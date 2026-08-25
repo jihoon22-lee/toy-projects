@@ -1,0 +1,22 @@
+# Build output
+build/
+bin/
+*.o
+*.a
+*.so
+
+# Coverage artifacts
+*.gcda
+*.gcno
+*.gcov
+
+# ici reports
+verify_report.html
+verify_report.json
+verify_report.md
+
+# IDE & OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
