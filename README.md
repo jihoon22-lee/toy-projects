@@ -7,7 +7,7 @@ C++17 / Qt6 로 만드는 실사용 데스크톱 도구 모음.
 
 | 이름 | 설명 | 상태 |
 |---|---|---|
-| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | 코어 완료, GUI 예정 |
+| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | 코어 + Qt6 GUI |
 | [loglens](loglens/) | 로그 뷰어 / 분석기 | 코어 완료, GUI 예정 |
 
 ## 공통 구조 규칙
@@ -42,5 +42,8 @@ cd <project>
 cd <project>
 cmake -S gui -B gui/build -DCMAKE_BUILD_TYPE=Release
 cmake --build gui/build -j
-./gui/build/<app>
+./gui/build/<project>-gui [경로]
 ```
+
+경로를 주면 폴더 선택 대화상자를 건너뛰고 바로 스캔한다. 덕분에
+`QT_QPA_PLATFORM=offscreen` 으로 헤드리스 스모크 실행이 가능하고, CI 가 그렇게 쓴다.
