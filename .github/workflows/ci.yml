@@ -1,0 +1,73 @@
+name: CI Quality Gate (ici)
+
+# 이 저장소의 CI 는 곧 "ici 로 검증한다" 는 뜻이다.
+# ici 를 소스에서 빌드하지 않고 공개 릴리스 에셋을 그대로 내려받아 쓴다 —
+# 외부 소비자와 완전히 같은 경로로 도그푸딩하기 위해서다.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  ICI_VERSION: v0.5.0
+
+jobs:
+  verify:
+    name: ici verify (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [diskmap]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # ici.pyz 는 3.10+ 를 요구한다. 하한 버전으로 돌려 실제 지원 범위를 같이 검증한다.
+      - name: Set up Python 3.10
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+
+      - name: Fetch ici release asset
+        run: |
+          set -euo pipefail
+          base="https://github.com/jihoon22-lee/ici/releases/download/${ICI_VERSION}"
+          curl -fsSL -o ici.pyz "${base}/ici.pyz"
+          curl -fsSL -o ici.pyz.sha256 "${base}/ici.pyz.sha256"
+          # 체크섬 파일은 'dist/ici.pyz' 경로 접두사를 담고 있어 sha256sum -c 가 그대로는 안 맞는다.
+          expected="$(cut -d' ' -f1 ici.pyz.sha256)"
+          actual="$(sha256sum ici.pyz | cut -d' ' -f1)"
+          if [ "$expected" != "$actual" ]; then
+            echo "::error::ici.pyz 체크섬 불일치 (expected=$expected actual=$actual)"
+            exit 1
+          fi
+          chmod +x ici.pyz
+
+      - name: Report toolchain
+        run: |
+          ./ici.pyz --version
+          g++ --version | head -1
+          gcov --version | head -1
+
+      # verify 는 FAIL/ERROR 에서 exit 1, SKIP 에서 exit 2, PASS/WARN 에서 exit 0 이다.
+      - name: Verify ${{ matrix.project }}
+        working-directory: ${{ matrix.project }}
+        run: ../ici.pyz verify --report --html verify_report.html --github-summary
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ici-report-${{ matrix.project }}
+          path: ${{ matrix.project }}/verify_report.*
+          if-no-files-found: warn
+          retention-days: 14
