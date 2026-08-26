@@ -1,4 +1,4 @@
-#include "fs_node.hpp"
+#include "diskmap/fs_node.hpp"
 
 #include <algorithm>
 

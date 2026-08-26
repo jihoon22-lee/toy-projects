@@ -4,7 +4,7 @@
 
 #include "assert.hpp"
 #include "fake_fs.hpp"
-#include "../src/core/scanner.hpp"
+#include "diskmap/scanner.hpp"
 
 #include <cstddef>
 #include <cstdint>

@@ -10,8 +10,8 @@
 //     independent of how tiles get grouped into rows).
 
 #include "assert.hpp"
-#include "../src/core/fs_node.hpp"
-#include "../src/core/treemap.hpp"
+#include "diskmap/fs_node.hpp"
+#include "diskmap/treemap.hpp"
 
 #include <cstdint>
 #include <vector>
