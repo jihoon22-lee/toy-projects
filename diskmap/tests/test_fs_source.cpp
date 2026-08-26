@@ -6,7 +6,7 @@
 // against a path that doesn't exist so the error branch is covered too.
 
 #include "assert.hpp"
-#include "../src/core/fs_source.hpp"
+#include "diskmap/fs_source.hpp"
 
 #include <chrono>
 #include <cstdint>

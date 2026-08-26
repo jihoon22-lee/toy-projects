@@ -9,8 +9,8 @@
 #include <utility>
 #include <vector>
 
-#include "../src/core/fs_node.hpp"
-#include "../src/core/fs_source.hpp"
+#include "diskmap/fs_node.hpp"
+#include "diskmap/fs_source.hpp"
 
 namespace diskmap_test {
 

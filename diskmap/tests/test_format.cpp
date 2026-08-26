@@ -2,7 +2,7 @@
 // (src/core/format.hpp / format.cpp).
 
 #include "assert.hpp"
-#include "../src/core/format.hpp"
+#include "diskmap/format.hpp"
 
 #include <cstdint>
 #include <limits>

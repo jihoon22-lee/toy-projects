@@ -7,8 +7,8 @@ C++17 / Qt6 로 만드는 실사용 데스크톱 도구 모음.
 
 | 이름 | 설명 | 상태 |
 |---|---|---|
-| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | 진행 중 |
-| loglens | 로그 뷰어 / 분석기 | 예정 |
+| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | 코어 완료, GUI 예정 |
+| [loglens](loglens/) | 로그 뷰어 / 분석기 | 코어 완료, GUI 예정 |
 
 ## 공통 구조 규칙
 
@@ -18,12 +18,16 @@ C++17 / Qt6 로 만드는 실사용 데스크톱 도구 모음.
 ```
 <project>/
 ├── ici.toml              project.source_dirs = ["src"]
-├── src/
-│   ├── core/             순수 C++17, Qt 금지 — ici 전 엔진 검증 대상
-│   └── main.cpp          CLI 드라이버 (main 은 여기 하나뿐)
+├── include/<project>/    공개 헤더 — ici 가 -Iinclude 와 그 하위를 넘겨준다
+├── src/                  순수 C++17 구현, Qt 금지 — ici 전 엔진 검증 대상
+│   └── main.cpp          CLI 드라이버 (main 은 여기 하나뿐, 테스트에서 자동 제외)
 ├── tests/*.cpp           각자 main() 을 갖는 독립 테스트 바이너리
 └── gui/                  Qt6 셸 + 자체 CMakeLists.txt (ici 스코프 밖)
 ```
+
+헤더를 `include/<project>/` 에 두는 것은 관례이기도 하지만 ici 의 `get_all_cpp_includes()`
+가 `include/` 와 그 하위를 `-I` 로 넘겨주기 때문이기도 하다. 덕분에 테스트도
+`#include "<project>/foo.hpp"` 로 참조할 수 있다 — 상대 경로가 필요 없다.
 
 ## 검증
 

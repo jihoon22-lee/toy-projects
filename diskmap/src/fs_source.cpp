@@ -1,4 +1,4 @@
-#include "fs_source.hpp"
+#include "diskmap/fs_source.hpp"
 
 #include <exception>
 #include <filesystem>

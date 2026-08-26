@@ -3,7 +3,7 @@
 
 #include "assert.hpp"
 #include "fake_fs.hpp"
-#include "../src/core/fs_node.hpp"
+#include "diskmap/fs_node.hpp"
 
 #include <cstddef>
 #include <cstdint>

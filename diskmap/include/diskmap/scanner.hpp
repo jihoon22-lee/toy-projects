@@ -6,8 +6,8 @@
 #include <string>
 #include <vector>
 
-#include "fs_node.hpp"
-#include "fs_source.hpp"
+#include "diskmap/fs_node.hpp"
+#include "diskmap/fs_source.hpp"
 
 namespace diskmap {
 

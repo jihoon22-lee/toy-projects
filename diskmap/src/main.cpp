@@ -1,7 +1,7 @@
-#include "core/format.hpp"
-#include "core/fs_node.hpp"
-#include "core/fs_source.hpp"
-#include "core/scanner.hpp"
+#include "diskmap/format.hpp"
+#include "diskmap/fs_node.hpp"
+#include "diskmap/fs_source.hpp"
+#include "diskmap/scanner.hpp"
 
 #include <algorithm>
 #include <cstdio>

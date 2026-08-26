@@ -133,3 +133,70 @@ Phase 5(Qt/CMake 어댑터) 설계의 입력이다. 각 항목은 **코드 위�
   "고칠 수 없는 경고" 는 경고 피로를 유발하고 진짜 WARN 을 묻는다.
 - **제안**: 미지원 언어는 WARN 이 아니라 N/A 로 표기 (리포트에 이미 N/A 회색 행 개념이 있다).
 
+
+### C-6. ✅ [수정됨 · ici PR #52] CI 에서 `lint` 엔진이 한 번도 실제로 실행되지 않았다
+- **위치**: `.github/workflows/ci.yml` 린트 단계 + `src/ici/engines/lint.py:207` `_find_ruff_command()`
+- **현상**: CI 는 `uvx ruff check .` 로 린트했는데 `uvx` 는 ruff 를 임시 실행할 뿐 `PATH` 에 남기지 않는다.
+  ruff 는 dev 의존성에도 없어 `.venv` 에도 없었다. 그래서 도그푸딩 단계의 `lint` 는 ruff 를 못 찾고
+  AST 폴백으로 강등돼 `targets: []`, `evidence = ESTIMATED`, `WARN` 으로 게이트를 통과했다.
+- **왜 안 드러났나**: 개발 머신에는 ruff 가 전역 설치(`~/.local/bin/ruff`)돼 있어 `shutil.which` 가 찾는다.
+  로컬에서는 항상 정상 동작했다. **로컬 통과가 CI 통과와 같은 의미가 아니었다.**
+- **수정**: ruff 를 dev 의존성으로 선언(`.venv` 경로로 엔진이 찾음), CI 를 `uv run` 으로 통일,
+  저장소 정책 `ruff_required = true`. 이제 ruff 부재 시 `lint` = ERROR / evidence NOT_RUN /
+  suite = ERROR / exit 1.
+
+### C-7. 도구 부재로 인한 강등(ESTIMATED)이 부적용(SKIP)보다 관대하다
+- **위치**: `src/ici/core/models.py:68-79` `aggregate_suite_status()`
+- **현상**: required 엔진이 `SKIP` 이거나 evidence 가 `NOT_RUN` 이면 스위트를 `ERROR` 로 승격한다.
+  그러나 evidence `ESTIMATED` 는 승격 대상이 아니다.
+- **결과적으로 심각도가 뒤집혀 있다**:
+  - `dead` — 이 언어에 **적용 자체가 안 되는** 엔진 → SKIP → 스위트 **ERROR** (C-1)
+  - `lint` — **검증이 실제로 일어나지 않은** 엔진 → ESTIMATED → 스위트 **WARN, 통과**
+  후자가 훨씬 위험한데 더 관대하게 취급된다.
+- **제안**: "언어 부적용" 과 "도구 부재로 검증 못 함" 을 구분되는 상태로 나누고,
+  전자는 게이트에서 빼고 후자를 승격 대상으로 삼는다.
+
+### C-8. AST 폴백이 검사 대상을 보고하지 않는다
+- **위치**: `src/ici/engines/lint.py:532` `_check_python_syntax()`
+- **현상**: `SyntaxError` 가 난 파일만 `InspectionTarget` 으로 남기고, 정상 파싱된 파일은 아무것도 남기지 않는다.
+  그래서 폴백이 돌아도 리포트상 "무엇을 검사했는지" 가 0건이다.
+- **어긋나는 규약**: `AGENTS.md` 5-1 — "모든 검증 엔진은 PASS/FAIL 여부와 무관하게 검사된 모든 대상의
+  파일 경로와 라인 번호(`InspectionTarget`)를 반환해야 한다."
+- **영향**: C-6 을 눈치채기 어렵게 만든 직접적 원인. 타깃이 0건이라 리포트만 봐서는
+  "깨끗해서 0건" 인지 "아무것도 안 봐서 0건" 인지 구분되지 않는다.
+
+### C-9. 🔴 C++ 테스트 바이너리가 보는 CWD 가 엔진마다 다르다
+- **위치**: `src/ici/engines/test.py` `_run_cpp_test_case()`, `src/ici/engines/sanitize.py:215`
+- **현상**: 같은 테스트 바이너리인데 실행 디렉터리가 세 가지다.
+
+  | 엔진 | 조건 | CWD |
+  |---|---|---|
+  | `test` | gcov 있음 | `build/tests` |
+  | `test` | gcov 없음 | 프로젝트 루트 |
+  | `sanitize` | 항상 | **프로젝트 밖 임시 디렉터리** |
+
+- **영향**: 테스트가 데이터 파일을 읽는 순간 깨진다. 게다가 `test` 는 **gcov 설치 여부에 따라**
+  CWD 가 달라져서, 같은 코드가 환경에 따라 통과하거나 실패한다. 재현성 있는 게이트가 아니다.
+- **실제로 밟았다**: `viewer/` 테스트가 `tests/data/*.json` 픽스처를 읽는데,
+  로컬 수동 실행은 통과 → `test` 엔진에서 실패 → 상대 경로 후보를 늘려 통과 →
+  `sanitize` 에서 다시 실패(임시 디렉터리라 어떤 상대 경로도 무효).
+- **우회**: `__FILE__` 에서 경로를 유도한다. ici 가 절대 경로로 컴파일하므로 CWD 와 무관해진다.
+  ```cpp
+  const std::string source = __FILE__;
+  const std::size_t slash = source.find_last_of('/');
+  return source.substr(0, slash + 1) + "data/";
+  ```
+- **제안**: 모든 C++ 테스트를 **프로젝트 루트에서** 실행하도록 통일하고, gcov 산출물 경로는
+  `-o` 로 지정한다. 최소한 문서에 "테스트는 CWD 를 가정하면 안 된다" 를 명시해야 한다.
+
+### C-10. `dup` 의 `warn_pct` 는 도달 불가능한 설정이다
+- **위치**: `src/ici/engines/dup.py:116`
+- **현상**: `has_warn = dup_pct > warn_pct or len(clone_groups) > 0`
+- **영향**: 클론 그룹이 하나라도 있으면 중복률과 무관하게 WARN 이다. `warn_pct = 5.0` 은
+  "5% 넘으면 경고" 로 읽히지만 실제로는 **0% 초과면 경고**다. 설정값이 의미를 갖지 못한다.
+- **실측**: `viewer/` 는 4.5%(임계값 5.0% 아래)인데 WARN. `diskmap` 이 PASS 였던 건
+  중복률이 낮아서가 아니라 클론 그룹이 **정확히 0개**였기 때문이다.
+- **부수 문제**: Type-2 탐지가 `parseArray`/`parseObject` 같은 **구조적 대칭**도 클론으로 잡는다.
+  지표를 맞추려고 템플릿으로 억지 통합하면 가독성이 나빠진다 — 지표가 설계를 왜곡하는 사례.
+- **제안**: `or len(clone_groups) > 0` 을 제거해 `warn_pct` 가 실제로 동작하게 하거나,
+  임계값과 별개로 "클론 존재" 를 정보성 표시로 분리한다.
