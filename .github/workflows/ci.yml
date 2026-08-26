@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 env:
-  ICI_VERSION: v0.5.0
+  ICI_VERSION: v0.5.1
 
 jobs:
   verify:
