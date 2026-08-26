@@ -80,7 +80,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        project: [diskmap]
+        # smoke_arg is what the GUI is pointed at headlessly: diskmap scans a
+        # directory, loglens opens a file, so it cannot be one shared value.
+        include:
+          - project: diskmap
+            smoke_arg: src
+          - project: loglens
+            smoke_arg: tests/data/sample.log
 
     steps:
       - name: Checkout
@@ -107,7 +113,7 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: |
           set -euo pipefail
-          ./gui/build/${{ matrix.project }}-gui "$PWD/src" &
+          ./gui/build/${{ matrix.project }}-gui "$PWD/${{ matrix.smoke_arg }}" &
           pid=$!
           sleep 8
           if ! kill -0 "$pid" 2>/dev/null; then
