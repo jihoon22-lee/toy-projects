@@ -71,3 +71,50 @@ jobs:
           path: ${{ matrix.project }}/verify_report.*
           if-no-files-found: warn
           retention-days: 14
+
+  # The Qt shell is outside ici's scope by design — the core is what gets
+  # verified — so nothing else would catch a broken GUI build. This job does.
+  gui-build:
+    name: Qt6 GUI build (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [diskmap]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Qt6
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qt6-base-dev
+
+      - name: Configure and build
+        working-directory: ${{ matrix.project }}
+        run: |
+          cmake -S gui -B gui/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build gui/build -j
+
+      # Runs the real binary headlessly against a known directory, so a GUI that
+      # links but crashes on startup or on its first scan still fails the gate.
+      - name: Headless smoke run
+        working-directory: ${{ matrix.project }}
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set -euo pipefail
+          ./gui/build/${{ matrix.project }}-gui "$PWD/src" &
+          pid=$!
+          sleep 8
+          if ! kill -0 "$pid" 2>/dev/null; then
+            echo "::error::GUI exited before the smoke window elapsed"
+            wait "$pid" || true
+            exit 1
+          fi
+          kill "$pid"
+          wait "$pid" 2>/dev/null || true
+          echo "GUI stayed up through a scan"
