@@ -1,0 +1,11 @@
+2026-08-26T04:15:22.100Z INFO  [api] request 1234 served in 12ms
+2026-08-26T04:15:22.400Z WARN  [db] slow query 5678 took 2100ms
+2026-08-26T04:15:23.000Z ERROR [api] upstream timeout contacting billing
+    at Connection.read(conn.cpp:88)
+    at Client.fetch(client.cpp:203)
+2026-08-26T04:15:41.900Z INFO  [api] request 9999 served in 8ms
+2026-08-26T04:16:01.000Z DEBUG [cache] evicted 42 entries
+{"ts":"2026-08-26T04:16:30.000Z","level":"error","logger":"db","msg":"deadlock detected on tx 77"}
+{"ts":"2026-08-26T04:16:31.000Z","level":"info","logger":"db","msg":"tx 77 retried"}
+Aug 26 04:17:02 host nginx: request served
+2026-08-26T04:17:30.000Z FATAL [api] shutting down after repeated failures
