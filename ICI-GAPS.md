@@ -44,12 +44,18 @@ Phase 5(Qt/CMake 어댑터) 설계의 입력이다. 각 항목은 **코드 위�
 
 ## B. 엔진 간 스코프 규칙 불일치
 
-### B-1. `cycle` 엔진만 `project.source_dirs` 를 무시한다
+### B-1. ✅ [수정됨 · ici PR #62] `cycle` 엔진만 `project.source_dirs` 를 무시했다
 - **위치**: `src/ici/engines/cycle.py` — `_iter_cpp_and_headers()`
 - **현상**: `os.walk(project_root)` 로 **프로젝트 전체**를 훑는다. 제외 대상은 `.venv`/`venv`/`build`/`.git` 뿐.
   다른 C++ 엔진(`lint`/`dup`/`complexity`/`exception`)은 전부 `get_all_cpp_sources()` = `source_dirs` 기준이다.
-- **영향**: `source_dirs = ["src"]` 로 스코프를 좁혀도 `gui/`, `tests/`, `third_party/` 가 순환 검사에 들어온다.
-  스코프 규칙이 엔진마다 다르다는 것을 사용자가 알 방법이 없다.
+- **영향**: `source_dirs = ["src"]` 로 스코프를 좁혀도 `gui/`, `tests/`, `third_party/` 가 순환 검사에 들어왔다.
+  스코프 규칙이 엔진마다 다르다는 것을 사용자가 알 방법이 없었다.
+- **실제로 터진 지점**: ici 저장소에 C++ 탐지 픽스처(`examples/cpp-fixtures/`)를 넣자, 픽스처의
+  **의도된 순환이 ici 자기 검증 리포트에 진짜 결함으로 보고**됐다. 다른 엔진은 아무도 못 보는
+  파일을 cycle 만 봤기 때문이다. 기록해 둔 갭이 실제 문제를 일으킨 첫 사례.
+- **수정 (PR #62)**: 소스 디렉터리 + 최상위 `include/` 만 훑는다. `get_all_cpp_sources()` 를
+  그대로 쓸 수는 없다 — 구현 파일만 반환하는데 **include 순환은 대체로 헤더의 성질**이라,
+  `get_all_cpp_includes()` 가 공개 헤더를 찾는 곳과 같은 위치를 본다.
 
 ### B-2. C++ include 해석이 basename 단독
 - **위치**: `src/ici/engines/cycle.py` — `_build_cpp_graph()`
