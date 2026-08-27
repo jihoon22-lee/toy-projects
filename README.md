@@ -18,16 +18,33 @@ C++17 / Qt6 로 만드는 실사용 데스크톱 도구 모음.
 ```
 <project>/
 ├── ici.toml              project.source_dirs = ["src"]
-├── include/<project>/    공개 헤더 — ici 가 -Iinclude 와 그 하위를 넘겨준다
-├── src/                  순수 C++17 구현, Qt 금지 — ici 전 엔진 검증 대상
-│   └── main.cpp          CLI 드라이버 (main 은 여기 하나뿐, 테스트에서 자동 제외)
-├── tests/*.cpp           각자 main() 을 갖는 독립 테스트 바이너리
-└── gui/                  Qt6 셸 + 자체 CMakeLists.txt (ici 스코프 밖)
+├── include/<project>/    코어의 공개 헤더 — ici 가 -Iinclude 와 그 하위를 넘겨준다
+├── src/                  구현. 전부 ici 검증 대상이다
+│   ├── main.cpp          CLI 드라이버 (main 은 여기 하나뿐, 테스트에서 자동 제외)
+│   └── gui/              Qt6 셸 + 자체 CMakeLists.txt + gui_main.cpp
+└── tests/*.cpp           각자 main() 을 갖는 독립 테스트 바이너리
 ```
 
 헤더를 `include/<project>/` 에 두는 것은 관례이기도 하지만 ici 의 `get_all_cpp_includes()`
 가 `include/` 와 그 하위를 `-I` 로 넘겨주기 때문이기도 하다. 덕분에 테스트도
 `#include "<project>/foo.hpp"` 로 참조할 수 있다 — 상대 경로가 필요 없다.
+
+### GUI 도 검증 대상이다
+
+Qt 셸을 `src/` 밖에 두면 "검증할 필요 없는 코드" 라는 뜻이 되어버린다. GUI 도 프로젝트
+소스이므로 `src/gui/` 에 두고 `ici.toml` 에 두 가지를 선언한다.
+
+```toml
+cpp_pkg_config          = ["Qt6Widgets"]   # lint 가 Qt 헤더를 찾을 수 있게
+cpp_external_build_dirs = ["src/gui"]      # 바이너리를 만드는 엔진만 건너뛴다
+```
+
+`Q_OBJECT` 클래스는 moc 가 생성한 소스 없이는 링크되지 않으므로 `test`/`sanitize`/`build`
+는 `src/gui` 를 건너뛴다. 그러나 `lint`·`line`·`complexity`·`dup`·`exception`·`cycle`·
+`security` 는 그대로 읽는다 — **링크가 안 된다는 게 그 코드의 품질을 안 봐도 된다는
+뜻은 아니다.** GUI 빌드 자체는 CMake 와 CI 의 헤드리스 스모크 실행이 담당한다.
+
+이 구조는 ici v0.5.2 이상이 필요하다.
 
 ## 검증
 

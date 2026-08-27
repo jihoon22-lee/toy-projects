@@ -9,14 +9,19 @@ Phase 5(Qt/CMake 어댑터) 설계의 입력이다. 각 항목은 **코드 위�
 
 ## A. Qt/빌드시스템 지원 부재
 
-### A-1. C++ include 경로를 설정으로 주입할 수 없다
+### A-1. ✅ [수정됨 · ici PR #57 / v0.5.2] C++ include 경로를 설정으로 주입할 수 없었다
 - **위치**: `src/ici/core/project.py` — `get_all_cpp_includes(base_path, config)`
 - **현상**: `config` 파라미터를 받지만 **본문에서 전혀 사용하지 않는다**. `-I` 는 `include/`,
   `<source_dir>/include`, 그리고 NAS 경로에서만 수집된다.
 - **영향**: Qt 시스템 헤더(`/usr/include/x86_64-linux-gnu/qt6/...`) 를 추가할 방법이 없어
   `src/` 안의 Qt 코드는 `lint`(`-fsyntax-only`)와 `test`(컴파일) 양쪽에서 무조건 실패한다.
 - **파생**: `src/ici/engines/lint.py` 는 `get_all_cpp_includes(self.project_root)` 로 **config 인자 없이**
-  호출한다. A-1 을 고쳐도 lint 는 여전히 설정을 못 읽는다. 두 곳 다 고쳐야 한다.
+  호출했다. A-1 을 고쳐도 lint 는 설정을 못 읽는 상태였다. 두 곳 다 고쳤다.
+- **수정 (v0.5.2)**: `project.cpp_pkg_config` 신설 — 나열한 pkg-config 패키지의 `--cflags` 가
+  컴파일 플래그에 추가된다. 경로가 아니라 패키지 이름을 쓰므로 머신이 바뀌어도 깨지지 않는다.
+  함께 `project.cpp_external_build_dirs` 도 생겨, moc 가 필요해 ici 가 직접 빌드할 수 없는
+  소스를 **분석은 유지한 채** 링크 대상에서만 뺄 수 있다.
+- **효과**: 이 저장소의 Qt GUI 가 스코프 밖(검증 엔진 0개)에서 `src/gui/`(8개) 로 들어왔다.
 
 ### A-2. 루트에 빌드 디스크립터가 있으면 build 엔진이 거부한다
 - **위치**: `src/ici/engines/build.py` — `_has_build_descriptor()`, `_compile_cpp()`
@@ -200,3 +205,23 @@ Phase 5(Qt/CMake 어댑터) 설계의 입력이다. 각 항목은 **코드 위�
   지표를 맞추려고 템플릿으로 억지 통합하면 가독성이 나빠진다 — 지표가 설계를 왜곡하는 사례.
 - **제안**: `or len(clone_groups) > 0` 을 제거해 `warn_pct` 가 실제로 동작하게 하거나,
   임계값과 별개로 "클론 존재" 를 정보성 표시로 분리한다.
+
+### C-11. ✅ [수정됨 · ici PR #59] 모노repo 의 여러 리포트를 게시할 수 없었다
+- **위치**: `src/ici/engines/publish.py` — `_resolve_target()`, `PUBLISH_MARKER`
+- **현상**: 서브프로젝트를 여럿 검증하는 저장소는 리포트도 여럿 만드는데, `ici publish` 는 하나만 다뤘다.
+  두 지점이 막혀 있었다.
+  1. **self 모드 경로에 프로젝트 접두사가 없다.** `prefix` 는 hub 모드(`ICI_PUBLISH_REPO`)에서만
+     `project_name` 으로 채워지고 self 모드는 `""` 다. 그래서 모든 프로젝트가 같은
+     `pr/<N>/index.html` 에 써서 **마지막 것만 남는다.**
+  2. **sticky 마커가 `<!-- ici-report -->` 하나로 고정.** 두 번째 publish 가 첫 번째 댓글을 덮어쓴다.
+- **부수 함정**: 매트릭스 레그에서 각자 publish 하면 위 두 문제에 더해 **경쟁**까지 생긴다.
+  Contents API 는 덮어쓰기에 현재 blob sha 를 요구하므로, 병렬로 같은 브랜치에 쓰면 하나가 유실된다.
+- **수정 (PR #59)**: `--report-dir` 반복 지정. 각 디렉터리를 **라벨로 네임스페이스된 경로**에 게시하고
+  프로젝트별 행·링크를 담은 **댓글 하나**를 남긴다. 업로드는 한 잡 안에서 순차 실행한다.
+  `label=path` 형식은 저장소 루트(디렉터리 이름이 `.`)를 위해 필요하다.
+- **적용**: 이 저장소는 매트릭스 레그가 아티팩트만 올리고 `report-pr` 잡이 전부 모아 한 번에 게시한다.
+  그 잡은 **PR 소스를 체크아웃하지 않는다** — 실행물은 체크섬 검증된 릴리스 pyz, 게시물은
+  verify 잡의 아티팩트뿐이라 PR 이 쓰기 토큰에 닿지 않는다.
+- **남은 것**: ici 저장소의 `publish-main` 은 여전히 루트 리포트만 게시한다. main 에서 verify 를
+  재실행해 인라인 게시하는 구조라, 뷰어까지 담으려면 C++ 게이트 재실행이나 아티팩트 소비로의
+  전환이 필요하고 후자는 `test_purity.py` 의 토큰 격리 검증을 손대게 된다.
