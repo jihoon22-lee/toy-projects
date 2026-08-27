@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 env:
-  ICI_VERSION: v0.5.2
+  ICI_VERSION: v0.5.3
 
 jobs:
   verify:
@@ -78,6 +78,84 @@ jobs:
           path: ${{ matrix.project }}/verify_report.*
           if-no-files-found: warn
           retention-days: 14
+
+  # One comment for the whole run, not one per project.
+  #
+  # Each matrix leg produces its own verify_report.html, so the obvious approach
+  # is to publish from inside the leg — but ici's sticky marker is a single fixed
+  # string, so the second project would overwrite the first project's comment
+  # rather than sit beside it, and parallel legs would race pushing to the same
+  # gh-pages branch (the Contents API needs the current blob sha to overwrite).
+  #
+  # So the legs only upload artifacts and this job publishes them together:
+  # sequential uploads under per-project paths, then one comment carrying a row
+  # and a link per project.
+  #
+  # It deliberately does not check out the pull request. Everything it runs comes
+  # from the checksum-verified ici release and everything it publishes comes from
+  # the verify job's artifacts, so a pull request cannot reach the write token.
+  report-pr:
+    name: Publish Reports & Sticky Comment
+    if: github.event_name == 'pull_request'
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # gh-pages 업로드
+      pull-requests: write  # sticky 댓글
+      pages: read           # Pages 활성화 여부 조회
+
+    steps:
+      - name: Set up Python 3.10
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+
+      - name: Fetch ici release asset
+        run: |
+          set -euo pipefail
+          base="https://github.com/jihoon22-lee/ici/releases/download/${ICI_VERSION}"
+          curl -fsSL -o ici.pyz "${base}/ici.pyz"
+          curl -fsSL -o ici.pyz.sha256 "${base}/ici.pyz.sha256"
+          expected="$(cut -d' ' -f1 ici.pyz.sha256)"
+          actual="$(sha256sum ici.pyz | cut -d' ' -f1)"
+          if [ "$expected" != "$actual" ]; then
+            echo "::error::ici.pyz 체크섬 불일치"
+            exit 1
+          fi
+          chmod +x ici.pyz
+
+      - name: Download all project reports
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: ici-report-*
+          path: reports
+
+      # Each artifact's root is the project directory's contents, so a download
+      # lands at reports/ici-report-<project>/verify_report.*. Strip the prefix so
+      # the directory name is the label that shows up in the comment.
+      - name: Normalise report directory names
+        run: |
+          set -euo pipefail
+          for dir in reports/ici-report-*; do
+            [ -d "$dir" ] || continue
+            mv "$dir" "reports/$(basename "$dir" | sed 's/^ici-report-//')"
+          done
+          ls -R reports
+
+      - name: Publish reports and update the sticky comment
+        run: |
+          set -euo pipefail
+          dirs=()
+          for dir in reports/*/; do
+            [ -f "${dir}verify_report.html" ] && dirs+=(--report-dir "${dir%/}")
+          done
+          if [ ${#dirs[@]} -eq 0 ]; then
+            echo "::error::no verify_report.html found in any artifact"
+            exit 1
+          fi
+          ./ici.pyz publish "${dirs[@]}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # The Qt shell is outside ici's scope by design — the core is what gets
   # verified — so nothing else would catch a broken GUI build. This job does.
