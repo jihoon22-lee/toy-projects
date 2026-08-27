@@ -3,6 +3,9 @@
 C++17 / Qt6 로 만드는 실사용 데스크톱 도구 모음.
 동시에 [ici](https://github.com/jihoon22-lee/ici) 품질 게이트의 **외부 C++ 검증 대상**으로 쓰인다.
 
+앞으로의 방향과 그 순서를 정한 이유는 [ROADMAP.md](ROADMAP.md) 에, 이 과정에서 발견한
+ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
+
 ## 프로젝트
 
 | 이름 | 설명 | 상태 |
