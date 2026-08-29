@@ -67,16 +67,19 @@ cpp_external_build_dirs = ["src/gui"]      # 바이너리를 만드는 엔진만
 
 ```bash
 cd <project>
-/mnt/e/projects/ici/dist/ici.pyz verify --report
+../../ici/dist/ici.pyz verify --report
 ```
+
+위 명령은 `ici`와 `toy-projects`를 같은 프로젝트 디렉터리 아래의 형제 저장소로 둔 배치를
+기준으로 한다.
 
 ## GUI 빌드
 
 ```bash
 cd <project>
-cmake -S gui -B gui/build -DCMAKE_BUILD_TYPE=Release
-cmake --build gui/build -j
-./gui/build/<project>-gui [경로]
+cmake -S src/gui -B src/gui/build -DCMAKE_BUILD_TYPE=Release
+cmake --build src/gui/build -j
+./src/gui/build/<project>-gui [경로]
 ```
 
 경로를 주면 폴더 선택 대화상자를 건너뛰고 바로 스캔한다. 덕분에
