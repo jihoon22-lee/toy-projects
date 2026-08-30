@@ -39,19 +39,29 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     auto* bar = new QHBoxLayout();
     auto* chooseButton = new QPushButton(tr("Choose folder…"), central);
+    chooseButton->setObjectName(QStringLiteral("chooseFolderButton"));
+    chooseButton->setAccessibleName(tr("Choose folder"));
     upButton_ = new QPushButton(tr("Up"), central);
+    upButton_->setObjectName(QStringLiteral("upButton"));
+    upButton_->setAccessibleName(tr("Go to parent folder"));
     upButton_->setEnabled(false);
     breadcrumb_ = new QLabel(tr("(no scan yet)"), central);
+    breadcrumb_->setObjectName(QStringLiteral("breadcrumb"));
+    breadcrumb_->setAccessibleName(tr("Current folder"));
     bar->addWidget(chooseButton);
     bar->addWidget(upButton_);
     bar->addWidget(breadcrumb_, 1);
     layout->addLayout(bar);
 
     treemap_ = new TreemapWidget(central);
+    treemap_->setObjectName(QStringLiteral("treemap"));
+    treemap_->setAccessibleName(tr("Disk usage treemap"));
     layout->addWidget(treemap_, 1);
 
     setCentralWidget(central);
     status_ = new QLabel(tr("Ready"), this);
+    status_->setObjectName(QStringLiteral("status"));
+    status_->setAccessibleName(tr("Scan status"));
     statusBar()->addWidget(status_);
 
     watcher_ = new QFutureWatcher<diskmap::ScanResult>(this);

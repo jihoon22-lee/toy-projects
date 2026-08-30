@@ -31,7 +31,7 @@
 | 프로젝트 | 현재 형태 | 실측 | 제품 상태 |
 |---|---|---|---|
 | loglens | C++17, Qt, CMake | 8 tests, TEM 4.08 | 유용한 골격, streaming 신뢰성과 대용량 UX 부족 |
-| diskmap | C++17, Qt, qmake | 6 tests, TEM 4.85 | treemap viewer, 정리 도구의 안전 모델 부족 |
+| diskmap | C++17, Qt, qmake | 7 tests, TEM 4.85 | treemap viewer, 정리 도구의 안전 모델 부족 |
 | ici/viewer | Qt-free core + Qt6 GUI | 3 tests, TEM 4.94 | core 중심, 셸과 report workflow 부족 |
 
 현재 공백:
@@ -174,11 +174,11 @@
 
 **브랜치:** `test/diskmap-qt-shell`
 
-- [ ] MainWindow를 library로 링크 가능한 qmake 구조를 유지한다.
-- [ ] scan result 표시, directory descend, breadcrumb, up, leaf no-op를 검증한다.
-- [ ] widget type 순서가 아니라 objectName과 public test seam을 사용한다.
-- [ ] stale scan generation을 위한 failing test를 D1 입력으로 남긴다.
-- [ ] Qt5 `localPos()`와 Qt6 `position()` 양쪽에서 build/test한다.
+- [x] MainWindow를 library로 링크 가능한 qmake 구조를 유지한다.
+- [x] scan result 표시, directory descend, breadcrumb, up, leaf no-op를 검증한다.
+- [x] widget type 순서가 아니라 objectName과 public test seam을 사용한다.
+- [x] stale scan generation을 위한 failing test를 D1 입력으로 남긴다.
+- [x] Qt5 `localPos()`와 Qt6 `position()` 양쪽에서 build/test한다.
 
 ### T0-5. 공통 Qt version 계약
 
@@ -267,6 +267,20 @@
 ### D1. identity-safe filesystem model
 
 **브랜치:** `refactor/diskmap-node-identity`
+
+**T0-4에서 넘겨받는 실패 시나리오:** 현재 `MainWindow`는 worker가 실행 중인 동안 두 번째
+`scanPath()`를 무시한다. D2에서 취소/rescan을 허용할 때 scan A가 끝난 뒤 scan B를 시작하거나,
+그 반대 순서로 완료되는 경합을 재현하면 이전 결과가 새 화면·breadcrumb를 덮을 수 있다. 각
+작업에 generation token을 붙이고 완료 시 현재 generation과 다르면 결과를 폐기하는 계약을
+먼저 정한 뒤, rescan race 테스트를 D2에서 추가한다. T0-4의 안정적인 탐색 테스트는 이
+미구현 동작을 초록불로 위장하지 않는다.
+
+D1 입력으로 보존할 예정 실패 테스트의 이름과 기대는
+`rescanCannotDisplayAnOlderGeneration`이다. scan A가 실행 중인 상태에서 scan B를 요청하고,
+B의 root가 표시된 뒤 A의 completion을 전달했을 때 `currentNode()->name`과 breadcrumb가
+B를 유지해야 한다. 현재 구현은 실행 중인 두 번째 `scanPath()`를 거부하므로 이 테스트를
+지금 활성화하면 실패한다. D2에서 cancellation/rescan API와 generation guard를 함께 만든
+뒤에만 활성화한다.
 
 `FsNode`에 cleanup과 정확한 size 계산에 필요한 사실을 보존한다.
 

@@ -9,4 +9,5 @@ SUBDIRS = \
     test_fs_source.pro \
     test_scanner.pro \
     test_treemap.pro \
-    test_treemap_widget.pro
+    test_treemap_widget.pro \
+    test_main_window.pro
