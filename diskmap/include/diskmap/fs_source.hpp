@@ -1,16 +1,23 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <vector>
+
+#include "diskmap/fs_metadata.hpp"
 
 namespace diskmap {
 
 struct DirEntry {
     std::string name;
+    std::filesystem::path path;
     bool is_dir = false;
     bool is_symlink = false;
     std::uint64_t size = 0;
+    FsMetadata metadata;
+    bool has_target_metadata = false;
+    FsMetadata target_metadata;
 };
 
 // Abstraction over "list the contents of a directory" so scanning logic can

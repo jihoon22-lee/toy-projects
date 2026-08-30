@@ -45,6 +45,7 @@ int main() {
                                         });
 
         CHECK_EQ(result.root.name, std::string("root")); // last path component
+        CHECK_EQ(result.root.path, std::string("/fake/root"));
         CHECK(result.root.is_dir);
 
         // dirB errored before listing, so it never got expanded/counted;
@@ -68,15 +69,22 @@ int main() {
         CHECK(diskmap::findChild(result.root, "symlinkFile") == nullptr); // symlink, not followed
 
         if (dirA) {
+            CHECK_EQ(dirA->path, std::string("/fake/root/dirA"));
             CHECK_EQ(dirA->size, static_cast<std::uint64_t>(110)); // 100 + 10
             CHECK_EQ(dirA->children.size(), static_cast<std::size_t>(2));
+            CHECK_EQ(dirA->metadata.logical_size, static_cast<std::uint64_t>(0));
         }
         if (dirB) {
+            CHECK_EQ(dirB->path, std::string("/fake/root/dirB"));
             CHECK_EQ(dirB->size, static_cast<std::uint64_t>(0)); // never expanded
             CHECK_EQ(dirB->children.size(), static_cast<std::size_t>(0));
+            CHECK(!dirB->complete);
+            CHECK_EQ(dirB->error, std::string("permission denied: dirB"));
         }
         if (file1) {
+            CHECK_EQ(file1->path, std::string("/fake/root/file1.txt"));
             CHECK_EQ(file1->size, static_cast<std::uint64_t>(50));
+            CHECK_EQ(file1->metadata.logical_size, static_cast<std::uint64_t>(50));
         }
         CHECK_EQ(result.root.size, static_cast<std::uint64_t>(160)); // 50 + 110
 

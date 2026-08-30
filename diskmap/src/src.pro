@@ -9,6 +9,7 @@ INCLUDEPATH += $$PWD/../include
 
 HEADERS += \
     $$PWD/../include/diskmap/format.hpp \
+    $$PWD/../include/diskmap/fs_metadata.hpp \
     $$PWD/../include/diskmap/fs_node.hpp \
     $$PWD/../include/diskmap/fs_source.hpp \
     $$PWD/../include/diskmap/scanner.hpp \

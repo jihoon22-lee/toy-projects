@@ -55,6 +55,15 @@ inline diskmap::DirEntry makeFileEntry(std::string name, std::uint64_t size, boo
     entry.is_dir = false;
     entry.is_symlink = symlink;
     entry.size = size;
+    entry.metadata.kind = symlink ? diskmap::FsKind::Symlink : diskmap::FsKind::RegularFile;
+    entry.metadata.logical_size = size;
+    entry.metadata.complete = true;
+    if (symlink) {
+        entry.has_target_metadata = true;
+        entry.target_metadata.kind = diskmap::FsKind::RegularFile;
+        entry.target_metadata.logical_size = size;
+        entry.target_metadata.complete = true;
+    }
     return entry;
 }
 
@@ -64,6 +73,13 @@ inline diskmap::DirEntry makeDirEntry(std::string name, bool symlink = false) {
     entry.is_dir = true;
     entry.is_symlink = symlink;
     entry.size = 0;
+    entry.metadata.kind = symlink ? diskmap::FsKind::Symlink : diskmap::FsKind::Directory;
+    entry.metadata.complete = true;
+    if (symlink) {
+        entry.has_target_metadata = true;
+        entry.target_metadata.kind = diskmap::FsKind::Directory;
+        entry.target_metadata.complete = true;
+    }
     return entry;
 }
 
@@ -73,6 +89,9 @@ inline diskmap::FsNode makeFileNode(std::string name, std::uint64_t size) {
     node.name = std::move(name);
     node.is_dir = false;
     node.size = size;
+    node.metadata.kind = diskmap::FsKind::RegularFile;
+    node.metadata.logical_size = size;
+    node.metadata.complete = true;
     return node;
 }
 
@@ -82,6 +101,8 @@ inline diskmap::FsNode makeDirNode(std::string name, std::vector<diskmap::FsNode
     diskmap::FsNode node;
     node.name = std::move(name);
     node.is_dir = true;
+    node.metadata.kind = diskmap::FsKind::Directory;
+    node.metadata.complete = true;
     node.children = std::move(children);
     return node;
 }
