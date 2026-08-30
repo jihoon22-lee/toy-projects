@@ -31,7 +31,7 @@
 | 프로젝트 | 현재 형태 | 실측 | 제품 상태 |
 |---|---|---|---|
 | loglens | C++17, Qt, CMake | 8 tests, TEM 4.08 | 유용한 골격, streaming 신뢰성과 대용량 UX 부족 |
-| diskmap | C++17, Qt, qmake | 7 tests, TEM 4.85 | treemap viewer, 정리 도구의 안전 모델 부족 |
+| diskmap | C++17, Qt, qmake | D1 Slice 2 local PASS · 9 tests · TEM 4.90 | treemap viewer, cleanup UX는 D2~D6에서 확장 |
 | ici/viewer | Qt-free core + Qt6 GUI | 3 tests, TEM 4.94 | core 중심, 셸과 report workflow 부족 |
 
 현재 공백:
@@ -340,11 +340,11 @@ B를 유지해야 한다. 현재 구현은 실행 중인 두 번째 `scanPath()`
 - scan generation과 error/incomplete state
 - hardlink reference identity
 
-- [ ] RealFsSource가 symlink를 따라간 결과와 링크 자체를 혼동하지 않는다.
-- [ ] follow_symlinks=true에서는 visited identity로 cycle을 막는다.
-- [ ] hardlink는 allocated/reclaimable 합계에서 중복 계산하지 않는다.
-- [ ] permission/error로 incomplete한 directory total을 완전한 값처럼 보이지 않게 한다.
-- [ ] path string 결합 대신 filesystem path abstraction을 사용한다.
+- [x] RealFsSource가 symlink를 따라간 결과와 링크 자체를 혼동하지 않는다.
+- [x] follow_symlinks=true에서는 visited identity로 cycle을 막는다.
+- [x] hardlink는 allocated/reclaimable 합계에서 중복 계산하지 않는다.
+- [x] permission/error로 incomplete한 directory total을 완전한 값처럼 보이지 않게 한다.
+- [x] path string 결합 대신 filesystem path abstraction을 사용한다.
 
 **D1 구현 slice 상태**
 
@@ -364,11 +364,44 @@ ici verify와 GUI smoke는 이 문서에서 완료로 주장하지 않으며, PR
 
 Slice 2 — safe traversal and path semantics:
 
-- [ ] `FileIdentity` visited set으로 follow-symlink directory cycle을 차단한다.
-- [ ] hard-link identity를 기준으로 allocated/reclaimable aggregate를 중복 계산하지
+- [x] `FileIdentity` visited set으로 follow-symlink directory cycle을 차단한다.
+- [x] hard-link identity를 기준으로 allocated/reclaimable aggregate를 중복 계산하지
   않는다.
-- [ ] string path join을 filesystem path abstraction으로 교체하고 platform별 경로
+- [x] string path join을 filesystem path abstraction으로 교체하고 platform별 경로
   의미론을 검증한다.
+
+**Slice 2 구현·검증 증거 (2026-08-31):** 구현 브랜치는
+`refactor/diskmap-identity-scan`이며, Slice 1의 metadata/source 경계를 이어받아
+`3759002`, `f3016db`, `ad6fff5`, `aa18539`, `bc060db`, `6e3484f`에서 계약·구현·실제
+filesystem 회귀·coverage 보강·qmake relink를 완료했다. `FsNode::path`와 source boundary는
+`std::filesystem::path`를 사용하고, scanner는 physical `FileIdentity` 방문 집합으로
+followed-directory cycle/back-edge를 노드로 보존하면서 확장을 차단한다. target identity가
+없는 followed directory는 `complete=false`와 오류로 남긴다. logical bytes는 directory entry마다
+계산하고, allocated bytes는 유효 identity별로 deduplicate하며, reclaimable bytes는 subtree가
+known hard-link reference를 모두 소유할 때만 확정한다. symlink target alias는 소유 reference로
+세지 않고, incomplete/unknown 및 `uint64_t` overflow는 `*_known=false`로 전파한다.
+
+- [x] fixed-identity `FakeFsSource`가 공백이 있는 nested path, cycle, hard-link ownership,
+  symlink alias, unknown allocation/link-count와 overflow를 검증한다.
+- [x] POSIX temporary filesystem test가 root identity, hard-link deduplication과 symlink
+  back-edge를 실제 metadata로 재검증한다.
+- [x] qmake static consumer에 `PRE_TARGETDEPS`를 연결해 test binary가 최신 archive를
+  다시 링크하도록 하고 stale `.gcda`/`.gcno` coverage 혼입을 막는다.
+
+**Slice 2 로컬 실측:** Qt 5.15.18(`/usr/bin/qmake`)과 Qt 6.10.2(`/usr/bin/qmake6`)에서
+fresh full build와 `make check` 9/9가 각각 통과했다. 두 GUI는
+`QT_QPA_PLATFORM=offscreen` smoke에서 8초 동안 살아 있었고 timeout exit 124는 기대한
+결과다. public ici 0.6.0 release asset verify는 `Suite PASS`, 10 pass / 0 warn / 0 fail /
+0 error / 2 skip, TEM 4.90, line 96.9% / function 97.9% / branch 85.2%, maximum complexity
+14, duplication 2.1, duration 24.24초였다. HTML은 180,624 bytes이며 외부 `src`/`href`
+참조가 0개다. 첫 coverage 실행은 stale `.gcda` stamp 1417858375와 `.gcno` stamp
+1418147347가 섞여 scanner.cpp가 0%로 집계되어 line 73.4% / function 83.3% / branch
+60.2%로 실패했으며, `PRE_TARGETDEPS` relink 후 stamps가 1418147347로 일치하고 위 PASS
+결과를 얻었다.
+
+원격 PR의 CI, 실제 sticky HTML comment와 Pages `text/html` 응답 검증은 아직 남아 있다.
+이 브랜치의 로컬 결과만으로 Slice 2의 원격 완료 또는 병합을 주장하지 않으며, toy CI의
+`Merge Gate`가 모든 matrix와 report 검증을 통과한 뒤에만 병합한다.
 
 ### D2. cancellable scanner와 stale result 방지
 

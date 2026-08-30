@@ -10,7 +10,7 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 
 | 이름 | 설명 | 상태 |
 |---|---|---|
-| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · 8 tests |
+| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · identity-safe scan · 9 tests |
 | [loglens](loglens/) | 로그 뷰어 / 분석기 | CMake + Qt5/Qt6 GUI · 라이브 팔로우 · 10 tests |
 
 ## 공통 구조 규칙
@@ -59,18 +59,41 @@ ici 0.6.0 은 어댑터를 둘 갖는다. **각각 실물 프로젝트 하나씩
 6개 중 5개만 세고 있었다.** 픽스처는 Qt 테스트만 있어서 다른 경로로 구제되는 바람에 이걸
 드러내지 못했다.
 
-### diskmap D1 identity metadata — Slice 1
+### diskmap D1 identity-safe scan — Slice 2
 
-diskmap은 이제 파일·디렉터리·심볼릭 링크와 링크 대상, 하드 링크를 서로 혼동하지 않도록
+diskmap은 파일·디렉터리·심볼릭 링크와 링크 대상, 하드 링크를 서로 혼동하지 않도록
 물리적 identity와 메타데이터를 보존한다. 사용자는 이후 탐색·정리 기능에서 “링크 자체”와
 “대상 파일”을 구분하고, 권한 오류로 불완전한 디렉터리를 확정된 용량처럼 보지 않게 된다.
 
 개발자 관점에서는 `RealFsSource`가 POSIX `lstat`/`stat` 결과와 `*_known` 플래그를
-`DirEntry`에 담고, scanner가 full path와 함께 `FsNode`로 전달한다. listing/iterator 오류는
-노드를 `complete=false`로 남기며, stat의 `metadata.logical_size`와 자식 합계인
-`FsNode::size`는 별도 값이다. 현재 Slice 1의 검증 범위는 Qt5·Qt6 전체 qmake 빌드와 모든
-`make check`이며, symlink cycle 방문 집합·hard-link 중복 제거·path abstraction은 다음
-Slice 2의 범위다.
+`DirEntry`에 담고, scanner가 `std::filesystem::path`와 함께 `FsNode`로 전달한다.
+`follow_symlinks=true`인 디렉터리는 물리적 `FileIdentity` 방문 집합으로 cycle을 차단하며,
+이미 방문한 target은 노드로 남기되 다시 확장하지 않는다. target identity를 확인할 수 없는
+followed directory는 안전하게 `complete=false`와 오류를 남긴다. listing/iterator 오류도 같은
+방식으로 보존하고, stat의 `metadata.logical_size`와 자식 합계인 `FsNode::size`는 별도 값이다.
+
+`FsNode::size`는 directory entry마다 logical bytes를 세고, `allocated_size`는 유효한 물리
+identity별로 한 번만 합산한다. `reclaimable_size`는 해당 subtree가 known hard-link reference를
+모두 소유할 때만 known으로 계산하며, symlink target alias는 소유 reference로 세지 않는다.
+불완전한 subtree·unknown allocation/link-count와 `uint64_t` overflow는 조용히 0으로 바꾸지
+않고 aggregate의 `*_known` 상태를 유지한다. 따라서 cleanup 기능은 확정된 값과 추정할 수 없는
+값을 구분할 수 있다.
+
+D1 Slice 2의 검증은 fixed-identity fake source와 실제 POSIX temporary filesystem을 함께
+사용한다. 경로 component의 공백, cycle/back-edge, hard-link 중복·reclaimability, symlink
+alias, identity 없는 followed directory, allocation/link-count unknown 및 aggregate overflow를
+검증하는 9개 qmake test binary가 등록되어 있다. qmake의 static consumer에
+`PRE_TARGETDEPS`를 연결해 테스트가 최신 archive를 다시 링크하도록 했고, stale `.gcda`/`.gcno`
+혼입으로 coverage가 낮게 보이는 재현도 제거했다.
+
+2026-08-31 로컬 실측은 Qt 5.15.18(`/usr/bin/qmake`)과 Qt 6.10.2(`/usr/bin/qmake6`)에서
+전체 빌드와 `make check` 9/9가 각각 통과했다. 두 GUI headless smoke는 8초 동안 살아 있었고
+timeout 종료 코드 124는 의도한 확인 결과다. ici 0.6.0 release asset으로 실행한 verify는
+`Suite PASS`, 10 pass / 0 warn / 0 fail / 0 error / 2 skip, TEM 4.90,
+line 96.9% / function 97.9% / branch 85.2%, maximum complexity 14, duplication 2.1,
+duration 24.24초였다. 생성한 HTML은 180,624 bytes이며 외부 `src`/`href` 참조가 0개다.
+이 브랜치의 원격 PR CI·sticky HTML comment·Pages 응답 검증은 아직 대기 중이며, PR에서
+같은 결과를 재확인한 뒤에만 병합한다.
 
 ### GUI 는 빌드되고 테스트된다
 

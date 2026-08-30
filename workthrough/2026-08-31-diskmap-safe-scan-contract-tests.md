@@ -45,3 +45,12 @@ the declared fields and traversal behavior.
 - Integrate the companion scanner implementation and run the complete qmake
   Qt5/Qt6 matrix plus ici verification.
 - Keep the tests as the D1 storage semantics gate for later cleanup staging.
+
+## Follow-up status
+
+The companion implementation and full verification were completed later in
+the same D1 stream. See
+[`2026-08-31-diskmap-safe-scan-slice2.md`](2026-08-31-diskmap-safe-scan-slice2.md)
+for the identity-safe traversal, storage aggregate, qmake relink, and final
+Qt5/Qt6 plus ici evidence. The “Next Steps” above records the state at the
+test-contract commit and is intentionally retained as historical context.

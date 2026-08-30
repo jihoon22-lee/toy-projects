@@ -49,7 +49,7 @@ gate에서는 아래 네 leg가 같은 계약을 다시 실행한다.
 | 프로젝트 | 빌드 | 검증 | Qt 테스트 |
 |---|---|---|---|
 | `loglens` | CMake · Qt5/Qt6 | PASS · TEM 4.84 | `QAbstractItemModelTester` + MainWindow QtTest |
-| `diskmap` | qmake · Qt5/Qt6 | PASS · TEM 4.85 | `QSignalSpy` + MainWindow QtTest |
+| `diskmap` | qmake · Qt5/Qt6 | D1 Slice 2 local PASS · TEM 4.90 | `QSignalSpy` + 9 native tests + MainWindow QtTest |
 | `ici/viewer` | CMake · Qt5/Qt6 | PASS · TEM 4.86 | MainWindow QtTest 4/4 |
 
 T0-5의 `discover`는 GUI 프로젝트 한 항목을 Qt5·Qt6 두 항목으로 확장한다. 따라서 현재
@@ -129,6 +129,14 @@ ici 0.6.0 실측은 line 93.2% / function 96.9% / branch 81.8% / TEM 4.84이다.
 게이트로 사용한다. 남은 것은 QPainter/Qt 내부 예외 경로와 ici의 C++ type-check 미지원이다.
 `diskmap/src/gui/main_window.cpp`는 T0-4에서 scan, breadcrumb, descend/up, leaf no-op를
 검증했다.
+
+D1 Slice 2에서는 이 셸 검증에 identity-safe scanner 계약을 추가했다. `std::filesystem::path`
+경계, followed-directory cycle 방지, hard-link allocated/reclaimable deduplication,
+symlink alias 비소유, identityless target의 incomplete 전파와 aggregate overflow를 fake
+source 및 실제 POSIX filesystem으로 확인한다. Qt5/qmake와 Qt6/qmake6 모두 fresh full build와
+`make check` 9/9, GUI offscreen smoke 8초 생존을 통과했으며 public ici 0.6.0 verify는 TEM
+4.90, line/function/branch 96.9%/97.9%/85.2%였다. 원격 PR CI와 report comment/Pages 증거는
+해당 Slice 2 PR에서 추가한다.
 
 ### 4단계 — 여유가 되면
 
