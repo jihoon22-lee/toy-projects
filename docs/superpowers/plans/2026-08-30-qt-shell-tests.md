@@ -1,0 +1,814 @@
+# Qt 셸 테스트와 Qt 버전 탐지 (toy-projects)
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** `loglens` 와 `diskmap` 의 Qt 셸에 단위 테스트를 붙여 `loglens` 의 커버리지 임계값을 되돌리고, 빌드가 설치된 Qt 버전을 따라가게 한다.
+
+**Architecture:** 먼저 셸에 있으면 안 되는 순수 로직을 core 로 뺀다 — 그만큼은 Qt 없이 테스트된다. 남은 것은 진짜 Qt 에 묶인 상태 기계(팔로우, 내비게이션)이고 그건 Qt 테스트로 검증한다. 빌드 정의는 Qt 버전을 고정하지 않고 탐지한다.
+
+**Tech Stack:** C++17, Qt (설치된 6 또는 5), CMake/CTest(loglens), qmake/make(diskmap), ici 0.6.0
+
+**Spec:** 이 계획은 대화에서 합의된 설계를 구현한다. 별도 스펙 문서는 없다 — 기존 구조 안에서 끝나는 변경이고, 근거는 각 태스크에 적었다.
+
+## Global Constraints
+
+- **C++17.** 두 프로젝트 모두 유지
+- **"로직은 core, Qt 는 얇은 껍데기" 원칙은 폐기됐다.** Qt 를 core 에 쓰는 것을 금지하지 않는다. 무엇을 어디 둘지는 그때그때 판단한다. 이 계획이 `parseLines` 를 core 로 옮기는 이유는 원칙 때문이 아니라 **그것이 파서 로직이고 테스트 대상이기 때문**이다
+- **Qt 버전을 고정하지 않는다.** CMake 는 `find_package(QT NAMES Qt6 Qt5 ...)` 후 `Qt${QT_VERSION_MAJOR}::`, qmake 는 `qmake6` 가 없으면 `qmake` 를 쓴다
+- **테스트는 프로젝트 루트에서 실행된다.** CMake 는 `WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}`. C-9 계약
+- **위젯 테스트는 디스플레이가 필요하다.** 로컬·CI 모두 `QT_QPA_PLATFORM=offscreen`
+- **커버리지 임계값을 실측 없이 올리지 않는다.** 측정한 값과 근거를 `ici.toml` 주석에 남긴다
+- **검증**: `cd <project> && QT_QPA_PLATFORM=offscreen ../../ici/dist/ici.pyz verify`
+- **브랜치**: `feat/qt-shell-tests` 에서 작업하고 PR 로 병합한다. `main` 직접 작업 금지
+
+---
+
+### Task 1: `parseLines` 를 core 로
+
+**Files:**
+- Modify: `loglens/include/loglens/log_parser.hpp`
+- Modify: `loglens/src/log_parser.cpp`
+- Modify: `loglens/src/gui/main_window.cpp:26-46` (익명 네임스페이스 제거)
+- Test: `loglens/tests/test_log_parser.cpp`
+
+**Interfaces:**
+- Consumes: 기존 `loglens::parseLine`, `loglens::isContinuation`
+- Produces: `std::vector<LogRecord> loglens::parseLines(const std::vector<std::string>& lines)`
+
+`main_window.cpp` 의 익명 네임스페이스에 **Qt 를 한 줄도 안 쓰는 파서 로직**이 있다. 스택 트레이스 같은 연속 줄을 앞 레코드에 접어 넣는 실제 규칙인데, 익명 네임스페이스라 테스트가 이름을 부를 수 없다.
+
+- [ ] **Step 1: Write the failing test**
+
+`loglens/tests/test_log_parser.cpp` 끝에 추가하고, 파일의 `main()` 이 호출하는 목록에 새 함수를 넣는다.
+
+```cpp
+static void testParseLinesFoldsContinuations() {
+    const std::vector<std::string> lines = {
+        "2026-08-26T04:15:22.100Z ERROR [api] request failed",
+        "    at Foo.bar(Foo.java:42)",
+        "    at Baz.qux(Baz.java:7)",
+        "2026-08-26T04:15:22.200Z INFO  [api] next request",
+    };
+
+    const std::vector<loglens::LogRecord> records = loglens::parseLines(lines);
+
+    // Four lines, two records: the two indented frames belong to the error
+    // above them, not to rows of their own.
+    CHECK_EQ(records.size(), static_cast<std::size_t>(2));
+    CHECK(records[0].message.find("Foo.java:42") != std::string::npos);
+    CHECK(records[0].message.find("Baz.java:7") != std::string::npos);
+    CHECK_EQ(records[1].level, loglens::Level::Info);
+}
+
+static void testParseLinesKeepsALeadingContinuation() {
+    // A continuation with nothing above it has no record to fold into. Dropping
+    // it would lose input, so it becomes a record of its own.
+    const std::vector<loglens::LogRecord> records =
+        loglens::parseLines({"    at Foo.bar(Foo.java:42)"});
+
+    CHECK_EQ(records.size(), static_cast<std::size_t>(1));
+}
+
+static void testParseLinesNumbersFromOne() {
+    const std::vector<loglens::LogRecord> records =
+        loglens::parseLines({"first", "second"});
+
+    CHECK_EQ(records.size(), static_cast<std::size_t>(2));
+    CHECK_EQ(records[0].line_number, static_cast<std::size_t>(1));
+    CHECK_EQ(records[1].line_number, static_cast<std::size_t>(2));
+}
+
+static void testParseLinesOnEmptyInput() {
+    CHECK(loglens::parseLines({}).empty());
+}
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+```bash
+cd loglens && cmake -S . -B build/check -DCMAKE_BUILD_TYPE=Debug && cmake --build build/check --parallel
+```
+Expected: 컴파일 실패 — `loglens::parseLines` 가 없다
+
+- [ ] **Step 3: Move the function into the parser**
+
+`loglens/include/loglens/log_parser.hpp` 에 선언을 더한다. `#include <vector>` 를 상단에 반영한다.
+
+```cpp
+// Parses a batch, folding continuation lines into the record above them so a
+// stack trace stays attached to the message that produced it instead of
+// becoming orphan rows. Line numbers start at 1.
+std::vector<LogRecord> parseLines(const std::vector<std::string>& lines);
+```
+
+`loglens/src/log_parser.cpp` 끝에 정의를 옮긴다.
+
+```cpp
+std::vector<LogRecord> parseLines(const std::vector<std::string>& lines) {
+    std::vector<LogRecord> records;
+    records.reserve(lines.size());
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        if (isContinuation(lines[i]) && !records.empty()) {
+            records.back().message += "\n" + lines[i];
+            records.back().raw += "\n" + lines[i];
+            continue;
+        }
+        records.push_back(parseLine(lines[i], Format::Auto, i + 1));
+    }
+    return records;
+}
+```
+
+`loglens/src/gui/main_window.cpp` 에서 익명 네임스페이스의 `parseLines` 정의를 지운다. `kBucketMs` 는 남긴다. 호출부 두 곳(`openPath`, `pollSource`)을 `loglens::parseLines(lines)` 로 바꾼다.
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+```bash
+cd loglens && cmake --build build/check --parallel && QT_QPA_PLATFORM=offscreen ctest --test-dir build/check --output-on-failure
+```
+Expected: 8/8 통과
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add loglens/include/loglens/log_parser.hpp loglens/src/log_parser.cpp \
+        loglens/src/gui/main_window.cpp loglens/tests/test_log_parser.cpp
+git commit -m "refactor(loglens): move batch parsing into the parser"
+```
+
+---
+
+### Task 2: `bucketTotal` 을 `Bucket::total()` 로
+
+**Files:**
+- Modify: `loglens/include/loglens/log_stats.hpp:14-17`
+- Modify: `loglens/src/log_stats.cpp`
+- Modify: `loglens/src/gui/timeline_widget.cpp:9-23`
+- Test: `loglens/tests/test_log_stats.cpp`
+
+**Interfaces:**
+- Consumes: 기존 `loglens::Bucket`
+- Produces: `std::size_t loglens::Bucket::total() const`
+
+`timeline_widget.cpp` 의 익명 네임스페이스에 `bucketTotal(const Bucket&)` 이 있다. `Bucket` 은 core 타입이므로 그 합계는 core 에 있는 편이 자연스럽고, 위젯이 아니라 통계의 성질이다.
+
+- [ ] **Step 1: Write the failing test**
+
+`loglens/tests/test_log_stats.cpp` 에 추가하고 `main()` 의 호출 목록에 넣는다.
+
+```cpp
+static void testBucketTotalSumsEveryLevel() {
+    loglens::Bucket bucket;
+    bucket.level_counts[static_cast<std::size_t>(loglens::Level::Info)] = 3;
+    bucket.level_counts[static_cast<std::size_t>(loglens::Level::Error)] = 2;
+
+    CHECK_EQ(bucket.total(), static_cast<std::size_t>(5));
+}
+
+static void testEmptyBucketTotalsZero() {
+    CHECK_EQ(loglens::Bucket().total(), static_cast<std::size_t>(0));
+}
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+```bash
+cd loglens && cmake --build build/check --parallel
+```
+Expected: 컴파일 실패 — `Bucket` 에 `total` 이 없다
+
+- [ ] **Step 3: Add the accessor**
+
+`loglens/include/loglens/log_stats.hpp` 의 `Bucket` 을 바꾼다.
+
+```cpp
+struct Bucket {
+    std::uint64_t start_ms = 0;
+    std::array<std::size_t, kLevelCount> level_counts{};
+
+    // Records in this bucket across every level. The timeline needs it to size
+    // a bar; it is a property of the bucket, not of the widget drawing it.
+    std::size_t total() const;
+};
+```
+
+`loglens/src/log_stats.cpp` 에 정의를 더한다.
+
+```cpp
+std::size_t Bucket::total() const {
+    std::size_t sum = 0;
+    for (std::size_t count : level_counts) {
+        sum += count;
+    }
+    return sum;
+}
+```
+
+`loglens/src/gui/timeline_widget.cpp` 에서 익명 네임스페이스의 `bucketTotal` 을 지우고 호출부를 `bucket.total()` 로 바꾼다. `kBarColours` 는 남긴다.
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+```bash
+cd loglens && cmake --build build/check --parallel && QT_QPA_PLATFORM=offscreen ctest --test-dir build/check --output-on-failure
+```
+Expected: 8/8 통과
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add loglens/include/loglens/log_stats.hpp loglens/src/log_stats.cpp \
+        loglens/src/gui/timeline_widget.cpp loglens/tests/test_log_stats.cpp
+git commit -m "refactor(loglens): make the bucket total a property of the bucket"
+```
+
+---
+
+### Task 3: loglens 팔로우 의미론에 Qt 테스트
+
+**Files:**
+- Create: `loglens/tests/test_main_window.cpp`
+- Modify: `loglens/CMakeLists.txt`
+
+**Interfaces:**
+- Consumes: `loglens_gui`, `MainWindow::openPath(const QString&)`, private slot `pollSource`
+- Produces: 없음
+
+`main_window.cpp` 는 128 statements 가 통째로 미검증이고, 그 중심이 이번에 만든 팔로우 상태 기계다. **기능은 스모크로만 확인했지 규칙은 아무도 검증하지 않았다.**
+
+타이머(500ms)를 기다리는 대신 `QMetaObject::invokeMethod` 로 `pollSource` 를 직접 부른다. moc 는 private slot 도 호출 가능하게 만들어 두므로 동작하고, 테스트가 시간에 의존하지 않는다.
+
+- [ ] **Step 1: Write the failing test**
+
+`loglens/tests/test_main_window.cpp`
+
+```cpp
+#include <QCheckBox>
+#include <QTableView>
+#include <QtTest>
+
+#include <fstream>
+
+#include "loglens/gui/main_window.hpp"
+
+class TestMainWindow : public QObject {
+    Q_OBJECT
+
+private slots:
+    void openingAFileFillsTheTable();
+    void growthAppendsRows();
+    void truncationResetsTheModel();
+    void aReadErrorStopsFollowing();
+};
+
+namespace {
+
+// Reaching the widgets by type rather than by name keeps the test off
+// MainWindow's private members.
+QAbstractItemModel* tableModel(MainWindow& window) {
+    auto* table = window.findChild<QTableView*>();
+    return table == nullptr ? nullptr : table->model();
+}
+
+int rowCount(MainWindow& window) {
+    QAbstractItemModel* model = tableModel(window);
+    return model == nullptr ? -1 : model->rowCount(QModelIndex());
+}
+
+void write(const QString& path, const QString& text, bool append) {
+    std::ofstream out(path.toStdString(),
+                      append ? std::ios::app : std::ios::trunc);
+    out << text.toStdString();
+}
+
+// The poll slot is private, which moc still makes invokable. Calling it beats
+// waiting on the 500 ms timer: the test asserts the rule, not the schedule.
+void poll(MainWindow& window) {
+    QVERIFY(QMetaObject::invokeMethod(&window, "pollSource"));
+}
+
+QString line(const char* level, int n) {
+    return QStringLiteral("2026-08-26T04:15:2%1.000Z %2  [api] request %3")
+        .arg(n % 10)
+        .arg(QString::fromLatin1(level))
+        .arg(n);
+}
+
+} // namespace
+
+void TestMainWindow::openingAFileFillsTheTable() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("app.log"));
+    write(path, line("INFO", 1) + "\n" + line("WARN", 2) + "\n", false);
+
+    MainWindow window;
+    window.openPath(path);
+
+    QCOMPARE(rowCount(window), 2);
+}
+
+void TestMainWindow::growthAppendsRows() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("app.log"));
+    write(path, line("INFO", 1) + "\n", false);
+
+    MainWindow window;
+    window.openPath(path);
+    QCOMPARE(rowCount(window), 1);
+
+    write(path, line("ERROR", 2) + "\n", true);
+    poll(window);
+
+    // Appended, not reloaded: the tailer keeps its offset, so the first line is
+    // not read twice.
+    QCOMPARE(rowCount(window), 2);
+}
+
+void TestMainWindow::truncationResetsTheModel() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("app.log"));
+    write(path, line("INFO", 1) + "\n" + line("INFO", 2) + "\n", false);
+
+    MainWindow window;
+    window.openPath(path);
+    QCOMPARE(rowCount(window), 2);
+
+    // Rotation: the retained rows no longer correspond to anything on disk, so
+    // appending under them would show a file that never existed.
+    write(path, line("WARN", 9) + "\n", false);
+    poll(window);
+
+    QCOMPARE(rowCount(window), 1);
+}
+
+void TestMainWindow::aReadErrorStopsFollowing() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("app.log"));
+    write(path, line("INFO", 1) + "\n", false);
+
+    MainWindow window;
+    window.openPath(path);
+    auto* follow = window.findChild<QCheckBox*>();
+    QVERIFY(follow != nullptr);
+    QVERIFY(follow->isChecked());
+
+    QVERIFY(QFile::remove(path));
+    poll(window);
+
+    // Whatever broke will break again on every tick, so following stops rather
+    // than spinning on the error.
+    QVERIFY(!follow->isChecked());
+}
+
+QTEST_MAIN(TestMainWindow)
+#include "test_main_window.moc"
+```
+
+`loglens/CMakeLists.txt` 의 `test_log_model` 블록 아래에 더한다.
+
+```cmake
+add_executable(test_main_window tests/test_main_window.cpp)
+target_link_libraries(test_main_window PRIVATE loglens_gui Qt${QT_VERSION_MAJOR}::Test)
+target_include_directories(test_main_window PRIVATE tests)
+add_test(NAME test_main_window COMMAND test_main_window WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+```bash
+cd loglens && cmake -S . -B build/check -DCMAKE_BUILD_TYPE=Debug && cmake --build build/check --parallel && QT_QPA_PLATFORM=offscreen ctest --test-dir build/check --output-on-failure -R test_main_window
+```
+Expected: 컴파일은 되지만 하나 이상 실패할 수 있다. **실패하면 그것이 발견이다** — 팔로우 규칙 중 하나가 실제로는 다르게 동작한다는 뜻이므로, 코드와 테스트 중 어느 쪽이 틀렸는지 판단하고 고친다.
+
+- [ ] **Step 3: Fix whatever the tests found**
+
+실패한 단언마다 원인을 확인한다. `main_window.cpp` 의 동작이 틀렸으면 코드를 고치고, 테스트의 기대가 틀렸으면 테스트를 고치되 **왜 그 기대가 틀렸는지 주석으로 남긴다.** 전부 통과했다면 이 스텝은 변경 없이 넘어간다.
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+```bash
+cd loglens && cmake --build build/check --parallel && QT_QPA_PLATFORM=offscreen ctest --test-dir build/check --output-on-failure
+```
+Expected: 9/9 통과
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add loglens/tests/test_main_window.cpp loglens/CMakeLists.txt loglens/src/gui/main_window.cpp
+git commit -m "test(loglens): assert the follow rules, not just that it runs"
+```
+
+---
+
+### Task 4: diskmap 내비게이션에 Qt 테스트
+
+**Files:**
+- Create: `diskmap/tests/test_main_window.cpp`
+- Create: `diskmap/tests/test_main_window.pro`
+- Modify: `diskmap/tests/tests.pro`
+
+**Interfaces:**
+- Consumes: `diskmap_gui`, `MainWindow::scanPath(const QString&)`, private slot `goUp`
+- Produces: 없음
+
+내비게이션의 `trail_` 스택은 push/pop 과 버튼 활성 상태가 얽혀 있어 **off-by-one 이 살기 좋은 자리**인데 지금 아무도 안 본다.
+
+스캔이 `QFutureWatcher` 로 비동기라 완료를 기다려야 한다. `QTRY_VERIFY` 가 조건이 참이 될 때까지 이벤트 루프를 돌리며 폴링하므로 고정 대기 없이 결정적이다.
+
+- [ ] **Step 1: Write the failing test**
+
+`diskmap/tests/test_main_window.cpp`
+
+```cpp
+#include <QLabel>
+#include <QPushButton>
+#include <QtTest>
+
+#include "diskmap/gui/main_window.hpp"
+#include "diskmap/gui/treemap_widget.hpp"
+
+class TestMainWindow : public QObject {
+    Q_OBJECT
+
+private slots:
+    void scanningFillsTheBreadcrumbWithTheRoot();
+    void activatingADirectoryDescends();
+    void goingUpReturnsAndStopsAtTheRoot();
+    void activatingALeafDoesNothing();
+};
+
+namespace {
+
+// Reaching the widgets by type rather than by name keeps the test off
+// MainWindow's private members. The breadcrumb is the only QLabel carrying a
+// "/"-joined trail, so it is found by that.
+QString breadcrumb(MainWindow& window) {
+    for (QLabel* label : window.findChildren<QLabel*>()) {
+        if (label->text().contains(QLatin1Char('/')) || !label->text().isEmpty()) {
+            return label->text();
+        }
+    }
+    return QString();
+}
+
+QPushButton* upButton(MainWindow& window) {
+    for (QPushButton* button : window.findChildren<QPushButton*>()) {
+        if (button->text().contains(QStringLiteral("Up"), Qt::CaseInsensitive)) {
+            return button;
+        }
+    }
+    return nullptr;
+}
+
+TreemapWidget* treemap(MainWindow& window) {
+    return window.findChild<TreemapWidget*>();
+}
+
+// A directory with one subdirectory holding a file, so there is somewhere to
+// descend into and something with no children to try descending into.
+QString makeTree(QTemporaryDir& dir) {
+    QDir root(dir.path());
+    root.mkpath(QStringLiteral("big"));
+    QFile file(dir.filePath(QStringLiteral("big/payload.bin")));
+    file.open(QIODevice::WriteOnly);
+    file.write(QByteArray(4096, 'x'));
+    file.close();
+    return dir.path();
+}
+
+} // namespace
+
+void TestMainWindow::scanningFillsTheBreadcrumbWithTheRoot() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    MainWindow window;
+    window.scanPath(makeTree(dir));
+
+    // The scan runs on a worker thread, so the assertion waits on the result
+    // rather than on a fixed delay.
+    QTRY_VERIFY(!breadcrumb(window).isEmpty());
+    QVERIFY(treemap(window)->currentNode() != nullptr);
+}
+
+void TestMainWindow::activatingADirectoryDescends() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    MainWindow window;
+    window.scanPath(makeTree(dir));
+    QTRY_VERIFY(treemap(window)->currentNode() != nullptr);
+
+    const diskmap::FsNode* root = treemap(window)->currentNode();
+    QVERIFY(!root->children.empty());
+    const QString before = breadcrumb(window);
+
+    emit treemap(window)->nodeActivated(&root->children.front());
+
+    QVERIFY(breadcrumb(window) != before);
+    QVERIFY(upButton(window)->isEnabled());
+}
+
+void TestMainWindow::goingUpReturnsAndStopsAtTheRoot() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    MainWindow window;
+    window.scanPath(makeTree(dir));
+    QTRY_VERIFY(treemap(window)->currentNode() != nullptr);
+
+    const diskmap::FsNode* root = treemap(window)->currentNode();
+    const QString atRoot = breadcrumb(window);
+    emit treemap(window)->nodeActivated(&root->children.front());
+
+    QVERIFY(QMetaObject::invokeMethod(&window, "goUp"));
+    QCOMPARE(breadcrumb(window), atRoot);
+    // At the root there is nowhere to go, and a second Up must not pop past it.
+    QVERIFY(!upButton(window)->isEnabled());
+    QVERIFY(QMetaObject::invokeMethod(&window, "goUp"));
+    QCOMPARE(breadcrumb(window), atRoot);
+}
+
+void TestMainWindow::activatingALeafDoesNothing() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    MainWindow window;
+    window.scanPath(makeTree(dir));
+    QTRY_VERIFY(treemap(window)->currentNode() != nullptr);
+
+    const diskmap::FsNode* root = treemap(window)->currentNode();
+    const diskmap::FsNode* directory = &root->children.front();
+    emit treemap(window)->nodeActivated(directory);
+    const QString atDirectory = breadcrumb(window);
+
+    // A file has no children, so descending into it would show an empty view
+    // with no way to tell why.
+    QVERIFY(!directory->children.empty());
+    emit treemap(window)->nodeActivated(&directory->children.front());
+
+    QCOMPARE(breadcrumb(window), atDirectory);
+}
+
+QTEST_MAIN(TestMainWindow)
+#include "test_main_window.moc"
+```
+
+`diskmap/tests/test_main_window.pro`
+
+```qmake
+TEMPLATE = app
+CONFIG += testcase console
+CONFIG -= app_bundle
+QT += core gui widgets concurrent testlib
+
+TARGET = test_main_window
+INCLUDEPATH += $$PWD/../include $$PWD
+SOURCES += test_main_window.cpp
+LIBS += -L$$OUT_PWD/../src/gui -ldiskmap_gui -L$$OUT_PWD/../src -ldiskmap_core
+```
+
+`diskmap/tests/tests.pro` 의 `SUBDIRS` 에 `test_main_window.pro` 를 더한다.
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+```bash
+cd diskmap && rm -rf build/check && mkdir -p build/check && cd build/check \
+  && qmake6 ../../diskmap.pro && make -j"$(nproc)" \
+  && QT_QPA_PLATFORM=offscreen ./tests/test_main_window
+```
+Expected: 하나 이상 실패할 수 있다. `breadcrumb()` 헬퍼가 엉뚱한 `QLabel` 을 집을 가능성이 가장 높다 — 그러면 라벨을 구별할 방법을 찾아 헬퍼를 고친다(예: `objectName` 을 위젯 쪽에 부여).
+
+- [ ] **Step 3: Fix whatever the tests found**
+
+실패 원인을 확인해 고친다. 위젯을 구별할 수 없어 실패했다면 `main_window.cpp` 에서 `breadcrumb_->setObjectName(QStringLiteral("breadcrumb"))` 과 `upButton_->setObjectName(QStringLiteral("up"))` 을 설정하고 헬퍼를 `findChild<QLabel*>(QStringLiteral("breadcrumb"))` 로 바꾼다. **테스트를 위해 이름을 붙이는 것은 정당하다** — 위젯에 이름이 있으면 디버깅과 접근성 도구에서도 쓸모가 있다.
+
+- [ ] **Step 4: Run every diskmap test**
+
+```bash
+cd diskmap/build/check && QT_QPA_PLATFORM=offscreen make check TESTARGS=-xunitxml 2>&1 | tail -20
+```
+Expected: 7개 바이너리 전부 통과
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add diskmap/tests/test_main_window.cpp diskmap/tests/test_main_window.pro \
+        diskmap/tests/tests.pro diskmap/src/gui/main_window.cpp
+git commit -m "test(diskmap): assert the navigation trail, not just that it draws"
+```
+
+---
+
+### Task 5: 설치된 Qt 를 따라가게 한다
+
+**Files:**
+- Modify: `loglens/CMakeLists.txt`
+- Modify: `loglens/src/gui/CMakeLists.txt`
+- Modify: `diskmap/src/gui/treemap_widget.cpp:108,119`
+- Modify: `loglens/ici.toml`, `diskmap/ici.toml`
+- Modify: `.github/workflows/ci.yml`
+
+**Interfaces:**
+- Consumes: Task 1–4
+- Produces: 없음
+
+여기는 Qt 6 가 설치돼 있고 내부망은 Qt 5.15 다. 빌드 정의가 버전을 고정하면 같은 소스가 한쪽에서 안 빌드된다.
+
+- [ ] **Step 1: Detect the Qt version in CMake**
+
+`loglens/CMakeLists.txt` 의 `find_package` 를 바꾼다.
+
+```cmake
+# Whichever Qt the machine has. Development here is Qt 6; the closed network is
+# Qt 5.15. Pinning a major version would make the same source unbuildable on one
+# of them for no reason.
+find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Test)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Test)
+```
+
+같은 파일과 `loglens/src/gui/CMakeLists.txt` 의 `Qt6::Widgets` / `Qt6::Test` 를 `Qt${QT_VERSION_MAJOR}::Widgets` / `Qt${QT_VERSION_MAJOR}::Test` 로 바꾼다. `src/gui/CMakeLists.txt` 의 `find_package(Qt6 REQUIRED COMPONENTS Widgets)` 줄은 루트가 이미 찾았으므로 지운다.
+
+- [ ] **Step 2: Guard the two Qt 6-only calls**
+
+`QMouseEvent::position()` 은 Qt 6 에서 들어왔고 Qt 5 는 `localPos()` 다. 이 저장소에서 Qt 5 와 어긋나는 곳은 여기 두 줄뿐이다.
+
+`diskmap/src/gui/treemap_widget.cpp` 상단에 헬퍼를 더한다.
+
+```cpp
+namespace {
+
+// QMouseEvent::position() arrived in Qt 6; Qt 5 spells the same thing
+// localPos(). These two call sites are the only place this repository parts
+// ways with Qt 5.
+QPointF eventPos(const QMouseEvent* event) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    return event->position();
+#else
+    return event->localPos();
+#endif
+}
+
+} // namespace
+```
+
+`mouseMoveEvent` 와 `mousePressEvent` 의 `event->position()` 을 `eventPos(event)` 로 바꾼다. 기존 익명 네임스페이스가 이미 있으면 그 안에 넣는다.
+
+- [ ] **Step 3: List both Qt packages for lint**
+
+두 `ici.toml` 의 `cpp_pkg_config` 를 바꾼다. `get_cpp_pkg_config_flags` 는 **해석에 실패한 패키지를 건너뛰므로** 둘을 나열하면 설치된 쪽이 잡힌다.
+
+```toml
+# Whichever Qt the machine has. ici skips a package pkg-config cannot resolve,
+# so listing both makes the same config work on a Qt 6 desktop and a Qt 5.15
+# closed-network box.
+cpp_pkg_config = ["Qt6Widgets", "Qt5Widgets"]
+```
+
+`diskmap` 은 `Qt6Concurrent` 도 쓰므로 `["Qt6Widgets", "Qt6Concurrent", "Qt5Widgets", "Qt5Concurrent"]` 로 한다.
+
+- [ ] **Step 4: Let qmake fall back**
+
+`.github/workflows/ci.yml` 의 `gui-build` 잡에서 diskmap 빌드 명령을 바꾼다. 로컬 문서(`README.md`)의 예시도 같이 고친다.
+
+```bash
+QMAKE=$(command -v qmake6 || command -v qmake)
+"$QMAKE" ../../diskmap.pro && make -j"$(nproc)"
+```
+
+- [ ] **Step 5: Verify under Qt 6, then under Qt 5 if it is installed**
+
+```bash
+cd loglens && rm -rf build/check && cmake -S . -B build/check -DCMAKE_BUILD_TYPE=Debug \
+  && cmake --build build/check --parallel \
+  && QT_QPA_PLATFORM=offscreen ctest --test-dir build/check --output-on-failure
+```
+Expected: 통과, 그리고 configure 로그에 잡힌 Qt 버전이 6 으로 보인다
+
+Qt 5 가 설치돼 있으면(`pkg-config --exists Qt5Widgets`) 강제로 한 번 더 돌린다.
+
+```bash
+cd loglens && rm -rf build/qt5 \
+  && cmake -S . -B build/qt5 -DCMAKE_BUILD_TYPE=Debug -DQT_NO_PACKAGE_VERSION_CHECK=ON -DCMAKE_PREFIX_PATH=/usr/lib/x86_64-linux-gnu/cmake/Qt5 \
+  && cmake --build build/qt5 --parallel \
+  && QT_QPA_PLATFORM=offscreen ctest --test-dir build/qt5 --output-on-failure
+```
+설치돼 있지 않으면 **"Qt 5 미검증" 이라고 커밋 메시지와 README 에 명시한다.** 안 돌려본 것을 된다고 적지 않는다.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add loglens/CMakeLists.txt loglens/src/gui/CMakeLists.txt \
+        diskmap/src/gui/treemap_widget.cpp loglens/ici.toml diskmap/ici.toml \
+        .github/workflows/ci.yml README.md
+git commit -m "build: follow whichever Qt the machine has"
+```
+
+---
+
+### Task 6: 임계값과 문서
+
+**Files:**
+- Modify: `loglens/ici.toml`
+- Modify: `README.md`
+- Modify: `ROADMAP.md`
+
+**Interfaces:**
+- Consumes: Task 1–5
+- Produces: 없음
+
+- [ ] **Step 1: Measure**
+
+```bash
+for p in loglens diskmap; do
+  (cd $p && rm -rf build/ici-* && QT_QPA_PLATFORM=offscreen ../../ici/dist/ici.pyz verify \
+    2>&1 | grep -E "Threshold|Coverage:Module|Total Engines|Suite:" | sed "s|^|[$p] |")
+done
+```
+실측된 branch·function 커버리지를 적어둔다.
+
+- [ ] **Step 2: Raise the thresholds to what was measured**
+
+`loglens/ici.toml` 의 `[engines.test]` 를 실측값에 맞춰 올린다. 목표는 원래의 `min_branch_cov = 80.0` / `min_func_cov = 90.0` 이다.
+
+**실측이 80/90 을 넘으면** 그 값으로 되돌리고 주석을 바꾼다.
+
+```toml
+# 셸에 테스트가 붙어 원래 값으로 돌아왔다. src/gui 가 커버리지에 들어온 뒤
+# 55/80 으로 내렸던 것은 코드가 나빠져서가 아니라 분모가 바뀌어서였고,
+# 이제 그 분모를 실제로 덮었다.
+min_branch_cov = 80.0
+min_func_cov = 90.0
+```
+
+**넘지 못하면 도달한 값에 여유를 두고, 무엇이 아직 안 덮였는지 파일별로 적는다.** 올리지 못한 것을 올렸다고 적지 않는다.
+
+- [ ] **Step 3: Retire the principle from the docs**
+
+`README.md` 의 "공통 구조 규칙" 에서 "로직은 core, Qt 는 얇은 껍데기" 라는 서술을 지우고 아래로 바꾼다.
+
+```markdown
+### Qt 를 core 에 쓰는 것을 금지하지 않는다
+
+한동안 "로직은 core, Qt 는 얇은 껍데기" 를 규칙처럼 지켰지만 그만뒀다. Qt 는 GUI 툴킷이기
+전에 프레임워크고, 도메인까지 Qt 로 구현하는 코드베이스가 훨씬 많다. 규칙을 지키는 것 자체가
+목적이 되면 코드가 아니라 규칙에 맞추게 된다.
+
+무엇을 어디 둘지는 그때그때 판단한다. 이 저장소에서 `parseLines` 가 core 에 있는 이유는
+원칙 때문이 아니라 **그것이 파서 로직이고 테스트 대상이기 때문**이다.
+
+예외가 하나 있고 그건 규칙이 아니라 요구다. [`ici/viewer`](https://github.com/jihoon22-lee/ici/tree/main/viewer)
+의 `icirv` CLI 는 Qt 가 없는 RHEL 8 에 정적 링크로 나가므로 그 코어는 Qt 를 쓸 수 없다.
+```
+
+"알려진 갭: Qt 셸에 단위 테스트가 없다" 절을 실제 상태로 고친다 — 어느 파일이 덮였고 어느 파일이 아직 아닌지.
+
+- [ ] **Step 4: Update the roadmap**
+
+`ROADMAP.md` 의 "Qt 셸에 단위 테스트가 없다" 절을 결과로 바꾼다. 임계값이 원래대로 돌아왔으면 그렇게, 아니면 남은 수치와 이유를 적는다.
+
+- [ ] **Step 5: Verify both projects and run the full check**
+
+```bash
+for p in loglens diskmap; do
+  (cd $p && rm -rf build/ici-* && QT_QPA_PLATFORM=offscreen ../../ici/dist/ici.pyz verify \
+    2>&1 | grep -E "Total Engines|Suite:" | sed "s|^|[$p] |")
+done
+```
+Expected: 둘 다 `Suite: PASS`
+
+- [ ] **Step 6: Commit, push and open the PR**
+
+```bash
+git add loglens/ici.toml README.md ROADMAP.md
+git commit -m "docs: retire the Qt-in-core rule, and record what the shell tests cover"
+git push -u origin feat/qt-shell-tests
+gh pr create --title "test: cover the Qt shells, and follow whichever Qt is installed" --body "..."
+```
+
+---
+
+## 자체 검토 결과
+
+**커버리지**
+
+| 합의된 항목 | 태스크 |
+|---|---|
+| `parseLines` 를 core 로 | Task 1 |
+| `bucketTotal` 을 core 로 | Task 2 |
+| loglens 셸 테스트 | Task 3 |
+| diskmap 셸 테스트 | Task 4 |
+| Qt 버전 탐지 + `position()` 가드 | Task 5 |
+| 임계값 복구 | Task 6 |
+| 원칙 폐기 문서화 | Task 6 Step 3 |
+
+**세 가지를 짚어둔다.**
+
+Task 3 Step 3 과 Task 4 Step 3 은 **조건부 스텝**이다. 셸의 실제 동작을 아직 모르므로, 테스트가 실패하면 그것이 발견이고 코드와 테스트 중 어느 쪽이 틀렸는지 판단해야 한다. 미리 답을 적어두면 그건 추측이다.
+
+**Task 6 Step 2 가 이 계획의 성패다.** 임계값을 되돌리는 게 목적인데, 실측이 못 미치면 되돌리지 못한다. 그 경우 도달값을 적고 무엇이 남았는지 남기는 것까지가 이 태스크다 — **못 올렸는데 올렸다고 적는 것이 유일한 실패다.**
+
+**Qt 5 검증은 설치 여부에 달려 있다.** `sudo apt-get install -y qtbase5-dev qt5-qmake qtbase5-dev-tools` 가 필요하고 이 계획은 그걸 실행할 수 없다. 설치되지 않은 채로 끝나면 "Qt 5 미검증" 을 명시한다.
+
+## 이 계획에 없는 것
+
+`ROADMAP.md` 의 **2단계(diskmap 정리 작업대)는 별도 계획**이다. 휴지통을 어떻게 다룰지(`gio trash` 인지 직접 구현인지), 안전 규칙의 범위를 어디까지 볼지 같은 설계 결정이 남아 있어서, 지금 상세 계획을 쓰면 실측이 아니라 추측이 된다. 이 계획이 끝난 뒤 따로 설계한다.
