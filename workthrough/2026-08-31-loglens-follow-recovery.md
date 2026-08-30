@@ -160,14 +160,14 @@ branch. The result was:
 Suite: PASS
 Engine summary: 10 pass / 0 warn / 0 fail / 0 error / 2 skip
 Tests: 10/10
-Coverage: line 92.4% / function 97.1% / branch 80.9%
+Coverage: line 92.5% / function 97.1% / branch 80.8%
 TEM: 4.86 / 5.0
 Maximum complexity: 12
 Duplication: 1.3%
-Elapsed: 92.15 s
+Elapsed: 81.28 s
 ```
 
-The standalone HTML report `/tmp/loglens-follow-recovery.html` was `264850` bytes and had
+The standalone HTML report `/tmp/loglens-recovery-fixed.html` was `265789` bytes and had
 `0` external HTTP `src`/`href` references.
 
 ### Headless GUI smoke

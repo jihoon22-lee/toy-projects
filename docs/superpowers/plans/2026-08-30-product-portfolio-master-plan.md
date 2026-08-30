@@ -242,7 +242,7 @@ bytes가 섞이는 것이 원인이었다. `d419d2f`가 `recovery_pending_`/
 `recovery_restart_started_`로 unavailable interval 뒤 단일 generation 증가와 offset 0
 재시작을 강제하도록 수정했고, 수정 후 Qt5·Qt6 전체 CTest는 다시 10/10 PASS다. 로컬 ici
 0.6.0 verify도 Suite PASS(10 pass, 2 skip), TEM 4.86,
-line/function/branch 92.4/97.1/80.9%를 기록했고 Zero-CDN HTML과 Qt5·Qt6 8초 headless
+line/function/branch 92.5/97.1/80.8%를 기록했고 Zero-CDN HTML과 Qt5·Qt6 8초 headless
 smoke를 확인했다. 원격 CI Merge Gate와 report-pr sticky HTML·Pages는 해당 PR에서
 수정 커밋을 포함해 재실행한 뒤 별도로 확인한다. 현재는 재실행, sticky comment와 Pages
 HTTP 확인이 남아 있으므로 Slice 2의 원격 완료 조건은 아직 닫지 않는다.
