@@ -102,12 +102,21 @@ timeout 종료 코드 124는 의도한 확인 결과다. ici 0.6.0 release asset
 `Suite PASS`, 10 pass / 0 warn / 0 fail / 0 error / 2 skip, TEM 4.90,
 line 96.9% / function 97.9% / branch 85.2%, maximum complexity 14, duplication 2.1,
 duration 24.24초였다. 생성한 HTML은 180,624 bytes이며 외부 `src`/`href` 참조가 0개다.
-이후 `da2b8ba`/`eedd4ec`에서 finite-depth truncation과 saturating logical aggregation을
-추가했으므로, 이 커밋들 이후의 전체 native/ici 재검증과 원격 PR CI·sticky HTML comment·Pages
+이후 `5ceb059`/`ebe3d86`에서 finite-depth truncation과 saturating logical aggregation을
+추가했으므로, 이 커밋들 이후의 final full ici 재검증과 원격 PR CI·sticky HTML comment·Pages
 응답 검증은 아직 대기 중이다. PR에서 최신 결과를 재확인한 뒤에만 병합한다.
 
-`4a0109d`/`4cd1779`에서는 regular-file root, root symlink dereference와 broken-target error
-전파를 추가했다. 이 커밋들 이후의 final full/local/remote verification 역시 대기 중이다.
+`6861b7a`/`2f56caf`에서는 regular-file root, root symlink dereference와 broken-target error
+전파를 추가했다. 이 커밋들 이후의 final full ici 및 remote verification은 대기 중이다.
+
+root semantics 후속 반영 뒤 최신 로컬 native 확인은 Qt 5.15.18(`/usr/bin/qmake`)과 Qt 6.10.2
+(`/usr/bin/qmake6`)에서 각각 full build target 및 `make check` 9/9 PASS였다. Qt5/Qt6 GUI
+offscreen smoke도 각각 8초 생존 후 기대된 timeout exit 124로 확인했다. 최종 full ici와
+원격 PR CI·sticky HTML comment·Pages 응답 검증은 아직 pending이다.
+
+`31d8b48`의 root inspection stage 분리 후 public ici complexity-only 검증도 PASS했으며,
+maximum cyclomatic 14 across 101 functions, 0 issues를 기록했다. 전체 ici verify 재실행은
+아직 pending이다.
 
 ### GUI 는 빌드되고 테스트된다
 

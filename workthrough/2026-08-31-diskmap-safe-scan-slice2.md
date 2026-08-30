@@ -30,7 +30,7 @@ guessed zero.
 
 ### 1. Identity-safe traversal and path boundary
 
-Production commits: `f3016db` and `aa18539`.
+Production commits: `f4bc717` and `9c50fd0`.
 
 - `FsNode::path`, `DirEntry::path`, `FsSource::list`, and `scanner::scan` now
   use `std::filesystem::path` at the source/scanner boundary.
@@ -44,7 +44,7 @@ Production commits: `f3016db` and `aa18539`.
 
 ### 2. Logical, allocated, and reclaimable storage
 
-Production commit: `f3016db`.
+Production commit: `f4bc717`.
 
 - `FsNode::size` remains the logical aggregate and counts each directory entry.
 - `allocated_size` deduplicates valid physical identities within each subtree.
@@ -62,7 +62,7 @@ Production commit: `f3016db`.
 
 ### 3. Contract and real-filesystem coverage
 
-Test commits: `3759002`, `ad6fff5`, and `bc060db`.
+Test commits: `02851f7`, `3fdeb55`, and `0a7b013`.
 
 - `FakeFsSource` scenarios cover nested paths containing spaces, canonical and
   symlink aliases, directory back-edges, identityless followed directories,
@@ -74,7 +74,7 @@ Test commits: `3759002`, `ad6fff5`, and `bc060db`.
 
 ### 4. Reproducible qmake coverage linkage
 
-Build fix commit: `6e3484f`.
+Build fix commit: `c65f0d8`.
 
 Static qmake consumers now declare the archive through `PRE_TARGETDEPS`, so a
 test binary is relinked when the static library changes. This closes the stale
@@ -83,7 +83,7 @@ archive path that can otherwise leave old `.gcda` files paired with newer
 
 ### 5. Conservative truncation follow-up
 
-Test commit: `da2b8ba`; production commit: `eedd4ec`.
+Test commit: `5ceb059`; production commit: `ebe3d86`.
 
 - Added regression coverage for finite-depth pruning and logical-size overflow.
 - The scanner now records the exact `scan depth limit reached` error on every
@@ -97,7 +97,7 @@ commits and all remote PR/report checks are still pending.
 
 ### 6. Scan-root semantics follow-up
 
-Test commit: `4a0109d`; production commit: `4cd1779`.
+Test commit: `6861b7a`; production commit: `2f56caf`.
 
 - A regular-file root is now a complete one-node scan rather than a failed
   directory listing. Its logical, allocated, and reclaimable facts are
@@ -110,8 +110,16 @@ Test commit: `4a0109d`; production commit: `4cd1779`.
   `is_dir=false`, and a source-dependent logical `size`; the size is not
   pinned because the source file may change.
 
-The full local/native/ici rerun after this root-semantics follow-up, together
-with remote PR CI, sticky HTML comment, and Pages verification, remains pending.
+The follow-up refactor `31d8b48` separated root inspection stages. Its public
+ici complexity-only check passed with maximum cyclomatic 14 across 101
+functions and 0 issues. The full ici verify rerun remains pending.
+
+After this root-semantics follow-up, the latest local native verification was
+Qt 5.15.18 (`/usr/bin/qmake`) and Qt 6.10.2 (`/usr/bin/qmake6`) with full build
+target plus `make check` 9/9 PASS on both. The Qt5 and Qt6 offscreen GUI smokes
+also survived 8 seconds and exited with the expected timeout 124. The final
+full ici rerun and remote PR CI, sticky HTML comment, and Pages verification
+remain pending.
 
 ## Code Examples
 

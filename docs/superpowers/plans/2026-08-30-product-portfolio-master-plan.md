@@ -31,7 +31,7 @@
 | 프로젝트 | 현재 형태 | 실측 | 제품 상태 |
 |---|---|---|---|
 | loglens | C++17, Qt, CMake | 8 tests, TEM 4.08 | 유용한 골격, streaming 신뢰성과 대용량 UX 부족 |
-| diskmap | C++17, Qt, qmake | D1 Slice 2 local PASS · 9 tests · TEM 4.90 | treemap viewer, cleanup UX는 D2~D6에서 확장 |
+| diskmap | C++17, Qt, qmake | D1 Slice 2 native PASS · ici baseline TEM 4.90 · final pending | treemap viewer, cleanup UX는 D2~D6에서 확장 |
 | ici/viewer | Qt-free core + Qt6 GUI | 3 tests, TEM 4.94 | core 중심, 셸과 report workflow 부족 |
 
 현재 공백:
@@ -372,7 +372,7 @@ Slice 2 — safe traversal and path semantics:
 
 **Slice 2 구현·검증 증거 (2026-08-31):** 구현 브랜치는
 `refactor/diskmap-identity-scan`이며, Slice 1의 metadata/source 경계를 이어받아
-`3759002`, `f3016db`, `ad6fff5`, `aa18539`, `bc060db`, `6e3484f`에서 계약·구현·실제
+`02851f7`, `f4bc717`, `3fdeb55`, `9c50fd0`, `0a7b013`, `c65f0d8`에서 계약·구현·실제
 filesystem 회귀·coverage 보강·qmake relink를 완료했다. `FsNode::path`와 source boundary는
 `std::filesystem::path`를 사용하고, scanner는 physical `FileIdentity` 방문 집합으로
 followed-directory cycle/back-edge를 노드로 보존하면서 확장을 차단한다. target identity가
@@ -404,16 +404,21 @@ fresh full build와 `make check` 9/9가 각각 통과했다. 두 GUI는
 참조가 0개다. 첫 coverage 실행은 stale `.gcda` stamp 1417858375와 `.gcno` stamp
 1418147347가 섞여 scanner.cpp가 0%로 집계되어 line 73.4% / function 83.3% / branch
 60.2%로 실패했으며, `PRE_TARGETDEPS` relink 후 stamps가 1418147347로 일치하고 위 PASS
-결과를 얻었다. 이후 `da2b8ba`/`eedd4ec`에서 finite `max_depth`로 잘린 directory를
+결과를 얻었다. 이후 `5ceb059`/`ebe3d86`에서 finite `max_depth`로 잘린 directory를
 `complete=false` 및 `scan depth limit reached`로 표시하고, logical size 합산을
 `uint64_t` 최댓값에서 포화하도록 보수적 truncation semantics를 추가했다. 이 후속 커밋
 이후의 최종 full native/ici 검증과 원격 PR CI, sticky HTML comment 및 Pages 응답 검증은
 아직 pending이며, 최신 결과를 확인한 뒤에만 Slice 2를 원격 완료로 표시한다.
 
-이후 `4a0109d`/`4cd1779`에서 regular-file root의 실제 CLI 경로와 root symlink semantics를
+이후 `6861b7a`/`2f56caf`에서 regular-file root의 실제 CLI 경로와 root symlink semantics를
 추가했다. 실제 file-root smoke는 JSON에서 `name=main.cpp`, `is_dir=false`, `size`가 source
 metadata와 일치하는 one-node 결과를 냈다(파일 크기는 source 변경에 따라 고정하지 않는다).
-이 후속 커밋 이후의 최종 full/local/remote 검증은 아직 pending이다.
+이 후속 커밋 이후 최신 로컬 native 확인은 Qt 5.15.18(`/usr/bin/qmake`)과
+Qt 6.10.2(`/usr/bin/qmake6`)에서 각각 full build target과 `make check` 9/9 PASS였다.
+Qt5/Qt6 GUI offscreen smoke도 각각 8초 생존 후 기대된 timeout exit 124로 확인했다. 최종
+full ici 및 원격 PR CI, sticky HTML comment와 Pages 응답 검증은 아직 pending이다.
+`31d8b48`의 root inspection stage 분리 후 public ici complexity-only 검증은 PASS,
+maximum cyclomatic 14 across 101 functions, 0 issues였으며 전체 ici verify 재실행은 pending이다.
 
 ### D2. cancellable scanner와 stale result 방지
 
