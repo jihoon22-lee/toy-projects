@@ -214,15 +214,27 @@ smoke를 실행한다. discovery 자동 확장은 `ci/test_check_manifest.py` st
 
 - [x] Slice 1 — source identity/typed chunk contract: POSIX device/inode 기반 교체 감지와
   generation/position/error를 담은 core poll 결과, real-filesystem 회귀 테스트.
-- [ ] Slice 2 — follow recovery GUI state: missing/reappear retry, stopped/follow resume와
+- [x] Slice 2 — follow recovery GUI state: missing/reappear retry, stopped/follow resume와
   그 상태를 표시하는 사용자 경험.
 
 - [ ] POSIX에서는 device/inode, 다른 platform에서는 사용 가능한 file identity abstraction을 도입한다.
 - [ ] 더 크거나 같은 새 파일로 교체돼도 rotation을 탐지한다.
 - [ ] truncate, replace, permission loss, file disappear/reappear를 구분한다.
 - [ ] poll 결과를 `records`, `generation_changed`, `error`, `position` 구조로 만든다.
-- [ ] stopped/retryable/fatal 상태와 사용자의 resume 동작을 정의한다.
+- [x] stopped/retryable/fatal 상태와 사용자의 resume 동작을 정의한다.
 - [ ] real filesystem integration test와 fake source deterministic test를 함께 둔다.
+
+**Slice 2 구현·검증 증거 (2026-08-31):** `FollowState`를 `Stopped`, `Following`,
+`WaitingRetry`로 분리했다. retryable missing/permission/open/stat/read 오류에서는 기존
+행과 timer를 유지하고 시도 횟수와 대기 상태를 표시한다. 새 file identity가 확인된
+replacement를 성공적으로 읽을 때만 assembler/model을 새 generation으로 reset한다. 사용자가
+Follow를 끄면 retry를 중지하고, 다시 켜면 명시적으로 재개한다. fatal unsupported file type은
+follow를 중지하되 마지막 정상 화면은 보존한다. `retryableSourceErrorKeepsFollowingAndVisibleRows`,
+`sourceReplacementRecoversWithCleanRows`, `disablingFollowWhileWaitingStopsPolling`,
+`unsupportedSourceStopsFollowing`를 포함한 `test_main_window` 회귀 테스트가 추가됐고,
+Qt 6 및 Qt 5 CMake/CTest에서 각각 10/10 PASS를 기록했다. 구현 커밋은 `4094ff5`, 테스트
+커밋은 `ca56d2e`다. 이 기록은 native 증거에 한정하며, ici verify·CI Merge Gate·report-pr의
+sticky HTML 및 실제 headless smoke는 해당 PR 검증에서 확인한다.
 
 ### L2. bounded storage와 큰 파일 UX
 
