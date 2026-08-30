@@ -7,3 +7,6 @@ TARGET = test_treemap_widget
 INCLUDEPATH += $$PWD/../include $$PWD
 SOURCES += test_treemap_widget.cpp
 LIBS += -L$$OUT_PWD/../src/gui -ldiskmap_gui -L$$OUT_PWD/../src -ldiskmap_core
+PRE_TARGETDEPS += \
+    $$OUT_PWD/../src/gui/libdiskmap_gui.a \
+    $$OUT_PWD/../src/libdiskmap_core.a

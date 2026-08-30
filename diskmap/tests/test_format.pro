@@ -7,3 +7,4 @@ TARGET = test_format
 INCLUDEPATH += $$PWD/../include $$PWD
 SOURCES += test_format.cpp
 LIBS += -L$$OUT_PWD/../src -ldiskmap_core
+PRE_TARGETDEPS += $$OUT_PWD/../src/libdiskmap_core.a

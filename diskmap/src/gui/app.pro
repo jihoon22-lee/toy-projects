@@ -9,3 +9,6 @@ SOURCES += gui_main.cpp
 # Subprojects build into <shadow>/<their path>, so the core sits one level up
 # from this one and the widget library beside it.
 LIBS += -L$$OUT_PWD -ldiskmap_gui -L$$OUT_PWD/.. -ldiskmap_core
+PRE_TARGETDEPS += \
+    $$OUT_PWD/libdiskmap_gui.a \
+    $$OUT_PWD/../libdiskmap_core.a
