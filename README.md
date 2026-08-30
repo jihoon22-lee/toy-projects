@@ -105,6 +105,26 @@ GUI 가 커버리지에 잡히기 시작하면서 드러난 사실이다.
 하나씩 붙는다. 그 잡은 PR 소스를 체크아웃하지 않는다 — 실행물은 체크섬 검증된 릴리스 pyz,
 게시물은 verify 잡의 아티팩트뿐이라 PR 이 쓰기 토큰에 닿지 않는다.
 
+## CI 품질 게이트 계약
+
+현재 프로젝트 목록과 각 Qt GUI의 빌드·smoke 입력은
+[`ci/projects.json`](ci/projects.json)이 유일한 기준이다. `discover` 잡은 이 manifest를
+검증하고 `ici.toml`을 가진 프로젝트가 하나라도 목록에서 빠지면 실패한다. `ici verify`
+matrix와 Qt GUI build/smoke matrix는 모두 같은 manifest 출력에서 생성되므로, 새 프로젝트를
+추가할 때 한쪽 matrix만 수정하는 실수를 허용하지 않는다. GUI가 없는 순수 CLI 프로젝트는
+`gui.enabled = false`를 명시해야 하며, 그 경우에도 ici verify에는 포함된다.
+
+PR의 `report-pr`는 verify·GUI matrix가 성공 또는 실패로 끝난 뒤 항상 평가된다. 성공한
+실행에서는 checksum을 확인한 ici `v0.6.0` release asset으로 모든 report artifact를
+`gh-pages`에 순차 게시하고, repository 단위 concurrency로 Pages 쓰기 경합을 막는다. 이어서
+실제 sticky 댓글을 API로 읽어 manifest 프로젝트 수만큼의 HTML 링크가 정확히 있는지 확인하고,
+각 링크가 Pages에서 `text/html` 응답을 반환할 때까지 기다린다.
+
+`Merge Gate`는 branch protection에서 required check로 설정해야 한다. 이 stable check가
+manifest discovery, 모든 ici verify matrix leg, 모든 GUI matrix leg와 PR report 검증을 함께
+요구한다. `push` 실행에서는 report 게시를 건너뛸 수 있지만, verify와 GUI 결과는 항상
+성공해야 한다.
+
 ## 검증
 
 ```bash
