@@ -10,7 +10,7 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 
 | 이름 | 설명 | 상태 |
 |---|---|---|
-| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · 7 tests |
+| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · 8 tests |
 | [loglens](loglens/) | 로그 뷰어 / 분석기 | CMake + Qt5/Qt6 GUI · 라이브 팔로우 · 10 tests |
 
 ## 공통 구조 규칙
