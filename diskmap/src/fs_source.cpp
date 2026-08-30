@@ -185,14 +185,21 @@ DirEntry makeDirEntry(const fs::directory_entry& entry) {
 
 FsSource::~FsSource() = default;
 
-std::vector<DirEntry> RealFsSource::list(const std::string& path, std::string& error) const {
+FsMetadata FsSource::inspect(const std::filesystem::path&, bool) const { return FsMetadata(); }
+
+FsMetadata RealFsSource::inspect(const std::filesystem::path& path, bool follow) const {
+    return readMetadata(path, follow);
+}
+
+std::vector<DirEntry> RealFsSource::list(const std::filesystem::path& path,
+                                         std::string& error) const {
     error.clear();
     std::vector<DirEntry> entries;
 
     std::error_code openError;
     fs::directory_iterator iterator(path, fs::directory_options::none, openError);
     if (openError) {
-        error = "cannot open directory '" + path + "': " + openError.message();
+        error = "cannot open directory '" + path.string() + "': " + openError.message();
         return entries;
     }
 
@@ -203,12 +210,13 @@ std::vector<DirEntry> RealFsSource::list(const std::string& path, std::string& e
             std::error_code stepError;
             iterator.increment(stepError);
             if (stepError) {
-                error = "error walking directory '" + path + "': " + stepError.message();
+                error = "error walking directory '" + path.string() + "': "
+                        + stepError.message();
                 break;
             }
         }
     } catch (const std::exception& exception) {
-        error = "exception while listing '" + path + "': " + exception.what();
+        error = "exception while listing '" + path.string() + "': " + exception.what();
         entries.clear();
     }
 

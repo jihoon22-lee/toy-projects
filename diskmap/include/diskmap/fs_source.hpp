@@ -28,12 +28,20 @@ public:
 
     // Lists the direct children of path. On failure returns an empty
     // vector and sets error to a human-readable message; never throws.
-    virtual std::vector<DirEntry> list(const std::string& path, std::string& error) const = 0;
+    virtual std::vector<DirEntry> list(const std::filesystem::path& path,
+                                       std::string& error) const = 0;
+
+    // Reads metadata for the path itself or its target. The default keeps
+    // scripted sources source-compatible; real filesystems override it so the
+    // scanner can seed its visited set with the root's physical identity.
+    virtual FsMetadata inspect(const std::filesystem::path& path, bool follow) const;
 };
 
 class RealFsSource : public FsSource {
 public:
-    std::vector<DirEntry> list(const std::string& path, std::string& error) const override;
+    std::vector<DirEntry> list(const std::filesystem::path& path,
+                               std::string& error) const override;
+    FsMetadata inspect(const std::filesystem::path& path, bool follow) const override;
 };
 
 } // namespace diskmap

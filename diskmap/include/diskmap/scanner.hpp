@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <string>
 #include <vector>
@@ -30,7 +31,7 @@ using ProgressFn = std::function<void(std::size_t dirs, std::size_t files)>;
 // listing error instead of stopping at the first one. Never recurses, so it
 // cannot stack-overflow on a deep tree.
 ScanResult scan(const FsSource& source,
-                 const std::string& rootPath,
+                 const std::filesystem::path& rootPath,
                  const ScanOptions& options,
                  const ProgressFn& progress = nullptr);
 

@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -15,13 +16,24 @@ constexpr int kMaxTreeDepth = 4096;
 
 struct FsNode {
     std::string name;
-    std::string path;
+    std::filesystem::path path;
     bool is_dir = false;
+    // `size` is logical bytes and intentionally counts every directory entry.
+    // Physical aggregates below deduplicate valid identities and retain an
+    // explicit known bit when the platform or an incomplete scan cannot prove
+    // an exact value.
     std::uint64_t size = 0;
+    std::uint64_t allocated_size = 0;
+    bool allocated_size_known = false;
+    std::uint64_t reclaimable_size = 0;
+    bool reclaimable_size_known = false;
     FsMetadata metadata;
     bool has_target_metadata = false;
     FsMetadata target_metadata;
     bool followed = false;
+    // The entry remains visible, but its directory target was already visited
+    // by physical identity and was deliberately not expanded again.
+    bool cycle_skipped = false;
     // Scan completeness is separate from metadata completeness: a directory
     // can have a valid stat record while listing its children fails.
     bool complete = true;
@@ -32,6 +44,11 @@ struct FsNode {
 // Post-order sum of subtree sizes; sets every directory's size to the sum
 // of its children and returns the size of the whole tree rooted at node.
 std::uint64_t aggregateSizes(FsNode& node);
+
+// Computes identity-aware physical storage facts independently for every
+// subtree. Hard-linked files contribute allocated bytes once per identity;
+// bytes are reclaimable only when every known hard-link reference is present.
+void aggregateStorage(FsNode& node);
 
 // Recursively sorts every level of children by size (descending), breaking
 // ties by name (ascending) so the ordering is stable and reproducible.

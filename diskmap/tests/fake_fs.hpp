@@ -4,6 +4,7 @@
 // Only *.cpp files under tests/ are compiled as test binaries, so this extra
 // header is safe to share across test files without becoming its own test.
 
+#include <filesystem>
 #include <map>
 #include <string>
 #include <utility>
@@ -19,15 +20,17 @@ namespace diskmap_test {
 // error through list()'s out-parameter instead of returning entries.
 class FakeFsSource : public diskmap::FsSource {
 public:
-    void addListing(const std::string& path, std::vector<diskmap::DirEntry> entries) {
+    void addListing(const std::filesystem::path& path, std::vector<diskmap::DirEntry> entries) {
         listings_[path] = std::move(entries);
     }
 
-    void addError(const std::string& path, std::string message = "simulated listing error") {
+    void addError(const std::filesystem::path& path,
+                  std::string message = "simulated listing error") {
         errors_[path] = std::move(message);
     }
 
-    std::vector<diskmap::DirEntry> list(const std::string& path, std::string& error) const override {
+    std::vector<diskmap::DirEntry> list(const std::filesystem::path& path,
+                                        std::string& error) const override {
         error.clear();
 
         const auto errIt = errors_.find(path);
@@ -38,15 +41,15 @@ public:
 
         const auto it = listings_.find(path);
         if (it == listings_.end()) {
-            error = "fake fs: no listing registered for '" + path + "'";
+            error = "fake fs: no listing registered for '" + path.string() + "'";
             return {};
         }
         return it->second;
     }
 
 private:
-    std::map<std::string, std::vector<diskmap::DirEntry>> listings_;
-    std::map<std::string, std::string> errors_;
+    std::map<std::filesystem::path, std::vector<diskmap::DirEntry>> listings_;
+    std::map<std::filesystem::path, std::string> errors_;
 };
 
 inline diskmap::DirEntry makeFileEntry(std::string name, std::uint64_t size, bool symlink = false) {
