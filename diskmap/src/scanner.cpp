@@ -147,7 +147,9 @@ ScanResult scan(const FsSource& source,
     result.root.metadata.complete = true;
 
     const FsMetadata rootMetadata = source.inspect(rootPath, false);
+    bool rootKindResolved = false;
     if (rootMetadata.complete) {
+        rootKindResolved = true;
         result.root.metadata = rootMetadata;
         result.root.is_dir = rootMetadata.kind == FsKind::Directory;
         if (rootMetadata.kind == FsKind::Symlink) {
@@ -158,11 +160,31 @@ ScanResult scan(const FsSource& source,
                                  && result.root.target_metadata.kind == FsKind::Directory;
             result.root.complete = result.root.has_target_metadata;
             result.root.error = result.root.target_metadata.error;
+            if (!result.root.has_target_metadata) {
+                if (result.root.error.empty()) {
+                    result.root.error = "cannot inspect symlink target '" + rootPath.string() + "'";
+                }
+                result.errors.push_back(result.root.error);
+            }
         }
     } else if (!rootMetadata.error.empty()) {
         result.root.complete = false;
         result.root.error = rootMetadata.error;
         result.errors.push_back(rootMetadata.error);
+    }
+
+    if (rootKindResolved && !result.root.is_dir) {
+        const FsMetadata& metadata = effectiveMetadata(result.root);
+        if (metadata.complete && metadata.kind == FsKind::RegularFile) {
+            result.root.size = metadata.logical_size;
+        }
+        ++result.files_scanned;
+        aggregateSizes(result.root);
+        aggregateStorage(result.root);
+        if (progress) {
+            progress(result.dirs_scanned, result.files_scanned);
+        }
+        return result;
     }
 
     std::set<IdentityKey> visited;
