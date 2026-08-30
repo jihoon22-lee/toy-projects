@@ -187,7 +187,9 @@ jobs:
               fi
               cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release "$qt_guard" \
                 2>&1 | tee build/configure.log
-              selected_major="$(sed -n 's/^-- loglens: using Qt\([0-9]\) .*/\1/p' \
+              # CMake GUI projects expose the selected major in a stable
+              # `-- <project>: using Qt<major> <version>` status line.
+              selected_major="$(sed -n 's/^-- .*using Qt\([56]\) .*/\1/p' \
                 build/configure.log | tail -1)"
               if [ "$selected_major" != "$QT_MAJOR" ]; then
                 echo "::error::CMake selected Qt $selected_major, expected Qt $QT_MAJOR"
