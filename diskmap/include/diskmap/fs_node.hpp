@@ -43,6 +43,8 @@ struct FsNode {
 
 // Post-order sum of subtree sizes; sets every directory's size to the sum
 // of its children and returns the size of the whole tree rooted at node.
+// Since logical size has no separate known bit, overflow saturates at uint64
+// max instead of wrapping to a misleadingly small value.
 std::uint64_t aggregateSizes(FsNode& node);
 
 // Computes identity-aware physical storage facts independently for every

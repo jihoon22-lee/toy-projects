@@ -13,7 +13,9 @@
 namespace diskmap {
 
 struct ScanOptions {
-    int max_depth = -1; // negative means unlimited
+    // Negative means unlimited. A directory pruned by a finite limit remains
+    // visible but is marked incomplete, so storage totals cannot look exact.
+    int max_depth = -1;
     bool follow_symlinks = false;
     std::uint64_t min_size = 0; // files smaller than this are skipped
 };

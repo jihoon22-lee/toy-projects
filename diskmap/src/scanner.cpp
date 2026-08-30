@@ -179,6 +179,8 @@ ScanResult scan(const FsSource& source,
         stack.pop_back();
 
         if (!depthIsExpandable(item.depth, options.max_depth)) {
+            item.node->complete = false;
+            item.node->error = "scan depth limit reached";
             continue;
         }
 

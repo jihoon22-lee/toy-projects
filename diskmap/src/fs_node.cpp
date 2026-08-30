@@ -198,7 +198,7 @@ std::uint64_t aggregateSizesAt(FsNode& node, int depth) {
     }
     std::uint64_t total = 0;
     for (FsNode& child : node.children) {
-        total += aggregateSizesAt(child, depth + 1);
+        addSize(total, aggregateSizesAt(child, depth + 1));
     }
     node.size = total;
     return total;
