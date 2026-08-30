@@ -177,7 +177,8 @@ the success condition for the long-running GUI process.
 
 ### Remote PR verification
 
-The final PR head was `3d7a7a5`, and workflow run
+The implementation head validated before this evidence-only documentation update was
+`3d7a7a5`, and workflow run
 [`33336242400`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33336242400)
 reported SUCCESS for every check: manifest, `ici verify` for diskmap and loglens, Qt5 and
 Qt6 GUI legs for both projects, `Publish Reports & Sticky Comment`, and `Merge Gate`.

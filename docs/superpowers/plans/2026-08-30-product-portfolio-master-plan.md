@@ -243,7 +243,7 @@ bytes가 섞이는 것이 원인이었다. `d419d2f`가 `recovery_pending_`/
 재시작을 강제하도록 수정했고, 수정 후 Qt5·Qt6 전체 CTest는 다시 10/10 PASS다. 로컬 ici
 0.6.0 verify도 Suite PASS(10 pass, 2 skip), TEM 4.86,
 line/function/branch 92.5/97.1/80.8%를 기록했고 Zero-CDN HTML과 Qt5·Qt6 8초 headless
-smoke를 확인했다. 이 수치는 원격 PR 집계와 분리된 local evidence다. 최종 head
+smoke를 확인했다. 이 수치는 원격 PR 집계와 분리된 local evidence다. 검증 대상 구현 head
 `3d7a7a5`의 PR #22 workflow
 [`33336242400`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33336242400)은
 manifest, `ici verify`(diskmap/loglens), 두 프로젝트의 Qt5·Qt6 GUI,
