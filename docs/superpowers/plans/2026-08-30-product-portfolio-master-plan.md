@@ -163,12 +163,12 @@
 
 **브랜치:** `test/loglens-qt-shell`
 
-- [ ] root CMake에 GUI library와 MainWindow QtTest target을 둔다.
-- [ ] 실제 fixture open, append growth, truncation, read error를 검증한다.
-- [ ] stale model, follow checkbox/timer와 status message를 검증한다.
-- [ ] Qt object에 안정적인 objectName/accessibility name을 부여한다.
-- [ ] Qt 5와 Qt 6 CMake build/CTest를 각각 실행한다.
-- [ ] ici coverage를 실측해 threshold를 도달값 근처로 올린다.
+- [x] root CMake에 GUI library와 MainWindow QtTest target을 둔다.
+- [x] 실제 fixture open, append growth, truncation, read error를 검증한다.
+- [x] stale model, follow checkbox/timer와 status message를 검증한다.
+- [x] Qt object에 안정적인 objectName/accessibility name을 부여한다.
+- [x] Qt 5와 Qt 6 CMake build/CTest를 각각 실행한다.
+- [x] ici coverage를 실측해 threshold를 도달값 근처로 올린다.
 
 ### T0-4. diskmap Qt 셸 테스트
 

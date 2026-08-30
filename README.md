@@ -10,8 +10,8 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 
 | 이름 | 설명 | 상태 |
 |---|---|---|
-| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | 코어 + Qt5/Qt6 GUI · 7 tests |
-| [loglens](loglens/) | 로그 뷰어 / 분석기 | 코어 + Qt GUI (현재 Qt6) · 라이브 팔로우 · 9 tests |
+| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · 7 tests |
+| [loglens](loglens/) | 로그 뷰어 / 분석기 | CMake + Qt5/Qt6 GUI · 라이브 팔로우 · 10 tests |
 
 ## 공통 구조 규칙
 
@@ -70,7 +70,7 @@ Qt 셸을 `src/` 밖에 두면 "검증할 필요 없는 코드" 라는 뜻이 �
 테스트가 링크할 대상이 없다.
 
 ```toml
-cpp_pkg_config = ["Qt6Widgets"]   # 현재 기본 환경; Qt5 fallback은 T0-5에서 추가
+cpp_pkg_config = ["Qt6Widgets", "Qt5Widgets"]   # 설치된 Qt 헤더를 lint가 찾게
 ```
 
 `cpp_external_build_dirs` 는 더 이상 쓰지 않는다. 루트에 빌드 디스크립터가 없는 프로젝트
@@ -106,10 +106,11 @@ for p in loglens diskmap; do
 done
 ```
 
-결과는 `loglens: Suite PASS, TEM 4.08 (10 passed, 2 skipped)`와 `diskmap: Suite PASS,
+결과는 `loglens: Suite PASS, TEM 4.84 (10 passed, 2 skipped)`와 `diskmap: Suite PASS,
 TEM 4.85 (10 passed, 2 skipped)`다. Qt5 강제 CMake build와 Qt5 qmake build/test는
-T0-5에서 `CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON` 및 `/usr/bin/qmake`를 사용해 별도로 실측하고,
-그 전까지는 Qt5가 설치돼 있다는 사실을 지원 완료로 간주하지 않는다.
+loglens는 `CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON`으로 이미 별도 실측했다. diskmap의 Qt5 qmake
+build/test는 T0-5에서 `/usr/bin/qmake`를 사용해 별도로 실측하며, 그 전까지 diskmap의 Qt5
+지원은 완료로 간주하지 않는다.
 
 ### loglens 스트림 계약
 
@@ -127,22 +128,23 @@ poll에서 읽은 raw bytes와 source generation을 전달하고, assembler가 �
 이미 표시한 행을 갱신하고 CLI는 같은 결과 벡터를 갱신한다. newline 없는 마지막 조각은
 follow 모드에서는 보류하며, one-shot CLI의 명시적 EOF `flush()`에서만 record가 된다.
 
-### Qt 셸 검증 현황
+### Qt 셸 테스트 현황
 
-GUI 가 커버리지에 잡히기 시작하면서 드러난 사실이다.
+GUI는 헤드리스 QtTest와 실제 fixture 파일을 사용해 상태 전이를 검증한다. `loglens`는
+Qt5/Qt6 CMake/CTest에서 같은 테스트를 실행했고, `diskmap`의 내비게이션 셸도 T0-4에서
+완료했다.
 
 | 파일 | 상태 |
 |---|---|
 | `loglens/src/gui/log_model.cpp` | `QAbstractItemModelTester` 로 검증 |
 | `diskmap/src/gui/treemap_widget.cpp` | `QSignalSpy` 로 검증 |
-| `loglens/src/gui/main_window.cpp` | **미검증** (128 statements) |
-| `loglens/src/gui/timeline_widget.cpp` | **미검증** (37 statements) |
-| `diskmap/src/gui/main_window.cpp` | `test_main_window` — scan result, breadcrumb, descend/up, leaf no-op |
+| `loglens/src/gui/main_window.cpp` | `test_main_window` — open/growth/truncation/read error/follow timer |
+| `loglens/src/gui/timeline_widget.cpp` | `test_main_window` — empty/populated paint branch |
+| `diskmap/src/gui/main_window.cpp` | `test_main_window` — scan, breadcrumb, descend/up, leaf no-op |
 
-`loglens` 의 커버리지 임계값이 80/90 에서
-55/80 으로 내려간 것이 이 때문이며, **코드가 나빠져서가 아니라 이전에 보이지 않던 코드가
-보이기 시작해서다.** 근거는 `loglens/ici.toml` 에 수치와 함께 적어 두었다. 셸에 테스트가
-붙으면 도로 올린다.
+`loglens`의 ici 0.6.0 실측은 line 93.2% / function 96.9% / branch 81.8% / TEM 4.84이다.
+`loglens/ici.toml`은 이 실측 아래에 slack을 둔 branch 75.0 / function 92.0을 게이트로
+사용한다. QPainter/Qt 내부 예외 경로와 C++ type-check 미지원은 남은 명시적 한계다.
 
 ## CI 리포트
 
@@ -185,6 +187,15 @@ cd <project>
 QT_QPA_PLATFORM=offscreen ../../ici/dist/ici.pyz verify --report
 ```
 
+`loglens`의 셸 상태 테스트만 빠르게 돌리려면 CTest를 쓴다. 테스트는 프로젝트 루트에서
+실행되며, 실제 follow timer는 `QTRY_COMPARE`로 기다리고 truncation/read error는 공개
+`MainWindow::pollNow()` 경계로 구동한다.
+
+```bash
+cd loglens
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/gui --output-on-failure
+```
+
 위 명령은 `ici`와 `toy-projects`를 같은 프로젝트 디렉터리 아래의 형제 저장소로 둔 배치를
 기준으로 한다. `QT_QPA_PLATFORM` 이 필요한 이유는 `diskmap` 의 위젯 테스트가 `QWidget` 을
 만들기 때문이다.
@@ -201,7 +212,11 @@ cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release
 cmake --build build/gui --parallel
 ./build/gui/src/gui/loglens-gui [경로]
 
-# diskmap (qmake, Qt 6)
+# Qt5를 명시적으로 검증할 때
+cmake -S . -B build/qt5 -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_Qt6=ON
+cmake --build build/qt5 --parallel
+
+# diskmap (qmake)
 cd diskmap
 mkdir -p build/gui && cd build/gui
 qmake6 ../../diskmap.pro && make -j

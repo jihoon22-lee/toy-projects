@@ -5,13 +5,14 @@ source_dirs = ["src"]
 
 # The Qt shell is project source like everything else, so it lives under src/
 # and every engine reads it. cpp_pkg_config gives lint the Qt include paths it
-# needs to parse the widget sources at all.
+# needs to parse the widget sources at all. Listing both majors lets the same
+# project config work on Qt 6 and Qt 5.15 hosts; ici skips unavailable packages.
 #
 # cpp_external_build_dirs used to sit here too, keeping src/gui out of the test
 # link because Q_OBJECT classes need moc-generated sources that a bare g++ call
 # cannot provide. ici 0.6.0 drives CMake for build, test and sanitize alike, so
 # moc runs and the GUI is compiled, unit-tested and sanitized like the core.
-cpp_pkg_config = ["Qt6Widgets"]
+cpp_pkg_config = ["Qt6Widgets", "Qt5Widgets"]
 
 # 임계값을 명시적으로 고정한다. 생략하면 개발자 홈의 ~/.config/ici/ici.toml 을 따르게 되어
 # 로컬과 CI 결과가 갈린다.
@@ -21,19 +22,18 @@ cpp_pkg_config = ["Qt6Widgets"]
 # 였다. 이제 빌드 어댑터가 GUI 까지 빌드하므로 셸이 분모에 들어온다.
 #
 #   src/gui/log_model.cpp        테스트됨 (tests/test_log_model.cpp)
-#   src/gui/main_window.cpp      0% — 128 statements
-#   src/gui/timeline_widget.cpp  0% — 37 statements
+#   src/gui/main_window.cpp      테스트됨 (tests/test_main_window.cpp)
+#   src/gui/timeline_widget.cpp  렌더링 분기 테스트됨 (tests/test_main_window.cpp)
 #
-# 실측은 branch 62.1% / func 85.7% / TEM 4.08 이다. 임계값을 그 아래로 내리는 것은 기준을
-# 낮추는 게 아니라 **다른 것을 재고 있으므로 다시 맞추는 것**이다 — 예전 값을 그대로 두면
-# 코드가 나빠져서가 아니라 이전에 보이지 않던 코드가 보이기 시작해서 게이트가 막힌다.
-#
-# 저 165 statements 는 실제로 단위 테스트가 없다. 지금은 CI 의 헤드리스 스모크 실행이
-# 유일한 커버이며, 그 사실은 README 에 알려진 갭으로 적어 둔다. 셸에 테스트가 붙으면
-# 이 값을 도로 올린다.
+# 셸 테스트를 추가한 뒤 ici 0.6.0으로 실측한 값은 line 93.2% / function 96.9% /
+# branch 81.8% / TEM 4.84 이다. branch는 timeline paint의 예외적인 QPainter 경로와
+# 생성자 예외 분기까지 모두 안정적으로 재현하기 어렵기 때문에, 실측값 아래에 6.8%p
+# slack을 둔 75.0을 게이트로 삼는다. function은 실측값 아래 4.9%p인 92.0을 쓴다.
+# 남은 미검증 범위는 QPainter/Qt 내부 예외 경로와 ici의 C++ type-check engine이므로,
+# threshold를 수치에 맞춰 낮추지 않고 테스트 가능한 application state를 우선 게이트한다.
 [engines.test]
 enabled = true
 mode = "pass_fail"
 min_tem_score = 4.0
-min_branch_cov = 55.0
-min_func_cov = 80.0
+min_branch_cov = 75.0
+min_func_cov = 92.0
