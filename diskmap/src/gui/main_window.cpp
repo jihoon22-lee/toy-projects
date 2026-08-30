@@ -1,4 +1,4 @@
-#include "main_window.hpp"
+#include "diskmap/gui/main_window.hpp"
 
 #include <QApplication>
 #include <QFileDialog>
@@ -11,7 +11,7 @@
 
 #include "diskmap/format.hpp"
 #include "diskmap/fs_node.hpp"
-#include "treemap_widget.hpp"
+#include "diskmap/gui/treemap_widget.hpp"
 
 namespace {
 

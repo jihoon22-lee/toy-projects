@@ -4,7 +4,7 @@
 
 #include "diskmap/fs_node.hpp"
 #include "fake_fs.hpp"
-#include "treemap_widget.hpp"
+#include "diskmap/gui/treemap_widget.hpp"
 
 using diskmap_test::makeDirNode;
 using diskmap_test::makeFileNode;

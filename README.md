@@ -21,12 +21,27 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 <project>/
 ├── ici.toml              project.source_dirs = ["src"]
 ├── <빌드 정의>           loglens 는 CMakeLists.txt, diskmap 은 diskmap.pro
-├── include/<project>/    코어의 공개 헤더
+├── include/<project>/    헤더는 전부 여기. 코어와 GUI 모두
+│   └── gui/              Qt 셸의 헤더
 ├── src/                  구현. 전부 ici 검증 대상이다
 │   ├── main.cpp          CLI 드라이버
-│   └── gui/              Qt6 셸. 라이브러리 + 실행 파일로 나뉜다
+│   └── gui/              Qt6 셸의 .cpp. 라이브러리 + 실행 파일로 나뉜다
 └── tests/                각각 자체 실행 파일이 되는 테스트
 ```
+
+**헤더는 예외 없이 `include/<project>/` 아래에 둔다.** GUI 헤더를 `.cpp` 옆에 두던
+시절도 있었지만, 그러면 같은 저장소에 배치 규칙이 둘이 된다. GUI 를 라이브러리로 분리한
+뒤로는 테스트가 그 헤더를 직접 include 하므로 더더욱 그렇다 — `src/` 밖에서 쓰이는
+헤더는 공개 헤더다.
+
+`gui/` 하위를 두되 접두사(`loglens/`, `diskmap/`)는 유지한다. `-Iinclude` 하나로
+`#include "loglens/gui/log_model.hpp"` 와 `#include "loglens/log_parser.hpp"` 가 같은
+모양이 된다.
+
+빌드 정의에는 **GUI 헤더를 명시적으로 나열해야 한다.** CMake 의 `AUTOMOC` 은 `.cpp` 와
+같은 디렉터리에 같은 이름의 헤더가 있을 때만 알아서 찾고, qmake 는 `HEADERS` 에 적힌
+것만 moc 에 넘긴다. 헤더가 `include/` 로 가면 둘 다 자동 탐지가 안 되므로, 적어두지
+않으면 `Q_OBJECT` 클래스가 조용히 vtable 미해결로 링크에 실패한다.
 
 ### 빌드 시스템이 프로젝트마다 다른 것은 의도다
 

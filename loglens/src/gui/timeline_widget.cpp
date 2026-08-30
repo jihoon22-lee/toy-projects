@@ -1,4 +1,4 @@
-#include "timeline_widget.hpp"
+#include "loglens/gui/timeline_widget.hpp"
 
 #include <QColor>
 #include <QPainter>

@@ -1,4 +1,4 @@
-#include "main_window.hpp"
+#include "loglens/gui/main_window.hpp"
 
 #include <QCheckBox>
 #include <QFileDialog>
@@ -17,11 +17,11 @@
 #include <string>
 #include <vector>
 
-#include "log_model.hpp"
+#include "loglens/gui/log_model.hpp"
 #include "loglens/log_parser.hpp"
 #include "loglens/log_source.hpp"
 #include "loglens/log_stats.hpp"
-#include "timeline_widget.hpp"
+#include "loglens/gui/timeline_widget.hpp"
 
 namespace {
 
