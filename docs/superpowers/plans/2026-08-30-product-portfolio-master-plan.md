@@ -233,8 +233,10 @@ follow를 중지하되 마지막 정상 화면은 보존한다. `retryableSource
 `sourceReplacementRecoversWithCleanRows`, `disablingFollowWhileWaitingStopsPolling`,
 `unsupportedSourceStopsFollowing`를 포함한 `test_main_window` 회귀 테스트가 추가됐고,
 Qt 6 및 Qt 5 CMake/CTest에서 각각 10/10 PASS를 기록했다. 구현 커밋은 `4094ff5`, 테스트
-커밋은 `ca56d2e`다. 이 기록은 native 증거에 한정하며, ici verify·CI Merge Gate·report-pr의
-sticky HTML 및 실제 headless smoke는 해당 PR 검증에서 확인한다.
+커밋은 `ca56d2e`다. 로컬 ici 0.6.0 verify도 Suite PASS(10 pass, 2 skip), TEM 4.86,
+line/function/branch 92.4/97.1/80.9%를 기록했고 Zero-CDN HTML과 Qt5·Qt6 8초 headless
+smoke를 확인했다. 원격 CI Merge Gate와 report-pr sticky HTML·Pages는 해당 PR에서
+별도로 확인한다.
 
 ### L2. bounded storage와 큰 파일 UX
 
