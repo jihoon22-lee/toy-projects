@@ -44,6 +44,7 @@ A-2 를 "수정됨" 으로 옮기지 않는 이유는 남은 거부 경로가 �
 | D-7 | qmake 의 `target_wrapper.sh` 실행이 테스트 카운트에서 누락 | ✅ ici #76 |
 | D-8 | qmake 의 상대 경로 때문에 line 커버리지 전부 유실 | ✅ ici #76 |
 | D-9 | CTest·QtTest 가 낸 XML 의 엔티티 확장(DoS) | ✅ ici #76 |
+| D-10 | 재사용 qmake shadow가 stale static consumer와 coverage stamp를 혼합 | ✅ ici #94 |
 
 **D-1 이 가장 중요하다.** 스펙은 `sanitize` 를 "나중에 옮겨도 되는 것" 으로 분류했는데,
 `sanitize` 는 `tests/**/*.cpp` 를 각각 plain g++ 로 컴파일한다. Qt 테스트를 `tests/` 에 두는
@@ -53,6 +54,18 @@ A-2 를 "수정됨" 으로 옮기지 않는 이유는 남은 거부 경로가 �
 **D-7 은 픽스처가 놓친 전형적인 예다.** qmake 는 Qt 링크 바이너리를 `target_wrapper.sh` 로
 실행하는데 ici 가 그 줄을 못 읽어 `diskmap` 의 테스트 6개 중 5개만 셌다. ici 의 qmake 픽스처는
 Qt 테스트 하나뿐이라 다른 경로로 구제돼 이 결함이 드러나지 않았다.
+
+**D-10은 증분 빌드가 성공해도 실행 파일이 최신이라는 보장이 없던 문제다.** DiskMap core
+archive만 다시 빌드되고 test executable이 이전 archive를 계속 링크하면서, 실행이 만든
+`.gcda` stamp `1417858375`와 새 `.gcno` stamp `1418147347`가 달라졌다. gcov는
+`scanner.cpp`를 0%로 읽었고 전체 branch coverage도 60.2%로 떨어졌다. DiskMap은 qmake
+consumer에 `PRE_TARGETDEPS`를 선언해 자체 그래프를 바로잡았고, ici
+[#94](https://github.com/jihoon22-lee/ici/pull/94)는 모든 qmake adapter build를
+`configure → make clean → parallel build`로 만들고 clean 결과를 evidence로 남긴다. 수정은
+[`1af6d64`](https://github.com/jihoon22-lee/ici/commit/1af6d64bef346720c2cfad656e16cd1a108324f5)로
+병합됐고 [CI run 33338430771](https://github.com/jihoon22-lee/ici/actions/runs/33338430771),
+[sticky comment](https://github.com/jihoon22-lee/ici/pull/94#issuecomment-5471591533), ici/viewer
+Pages의 HTTP 200·external refs 0까지 확인했다.
 
 ### 수정된 것
 

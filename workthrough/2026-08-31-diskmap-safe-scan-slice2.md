@@ -129,8 +129,14 @@ successful `/usr/bin/make clean` evidence for both test and sanitize, and the
 tool snapshot was rendered. HTML was 281264 bytes with external `src`/`href`
 references 0. This supersedes the immediately earlier public ici 0.6.0
 complexity WARN-era result and confirms the freshness guard. The final local
-ici evidence is complete; remote PR CI, sticky HTML comment, and Pages
-verification remain pending.
+ici evidence is complete. The guard itself merged through ici
+[PR #94](https://github.com/jihoon22-lee/ici/pull/94) as commit
+[`1af6d64`](https://github.com/jihoon22-lee/ici/commit/1af6d64bef346720c2cfad656e16cd1a108324f5):
+all checks in [run 33338430771](https://github.com/jihoon22-lee/ici/actions/runs/33338430771)
+passed, the [sticky comment](https://github.com/jihoon22-lee/ici/pull/94#issuecomment-5471591533)
+contained both current report links, and ici/viewer Pages returned HTTP 200
+with zero external references. The DiskMap toy PR CI, sticky HTML comment, and
+Pages verification remain pending.
 
 ## Code Examples
 
