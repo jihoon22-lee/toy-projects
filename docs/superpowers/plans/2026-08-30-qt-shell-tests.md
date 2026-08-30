@@ -673,9 +673,8 @@ pkg-config `Core`, `Gui`, `Widgets`, `Concurrent`, `Test` 버전을 출력·검�
 
 - [x] **Step 6: Commit**
 
-구현은 `chore/qt5-qt6-matrix` 브랜치의 `c9554a0 ci: exercise the Qt5 and Qt6 GUI matrix`로
-커밋했다. 이 bounded 작업의 지시에 따라 push/PR/merge는 수행하지 않고 부모 세션에서
-원격 CI를 실행한다.
+구현은 `chore/qt5-qt6-matrix` 브랜치에서 작업 단위별 Conventional Commit으로 기록하고,
+원격 CI에서 같은 네 leg를 재실행한다.
 
 ```bash
 git add loglens/CMakeLists.txt loglens/src/gui/CMakeLists.txt \

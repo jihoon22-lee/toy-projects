@@ -43,9 +43,8 @@
 A-3 은 닫혔다. `Q_OBJECT` 클래스의 단위 테스트가 `tests/` 안에서 통과한다. 이어서
 loglens의 poll 경계 parser state와 CLI/GUI 공통 delta 계약도
 [#14](https://github.com/jihoon22-lee/toy-projects/pull/14)로 병합됐다. 이것은 T0-2 완료이며,
-Qt 셸 테스트와 양 Qt major matrix까지 끝나야 T0 전체가 완료된다. T0-5 구현은
-`chore/qt5-qt6-matrix`에서 마쳤고, 원격 PR gate에서는 아래 네 leg가 같은 계약을 다시
-실행한다.
+Qt 셸 테스트와 양 Qt major matrix까지 끝나야 T0 전체가 완료된다. T0-5 구현의 원격 PR
+gate에서는 아래 네 leg가 같은 계약을 다시 실행한다.
 
 | 프로젝트 | 빌드 | 검증 | Qt 테스트 |
 |---|---|---|---|
