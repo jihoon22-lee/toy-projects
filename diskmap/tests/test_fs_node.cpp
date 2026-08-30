@@ -11,6 +11,9 @@
 #include <vector>
 
 using diskmap::FsNode;
+using diskmap::FsKind;
+using diskmap::FsMetadata;
+using diskmap::FileIdentity;
 using diskmap_test::makeDirNode;
 using diskmap_test::makeFileNode;
 
@@ -32,6 +35,73 @@ FsNode makeChain(int depth, FsNode leaf) {
 } // namespace
 
 int main() {
+    // --- identity and node metadata model: link and target facts coexist ---
+    {
+        const FileIdentity first{17, 23, true};
+        const FileIdentity same{17, 23, true};
+        const FileIdentity differentFile{17, 24, true};
+        const FileIdentity invalid{0, 0, false};
+        CHECK(first == same);
+        CHECK(first != differentFile);
+        CHECK(first != invalid);
+
+        FsNode link = makeFileNode("link", 5);
+        link.path = "/tmp/diskmap/link";
+        link.metadata.kind = FsKind::Symlink;
+        link.metadata.identity = first;
+        link.metadata.logical_size = 23;
+        link.metadata.allocated_size = 0;
+        link.metadata.allocated_size_known = true;
+        link.metadata.hard_link_count = 1;
+        link.metadata.hard_link_count_known = true;
+        link.metadata.permissions = 0777;
+        link.metadata.permissions_known = true;
+        link.metadata.owner = 1000;
+        link.metadata.group = 1000;
+        link.metadata.ownership_known = true;
+        link.metadata.modified_ns = 123456789;
+        link.metadata.modified_time_known = true;
+        link.metadata.complete = true;
+        link.has_target_metadata = true;
+        link.target_metadata.kind = FsKind::RegularFile;
+        link.target_metadata.identity = differentFile;
+        link.target_metadata.logical_size = 5;
+        link.target_metadata.complete = true;
+        link.followed = true;
+        link.complete = true;
+        link.error.clear();
+
+        CHECK_EQ(link.name, std::string("link"));
+        CHECK_EQ(link.path, std::string("/tmp/diskmap/link"));
+        CHECK(!link.is_dir);
+        CHECK_EQ(link.size, static_cast<std::uint64_t>(5));
+        CHECK_EQ(link.metadata.kind, FsKind::Symlink);
+        CHECK(link.metadata.identity == first);
+        CHECK(link.has_target_metadata);
+        CHECK_EQ(link.target_metadata.kind, FsKind::RegularFile);
+        CHECK(link.target_metadata.identity == differentFile);
+        CHECK(link.target_metadata.identity != link.metadata.identity);
+        CHECK(link.followed);
+        CHECK(link.complete);
+        CHECK(link.error.empty());
+
+        // A failed target lookup is represented on the node without erasing
+        // the link's own identity or kind.
+        link.has_target_metadata = false;
+        link.target_metadata = FsMetadata{};
+        link.target_metadata.error = "target does not exist";
+        link.target_metadata.complete = false;
+        link.complete = false;
+        link.error = link.target_metadata.error;
+        CHECK_EQ(link.metadata.kind, FsKind::Symlink);
+        CHECK(link.metadata.identity == first);
+        CHECK(!link.has_target_metadata);
+        CHECK(!link.target_metadata.complete);
+        CHECK(!link.target_metadata.error.empty());
+        CHECK(!link.complete);
+        CHECK_EQ(link.error, std::string("target does not exist"));
+    }
+
     // --- aggregateSizes: post-order sum, sets directory sizes ---
     {
         FsNode root = makeDirNode("root", {

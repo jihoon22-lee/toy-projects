@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "diskmap/fs_metadata.hpp"
+
 namespace diskmap {
 
 // Caps how many levels the recursive helpers below will descend, so a
@@ -13,8 +15,17 @@ constexpr int kMaxTreeDepth = 4096;
 
 struct FsNode {
     std::string name;
+    std::string path;
     bool is_dir = false;
     std::uint64_t size = 0;
+    FsMetadata metadata;
+    bool has_target_metadata = false;
+    FsMetadata target_metadata;
+    bool followed = false;
+    // Scan completeness is separate from metadata completeness: a directory
+    // can have a valid stat record while listing its children fails.
+    bool complete = true;
+    std::string error;
     std::vector<FsNode> children;
 };
 

@@ -316,6 +316,30 @@ B를 유지해야 한다. 현재 구현은 실행 중인 두 번째 `scanPath()`
 - [ ] permission/error로 incomplete한 directory total을 완전한 값처럼 보이지 않게 한다.
 - [ ] path string 결합 대신 filesystem path abstraction을 사용한다.
 
+**D1 구현 slice 상태**
+
+Slice 1 — metadata/source boundary (2026-08-31):
+
+- [x] `FsMetadata`와 `FileIdentity`를 도입하고 allocated bytes, hard-link count,
+  permissions, ownership, modified time의 `*_known` 상태를 보존한다.
+- [x] POSIX `lstat`(link)와 `stat`(followed target)를 분리하고, full path와
+  link/target metadata를 `DirEntry`에서 `FsNode`까지 전달한다.
+- [x] stat metadata와 scan aggregate size를 분리하고, directory listing/open/iterator
+  오류를 incomplete node와 명시적 error로 보존한다.
+- [x] Qt5/qmake와 Qt6/qmake6의 전체 빌드 및 모든 `make check`를 통과시킨다.
+
+Slice 1의 현재 검증 증거는 위 Qt5/Qt6 qmake build와 전체 `make check`에 한정한다.
+ici verify와 GUI smoke는 이 문서에서 완료로 주장하지 않으며, PR/release 검증에서 별도로
+수집한다.
+
+Slice 2 — safe traversal and path semantics:
+
+- [ ] `FileIdentity` visited set으로 follow-symlink directory cycle을 차단한다.
+- [ ] hard-link identity를 기준으로 allocated/reclaimable aggregate를 중복 계산하지
+  않는다.
+- [ ] string path join을 filesystem path abstraction으로 교체하고 platform별 경로
+  의미론을 검증한다.
+
 ### D2. cancellable scanner와 stale result 방지
 
 **브랜치:** `feat/diskmap-cancellable-scan`

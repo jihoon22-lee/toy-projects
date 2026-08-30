@@ -39,11 +39,22 @@ bool entrySkipped(const DirEntry& entry, const ScanOptions& options) {
     return !entry.is_dir && entry.size < options.min_size;
 }
 
-FsNode makeChildNode(const DirEntry& entry) {
+FsNode makeChildNode(const DirEntry& entry, const std::string& parentPath) {
     FsNode child;
     child.name = entry.name;
+    child.path = entry.path.empty() ? joinPath(parentPath, entry.name) : entry.path.string();
     child.is_dir = entry.is_dir;
     child.size = entry.is_dir ? 0 : entry.size;
+    child.metadata = entry.metadata;
+    child.has_target_metadata = entry.has_target_metadata;
+    child.target_metadata = entry.target_metadata;
+    child.followed = entry.is_symlink;
+    child.complete = entry.metadata.complete;
+    child.error = entry.metadata.error;
+    if (entry.is_symlink && !entry.has_target_metadata) {
+        child.complete = false;
+        child.error = entry.target_metadata.error;
+    }
     return child;
 }
 
@@ -61,14 +72,14 @@ void expandDirectory(WorkItem& item,
         if (entrySkipped(entry, options)) {
             continue;
         }
-        item.node->children.push_back(makeChildNode(entry));
+        item.node->children.push_back(makeChildNode(entry, item.path));
         if (!entry.is_dir) {
             ++result.files_scanned;
         }
     }
     for (FsNode& child : item.node->children) {
         if (child.is_dir) {
-            stack.push_back(WorkItem{joinPath(item.path, child.name), item.depth + 1, &child});
+            stack.push_back(WorkItem{child.path, item.depth + 1, &child});
         }
     }
 }
@@ -81,7 +92,10 @@ ScanResult scan(const FsSource& source,
                  const ProgressFn& progress) {
     ScanResult result;
     result.root.name = lastPathComponent(rootPath);
+    result.root.path = rootPath;
     result.root.is_dir = true;
+    result.root.metadata.kind = FsKind::Directory;
+    result.root.metadata.complete = true;
 
     std::vector<WorkItem> stack;
     stack.push_back(WorkItem{rootPath, 0, &result.root});
@@ -97,6 +111,8 @@ ScanResult scan(const FsSource& source,
         std::string error;
         std::vector<DirEntry> entries = source.list(item.path, error);
         if (!error.empty()) {
+            item.node->complete = false;
+            item.node->error = error;
             result.errors.push_back(error);
             continue;
         }
