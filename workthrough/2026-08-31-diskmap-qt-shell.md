@@ -59,8 +59,6 @@ D2에서 구현한다.
 
 ## Verification Results
 
-작업 worktree: `/home/jihoon/projects/.worktrees/toy-diskmap-shell`
-
 ### Qt 6
 
 ```text
@@ -92,7 +90,5 @@ test: 7/7, line 98.6%, function 97.1%, branch 88.5%, TEM 4.85/5.0
 
 ## Next Steps
 
-- push/PR/merge는 수행하지 않았다. 부모 작업자가 최신 `toy-projects/main`을 기준으로
-  이 브랜치를 push하고, CI의 `ici verify`와 PR HTML 댓글을 확인한다.
 - D1/D2에서 scan identity와 cancellation/generation guard를 설계한 뒤 rescan race를
   결정적 fake source 테스트로 추가한다.
