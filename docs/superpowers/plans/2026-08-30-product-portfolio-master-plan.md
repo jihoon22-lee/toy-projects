@@ -1,6 +1,7 @@
 # toy-projects 제품 포트폴리오와 ici 실물 검증 마스터 계획
 
 **상태:** 승인된 장기 마스터 계획. 2026-08-30 이후 toy-projects의 기능 우선순위, 신규 프로젝트 선정과 완료 조건은 이 문서를 기준으로 판단한다.
+**문서 기준일:** 2026-08-31. 이 계획은 toy-projects [PR #12](https://github.com/jihoon22-lee/toy-projects/pull/12)로 `main`에 병합됐다. 현재 완료 상태는 이 문서의 체크리스트와 병합된 PR을 함께 기준으로 삼는다.
 
 **목표:** `loglens`와 `diskmap`을 실제로 쓸 만한 완성도 높은 Qt 제품으로 발전시키고, ici의 Python·C++·Qt 분석 공백을 메우는 `buildscope`, `envlens`, `abilens`와 `quality-zoo`를 단계적으로 구축한다.
 
@@ -123,10 +124,18 @@
 
 **브랜치:** `docs/qt-plan-corrections`
 
-- [ ] 이 마스터 계획을 병합한다.
-- [ ] 인수인계서의 “계획 그대로 실행” 문구를 master 우선으로 바꾼다.
-- [ ] Qt 5.15 설치 상태와 실제 검증 명령을 기록한다.
-- [ ] ROADMAP에서 master plan과 각 stream으로 연결한다.
+- [x] 이 마스터 계획을 [PR #12](https://github.com/jihoon22-lee/toy-projects/pull/12)로 병합했다.
+- [x] 인수인계서는 과거 세부 계획보다 이 master plan을 우선하도록 갱신했다.
+- [x] Qt 5.15 설치 상태와 실제 검증 명령을 기록했다.
+- [x] ROADMAP에서 master plan과 T0/L/D/B/E/A/Q 각 stream으로 연결했다.
+
+**T0-1 실측 증거 (2026-08-31, WSL2):** `/usr/bin/qmake`는 Qt 5.15.18,
+`/usr/bin/qmake6`는 Qt 6.10.2를 보고했고, `pkg-config`의 Qt5/Qt6 Core·Widgets·Concurrent·Test
+모듈도 각각 같은 버전으로 해석됐다. ici 0.6.0 release asset으로 최신 `main`의 두 프로젝트를
+`QT_QPA_PLATFORM=offscreen ici.pyz verify --report --html ... --github-summary`로 실행한 결과는
+`loglens: Suite PASS, TEM 4.08 (10 passed, 2 skipped)`와 `diskmap: Suite PASS, TEM 4.85
+(10 passed, 2 skipped)`였다. Qt major별 native build/test는 T0-3~T0-5에서 이 증거와 별도로
+완료해야 하며, 아직 T0 전체 완료로 표시하지 않는다.
 
 ### T0-2. loglens parser contract부터 수정
 

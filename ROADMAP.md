@@ -4,10 +4,27 @@
 발견한 ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에, 프로젝트 소개와 구조 규칙은
 [README.md](README.md) 에 있다.
 
-> **확장된 실행 계획 (2026-08-30):** 기존 두 앱의 제품 완성, 신규 `buildscope`·`envlens`·
+> **확장된 실행 계획 (2026-08-31 기준):** 기존 두 앱의 제품 완성, 신규 `buildscope`·`envlens`·
 > `abilens`, `quality-zoo`와 ici 교차 개발 순서는
 > [제품 포트폴리오 마스터 계획](docs/superpowers/plans/2026-08-30-product-portfolio-master-plan.md)이
-> 기준이다. 아래 내용은 그 계획이 나오기 전의 배경과 문제 발견 이력으로 유지한다.
+> 기준이다. 이 계획은 [PR #12](https://github.com/jihoon22-lee/toy-projects/pull/12)로
+> `main`에 병합됐다. 아래의 배경과 문제 발견 이력은 마스터 계획을 보충하는 역사적 기록으로
+> 유지한다.
+
+## 마스터 계획 stream 연결
+
+세부 기능의 우선순위와 완료 조건은 아래 링크의 마스터 계획을 기준으로 한다. 이 문서의
+과거 단계 설명과 마스터 계획의 현재 stream이 충돌하면 마스터 계획이 우선한다.
+
+| Stream | 역할 | 마스터 계획 |
+|---|---|---|
+| T0 | 현재 Qt 셸 보정, parser state와 Qt5/Qt6 안전망 | [T0](docs/superpowers/plans/2026-08-30-product-portfolio-master-plan.md) |
+| L | loglens incident explorer | [L stream](docs/superpowers/plans/2026-08-30-product-portfolio-master-plan.md) |
+| D | diskmap storage workbench | [D stream](docs/superpowers/plans/2026-08-30-product-portfolio-master-plan.md) |
+| B | buildscope hybrid build explorer | [B stream](docs/superpowers/plans/2026-08-30-product-portfolio-master-plan.md) |
+| E | envlens Python environment explorer | [E stream](docs/superpowers/plans/2026-08-30-product-portfolio-master-plan.md) |
+| A | abilens Make/ELF/ABI explorer | [A stream](docs/superpowers/plans/2026-08-30-product-portfolio-master-plan.md) |
+| Q | quality-zoo expected-finding corpus | [Q stream](docs/superpowers/plans/2026-08-30-product-portfolio-master-plan.md) |
 
 ## 배경
 
@@ -15,16 +32,18 @@
 그걸 [ici](https://github.com/jihoon22-lee/ici) 로 검증한다. ici 는 그 전까지 **자기 자신
 (순수 Python 프로젝트) 하나만** 도그푸딩하고 있어서 C++ 경로에 E2E 회귀 커버리지가 없었다.
 
-결과는 기록이 말한다. 세 프로젝트를 만드는 동안 **ici 결함 17건을 찾았고 그중 13건이 수정됐다.**
-전부 만들면서 나왔고, 코드를 읽어서 찾은 것은 하나도 없다.
+결과는 기록이 말한다. 초기 실물 개발에서 **ici 결함 17건을 찾았고 그중 13건이 수정됐다.**
+어댑터 작업에서 9건이 더 발견돼 현재 추적 항목은 26건이며, 그중 22건이 수정됐다. 전부
+만들면서 나왔고, 코드를 읽어서 찾은 것은 하나도 없다. 남은 항목은
+[ICI-GAPS.md](ICI-GAPS.md)의 A-2, B-2, B-3, C-7이다.
 
-**결함은 26건이 됐다.** 처음 17건 중 13건이 수정됐고, 어댑터 작업에서 9건이 더 나와 전부
-수정됐다. 여전히 코드를 읽어서 찾은 것은 하나도 없다.
-
-## 완료: 어댑터가 생겼고, 우회는 사라졌다 (2026-08-30)
+## 완료: 어댑터와 loglens stream state (2026-08-31)
 
 1단계와 그에 딸린 전환이 끝났다. **ici 0.6.0 이 CMake/CTest 와 qmake/Make 어댑터를 갖췄고**,
-A-3 은 닫혔다. `Q_OBJECT` 클래스의 단위 테스트가 `tests/` 안에서 통과한다.
+A-3 은 닫혔다. `Q_OBJECT` 클래스의 단위 테스트가 `tests/` 안에서 통과한다. 이어서
+loglens의 poll 경계 parser state와 CLI/GUI 공통 delta 계약도
+[#14](https://github.com/jihoon22-lee/toy-projects/pull/14)로 병합됐다. 이것은 T0-2 완료이며,
+Qt 셸 테스트와 양 Qt major matrix까지 끝나야 T0 전체가 완료된다.
 
 | 프로젝트 | 빌드 | 검증 | Qt 테스트 |
 |---|---|---|---|
@@ -71,7 +90,9 @@ A-3 은 닫혔다. `Q_OBJECT` 클래스의 단위 테스트가 `tests/` 안에�
 
 **이제 이것을 단위 테스트할 수 있다.** 1단계 전에는 불가능했고, 그게 이 단계를 미룬 이유였다.
 
-### 3단계 — diff/merge 도구 (A): 근거를 다시 판단할 것
+### 과거 3단계 — diff/merge 도구: 근거를 다시 판단할 것
+
+이 역사적 단계의 `A` 표기는 현재 마스터 계획의 `abilens` A stream과 다르다.
 
 **원래 목적은 이미 달성됐다.** 이 단계는 A-2·A-3 을 실측하기 위한 것이었는데 둘 다 처리됐다.
 남은 미충족 조건은 하나뿐이다 — **`.qrc`/`.ui` 생성 단계(`AUTOUIC`/`AUTORCC`)** 가 어느
@@ -81,9 +102,10 @@ A-3 은 닫혔다. `Q_OBJECT` 클래스의 단위 테스트가 `tests/` 안에�
 있다 — 기존 프로젝트에 아이콘 `.qrc` 하나를 넣으면 같은 것이 실측된다. 도구 자체가 갖고
 싶다면 그건 별개의 이유이고, 그렇다면 그 이유로 정당화해야 한다.
 
-### Qt 셸에 단위 테스트가 없다
+### 현재 남은 갭: Qt 셸에 단위 테스트가 없다
 
-어댑터가 GUI 를 커버리지에 넣으면서 드러났다. `loglens/src/gui/main_window.cpp`(128
+어댑터가 GUI 를 커버리지에 넣으면서 드러났다. 이 갭은 마스터 계획의 T0-3(loglens)와
+T0-4(diskmap)가 담당한다. `loglens/src/gui/main_window.cpp`(128
 statements)와 `timeline_widget.cpp`(37)는 테스트가 없고, `diskmap` 도 `main_window.cpp` 가
 그렇다. 지금은 CI 의 헤드리스 스모크가 유일한 커버다.
 
@@ -101,7 +123,7 @@ statements)와 `timeline_widget.cpp`(37)는 테스트가 없고, `diskmap` 도 `
 **완료 기준을 "기능이 동작한다" 가 아니라 "요구사항이 실측됐다" 로 둔다.** 기능은 수단이다.
 각 단계는 PR 하나 크기로 끊고, 매번 ici 가 어디서 어떻게 깨지는지를 재현 조건과 함께 남긴다.
 
-지금까지 찾은 결함 22건이 전부 그렇게 나왔다 — 만들다 이상해서 파고든 결과다.
+수정·미수정을 합친 26건의 결함이 전부 그렇게 나왔다 — 만들다 이상해서 파고든 결과다.
 
 여기에 한 줄을 덧붙인다. **픽스처는 실물 프로젝트를 대신하지 못한다.** ici 저장소의 qmake
 픽스처는 통과하는데 `diskmap` 은 테스트 하나를 통째로 잃고 있었다(D-7). 픽스처는 만든 사람이

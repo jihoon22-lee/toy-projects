@@ -8,10 +8,10 @@
 `ici` 를 실제 C++/Qt 프로젝트에 적용하면서 발견한 갭 목록.
 Phase 5(Qt/CMake 어댑터) 설계의 입력이다. 각 항목은 **코드 위치 + 재현 조건 + 영향**을 남긴다.
 
-버전 기준: `ici 0.5.0` (`dist/ici.pyz`)
+버전 기준: `ici 0.6.0` release asset (`ici/dist/ici.pyz`)
 
 
-## 현황 (2026-08-30)
+## 현황 (2026-08-31)
 
 **A-3 이 닫혔다.** ici 0.6.0 이 CMake/CTest 와 qmake/Make 빌드 어댑터를 갖췄고, 이 저장소의
 두 프로젝트가 그 실측 대상이었다 — `loglens` 는 CMake, `diskmap` 은 qmake 로 전환했다.
