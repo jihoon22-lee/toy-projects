@@ -1,6 +1,6 @@
 # toy-projects
 
-C++17 / Qt 5.15+ / Qt6 로 만드는 실사용 데스크톱 도구 모음.
+C++17 / Qt 5.15 및 Qt 6 환경을 대상으로 만드는 실사용 데스크톱 도구 모음.
 동시에 [ici](https://github.com/jihoon22-lee/ici) 품질 게이트의 **외부 C++ 검증 대상**으로 쓰인다.
 
 앞으로의 방향과 그 순서를 정한 이유는 [ROADMAP.md](ROADMAP.md) 에, 이 과정에서 발견한
@@ -10,8 +10,8 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 
 | 이름 | 설명 | 상태 |
 |---|---|---|
-| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | 코어 + Qt6 GUI |
-| [loglens](loglens/) | 로그 뷰어 / 분석기 | 코어 + Qt6 GUI · 라이브 팔로우 |
+| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | 코어 + Qt GUI (현재 Qt6) |
+| [loglens](loglens/) | 로그 뷰어 / 분석기 | 코어 + Qt GUI (현재 Qt6) · 라이브 팔로우 |
 
 ## 공통 구조 규칙
 
@@ -70,11 +70,46 @@ Qt 셸을 `src/` 밖에 두면 "검증할 필요 없는 코드" 라는 뜻이 �
 테스트가 링크할 대상이 없다.
 
 ```toml
-cpp_pkg_config = ["Qt6Widgets"]   # lint 가 Qt 헤더를 찾을 수 있게
+cpp_pkg_config = ["Qt6Widgets"]   # 현재 기본 환경; Qt5 fallback은 T0-5에서 추가
 ```
 
 `cpp_external_build_dirs` 는 더 이상 쓰지 않는다. 루트에 빌드 디스크립터가 없는 프로젝트
 (g++ 경로)에서는 여전히 유효하다.
+
+### Qt 환경과 현재 실측
+
+개발 환경에는 Qt 5.15.18과 Qt 6.10.2가 함께 설치돼 있다. 버전은 다음 명령으로 확인한다.
+
+```text
+$ qmake -v
+Using Qt version 5.15.18 in /usr/lib/x86_64-linux-gnu
+$ qmake6 -v
+Using Qt version 6.10.2 in /usr/lib/x86_64-linux-gnu
+$ pkg-config --modversion Qt5Core Qt5Widgets Qt5Concurrent Qt5Test
+5.15.18
+5.15.18
+5.15.18
+5.15.18
+$ pkg-config --modversion Qt6Core Qt6Widgets Qt6Concurrent Qt6Test
+6.10.2
+6.10.2
+6.10.2
+6.10.2
+```
+
+2026-08-31 현재 Qt6 기본 환경에서 ici 0.6.0 release asset으로 다음 실측도 통과했다.
+
+```bash
+for p in loglens diskmap; do
+  (cd "$p" && QT_QPA_PLATFORM=offscreen ../../ici/dist/ici.pyz verify \
+    --report --html verify_report.html --github-summary)
+done
+```
+
+결과는 `loglens: Suite PASS, TEM 4.08 (10 passed, 2 skipped)`와 `diskmap: Suite PASS,
+TEM 4.85 (10 passed, 2 skipped)`다. Qt5 강제 CMake build와 Qt5 qmake build/test는
+T0-5에서 `CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON` 및 `/usr/bin/qmake`를 사용해 별도로 실측하고,
+그 전까지는 Qt5가 설치돼 있다는 사실을 지원 완료로 간주하지 않는다.
 
 ### loglens 스트림 계약
 
