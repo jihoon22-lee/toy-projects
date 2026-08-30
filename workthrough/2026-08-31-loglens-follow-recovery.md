@@ -10,9 +10,8 @@ retryable source 오류 동안 유지하고, 새 file identity가 확인된 뒤�
 새 generation으로 강제하도록 보완했다.
 
 이 문서는 구현 커밋 `4094ff5`, 테스트 커밋 `ca56d2e`, 복구 경계 보완 커밋 `d419d2f`의
-설계·검증을 기록한다. local
-ici 0.6.0 검증과 Qt5/Qt6 headless smoke도 완료했지만, GitHub Actions CI와 report-pr sticky
-HTML/Pages 게시 검증은 아직 원격 PR 게이트로 남아 있다.
+설계·검증을 기록한다. local ici 0.6.0 검증과 Qt5/Qt6 headless smoke, 그리고 최종
+PR #22 원격 CI/report-pr sticky HTML/Pages 게시 검증까지 완료했다.
 
 ## Context
 
@@ -104,10 +103,10 @@ poll이 여러 번 발생해도 restart/generation은 한 번만 증가하도록
 
 - `README.md`: follow 오류 의미론과 `test_main_window` 검증 범위를 갱신했다.
 - `docs/superpowers/plans/2026-08-30-product-portfolio-master-plan.md`: L1 Slice 2와
-  stopped/retryable/fatal 상태 계약을 완료로 표시하고 native evidence와 남은 검증 경계를
+  stopped/retryable/fatal 상태 계약을 완료로 표시하고 native 및 원격 PR evidence를
   기록했다.
-- `docs/superpowers/2026-08-30-handover.md`: Slice 2의 현재 branch/commit과 다음 PR 검증
-  순서를 반영했다.
+- `docs/superpowers/2026-08-30-handover.md`: Slice 2의 현재 branch/commit과 원격 PR·Pages
+  완료 evidence를 반영했다.
 - `workthrough/2026-08-31-loglens-follow-recovery.md`: 본 구현과 검증을 재현할 수 있는
   작업 기록을 추가했다.
 
@@ -176,16 +175,24 @@ The Qt5 and Qt6 GUI binaries each remained alive for the complete eight-second s
 with `QT_QPA_PLATFORM=offscreen`. The expected timeout exit was `124` in both runs; this is
 the success condition for the long-running GUI process.
 
-### Deliberately pending evidence
+### Remote PR verification
 
-- d419d2f를 포함한 PR #22의 원격 CI 재실행과 Merge Gate
-- 재실행 결과의 `report-pr` sticky comment와 generated HTML 링크 게시, 각 링크 HTTP 확인
+The final PR head was `3d7a7a5`, and workflow run
+[`33336242400`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33336242400)
+reported SUCCESS for every check: manifest, `ici verify` for diskmap and loglens, Qt5 and
+Qt6 GUI legs for both projects, `Publish Reports & Sticky Comment`, and `Merge Gate`.
 
-These remote checks are release/PR gates and are intentionally not inferred from the local
-verification above.
+The actual [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/22#issuecomment-5471277839)
+contained `diskmap: PASS · TEM 4.87`, `loglens: PASS · TEM 4.82`, and the latest workflow
+link. The generated Pages reports were also fetched successfully: `diskmap/pr/22/` returned
+HTTP 200 with 161211 bytes and 0 external references; `loglens/pr/22/` returned HTTP 200 with
+262156 bytes and 0 external references.
+
+The remote metrics above are separate from the local ici metrics recorded in the preceding
+section; neither result is inferred from the other.
 
 ## Next Steps
 
-Open the implementation PR, wait for all required CI checks to pass, and verify the actual
-report-pr comment and Pages HTML before merging. After that, continue with diskmap D1 Slice 2:
-cycle-safe symlink traversal, hardlink aggregate accounting, and filesystem path semantics.
+PR #22's required CI, sticky comment, and Pages HTML gates are complete. Continue with diskmap
+D1 Slice 2: cycle-safe symlink traversal, hardlink aggregate accounting, and filesystem path
+semantics.
