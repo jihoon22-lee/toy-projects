@@ -7,9 +7,6 @@
 manifest가 `ici verify`와 Qt GUI matrix를 함께 만들고, PR report job은 matrix의
 종료 결과 뒤에 실행되어 sticky 댓글과 실제 GitHub Pages HTML까지 검증한다.
 
-구현 커밋은 `a0ca49d` (`chore(ci): enforce manifest and report merge gates`)이며,
-이 worktree에서는 원격 push, PR 생성, merge를 수행하지 않았다.
-
 ## Context
 
 기존 workflow에는 `diskmap`과 `loglens`가 각각 verify/GUI matrix에 하드코딩되어
@@ -23,10 +20,10 @@ HTML을 반환하는지는 gate하지 않았다. 현재 GitHub `main` branch pro
 
 ### 1. 단일 project manifest
 
-- 파일: `/home/jihoon/projects/.worktrees/toy-ci-gates/ci/projects.json`
+- 파일: `ci/projects.json`
 - `diskmap`, `loglens`의 ici 검증 참여 여부와 GUI build system, descriptor,
   binary, smoke 입력을 한 곳에 기록했다.
-- 파일: `/home/jihoon/projects/.worktrees/toy-ci-gates/ci/check_manifest.py`
+- 파일: `ci/check_manifest.py`
 - manifest schema, 이름/경로 안전성, `ici.toml` 존재, GUI descriptor를 검증한다.
 - 저장소 최상위에서 `ici.toml`을 가진 프로젝트 집합과 manifest 집합을 비교하여
   누락 또는 임의 추가를 실패시킨다.
@@ -35,7 +32,7 @@ HTML을 반환하는지는 gate하지 않았다. 현재 GitHub `main` branch pro
 
 ### 2. Matrix와 Qt GUI smoke
 
-- 파일: `/home/jihoon/projects/.worktrees/toy-ci-gates/.github/workflows/ci.yml`
+- 파일: `.github/workflows/ci.yml`
 - `discover` output을 `fromJSON`으로 소비하여 verify와 GUI matrix를 동적으로
   생성한다.
 - GUI matrix는 manifest의 `cmake`/`qmake` descriptor로 실제 Release build를
@@ -59,10 +56,10 @@ HTML을 반환하는지는 gate하지 않았다. 현재 GitHub `main` branch pro
   때까지 Pages 전파를 기다린다.
 - `Merge Gate`는 discover, 모든 verify matrix leg, 모든 GUI matrix leg와 PR
   report 검증을 요구한다. push에서는 report job이 skip되는 것을 허용한다.
-- 파일: `/home/jihoon/projects/.worktrees/toy-ci-gates/README.md`
+- 파일: `README.md`
   - manifest, report, Pages 확인, branch protection required check 계약을
     사용자 문서에 동기화했다.
-- 파일: `/home/jihoon/projects/.worktrees/toy-ci-gates/.gitignore`
+- 파일: `.gitignore`
   - CI Python helper의 `__pycache__`/`*.pyc`를 제외했다.
 
 ## Code Examples
@@ -122,9 +119,9 @@ git diff --check                           PASS
 
 ## Limitations and Follow-up
 
-- The repository currently has no `main` branch protection (`gh api .../branches/main/protection`
-  returned `404`). An administrator must mark the exact `Merge Gate` check as required;
-  the workflow cannot enforce that repository setting by itself.
+- The repository ruleset is an external GitHub setting rather than a versioned file. The
+  rollout must mark the exact `Merge Gate` check as required before this branch is merged
+  and verify the active rule again after the merge.
 - The current manifest has two Qt6 GUI projects. Qt5/Qt6 dual-major coverage remains
   the separate T0-5 workstream and should later extend the GUI matrix metadata without
   reintroducing a second project list.
