@@ -404,6 +404,71 @@ int main() {
         CHECK_EQ(result.files_scanned, static_cast<std::size_t>(1));
     }
 
+    // --- a regular-file root is a complete one-node scan, not a failed
+    // attempt to open that file as a directory ---
+    {
+        InspectingFakeFsSource fs;
+        const std::filesystem::path root = "/root-file/payload.bin";
+        diskmap::FsMetadata fileMetadata;
+        fileMetadata.kind = FsKind::RegularFile;
+        fileMetadata.identity = identity(14, 139);
+        fileMetadata.logical_size = 37;
+        fileMetadata.allocated_size = 4096;
+        fileMetadata.allocated_size_known = true;
+        fileMetadata.hard_link_count = 1;
+        fileMetadata.hard_link_count_known = true;
+        fileMetadata.complete = true;
+        fs.addInspection(root, false, fileMetadata);
+
+        const ScanResult result = scan(fs, root, ScanOptions{});
+        CHECK(!result.root.is_dir);
+        CHECK(result.root.complete);
+        CHECK_EQ(result.root.size, static_cast<std::uint64_t>(37));
+        CHECK_EQ(result.root.allocated_size, static_cast<std::uint64_t>(4096));
+        CHECK(result.root.allocated_size_known);
+        CHECK_EQ(result.root.reclaimable_size, static_cast<std::uint64_t>(4096));
+        CHECK(result.root.reclaimable_size_known);
+        CHECK_EQ(result.dirs_scanned, static_cast<std::size_t>(0));
+        CHECK_EQ(result.files_scanned, static_cast<std::size_t>(1));
+        CHECK(result.errors.empty());
+    }
+
+    // --- an explicitly selected root symlink is dereferenced even when
+    // descendant following is disabled; a file target remains a leaf ---
+    {
+        InspectingFakeFsSource fs;
+        const std::filesystem::path root = "/root-link/payload";
+        diskmap::FsMetadata linkMetadata;
+        linkMetadata.kind = FsKind::Symlink;
+        linkMetadata.identity = identity(14, 140);
+        linkMetadata.complete = true;
+        diskmap::FsMetadata targetMetadata;
+        targetMetadata.kind = FsKind::RegularFile;
+        targetMetadata.identity = identity(14, 141);
+        targetMetadata.logical_size = 73;
+        targetMetadata.allocated_size = 8192;
+        targetMetadata.allocated_size_known = true;
+        targetMetadata.hard_link_count = 1;
+        targetMetadata.hard_link_count_known = true;
+        targetMetadata.complete = true;
+        fs.addInspection(root, false, linkMetadata);
+        fs.addInspection(root, true, targetMetadata);
+
+        const ScanResult result = scan(fs, root, ScanOptions{});
+        CHECK(result.root.followed);
+        CHECK(!result.root.is_dir);
+        CHECK(result.root.complete);
+        CHECK(result.root.has_target_metadata);
+        CHECK_EQ(result.root.size, static_cast<std::uint64_t>(73));
+        CHECK_EQ(result.root.allocated_size, static_cast<std::uint64_t>(8192));
+        CHECK(result.root.allocated_size_known);
+        CHECK_EQ(result.root.reclaimable_size, static_cast<std::uint64_t>(0));
+        CHECK(result.root.reclaimable_size_known);
+        CHECK_EQ(result.dirs_scanned, static_cast<std::size_t>(0));
+        CHECK_EQ(result.files_scanned, static_cast<std::size_t>(1));
+        CHECK(result.errors.empty());
+    }
+
     // --- root metadata is allowed to be a symlink, including an incomplete
     // target, and root lookup errors remain explicit ---
     {
@@ -450,7 +515,8 @@ int main() {
         CHECK(!result.root.complete);
         CHECK(!result.root.has_target_metadata);
         CHECK_EQ(result.root.error, std::string("target disappeared"));
-        CHECK(result.errors.empty());
+        CHECK_EQ(result.errors.size(), static_cast<std::size_t>(1));
+        CHECK_EQ(result.errors[0], std::string("target disappeared"));
     }
 
     {
