@@ -112,14 +112,25 @@ Test commit: `6861b7a`; production commit: `2f56caf`.
 
 The follow-up refactor `31d8b48` separated root inspection stages. Its public
 ici complexity-only check passed with maximum cyclomatic 14 across 101
-functions and 0 issues. The full ici verify rerun remains pending.
+functions and 0 issues. The final candidate verification is recorded below.
 
 After this root-semantics follow-up, the latest local native verification was
 Qt 5.15.18 (`/usr/bin/qmake`) and Qt 6.10.2 (`/usr/bin/qmake6`) with full build
 target plus `make check` 9/9 PASS on both. The Qt5 and Qt6 offscreen GUI smokes
-also survived 8 seconds and exited with the expected timeout 124. The final
-full ici rerun and remote PR CI, sticky HTML comment, and Pages verification
-remain pending.
+also survived 8 seconds and exited with the expected timeout 124.
+
+The final local candidate ici qmake-clean branch reported `Suite PASS`, 10 pass
+/ 0 warn / 0 fail / 0 error / 2 skip, 9/9 tests, line 96.6% / function 98.0%
+/ branch 85.0%, TEM 4.90, complexity 14 across 101 functions / 0 issues,
+duplication 2.0, sanitizer clean, and duration 85.96 s. Its capability
+inventory contained 30 tools / 21 ready / 0 incomplete / 9 unavailable;
+required `g++` was ready and health was `READY`. Candidate JSON retained
+successful `/usr/bin/make clean` evidence for both test and sanitize, and the
+tool snapshot was rendered. HTML was 281264 bytes with external `src`/`href`
+references 0. This supersedes the immediately earlier public ici 0.6.0
+complexity WARN-era result and confirms the freshness guard. The final local
+ici evidence is complete; remote PR CI, sticky HTML comment, and Pages
+verification remain pending.
 
 ## Code Examples
 

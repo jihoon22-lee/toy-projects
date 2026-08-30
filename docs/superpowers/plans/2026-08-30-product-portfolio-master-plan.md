@@ -31,7 +31,7 @@
 | 프로젝트 | 현재 형태 | 실측 | 제품 상태 |
 |---|---|---|---|
 | loglens | C++17, Qt, CMake | 8 tests, TEM 4.08 | 유용한 골격, streaming 신뢰성과 대용량 UX 부족 |
-| diskmap | C++17, Qt, qmake | D1 Slice 2 native PASS · ici baseline TEM 4.90 · final pending | treemap viewer, cleanup UX는 D2~D6에서 확장 |
+| diskmap | C++17, Qt, qmake | D1 Slice 2 candidate ici PASS · remote pending · TEM 4.90 | treemap viewer, cleanup UX는 D2~D6에서 확장 |
 | ici/viewer | Qt-free core + Qt6 GUI | 3 tests, TEM 4.94 | core 중심, 셸과 report workflow 부족 |
 
 현재 공백:
@@ -407,18 +407,27 @@ fresh full build와 `make check` 9/9가 각각 통과했다. 두 GUI는
 결과를 얻었다. 이후 `5ceb059`/`ebe3d86`에서 finite `max_depth`로 잘린 directory를
 `complete=false` 및 `scan depth limit reached`로 표시하고, logical size 합산을
 `uint64_t` 최댓값에서 포화하도록 보수적 truncation semantics를 추가했다. 이 후속 커밋
-이후의 최종 full native/ici 검증과 원격 PR CI, sticky HTML comment 및 Pages 응답 검증은
-아직 pending이며, 최신 결과를 확인한 뒤에만 Slice 2를 원격 완료로 표시한다.
+직후의 최종 full native/ici 검증과 원격 PR CI, sticky HTML comment 및 Pages 응답 검증은
+아직 pending이었다. 이후 candidate qmake-clean 검증으로 local ici를 다시 확인했다.
 
 이후 `6861b7a`/`2f56caf`에서 regular-file root의 실제 CLI 경로와 root symlink semantics를
 추가했다. 실제 file-root smoke는 JSON에서 `name=main.cpp`, `is_dir=false`, `size`가 source
 metadata와 일치하는 one-node 결과를 냈다(파일 크기는 source 변경에 따라 고정하지 않는다).
 이 후속 커밋 이후 최신 로컬 native 확인은 Qt 5.15.18(`/usr/bin/qmake`)과
 Qt 6.10.2(`/usr/bin/qmake6`)에서 각각 full build target과 `make check` 9/9 PASS였다.
-Qt5/Qt6 GUI offscreen smoke도 각각 8초 생존 후 기대된 timeout exit 124로 확인했다. 최종
-full ici 및 원격 PR CI, sticky HTML comment와 Pages 응답 검증은 아직 pending이다.
+Qt5/Qt6 GUI offscreen smoke도 각각 8초 생존 후 기대된 timeout exit 124로 확인했다.
 `31d8b48`의 root inspection stage 분리 후 public ici complexity-only 검증은 PASS,
-maximum cyclomatic 14 across 101 functions, 0 issues였으며 전체 ici verify 재실행은 pending이다.
+maximum cyclomatic 14 across 101 functions, 0 issues였다.
+
+**최종 local candidate ici qmake-clean 검증:** `Suite PASS`, 10 pass / 0 warn / 0 fail /
+0 error / 2 skip, 9/9 tests, line 96.6% / function 98.0% / branch 85.0%, TEM 4.90,
+complexity 14 across 101 functions / 0 issues, duplication 2.0, sanitizer clean,
+duration 85.96초였다. capability inventory는 30 tools / 21 ready / 0 incomplete /
+9 unavailable, required `g++` ready, health `READY`였다. candidate JSON에는 test와 sanitize
+각각의 성공한 `/usr/bin/make clean` evidence가 포함됐고, tool snapshot도 렌더링됐다.
+HTML은 281,264 bytes이며 외부 `src`/`href` 참조가 0개다. 이 결과는 이전 public ici
+0.6.0 complexity WARN-era 결과를 대체하고 새 freshness guard를 확인한다. 최종 local ici
+검증은 완료됐으며 toy remote PR CI·sticky HTML comment·Pages 응답 검증은 아직 pending이다.
 
 ### D2. cancellable scanner와 stale result 방지
 

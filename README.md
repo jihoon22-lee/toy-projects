@@ -103,19 +103,32 @@ timeout 종료 코드 124는 의도한 확인 결과다. ici 0.6.0 release asset
 line 96.9% / function 97.9% / branch 85.2%, maximum complexity 14, duplication 2.1,
 duration 24.24초였다. 생성한 HTML은 180,624 bytes이며 외부 `src`/`href` 참조가 0개다.
 이후 `5ceb059`/`ebe3d86`에서 finite-depth truncation과 saturating logical aggregation을
-추가했으므로, 이 커밋들 이후의 final full ici 재검증과 원격 PR CI·sticky HTML comment·Pages
-응답 검증은 아직 대기 중이다. PR에서 최신 결과를 재확인한 뒤에만 병합한다.
+추가했다. 아래 candidate qmake-clean 검증이 이 커밋들 이후의 최신 ici 결과이며, 원격 PR
+CI·sticky HTML comment·Pages 응답은 아직 대기 중이다. PR에서 최신 결과를 재확인한 뒤에만
+병합한다.
 
 `6861b7a`/`2f56caf`에서는 regular-file root, root symlink dereference와 broken-target error
-전파를 추가했다. 이 커밋들 이후의 final full ici 및 remote verification은 대기 중이다.
+전파를 추가했다. 이 커밋들 이후의 candidate qmake-clean verification은 아래에 기록했으며,
+remote verification은 대기 중이다.
 
 root semantics 후속 반영 뒤 최신 로컬 native 확인은 Qt 5.15.18(`/usr/bin/qmake`)과 Qt 6.10.2
 (`/usr/bin/qmake6`)에서 각각 full build target 및 `make check` 9/9 PASS였다. Qt5/Qt6 GUI
-offscreen smoke도 각각 8초 생존 후 기대된 timeout exit 124로 확인했다. 최종 full ici와
-원격 PR CI·sticky HTML comment·Pages 응답 검증은 아직 pending이다.
+offscreen smoke도 각각 8초 생존 후 기대된 timeout exit 124로 확인했다. 최종 full ici
+candidate는 아래와 같이 PASS했고, 원격 PR CI·sticky HTML comment·Pages 응답 검증은 아직 pending이다.
 
 `31d8b48`의 root inspection stage 분리 후 public ici complexity-only 검증도 PASS했으며,
-maximum cyclomatic 14 across 101 functions, 0 issues를 기록했다. 전체 ici verify 재실행은
+maximum cyclomatic 14 across 101 functions, 0 issues를 기록했다. 이는 아래 candidate
+qmake-clean 검증으로 대체되는 중간 확인이다.
+
+최종 local candidate ici qmake-clean branch는 `Suite PASS`, 10 pass / 0 warn / 0 fail /
+0 error / 2 skip, 9/9 tests, line 96.6% / function 98.0% / branch 85.0%, TEM 4.90,
+complexity 14 across 101 functions / 0 issues, duplication 2.0, sanitizer clean,
+duration 85.96초를 기록했다. capability inventory는 30 tools / 21 ready / 0 incomplete /
+9 unavailable, required `g++` ready, health `READY`였다. candidate JSON에는 test와 sanitize
+각각의 성공한 `/usr/bin/make clean` evidence가 포함됐고, tool snapshot도 렌더링됐다.
+HTML은 281,264 bytes이며 외부 `src`/`href` 참조가 0개다. 이 결과가 즉시 이전 public
+ici 0.6.0 complexity WARN-era 결과를 대체하며 새 ici freshness guard를 확인한다. 최종
+full ici local 검증은 완료됐고, toy remote PR CI·sticky HTML comment·Pages 응답 검증만
 아직 pending이다.
 
 ### GUI 는 빌드되고 테스트된다
