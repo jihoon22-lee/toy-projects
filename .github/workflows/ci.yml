@@ -105,9 +105,11 @@ jobs:
 
   # ici builds and unit-tests the widget libraries now, but it never launches
   # the application. This matrix does: a GUI that links and then dies on
-  # startup still fails the gate here.
+  # startup still fails the gate here. Discovery expands every GUI project to
+  # one leg per supported Qt major, so a new project gets the same coverage
+  # without another workflow edit.
   gui-build:
-    name: Qt6 GUI build (${{ matrix.project.name }})
+    name: Qt${{ matrix.project.qt_major }} GUI build (${{ matrix.project.name }})
     if: ${{ needs.discover.outputs.gui_count != '0' }}
     needs: discover
     runs-on: ubuntu-latest
@@ -122,26 +124,124 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Qt6
+      - name: Install Qt${{ matrix.project.qt_major }}
+        env:
+          QT_MAJOR: ${{ matrix.project.qt_major }}
         run: |
+          set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qt6-base-dev qmake6
+          case "$QT_MAJOR" in
+            5)
+              sudo apt-get install -y --no-install-recommends qtbase5-dev qt5-qmake pkg-config
+              ;;
+            6)
+              sudo apt-get install -y --no-install-recommends qt6-base-dev qmake6 pkg-config
+              ;;
+            *)
+              echo "::error::unsupported Qt major: $QT_MAJOR"
+              exit 1
+              ;;
+          esac
+
+      - name: Verify Qt${{ matrix.project.qt_major }} pkg-config metadata
+        env:
+          QT_MAJOR: ${{ matrix.project.qt_major }}
+        run: |
+          set -euo pipefail
+          case "$QT_MAJOR" in
+            5) modules=(Qt5Core Qt5Gui Qt5Widgets Qt5Concurrent Qt5Test) ;;
+            6) modules=(Qt6Core Qt6Gui Qt6Widgets Qt6Concurrent Qt6Test) ;;
+            *) echo "::error::unsupported Qt major: $QT_MAJOR"; exit 1 ;;
+          esac
+          for module in "${modules[@]}"; do
+            version="$(pkg-config --modversion "$module")"
+            echo "$module=$version"
+            case "$version" in
+              "$QT_MAJOR".*) ;;
+              *)
+                echo "::error::$module resolved to $version, expected Qt $QT_MAJOR"
+                exit 1
+                ;;
+            esac
+          done
 
       - name: Configure and build
         working-directory: ${{ matrix.project.name }}
         env:
           BUILD_SYSTEM: ${{ matrix.project.build_system }}
           BUILD_DESCRIPTOR: ${{ matrix.project.build_descriptor }}
+          GUI_BINARY: ${{ matrix.project.gui_binary }}
+          QT_MAJOR: ${{ matrix.project.qt_major }}
         run: |
           set -euo pipefail
           case "$BUILD_SYSTEM" in
             cmake)
-              cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release
+              mkdir -p build
+              if [ "$QT_MAJOR" = 5 ]; then
+                qt_guard=-DCMAKE_DISABLE_FIND_PACKAGE_Qt6=ON
+              elif [ "$QT_MAJOR" = 6 ]; then
+                qt_guard=-DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON
+              else
+                echo "::error::unsupported Qt major: $QT_MAJOR"
+                exit 1
+              fi
+              cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release "$qt_guard" \
+                2>&1 | tee build/configure.log
+              selected_major="$(sed -n 's/^-- loglens: using Qt\([0-9]\) .*/\1/p' \
+                build/configure.log | tail -1)"
+              if [ "$selected_major" != "$QT_MAJOR" ]; then
+                echo "::error::CMake selected Qt $selected_major, expected Qt $QT_MAJOR"
+                exit 1
+              fi
               cmake --build build/gui --parallel
               ;;
             qmake)
               mkdir -p build/gui
-              (cd build/gui && qmake6 "../../$BUILD_DESCRIPTOR" && make -j"$(nproc)")
+              if [ "$QT_MAJOR" = 5 ]; then
+                qmake=/usr/bin/qmake
+              elif [ "$QT_MAJOR" = 6 ]; then
+                qmake=/usr/bin/qmake6
+              else
+                echo "::error::unsupported Qt major: $QT_MAJOR"
+                exit 1
+              fi
+              qmake_version="$("$qmake" -query QT_VERSION)"
+              echo "$qmake QT_VERSION=$qmake_version"
+              case "$qmake_version" in
+                "$QT_MAJOR".*) ;;
+                *)
+                  echo "::error::$qmake selected Qt $qmake_version, expected Qt $QT_MAJOR"
+                  exit 1
+                  ;;
+              esac
+              (cd build/gui && "$qmake" "../../$BUILD_DESCRIPTOR" && make -j"$(nproc)")
+              ;;
+            *)
+              echo "::error::unsupported GUI build system: $BUILD_SYSTEM"
+              exit 1
+              ;;
+          esac
+
+          if ! ldd "$GUI_BINARY" | grep -Eq "libQt${QT_MAJOR}Widgets"; then
+            echo "::error::$GUI_BINARY is not linked to Qt${QT_MAJOR}Widgets"
+            ldd "$GUI_BINARY" || true
+            exit 1
+          fi
+          echo "linked Qt${QT_MAJOR}Widgets: $(ldd "$GUI_BINARY" | grep -E "libQt${QT_MAJOR}Widgets" | head -1)"
+
+      - name: Native tests
+        working-directory: ${{ matrix.project.name }}
+        env:
+          BUILD_SYSTEM: ${{ matrix.project.build_system }}
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set -euo pipefail
+          case "$BUILD_SYSTEM" in
+            cmake)
+              ctest --test-dir build/gui --output-on-failure
+              ;;
+            qmake)
+              (cd build/gui && make check)
               ;;
             *)
               echo "::error::unsupported GUI build system: $BUILD_SYSTEM"

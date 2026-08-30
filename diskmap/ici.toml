@@ -14,7 +14,10 @@ source_dirs = ["src"]
 # call cannot provide. ici 0.6.0 drives qmake for build, test and sanitize
 # alike, so moc runs and the GUI is compiled, unit-tested and sanitized like
 # the core.
-cpp_pkg_config = ["Qt6Widgets", "Qt6Concurrent"]
+# Keep the preferred Qt 6 modules first, then the equivalent Qt 5 modules. ici
+# skips packages unavailable on the host, while the CI GUI matrix separately
+# proves that every selected major resolves the same module set.
+cpp_pkg_config = ["Qt6Widgets", "Qt6Concurrent", "Qt5Widgets", "Qt5Concurrent"]
 
 # 임계값을 명시적으로 고정한다. 생략하면 개발자 홈의 ~/.config/ici/ici.toml 을 따르게 되어
 # 로컬과 CI 결과가 갈린다. 값 자체는 ici 기본 정책과 동일하다 — 실측이 이를 넘기므로

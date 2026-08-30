@@ -7,11 +7,15 @@ set(CMAKE_AUTOMOC ON)
 
 # Use whichever supported Qt major is installed. Keeping the package discovery
 # versioned makes the same source build on a Qt 6 desktop and a Qt 5.15 host.
-# CMake treats CMAKE_DISABLE_FIND_PACKAGE_Qt6 as a hard error when Qt6 appears
-# in a REQUIRED NAMES list, so remove that name before the deliberate Qt5 job.
+# CMake treats a disabled package as a hard error when it appears in a REQUIRED
+# NAMES list, so remove either explicitly disabled name before discovery. This
+# lets CI prove both directions without relying on search-path ordering.
 set(_qt_package_names Qt6 Qt5)
 if(CMAKE_DISABLE_FIND_PACKAGE_Qt6)
     list(REMOVE_ITEM _qt_package_names Qt6)
+endif()
+if(CMAKE_DISABLE_FIND_PACKAGE_Qt5)
+    list(REMOVE_ITEM _qt_package_names Qt5)
 endif()
 find_package(QT NAMES ${_qt_package_names} REQUIRED COMPONENTS Widgets Test)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Test)
