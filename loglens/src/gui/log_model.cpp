@@ -49,13 +49,53 @@ LogModel::LogModel(QObject* parent) : QAbstractTableModel(parent) {}
 void LogModel::setRecords(std::vector<loglens::LogRecord> records) {
     beginResetModel();
     records_ = std::move(records);
+    // Opening a new file drops the old filter. Leaving it would make
+    // appendRecords filter rows that rebuildVisible(nullptr) just let through.
+    filter_.reset();
     rebuildVisible(nullptr);
     endResetModel();
 }
 
 void LogModel::setFilter(const loglens::Filter* filter) {
     beginResetModel();
+    filter_ = filter == nullptr ? std::nullopt : std::optional<loglens::Filter>(*filter);
     rebuildVisible(filter);
+    endResetModel();
+}
+
+void LogModel::appendRecords(const std::vector<loglens::LogRecord>& records) {
+    if (records.empty()) {
+        return;
+    }
+
+    const int first = static_cast<int>(visible_.size());
+    std::vector<int> arriving;
+    arriving.reserve(records.size());
+    for (const loglens::LogRecord& record : records) {
+        const int index = static_cast<int>(records_.size() + arriving.size());
+        if (!filter_ || filter_->matches(record)) {
+            arriving.push_back(index);
+        }
+    }
+
+    // beginInsertRows with an empty range violates the model contract, so a
+    // batch where nothing passes the filter stays silent about rows while
+    // still retaining the records.
+    if (arriving.empty()) {
+        records_.insert(records_.end(), records.begin(), records.end());
+        return;
+    }
+
+    beginInsertRows(QModelIndex(), first, first + static_cast<int>(arriving.size()) - 1);
+    records_.insert(records_.end(), records.begin(), records.end());
+    visible_.insert(visible_.end(), arriving.begin(), arriving.end());
+    endInsertRows();
+}
+
+void LogModel::resetRecords() {
+    beginResetModel();
+    records_.clear();
+    visible_.clear();
     endResetModel();
 }
 

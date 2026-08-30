@@ -1,13 +1,16 @@
 #include "main_window.hpp"
 
+#include <QCheckBox>
 #include <QFileDialog>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QScrollBar>
 #include <QStatusBar>
 #include <QTableView>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include <fstream>
@@ -54,6 +57,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     bar->addWidget(openButton);
     bar->addWidget(filterEdit_, 1);
     bar->addWidget(applyButton);
+    followBox_ = new QCheckBox(tr("Follow"), central);
+    followBox_->setChecked(true);
+    bar->addWidget(followBox_);
     layout->addLayout(bar);
 
     timeline_ = new TimelineWidget(central);
@@ -74,6 +80,18 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     status_ = new QLabel(tr("Ready"), this);
     statusBar()->addWidget(status_);
 
+    pollTimer_ = new QTimer(this);
+    pollTimer_->setInterval(500);
+    connect(pollTimer_, &QTimer::timeout, this, &MainWindow::pollSource);
+    connect(followBox_, &QCheckBox::toggled, this, &MainWindow::setFollowing);
+
+    // Following the tail is only wanted while the view is already at the tail.
+    // Scrolling up to read something is an explicit request to stay put, and
+    // yanking the viewport back down would make the log unreadable.
+    connect(table_->verticalScrollBar(), &QScrollBar::valueChanged, this, [this](int value) {
+        autoScroll_ = value == table_->verticalScrollBar()->maximum();
+    });
+
     connect(openButton, &QPushButton::clicked, this, &MainWindow::chooseFile);
     connect(applyButton, &QPushButton::clicked, this, &MainWindow::applyFilter);
     connect(filterEdit_, &QLineEdit::returnPressed, this, &MainWindow::applyFilter);
@@ -91,17 +109,57 @@ void MainWindow::chooseFile() {
 }
 
 void MainWindow::openPath(const QString& path) {
-    loglens::FileTailer tailer(path.toStdString());
+    tailer_ = std::make_unique<loglens::FileTailer>(path.toStdString());
     std::vector<std::string> lines;
     std::string error;
-    if (!tailer.poll(lines, error)) {
+    if (!tailer_->poll(lines, error)) {
         // Report it rather than showing an empty window with no explanation.
         status_->setText(tr("Cannot read: %1").arg(QString::fromStdString(error)));
+        tailer_.reset();
         return;
     }
     model_->setRecords(parseLines(lines));
     applyFilter();
     setWindowTitle(tr("loglens — %1").arg(path));
+    setFollowing(followBox_->isChecked());
+}
+
+void MainWindow::pollSource() {
+    if (!tailer_) {
+        return;
+    }
+    const std::size_t restartsBefore = tailer_->restarts();
+    std::vector<std::string> lines;
+    std::string error;
+    if (!tailer_->poll(lines, error)) {
+        // Stop rather than spin: whatever broke will keep breaking every tick.
+        status_->setText(tr("Follow stopped: %1").arg(QString::fromStdString(error)));
+        followBox_->setChecked(false);
+        return;
+    }
+
+    // A truncated or replaced file makes every retained row stale, so the model
+    // starts over instead of appending new lines under old ones.
+    if (tailer_->restarts() != restartsBefore) {
+        model_->resetRecords();
+    }
+    if (lines.empty()) {
+        return;
+    }
+    model_->appendRecords(parseLines(lines));
+    refreshTimeline();
+    updateStatus(QString());
+    if (autoScroll_) {
+        table_->scrollToBottom();
+    }
+}
+
+void MainWindow::setFollowing(bool following) {
+    if (following && tailer_) {
+        pollTimer_->start();
+        return;
+    }
+    pollTimer_->stop();
 }
 
 void MainWindow::applyFilter() {

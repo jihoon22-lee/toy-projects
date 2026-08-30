@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 env:
-  ICI_VERSION: v0.5.5
+  ICI_VERSION: v0.6.0
 
 jobs:
   verify:
@@ -36,6 +36,15 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.10"
+
+      # Both projects are driven by their own build systems now: loglens
+      # configures with cmake, diskmap with qmake6, and the Q_OBJECT unit tests
+      # link Qt Test. qmake6 is a separate package from qt6-base-dev; cmake
+      # ships with the runner image.
+      - name: Install the Qt6 build toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qt6-base-dev qmake6 pkg-config
 
       - name: Fetch ici release asset
         run: |
@@ -68,6 +77,9 @@ jobs:
       # verify 는 FAIL/ERROR 에서 exit 1, SKIP 에서 exit 2, PASS/WARN 에서 exit 0 이다.
       - name: Verify ${{ matrix.project }}
         working-directory: ${{ matrix.project }}
+        env:
+          # diskmap's widget test constructs QWidgets, and there is no display.
+          QT_QPA_PLATFORM: offscreen
         run: ../ici.pyz verify --report --html verify_report.html --github-summary
 
       - name: Upload report
@@ -157,8 +169,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # The Qt shell is outside ici's scope by design — the core is what gets
-  # verified — so nothing else would catch a broken GUI build. This job does.
+  # ici builds and unit-tests the widget libraries now, but it never launches
+  # the application. This job does: a GUI that links and then dies on startup
+  # still fails the gate here.
   gui-build:
     name: Qt6 GUI build (${{ matrix.project }})
     runs-on: ubuntu-latest
@@ -170,8 +183,10 @@ jobs:
         include:
           - project: diskmap
             smoke_arg: src
+            gui_binary: build/gui/src/gui/diskmap-gui
           - project: loglens
             smoke_arg: tests/data/sample.log
+            gui_binary: build/gui/src/gui/loglens-gui
 
     steps:
       - name: Checkout
@@ -182,13 +197,22 @@ jobs:
       - name: Install Qt6
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qt6-base-dev
+          sudo apt-get install -y --no-install-recommends qt6-base-dev qmake6
 
+      # Each project builds with its own system: loglens on CMake, diskmap on
+      # qmake. That split is deliberate — it gives each of ici's two build
+      # adapters a real project rather than a fixture.
       - name: Configure and build
         working-directory: ${{ matrix.project }}
         run: |
-          cmake -S src/gui -B src/gui/build -DCMAKE_BUILD_TYPE=Release
-          cmake --build src/gui/build -j
+          set -euo pipefail
+          if [ -f CMakeLists.txt ]; then
+            cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release
+            cmake --build build/gui --parallel
+          else
+            mkdir -p build/gui
+            cd build/gui && qmake6 ../../${{ matrix.project }}.pro && make -j"$(nproc)"
+          fi
 
       # Runs the real binary headlessly against a known directory, so a GUI that
       # links but crashes on startup or on its first scan still fails the gate.
@@ -198,7 +222,7 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: |
           set -euo pipefail
-          ./src/gui/build/${{ matrix.project }}-gui "$PWD/${{ matrix.smoke_arg }}" &
+          ./${{ matrix.gui_binary }} "$PWD/${{ matrix.smoke_arg }}" &
           pid=$!
           sleep 8
           if ! kill -0 "$pid" 2>/dev/null; then
