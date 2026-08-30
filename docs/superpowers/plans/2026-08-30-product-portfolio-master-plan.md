@@ -275,6 +275,13 @@
 먼저 정한 뒤, rescan race 테스트를 D2에서 추가한다. T0-4의 안정적인 탐색 테스트는 이
 미구현 동작을 초록불로 위장하지 않는다.
 
+D1 입력으로 보존할 예정 실패 테스트의 이름과 기대는
+`rescanCannotDisplayAnOlderGeneration`이다. scan A가 실행 중인 상태에서 scan B를 요청하고,
+B의 root가 표시된 뒤 A의 completion을 전달했을 때 `currentNode()->name`과 breadcrumb가
+B를 유지해야 한다. 현재 구현은 실행 중인 두 번째 `scanPath()`를 거부하므로 이 테스트를
+지금 활성화하면 실패한다. D2에서 cancellation/rescan API와 generation guard를 함께 만든
+뒤에만 활성화한다.
+
 `FsNode`에 cleanup과 정확한 size 계산에 필요한 사실을 보존한다.
 
 - canonical/display path
