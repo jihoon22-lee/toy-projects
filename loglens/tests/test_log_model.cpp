@@ -37,6 +37,7 @@ class TestLogModel : public QObject {
 private slots:
     void appendWithoutFilterInsertsAtTheEnd();
     void appendWithFilterInsertsOnlyMatches();
+    void appendWithFilterPreservesBackingIndexes();
     void appendThatMatchesNothingEmitsNoInsert();
     void resetClearsEverything();
     void updateVisibleRecordEmitsDataChanged();
@@ -84,6 +85,32 @@ void TestLogModel::appendWithFilterInsertsOnlyMatches() {
     QCOMPARE(spy.count(), 1);
     QCOMPARE(spy.at(0).at(1).toInt(), 1);
     QCOMPARE(spy.at(0).at(2).toInt(), 1);
+}
+
+void TestLogModel::appendWithFilterPreservesBackingIndexes() {
+    LogModel model;
+    QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::Fatal);
+
+    const loglens::Filter filter = errorsOnly();
+    model.setFilter(&filter);
+
+    const std::vector<loglens::LogRecord> incoming = {
+        makeRecord(Level::Debug, "svc", "leading non-match"),
+        makeRecord(Level::Error, "svc", "first match"),
+        makeRecord(Level::Fatal, "svc", "second match"),
+        makeRecord(Level::Info, "svc", "trailing non-match"),
+    };
+    model.appendRecords(incoming);
+
+    QCOMPARE(model.rowCount(), 2);
+    const loglens::LogRecord* first = model.recordAt(0);
+    const loglens::LogRecord* second = model.recordAt(1);
+    QVERIFY(first != nullptr);
+    QVERIFY(second != nullptr);
+    QVERIFY(first->level == Level::Error);
+    QCOMPARE(first->message, std::string("first match"));
+    QVERIFY(second->level == Level::Fatal);
+    QCOMPARE(second->message, std::string("second match"));
 }
 
 void TestLogModel::appendThatMatchesNothingEmitsNoInsert() {

@@ -73,8 +73,9 @@ void LogModel::appendRecords(const std::vector<loglens::LogRecord>& records) {
     const int first = static_cast<int>(visible_.size());
     std::vector<int> arriving;
     arriving.reserve(records.size());
-    for (const loglens::LogRecord& record : records) {
-        const int index = static_cast<int>(records_.size() + arriving.size());
+    for (std::size_t offset = 0; offset < records.size(); ++offset) {
+        const loglens::LogRecord& record = records[offset];
+        const int index = static_cast<int>(records_.size() + offset);
         if (!filter_ || filter_->matches(record)) {
             arriving.push_back(index);
         }
