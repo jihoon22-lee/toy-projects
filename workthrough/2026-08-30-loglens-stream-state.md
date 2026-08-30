@@ -52,6 +52,8 @@ auto eof = assembler.flush();  // one-shot CLI's explicit EOF policy
 - `loglens/src/gui/main_window.cpp` / `include/.../main_window.hpp`
   - 익명 `parseLines`를 삭제하고 open/follow 모두 같은 assembler를 사용한다.
   - generation 변경 시 assembler와 model을 함께 reset한다.
+  - generation 변경 직후 파일 open이 실패해도 다음 retry가 stale state를 재사용하지 않도록
+    parser/model을 먼저 폐기한다.
 - `loglens/src/gui/log_model.cpp` / `include/.../log_model.hpp`
   - continuation `Extend`를 기존 row의 `dataChanged`로 반영한다.
   - filter 결과가 바뀌는 extension은 올바른 insert/remove model signal을 낸다.
@@ -85,4 +87,7 @@ TEM: 4.14 / 5.0, line 77.2%, func 85.8%, branch 63.0%
 - Qt shell 자체의 MainWindow/timer 테스트와 Qt 5/Qt 6 matrix는 T0-3/T0-5에서
   별도 milestone으로 진행한다.
 
-Implementation commit: `81e9c2d fix(loglens): preserve parser state across file polls`
+Implementation commits:
+
+- `81e9c2d fix(loglens): preserve parser state across file polls`
+- `eb58302 fix(loglens): reset follow state after failed rotation`
