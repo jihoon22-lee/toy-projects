@@ -87,6 +87,12 @@ private:
     std::uint64_t generation_ = 0;
     FileIdentity identity_;
 
+    SourceChunk initialChunk() const;
+#ifndef _WIN32
+    SourceChunk pollPosixChunk();
+#else
+    SourceChunk pollPortableChunk();
+#endif
     SourceChange detectRestart(const FileIdentity& identity, std::uint64_t size);
 };
 

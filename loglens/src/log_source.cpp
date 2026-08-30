@@ -102,6 +102,14 @@ std::size_t FileTailer::restarts() const { return restarts_; }
 
 std::uint64_t FileTailer::generation() const { return generation_; }
 
+SourceChunk FileTailer::initialChunk() const {
+    SourceChunk out;
+    out.generation = generation_;
+    out.position = offset_;
+    out.identity = identity_;
+    return out;
+}
+
 SourceChange FileTailer::detectRestart(const FileIdentity& identity, std::uint64_t size) {
     if (identity_.valid && identity.valid && identity_ != identity) {
         identity_ = identity;
@@ -122,13 +130,9 @@ SourceChange FileTailer::detectRestart(const FileIdentity& identity, std::uint64
     return SourceChange::None;
 }
 
-SourceChunk FileTailer::pollChunk() {
-    SourceChunk out;
-    out.generation = generation_;
-    out.position = offset_;
-    out.identity = identity_;
-
 #ifndef _WIN32
+SourceChunk FileTailer::pollPosixChunk() {
+    SourceChunk out = initialChunk();
     const int rawDescriptor = ::open(path_.c_str(), readOnlyFlags());
     if (rawDescriptor < 0) {
         const int value = errno;
@@ -200,7 +204,11 @@ SourceChunk FileTailer::pollChunk() {
     }
     offset_ = start + static_cast<std::uint64_t>(out.bytes.size());
     out.position = offset_;
+    return out;
+}
 #else
+SourceChunk FileTailer::pollPortableChunk() {
+    SourceChunk out = initialChunk();
     std::error_code statusError;
     const fs::file_status status = fs::status(path_, statusError);
     if (statusError) {
@@ -252,8 +260,16 @@ SourceChunk FileTailer::pollChunk() {
                                 true);
         return out;
     }
-#endif
     return out;
+}
+#endif
+
+SourceChunk FileTailer::pollChunk() {
+#ifndef _WIN32
+    return pollPosixChunk();
+#else
+    return pollPortableChunk();
+#endif
 }
 
 bool FileTailer::pollChunk(SourceChunk& out, std::string& error) {
