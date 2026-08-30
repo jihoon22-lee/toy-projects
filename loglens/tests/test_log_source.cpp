@@ -355,9 +355,6 @@ void testTailerMissingIsRetryableAndRecreateIsReplacement() {
     const std::uint64_t oldGeneration = tailer.generation();
     const std::size_t oldRestarts = tailer.restarts();
 
-    // Stage the replacement before unlinking so it necessarily has a distinct
-    // inode from the original pathname.
-    CHECK(writeFile(staging, newContent));
     std::error_code ec;
     fs::remove(target, ec);
     CHECK(!ec);
@@ -375,13 +372,16 @@ void testTailerMissingIsRetryableAndRecreateIsReplacement() {
     CHECK_EQ(tailer.generation(), oldGeneration);
     CHECK_EQ(tailer.restarts(), oldRestarts);
 
+    // Create the replacement only after unlinking. Some filesystems may reuse
+    // the just-freed inode immediately; the observed missing interval must
+    // still force a new generation independently of identity reuse.
+    CHECK(writeFile(staging, newContent));
     fs::rename(staging, target, ec);
     CHECK(!ec);
     const SourceChunk recreated = tailer.pollChunk();
     checkSuccessfulChunk(recreated);
     CHECK_EQ(recreated.bytes, newContent);
     CHECK(recreated.identity.valid);
-    CHECK(recreated.identity != before.identity);
     CHECK_EQ(recreated.change, SourceChange::Replaced);
     CHECK(recreated.generation_changed);
     CHECK_EQ(recreated.generation, oldGeneration + 1);

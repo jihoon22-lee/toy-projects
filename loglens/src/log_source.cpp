@@ -111,6 +111,18 @@ SourceChunk FileTailer::initialChunk() const {
 }
 
 SourceChange FileTailer::detectRestart(const FileIdentity& identity, std::uint64_t size) {
+    if (recovery_pending_) {
+        if (identity.valid) {
+            identity_ = identity;
+        }
+        offset_ = 0;
+        if (!recovery_restart_started_) {
+            ++restarts_;
+            ++generation_;
+            recovery_restart_started_ = true;
+        }
+        return SourceChange::Replaced;
+    }
     if (identity_.valid && identity.valid && identity_ != identity) {
         identity_ = identity;
         offset_ = 0;
@@ -266,10 +278,19 @@ SourceChunk FileTailer::pollPortableChunk() {
 
 SourceChunk FileTailer::pollChunk() {
 #ifndef _WIN32
-    return pollPosixChunk();
+    SourceChunk out = pollPosixChunk();
 #else
-    return pollPortableChunk();
+    SourceChunk out = pollPortableChunk();
 #endif
+    if (out.ok()) {
+        recovery_pending_ = false;
+        recovery_restart_started_ = false;
+    } else {
+        recovery_pending_ = true;
+        recovery_restart_started_ =
+            recovery_restart_started_ || out.generation_changed;
+    }
+    return out;
 }
 
 bool FileTailer::pollChunk(SourceChunk& out, std::string& error) {

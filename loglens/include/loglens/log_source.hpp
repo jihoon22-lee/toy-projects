@@ -86,6 +86,10 @@ private:
     std::size_t restarts_ = 0;
     std::uint64_t generation_ = 0;
     FileIdentity identity_;
+    // A successful read after any unavailable/error interval is a new source
+    // generation even if the filesystem immediately reuses the old inode.
+    bool recovery_pending_ = false;
+    bool recovery_restart_started_ = false;
 
     SourceChunk initialChunk() const;
 #ifndef _WIN32
