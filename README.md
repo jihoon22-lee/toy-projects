@@ -59,6 +59,19 @@ ici 0.6.0 은 어댑터를 둘 갖는다. **각각 실물 프로젝트 하나씩
 6개 중 5개만 세고 있었다.** 픽스처는 Qt 테스트만 있어서 다른 경로로 구제되는 바람에 이걸
 드러내지 못했다.
 
+### diskmap D1 identity metadata — Slice 1
+
+diskmap은 이제 파일·디렉터리·심볼릭 링크와 링크 대상, 하드 링크를 서로 혼동하지 않도록
+물리적 identity와 메타데이터를 보존한다. 사용자는 이후 탐색·정리 기능에서 “링크 자체”와
+“대상 파일”을 구분하고, 권한 오류로 불완전한 디렉터리를 확정된 용량처럼 보지 않게 된다.
+
+개발자 관점에서는 `RealFsSource`가 POSIX `lstat`/`stat` 결과와 `*_known` 플래그를
+`DirEntry`에 담고, scanner가 full path와 함께 `FsNode`로 전달한다. listing/iterator 오류는
+노드를 `complete=false`로 남기며, stat의 `metadata.logical_size`와 자식 합계인
+`FsNode::size`는 별도 값이다. 현재 Slice 1의 검증 범위는 Qt5·Qt6 전체 qmake 빌드와 모든
+`make check`이며, symlink cycle 방문 집합·hard-link 중복 제거·path abstraction은 다음
+Slice 2의 범위다.
+
 ### GUI 는 빌드되고 테스트된다
 
 Qt 셸을 `src/` 밖에 두면 "검증할 필요 없는 코드" 라는 뜻이 되어버리므로 `src/gui/` 에 둔다.
