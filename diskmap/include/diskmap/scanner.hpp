@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <string>
 #include <vector>
@@ -12,7 +13,11 @@
 namespace diskmap {
 
 struct ScanOptions {
-    int max_depth = -1; // negative means unlimited
+    // Negative means unlimited. A directory pruned by a finite limit remains
+    // visible but is marked incomplete, so storage totals cannot look exact.
+    int max_depth = -1;
+    // Controls descendants. The explicitly selected root is always
+    // dereferenced, matching ordinary path argument semantics.
     bool follow_symlinks = false;
     std::uint64_t min_size = 0; // files smaller than this are skipped
 };
@@ -26,11 +31,12 @@ struct ScanResult {
 
 using ProgressFn = std::function<void(std::size_t dirs, std::size_t files)>;
 
-// Iteratively walks rootPath via source, honoring options, collecting every
-// listing error instead of stopping at the first one. Never recurses, so it
-// cannot stack-overflow on a deep tree.
+// Iteratively walks a directory root via source, honoring options and
+// collecting every listing error instead of stopping at the first one. A
+// regular-file root is returned as a complete one-node scan. Never recurses,
+// so it cannot stack-overflow on a deep tree.
 ScanResult scan(const FsSource& source,
-                 const std::string& rootPath,
+                 const std::filesystem::path& rootPath,
                  const ScanOptions& options,
                  const ProgressFn& progress = nullptr);
 

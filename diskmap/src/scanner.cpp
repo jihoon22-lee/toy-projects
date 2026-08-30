@@ -1,5 +1,7 @@
 #include "diskmap/scanner.hpp"
 
+#include <filesystem>
+#include <set>
 #include <utility>
 
 namespace diskmap {
@@ -7,25 +9,27 @@ namespace diskmap {
 namespace {
 
 struct WorkItem {
-    std::string path;
+    std::filesystem::path path;
     int depth = 0;
     FsNode* node = nullptr;
 };
 
-std::string lastPathComponent(const std::string& path) {
-    std::string trimmed = path;
-    while (trimmed.size() > 1 && trimmed.back() == '/') {
-        trimmed.pop_back();
-    }
-    const std::size_t pos = trimmed.find_last_of('/');
-    return pos == std::string::npos ? trimmed : trimmed.substr(pos + 1);
-}
+using IdentityKey = std::pair<std::uint64_t, std::uint64_t>;
 
-std::string joinPath(const std::string& base, const std::string& name) {
-    if (base.empty()) {
-        return name;
+std::string lastPathComponent(const std::filesystem::path& path) {
+    const std::filesystem::path normalized = path.lexically_normal();
+    if (normalized.empty()) {
+        return std::string();
     }
-    return base.back() == '/' ? base + name : base + "/" + name;
+    const std::filesystem::path filename = normalized.filename();
+    if (!filename.empty()) {
+        return filename.string();
+    }
+    const std::filesystem::path parent = normalized.parent_path();
+    if (parent != normalized && !parent.filename().empty()) {
+        return parent.filename().string();
+    }
+    return normalized.root_path().string();
 }
 
 bool depthIsExpandable(int depth, int maxDepth) {
@@ -39,23 +43,119 @@ bool entrySkipped(const DirEntry& entry, const ScanOptions& options) {
     return !entry.is_dir && entry.size < options.min_size;
 }
 
-FsNode makeChildNode(const DirEntry& entry, const std::string& parentPath) {
+const FsMetadata& effectiveMetadata(const FsNode& node) {
+    return node.followed && node.has_target_metadata ? node.target_metadata : node.metadata;
+}
+
+void inspectRootSymlink(const FsSource& source,
+                        const std::filesystem::path& rootPath,
+                        ScanResult& result) {
+    result.root.followed = true;
+    result.root.target_metadata = source.inspect(rootPath, true);
+    result.root.has_target_metadata = result.root.target_metadata.complete;
+    result.root.is_dir = result.root.has_target_metadata
+                         && result.root.target_metadata.kind == FsKind::Directory;
+    result.root.complete = result.root.has_target_metadata;
+    result.root.error = result.root.target_metadata.error;
+    if (result.root.has_target_metadata) {
+        return;
+    }
+    if (result.root.error.empty()) {
+        result.root.error = "cannot inspect symlink target '" + rootPath.string() + "'";
+    }
+    result.errors.push_back(result.root.error);
+}
+
+bool inspectRoot(const FsSource& source,
+                 const std::filesystem::path& rootPath,
+                 ScanResult& result) {
+    const FsMetadata metadata = source.inspect(rootPath, false);
+    if (metadata.complete) {
+        result.root.metadata = metadata;
+        result.root.is_dir = metadata.kind == FsKind::Directory;
+        if (metadata.kind == FsKind::Symlink) {
+            inspectRootSymlink(source, rootPath, result);
+        }
+        return true;
+    }
+    if (!metadata.error.empty()) {
+        result.root.complete = false;
+        result.root.error = metadata.error;
+        result.errors.push_back(metadata.error);
+    }
+    return false;
+}
+
+void finalizeLeafRoot(ScanResult& result, const ProgressFn& progress) {
+    const FsMetadata& metadata = effectiveMetadata(result.root);
+    if (metadata.complete && metadata.kind == FsKind::RegularFile) {
+        result.root.size = metadata.logical_size;
+    }
+    ++result.files_scanned;
+    aggregateSizes(result.root);
+    aggregateStorage(result.root);
+    if (progress) {
+        progress(result.dirs_scanned, result.files_scanned);
+    }
+}
+
+FsNode makeChildNode(const DirEntry& entry, const std::filesystem::path& parentPath) {
     FsNode child;
     child.name = entry.name;
-    child.path = entry.path.empty() ? joinPath(parentPath, entry.name) : entry.path.string();
+    child.path = entry.path.empty() ? parentPath / std::filesystem::path(entry.name) : entry.path;
     child.is_dir = entry.is_dir;
     child.size = entry.is_dir ? 0 : entry.size;
     child.metadata = entry.metadata;
     child.has_target_metadata = entry.has_target_metadata;
     child.target_metadata = entry.target_metadata;
     child.followed = entry.is_symlink;
-    child.complete = entry.metadata.complete;
+    child.complete = entry.metadata.complete
+                     && (!entry.is_symlink
+                         || (entry.has_target_metadata && entry.target_metadata.complete));
     child.error = entry.metadata.error;
     if (entry.is_symlink && !entry.has_target_metadata) {
         child.complete = false;
         child.error = entry.target_metadata.error;
     }
     return child;
+}
+
+bool rememberDirectoryIdentity(FsNode& child,
+                               std::set<IdentityKey>& visited,
+                               ScanResult& result) {
+    const FileIdentity& identity = effectiveMetadata(child).identity;
+    if (child.followed && !identity.valid) {
+        child.complete = false;
+        child.error = "cannot safely follow directory symlink '" + child.path.string()
+                      + "': target identity is unavailable";
+        result.errors.push_back(child.error);
+        return false;
+    }
+    if (!identity.valid) {
+        return true;
+    }
+    const IdentityKey key{identity.device, identity.file};
+    if (!visited.insert(key).second) {
+        child.cycle_skipped = true;
+        return false;
+    }
+    return true;
+}
+
+void scheduleDirectoryPass(std::vector<FsNode>& children,
+                           bool followedPass,
+                           int childDepth,
+                           ScanResult& result,
+                           std::vector<WorkItem>& stack,
+                           std::set<IdentityKey>& visited) {
+    for (FsNode& child : children) {
+        if (!child.is_dir || child.followed != followedPass) {
+            continue;
+        }
+        if (rememberDirectoryIdentity(child, visited, result)) {
+            stack.push_back(WorkItem{child.path, childDepth, &child});
+        }
+    }
 }
 
 // Fills node.children from entries (skipping symlinks/undersized files per
@@ -66,7 +166,8 @@ void expandDirectory(WorkItem& item,
                       const std::vector<DirEntry>& entries,
                       const ScanOptions& options,
                       ScanResult& result,
-                      std::vector<WorkItem>& stack) {
+                      std::vector<WorkItem>& stack,
+                      std::set<IdentityKey>& visited) {
     item.node->children.reserve(entries.size());
     for (const DirEntry& entry : entries) {
         if (entrySkipped(entry, options)) {
@@ -77,17 +178,17 @@ void expandDirectory(WorkItem& item,
             ++result.files_scanned;
         }
     }
-    for (FsNode& child : item.node->children) {
-        if (child.is_dir) {
-            stack.push_back(WorkItem{child.path, item.depth + 1, &child});
-        }
-    }
+    // Prefer real directory entries to symlink aliases. This makes the stable
+    // lexical source order choose the canonical entry before an alias that
+    // resolves to the same identity.
+    scheduleDirectoryPass(item.node->children, false, item.depth + 1, result, stack, visited);
+    scheduleDirectoryPass(item.node->children, true, item.depth + 1, result, stack, visited);
 }
 
 } // namespace
 
 ScanResult scan(const FsSource& source,
-                 const std::string& rootPath,
+                 const std::filesystem::path& rootPath,
                  const ScanOptions& options,
                  const ProgressFn& progress) {
     ScanResult result;
@@ -97,6 +198,18 @@ ScanResult scan(const FsSource& source,
     result.root.metadata.kind = FsKind::Directory;
     result.root.metadata.complete = true;
 
+    const bool rootKindResolved = inspectRoot(source, rootPath, result);
+    if (rootKindResolved && !result.root.is_dir) {
+        finalizeLeafRoot(result, progress);
+        return result;
+    }
+
+    std::set<IdentityKey> visited;
+    const FileIdentity& rootIdentity = effectiveMetadata(result.root).identity;
+    if (rootIdentity.valid) {
+        visited.insert(IdentityKey{rootIdentity.device, rootIdentity.file});
+    }
+
     std::vector<WorkItem> stack;
     stack.push_back(WorkItem{rootPath, 0, &result.root});
 
@@ -105,6 +218,8 @@ ScanResult scan(const FsSource& source,
         stack.pop_back();
 
         if (!depthIsExpandable(item.depth, options.max_depth)) {
+            item.node->complete = false;
+            item.node->error = "scan depth limit reached";
             continue;
         }
 
@@ -118,7 +233,7 @@ ScanResult scan(const FsSource& source,
         }
         ++result.dirs_scanned;
 
-        expandDirectory(item, entries, options, result, stack);
+        expandDirectory(item, entries, options, result, stack, visited);
 
         if (progress) {
             progress(result.dirs_scanned, result.files_scanned);
@@ -126,6 +241,7 @@ ScanResult scan(const FsSource& source,
     }
 
     aggregateSizes(result.root);
+    aggregateStorage(result.root);
     return result;
 }
 

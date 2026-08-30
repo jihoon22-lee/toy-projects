@@ -10,7 +10,7 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 
 | 이름 | 설명 | 상태 |
 |---|---|---|
-| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · 7 tests |
+| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · identity-safe scan · 9 tests |
 | [loglens](loglens/) | 로그 뷰어 / 분석기 | CMake + Qt5/Qt6 GUI · 라이브 팔로우 · 10 tests |
 
 ## 공통 구조 규칙
@@ -59,18 +59,77 @@ ici 0.6.0 은 어댑터를 둘 갖는다. **각각 실물 프로젝트 하나씩
 6개 중 5개만 세고 있었다.** 픽스처는 Qt 테스트만 있어서 다른 경로로 구제되는 바람에 이걸
 드러내지 못했다.
 
-### diskmap D1 identity metadata — Slice 1
+### diskmap D1 identity-safe scan — Slice 2
 
-diskmap은 이제 파일·디렉터리·심볼릭 링크와 링크 대상, 하드 링크를 서로 혼동하지 않도록
+diskmap은 파일·디렉터리·심볼릭 링크와 링크 대상, 하드 링크를 서로 혼동하지 않도록
 물리적 identity와 메타데이터를 보존한다. 사용자는 이후 탐색·정리 기능에서 “링크 자체”와
 “대상 파일”을 구분하고, 권한 오류로 불완전한 디렉터리를 확정된 용량처럼 보지 않게 된다.
 
 개발자 관점에서는 `RealFsSource`가 POSIX `lstat`/`stat` 결과와 `*_known` 플래그를
-`DirEntry`에 담고, scanner가 full path와 함께 `FsNode`로 전달한다. listing/iterator 오류는
-노드를 `complete=false`로 남기며, stat의 `metadata.logical_size`와 자식 합계인
-`FsNode::size`는 별도 값이다. 현재 Slice 1의 검증 범위는 Qt5·Qt6 전체 qmake 빌드와 모든
-`make check`이며, symlink cycle 방문 집합·hard-link 중복 제거·path abstraction은 다음
-Slice 2의 범위다.
+`DirEntry`에 담고, scanner가 `std::filesystem::path`와 함께 `FsNode`로 전달한다.
+`follow_symlinks=true`인 디렉터리는 물리적 `FileIdentity` 방문 집합으로 cycle을 차단하며,
+이미 방문한 target은 노드로 남기되 다시 확장하지 않는다. target identity를 확인할 수 없는
+followed directory는 안전하게 `complete=false`와 오류를 남긴다. listing/iterator 오류도 같은
+방식으로 보존하고, stat의 `metadata.logical_size`와 자식 합계인 `FsNode::size`는 별도 값이다.
+
+명시적으로 선택한 root가 regular file이면 디렉터리로 열려고 실패하지 않고, complete한 한
+노드 scan으로 반환한다. 이 노드는 logical/allocated/reclaimable facts와 `files_scanned=1`을
+그대로 가진다. 선택한 root가 symlink이면 `follow_symlinks`와 무관하게 target을 dereference
+하며, target이 file이면 leaf로 남긴다. 이 옵션은 root 아래 descendants에만 적용된다. 깨진
+root symlink target은 root를 incomplete로 남기고 오류를 `ScanResult.errors`에도 포함한다.
+
+`FsNode::size`는 directory entry마다 logical bytes를 세고, `allocated_size`는 유효한 물리
+identity별로 한 번만 합산한다. `reclaimable_size`는 해당 subtree가 known hard-link reference를
+모두 소유할 때만 known으로 계산하며, symlink target alias는 소유 reference로 세지 않는다.
+불완전한 subtree·unknown allocation/link-count는 조용히 0으로 바꾸지 않고 aggregate의
+`*_known=false`로 전파한다. 유한한 `max_depth`로 잘린 directory도
+`complete=false`, `scan depth limit reached`로 남기므로 allocated/reclaimable total을
+확정값처럼 보이지 않게 한다. logical aggregate는 별도 known bit가 없으므로
+`uint64_t` overflow에서 최댓값으로 포화(saturate)한다. 따라서 cleanup 기능은 확정된 값과
+추정할 수 없는 값을 구분할 수 있다.
+
+D1 Slice 2의 검증은 fixed-identity fake source와 실제 POSIX temporary filesystem을 함께
+사용한다. 경로 component의 공백, cycle/back-edge, hard-link 중복·reclaimability, symlink
+alias, identity 없는 followed directory, allocation/link-count unknown 및 aggregate overflow를
+검증하는 9개 qmake test binary가 등록되어 있다. qmake의 static consumer에
+`PRE_TARGETDEPS`를 연결해 테스트가 최신 archive를 다시 링크하도록 했고, stale `.gcda`/`.gcno`
+혼입으로 coverage가 낮게 보이는 재현도 제거했다.
+
+2026-08-31 보수적 truncation 후속 커밋 전 로컬 실측은 Qt 5.15.18(`/usr/bin/qmake`)과
+Qt 6.10.2(`/usr/bin/qmake6`)에서
+전체 빌드와 `make check` 9/9가 각각 통과했다. 두 GUI headless smoke는 8초 동안 살아 있었고
+timeout 종료 코드 124는 의도한 확인 결과다. ici 0.6.0 release asset으로 실행한 verify는
+`Suite PASS`, 10 pass / 0 warn / 0 fail / 0 error / 2 skip, TEM 4.90,
+line 96.9% / function 97.9% / branch 85.2%, maximum complexity 14, duplication 2.1,
+duration 24.24초였다. 생성한 HTML은 180,624 bytes이며 외부 `src`/`href` 참조가 0개다.
+이후 `5ceb059`/`ebe3d86`에서 finite-depth truncation과 saturating logical aggregation을
+추가했다. 아래 candidate qmake-clean 검증이 이 커밋들 이후의 최신 ici 결과이며, 원격 PR
+CI·sticky HTML comment·Pages 응답은 아직 대기 중이다. PR에서 최신 결과를 재확인한 뒤에만
+병합한다.
+
+`6861b7a`/`2f56caf`에서는 regular-file root, root symlink dereference와 broken-target error
+전파를 추가했다. 이 커밋들 이후의 candidate qmake-clean verification은 아래에 기록했으며,
+remote verification은 대기 중이다.
+
+root semantics 후속 반영 뒤 최신 로컬 native 확인은 Qt 5.15.18(`/usr/bin/qmake`)과 Qt 6.10.2
+(`/usr/bin/qmake6`)에서 각각 full build target 및 `make check` 9/9 PASS였다. Qt5/Qt6 GUI
+offscreen smoke도 각각 8초 생존 후 기대된 timeout exit 124로 확인했다. 최종 full ici
+candidate는 아래와 같이 PASS했고, 원격 PR CI·sticky HTML comment·Pages 응답 검증은 아직 pending이다.
+
+`31d8b48`의 root inspection stage 분리 후 public ici complexity-only 검증도 PASS했으며,
+maximum cyclomatic 14 across 101 functions, 0 issues를 기록했다. 이는 아래 candidate
+qmake-clean 검증으로 대체되는 중간 확인이다.
+
+최종 local candidate ici qmake-clean branch는 `Suite PASS`, 10 pass / 0 warn / 0 fail /
+0 error / 2 skip, 9/9 tests, line 96.6% / function 98.0% / branch 85.0%, TEM 4.90,
+complexity 14 across 101 functions / 0 issues, duplication 2.0, sanitizer clean,
+duration 85.96초를 기록했다. capability inventory는 30 tools / 21 ready / 0 incomplete /
+9 unavailable, required `g++` ready, health `READY`였다. candidate JSON에는 test와 sanitize
+각각의 성공한 `/usr/bin/make clean` evidence가 포함됐고, tool snapshot도 렌더링됐다.
+HTML은 281,264 bytes이며 외부 `src`/`href` 참조가 0개다. 이 결과가 즉시 이전 public
+ici 0.6.0 complexity WARN-era 결과를 대체하며 새 ici freshness guard를 확인한다. 최종
+full ici local 검증은 완료됐고, toy remote PR CI·sticky HTML comment·Pages 응답 검증만
+아직 pending이다.
 
 ### GUI 는 빌드되고 테스트된다
 
@@ -314,3 +373,18 @@ mkdir -p ../gui-qt5 && cd ../gui-qt5
 
 경로를 주면 폴더 선택 대화상자를 건너뛰고 바로 스캔한다. 덕분에
 `QT_QPA_PLATFORM=offscreen` 으로 헤드리스 스모크 실행이 가능하고, CI 가 그렇게 쓴다.
+
+## CLI root scan
+
+CLI는 디렉터리뿐 아니라 regular file도 직접 받을 수 있다. 파일 root는 JSON에서
+`"is_dir":false`인 한 노드로 출력되며, logical size는 실행 시 파일 metadata에서 읽는다.
+root symlink는 항상 target을 확인하고, descendant symlink follow 여부는 scanner 옵션의
+의미를 따른다. 실제 파일 root smoke는 다음처럼 실행한다.
+
+```bash
+cd diskmap
+./build/gui/src/diskmap path/to/main.cpp --json
+```
+
+파일 크기는 source에 따라 달라지므로 예시 출력의 `size` 숫자를 고정된 fixture로 취급하지
+않는다. 깨진 root symlink는 JSON 출력과 함께 stderr 및 `ScanResult.errors`에 오류를 남긴다.

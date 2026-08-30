@@ -8,6 +8,8 @@ SUBDIRS = \
     test_fs_node.pro \
     test_fs_source.pro \
     test_scanner.pro \
+    test_scanner_safety.pro \
+    test_scanner_real_safety.pro \
     test_treemap.pro \
     test_treemap_widget.pro \
     test_main_window.pro

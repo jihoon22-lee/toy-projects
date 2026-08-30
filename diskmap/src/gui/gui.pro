@@ -16,3 +16,4 @@ HEADERS += \
     $$PWD/../../include/diskmap/gui/treemap_widget.hpp
 
 SOURCES += main_window.cpp treemap_widget.cpp
+PRE_TARGETDEPS += $$OUT_PWD/../libdiskmap_core.a

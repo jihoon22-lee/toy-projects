@@ -173,7 +173,11 @@ int main() {
             CHECK(subdirA != nullptr);
             if (subdirA) {
                 CHECK_EQ(subdirA->children.size(), static_cast<std::size_t>(0)); // never expanded
+                CHECK(!subdirA->complete);
+                CHECK_EQ(subdirA->error, std::string("scan depth limit reached"));
             }
+            CHECK(!result.root.allocated_size_known);
+            CHECK(!result.root.reclaimable_size_known);
         }
         {
             ScanOptions opts;
@@ -187,8 +191,12 @@ int main() {
                 CHECK(subsubdir != nullptr);
                 if (subsubdir) {
                     CHECK_EQ(subsubdir->children.size(), static_cast<std::size_t>(0)); // pruned
+                    CHECK(!subsubdir->complete);
+                    CHECK_EQ(subsubdir->error, std::string("scan depth limit reached"));
                 }
             }
+            CHECK(!result.root.allocated_size_known);
+            CHECK(!result.root.reclaimable_size_known);
         }
         {
             ScanOptions opts; // default max_depth = -1, unlimited

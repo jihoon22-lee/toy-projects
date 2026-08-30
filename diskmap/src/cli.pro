@@ -10,3 +10,4 @@ INCLUDEPATH += $$PWD/../include
 
 SOURCES += main.cpp
 LIBS += -L$$OUT_PWD -ldiskmap_core
+PRE_TARGETDEPS += $$OUT_PWD/libdiskmap_core.a

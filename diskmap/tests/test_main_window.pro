@@ -7,3 +7,6 @@ TARGET = test_main_window
 INCLUDEPATH += $$PWD/../include $$PWD
 SOURCES += test_main_window.cpp
 LIBS += -L$$OUT_PWD/../src/gui -ldiskmap_gui -L$$OUT_PWD/../src -ldiskmap_core
+PRE_TARGETDEPS += \
+    $$OUT_PWD/../src/gui/libdiskmap_gui.a \
+    $$OUT_PWD/../src/libdiskmap_core.a
