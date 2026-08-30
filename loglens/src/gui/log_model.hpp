@@ -2,6 +2,7 @@
 
 #include <QAbstractTableModel>
 
+#include <optional>
 #include <vector>
 
 #include "loglens/filter_expr.hpp"
@@ -25,6 +26,15 @@ public:
     // Passing nullptr clears the filter and shows everything.
     void setFilter(const loglens::Filter* filter);
 
+    // Appends records that arrived after the last poll. Rows that pass the
+    // current filter are announced as one contiguous insert at the end, which
+    // is always correct because appends never land in the middle.
+    void appendRecords(const std::vector<loglens::LogRecord>& records);
+
+    // Drops everything. Used when the source file is truncated or rotated,
+    // where the retained rows no longer correspond to anything on disk.
+    void resetRecords();
+
     const loglens::LogRecord* recordAt(int row) const;
     int totalCount() const;
 
@@ -36,6 +46,10 @@ public:
 private:
     std::vector<loglens::LogRecord> records_;
     std::vector<int> visible_;
+    // Held by value, not by pointer: appendRecords needs the predicate later,
+    // and the caller's optional<Filter> may be reassigned before then. A Filter
+    // is one shared_ptr, so copying it is cheap.
+    std::optional<loglens::Filter> filter_;
 
     void rebuildVisible(const loglens::Filter* filter);
 };
