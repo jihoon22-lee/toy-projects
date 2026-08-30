@@ -52,9 +52,13 @@ Production commit: `f3016db`.
   owned by that subtree; a subtree containing one reference of a multi-link
   file is therefore not marked reclaimable.
 - A followed symlink target is not treated as an owned hard-link reference.
-- Unknown allocation/link-count facts, incomplete descendants, and saturated
-  `uint64_t` arithmetic propagate through the `*_known` flags instead of being
-  silently reported as zero.
+- Unknown allocation/link-count facts and incomplete descendants propagate
+  through the `*_known` flags instead of being silently reported as zero.
+- A finite `max_depth` leaves each pruned directory visible but marks it
+  `complete=false` with `scan depth limit reached`; its allocated and
+  reclaimable aggregates therefore remain unknown.
+- Logical size has no separate known bit, so `uint64_t` overflow saturates at
+  `std::numeric_limits<uint64_t>::max()` instead of wrapping.
 
 ### 3. Contract and real-filesystem coverage
 
@@ -76,6 +80,20 @@ Static qmake consumers now declare the archive through `PRE_TARGETDEPS`, so a
 test binary is relinked when the static library changes. This closes the stale
 archive path that can otherwise leave old `.gcda` files paired with newer
 `.gcno` files and produce misleading coverage.
+
+### 5. Conservative truncation follow-up
+
+Test commit: `da2b8ba`; production commit: `eedd4ec`.
+
+- Added regression coverage for finite-depth pruning and logical-size overflow.
+- The scanner now records the exact `scan depth limit reached` error on every
+  directory it cannot expand because of `max_depth`.
+- Physical totals become unknown when that incomplete subtree is present, while
+  logical totals remain conservative through saturating addition.
+
+The native and ici measurements below were collected before this follow-up.
+They are retained as the Slice 2 baseline; full re-verification after these
+commits and all remote PR/report checks are still pending.
 
 ## Code Examples
 
@@ -120,7 +138,8 @@ this long-running GUI smoke check.
 
 ### ici verification
 
-Using the public ici 0.6.0 release asset:
+Using the public ici 0.6.0 release asset before the conservative truncation
+follow-up:
 
 ```text
 Suite PASS

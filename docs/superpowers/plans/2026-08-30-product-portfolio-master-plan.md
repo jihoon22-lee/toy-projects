@@ -379,7 +379,10 @@ followed-directory cycle/back-edge를 노드로 보존하면서 확장을 차단
 없는 followed directory는 `complete=false`와 오류로 남긴다. logical bytes는 directory entry마다
 계산하고, allocated bytes는 유효 identity별로 deduplicate하며, reclaimable bytes는 subtree가
 known hard-link reference를 모두 소유할 때만 확정한다. symlink target alias는 소유 reference로
-세지 않고, incomplete/unknown 및 `uint64_t` overflow는 `*_known=false`로 전파한다.
+세지 않고, incomplete/unknown은 `*_known=false`로 전파한다. 유한한 `max_depth`로 잘린
+directory도 `complete=false`와 `scan depth limit reached`를 남겨 physical aggregate를
+unknown으로 만든다. logical aggregate는 별도 known bit가 없으므로 `uint64_t` overflow에서
+최댓값으로 포화한다.
 
 - [x] fixed-identity `FakeFsSource`가 공백이 있는 nested path, cycle, hard-link ownership,
   symlink alias, unknown allocation/link-count와 overflow를 검증한다.
@@ -388,7 +391,8 @@ known hard-link reference를 모두 소유할 때만 확정한다. symlink targe
 - [x] qmake static consumer에 `PRE_TARGETDEPS`를 연결해 test binary가 최신 archive를
   다시 링크하도록 하고 stale `.gcda`/`.gcno` coverage 혼입을 막는다.
 
-**Slice 2 로컬 실측:** Qt 5.15.18(`/usr/bin/qmake`)과 Qt 6.10.2(`/usr/bin/qmake6`)에서
+**Slice 2 로컬 실측(보수적 truncation 후속 커밋 전 기준):** Qt 5.15.18
+(`/usr/bin/qmake`)과 Qt 6.10.2(`/usr/bin/qmake6`)에서
 fresh full build와 `make check` 9/9가 각각 통과했다. 두 GUI는
 `QT_QPA_PLATFORM=offscreen` smoke에서 8초 동안 살아 있었고 timeout exit 124는 기대한
 결과다. public ici 0.6.0 release asset verify는 `Suite PASS`, 10 pass / 0 warn / 0 fail /
@@ -397,11 +401,11 @@ fresh full build와 `make check` 9/9가 각각 통과했다. 두 GUI는
 참조가 0개다. 첫 coverage 실행은 stale `.gcda` stamp 1417858375와 `.gcno` stamp
 1418147347가 섞여 scanner.cpp가 0%로 집계되어 line 73.4% / function 83.3% / branch
 60.2%로 실패했으며, `PRE_TARGETDEPS` relink 후 stamps가 1418147347로 일치하고 위 PASS
-결과를 얻었다.
-
-원격 PR의 CI, 실제 sticky HTML comment와 Pages `text/html` 응답 검증은 아직 남아 있다.
-이 브랜치의 로컬 결과만으로 Slice 2의 원격 완료 또는 병합을 주장하지 않으며, toy CI의
-`Merge Gate`가 모든 matrix와 report 검증을 통과한 뒤에만 병합한다.
+결과를 얻었다. 이후 `da2b8ba`/`eedd4ec`에서 finite `max_depth`로 잘린 directory를
+`complete=false` 및 `scan depth limit reached`로 표시하고, logical size 합산을
+`uint64_t` 최댓값에서 포화하도록 보수적 truncation semantics를 추가했다. 이 후속 커밋
+이후의 최종 full native/ici 검증과 원격 PR CI, sticky HTML comment 및 Pages 응답 검증은
+아직 pending이며, 최신 결과를 확인한 뒤에만 Slice 2를 원격 완료로 표시한다.
 
 ### D2. cancellable scanner와 stale result 방지
 

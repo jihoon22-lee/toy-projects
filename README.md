@@ -75,9 +75,12 @@ followed directory는 안전하게 `complete=false`와 오류를 남긴다. list
 `FsNode::size`는 directory entry마다 logical bytes를 세고, `allocated_size`는 유효한 물리
 identity별로 한 번만 합산한다. `reclaimable_size`는 해당 subtree가 known hard-link reference를
 모두 소유할 때만 known으로 계산하며, symlink target alias는 소유 reference로 세지 않는다.
-불완전한 subtree·unknown allocation/link-count와 `uint64_t` overflow는 조용히 0으로 바꾸지
-않고 aggregate의 `*_known` 상태를 유지한다. 따라서 cleanup 기능은 확정된 값과 추정할 수 없는
-값을 구분할 수 있다.
+불완전한 subtree·unknown allocation/link-count는 조용히 0으로 바꾸지 않고 aggregate의
+`*_known=false`로 전파한다. 유한한 `max_depth`로 잘린 directory도
+`complete=false`, `scan depth limit reached`로 남기므로 allocated/reclaimable total을
+확정값처럼 보이지 않게 한다. logical aggregate는 별도 known bit가 없으므로
+`uint64_t` overflow에서 최댓값으로 포화(saturate)한다. 따라서 cleanup 기능은 확정된 값과
+추정할 수 없는 값을 구분할 수 있다.
 
 D1 Slice 2의 검증은 fixed-identity fake source와 실제 POSIX temporary filesystem을 함께
 사용한다. 경로 component의 공백, cycle/back-edge, hard-link 중복·reclaimability, symlink
@@ -86,14 +89,16 @@ alias, identity 없는 followed directory, allocation/link-count unknown 및 agg
 `PRE_TARGETDEPS`를 연결해 테스트가 최신 archive를 다시 링크하도록 했고, stale `.gcda`/`.gcno`
 혼입으로 coverage가 낮게 보이는 재현도 제거했다.
 
-2026-08-31 로컬 실측은 Qt 5.15.18(`/usr/bin/qmake`)과 Qt 6.10.2(`/usr/bin/qmake6`)에서
+2026-08-31 보수적 truncation 후속 커밋 전 로컬 실측은 Qt 5.15.18(`/usr/bin/qmake`)과
+Qt 6.10.2(`/usr/bin/qmake6`)에서
 전체 빌드와 `make check` 9/9가 각각 통과했다. 두 GUI headless smoke는 8초 동안 살아 있었고
 timeout 종료 코드 124는 의도한 확인 결과다. ici 0.6.0 release asset으로 실행한 verify는
 `Suite PASS`, 10 pass / 0 warn / 0 fail / 0 error / 2 skip, TEM 4.90,
 line 96.9% / function 97.9% / branch 85.2%, maximum complexity 14, duplication 2.1,
 duration 24.24초였다. 생성한 HTML은 180,624 bytes이며 외부 `src`/`href` 참조가 0개다.
-이 브랜치의 원격 PR CI·sticky HTML comment·Pages 응답 검증은 아직 대기 중이며, PR에서
-같은 결과를 재확인한 뒤에만 병합한다.
+이후 `da2b8ba`/`eedd4ec`에서 finite-depth truncation과 saturating logical aggregation을
+추가했으므로, 이 커밋들 이후의 전체 native/ici 재검증과 원격 PR CI·sticky HTML comment·Pages
+응답 검증은 아직 대기 중이다. PR에서 최신 결과를 재확인한 뒤에만 병합한다.
 
 ### GUI 는 빌드되고 테스트된다
 
