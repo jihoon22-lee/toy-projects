@@ -1,5 +1,12 @@
 # Qt 셸 테스트와 Qt 버전 탐지 (toy-projects)
 
+> **상태 보정:** 이 문서는
+> `2026-08-30-product-portfolio-master-plan.md`의 T0 세부 입력이다. 아래 stateless
+> `parseLines(vector<string>)` 구현은 poll마다 line number와 continuation/partial-line state를
+> 잃으므로 그대로 구현하지 않는다. 마스터 T0-2의 stateful `RecordAssembler` 계약이 우선한다.
+> Qt 5.15는 현재 설치돼 있으므로 미검증으로 남기지 않고 Qt 6 탐색을 명시적으로 비활성화해
+> 양 major를 실측한다.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** `loglens` 와 `diskmap` 의 Qt 셸에 단위 테스트를 붙여 `loglens` 의 커버리지 임계값을 되돌리고, 빌드가 설치된 Qt 버전을 따라가게 한다.
@@ -23,117 +30,63 @@
 
 ---
 
-### Task 1: `parseLines` 를 core 로
+### Task 1: poll 경계를 보존하는 stateful record assembler
 
 **Files:**
 - Modify: `loglens/include/loglens/log_parser.hpp`
 - Modify: `loglens/src/log_parser.cpp`
-- Modify: `loglens/src/gui/main_window.cpp:26-46` (익명 네임스페이스 제거)
+- Modify: `loglens/include/loglens/log_source.hpp`
+- Modify: `loglens/src/log_source.cpp`
+- Modify: `loglens/src/main.cpp`
+- Modify: `loglens/src/gui/main_window.cpp`
 - Test: `loglens/tests/test_log_parser.cpp`
+- Test: `loglens/tests/test_log_source.cpp`
 
-**Interfaces:**
-- Consumes: 기존 `loglens::parseLine`, `loglens::isContinuation`
-- Produces: `std::vector<LogRecord> loglens::parseLines(const std::vector<std::string>& lines)`
+**Consumes:** 기존 `parseLine`, `isContinuation`, `FileTailer`
 
-`main_window.cpp` 의 익명 네임스페이스에 **Qt 를 한 줄도 안 쓰는 파서 로직**이 있다. 스택 트레이스 같은 연속 줄을 앞 레코드에 접어 넣는 실제 규칙인데, 익명 네임스페이스라 테스트가 이름을 부를 수 없다.
+**Produces:** physical line number, partial bytes와 previous-record extension을 poll 사이에 보존하는
+`RecordAssembler` 및 명시적 record delta contract. 최종 이름과 타입은 failing test에서 필요한
+상태를 먼저 확인한 뒤 정한다.
 
-- [ ] **Step 1: Write the failing test**
+익명 `parseLines`를 그대로 core로 옮기면 두 결함을 고정한다. 매 poll마다 line number가 1로
+돌아가고, 다음 poll의 stack frame이 이전 poll의 record에 붙지 않는다. `std::getline`이 newline
+없는 마지막 조각을 읽은 뒤 offset을 끝으로 옮기는 문제도 함께 다룬다.
 
-`loglens/tests/test_log_parser.cpp` 끝에 추가하고, 파일의 `main()` 이 호출하는 목록에 새 함수를 넣는다.
-
-```cpp
-static void testParseLinesFoldsContinuations() {
-    const std::vector<std::string> lines = {
-        "2026-08-26T04:15:22.100Z ERROR [api] request failed",
-        "    at Foo.bar(Foo.java:42)",
-        "    at Baz.qux(Baz.java:7)",
-        "2026-08-26T04:15:22.200Z INFO  [api] next request",
-    };
-
-    const std::vector<loglens::LogRecord> records = loglens::parseLines(lines);
-
-    // Four lines, two records: the two indented frames belong to the error
-    // above them, not to rows of their own.
-    CHECK_EQ(records.size(), static_cast<std::size_t>(2));
-    CHECK(records[0].message.find("Foo.java:42") != std::string::npos);
-    CHECK(records[0].message.find("Baz.java:7") != std::string::npos);
-    CHECK_EQ(records[1].level, loglens::Level::Info);
-}
-
-static void testParseLinesKeepsALeadingContinuation() {
-    // A continuation with nothing above it has no record to fold into. Dropping
-    // it would lose input, so it becomes a record of its own.
-    const std::vector<loglens::LogRecord> records =
-        loglens::parseLines({"    at Foo.bar(Foo.java:42)"});
-
-    CHECK_EQ(records.size(), static_cast<std::size_t>(1));
-}
-
-static void testParseLinesNumbersFromOne() {
-    const std::vector<loglens::LogRecord> records =
-        loglens::parseLines({"first", "second"});
-
-    CHECK_EQ(records.size(), static_cast<std::size_t>(2));
-    CHECK_EQ(records[0].line_number, static_cast<std::size_t>(1));
-    CHECK_EQ(records[1].line_number, static_cast<std::size_t>(2));
-}
-
-static void testParseLinesOnEmptyInput() {
-    CHECK(loglens::parseLines({}).empty());
-}
-```
-
-- [ ] **Step 2: Run the test to verify it fails**
+- [ ] **Step 1: write failing parser-state tests**
+  - initial batch의 두 record가 physical line 1/2를 가진다.
+  - 두 번째 `consume`은 line 3부터 계속된다.
+  - 첫 poll의 error record와 두 번째 poll의 stack frame이 하나의 record가 된다.
+  - source 첫 줄의 continuation은 유실되지 않는다.
+  - reset/generation change 뒤 line과 continuation state가 명시된 초기값으로 돌아간다.
+- [ ] **Step 2: write failing partial-line tests**
+  - newline 없는 `"part"` 뒤 `"ial\n"`이 들어오면 `"partial"` 한 줄만 나온다.
+  - partial bytes는 rotation/truncation 때 이전 generation record로 섞이지 않는다.
+  - explicit EOF/flush 정책 없이 미완성 조각을 완성 record로 발표하지 않는다.
+- [ ] **Step 3: design a delta contract before implementation**
+  - 새 record append와 이전 record continuation extension을 구분한다.
+  - GUI model과 CLI vector가 같은 delta를 적용할 수 있어야 한다.
+  - assembler가 이미 UI에 넘긴 record의 dangling pointer를 보관하지 않는다.
+- [ ] **Step 4: implement the smallest stateful core**
+  - next physical line, partial bytes, generation과 continuation state를 소유한다.
+  - FileTailer는 complete line과 pending bytes의 경계를 보존한다.
+  - parser format 선택을 호출마다 임의로 바꾸지 않는다.
+- [ ] **Step 5: remove duplicated GUI/CLI folding**
+  - GUI 익명 `parseLines`와 CLI `appendLine`을 제거한다.
+  - initial open과 follow poll이 같은 pipeline을 사용한다.
+- [ ] **Step 6: run native and ici tests**
 
 ```bash
-cd loglens && cmake -S . -B build/check -DCMAKE_BUILD_TYPE=Debug && cmake --build build/check --parallel
-```
-Expected: 컴파일 실패 — `loglens::parseLines` 가 없다
-
-- [ ] **Step 3: Move the function into the parser**
-
-`loglens/include/loglens/log_parser.hpp` 에 선언을 더한다. `#include <vector>` 를 상단에 반영한다.
-
-```cpp
-// Parses a batch, folding continuation lines into the record above them so a
-// stack trace stays attached to the message that produced it instead of
-// becoming orphan rows. Line numbers start at 1.
-std::vector<LogRecord> parseLines(const std::vector<std::string>& lines);
+cd loglens
+cmake -S . -B build/check -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/check --parallel
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/check --output-on-failure
+QT_QPA_PLATFORM=offscreen ../../ici/dist/ici.pyz verify
 ```
 
-`loglens/src/log_parser.cpp` 끝에 정의를 옮긴다.
-
-```cpp
-std::vector<LogRecord> parseLines(const std::vector<std::string>& lines) {
-    std::vector<LogRecord> records;
-    records.reserve(lines.size());
-    for (std::size_t i = 0; i < lines.size(); ++i) {
-        if (isContinuation(lines[i]) && !records.empty()) {
-            records.back().message += "\n" + lines[i];
-            records.back().raw += "\n" + lines[i];
-            continue;
-        }
-        records.push_back(parseLine(lines[i], Format::Auto, i + 1));
-    }
-    return records;
-}
-```
-
-`loglens/src/gui/main_window.cpp` 에서 익명 네임스페이스의 `parseLines` 정의를 지운다. `kBucketMs` 는 남긴다. 호출부 두 곳(`openPath`, `pollSource`)을 `loglens::parseLines(lines)` 로 바꾼다.
-
-- [ ] **Step 4: Run the tests to verify they pass**
+- [ ] **Step 7: commit**
 
 ```bash
-cd loglens && cmake --build build/check --parallel && QT_QPA_PLATFORM=offscreen ctest --test-dir build/check --output-on-failure
-```
-Expected: 8/8 통과
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add loglens/include/loglens/log_parser.hpp loglens/src/log_parser.cpp \
-        loglens/src/gui/main_window.cpp loglens/tests/test_log_parser.cpp
-git commit -m "refactor(loglens): move batch parsing into the parser"
+git commit -m "fix(loglens): preserve parser state across file polls"
 ```
 
 ---
@@ -675,7 +628,7 @@ QMAKE=$(command -v qmake6 || command -v qmake)
 "$QMAKE" ../../diskmap.pro && make -j"$(nproc)"
 ```
 
-- [ ] **Step 5: Verify under Qt 6, then under Qt 5 if it is installed**
+- [ ] **Step 5: Verify under the installed Qt 6 and Qt 5 toolchains**
 
 ```bash
 cd loglens && rm -rf build/check && cmake -S . -B build/check -DCMAKE_BUILD_TYPE=Debug \
@@ -684,15 +637,16 @@ cd loglens && rm -rf build/check && cmake -S . -B build/check -DCMAKE_BUILD_TYPE
 ```
 Expected: 통과, 그리고 configure 로그에 잡힌 Qt 버전이 6 으로 보인다
 
-Qt 5 가 설치돼 있으면(`pkg-config --exists Qt5Widgets`) 강제로 한 번 더 돌린다.
+현재 설치된 Qt 5를 강제로 한 번 더 돌린다. Qt 6이 먼저 발견되지 않게 명시적으로 탐색을
+비활성화하고 configure log의 `QT_VERSION_MAJOR`와 실제 link target을 확인한다.
 
 ```bash
 cd loglens && rm -rf build/qt5 \
-  && cmake -S . -B build/qt5 -DCMAKE_BUILD_TYPE=Debug -DQT_NO_PACKAGE_VERSION_CHECK=ON -DCMAKE_PREFIX_PATH=/usr/lib/x86_64-linux-gnu/cmake/Qt5 \
+  && cmake -S . -B build/qt5 -DCMAKE_BUILD_TYPE=Debug -DCMAKE_DISABLE_FIND_PACKAGE_Qt6=ON \
   && cmake --build build/qt5 --parallel \
   && QT_QPA_PLATFORM=offscreen ctest --test-dir build/qt5 --output-on-failure
 ```
-설치돼 있지 않으면 **"Qt 5 미검증" 이라고 커밋 메시지와 README 에 명시한다.** 안 돌려본 것을 된다고 적지 않는다.
+diskmap도 `/usr/bin/qmake`가 보고하는 Qt 5.15로 별도 shadow build와 `make check`를 실행한다.
 
 - [ ] **Step 6: Commit**
 
@@ -807,7 +761,9 @@ Task 3 Step 3 과 Task 4 Step 3 은 **조건부 스텝**이다. 셸의 실제 �
 
 **Task 6 Step 2 가 이 계획의 성패다.** 임계값을 되돌리는 게 목적인데, 실측이 못 미치면 되돌리지 못한다. 그 경우 도달값을 적고 무엇이 남았는지 남기는 것까지가 이 태스크다 — **못 올렸는데 올렸다고 적는 것이 유일한 실패다.**
 
-**Qt 5 검증은 설치 여부에 달려 있다.** `sudo apt-get install -y qtbase5-dev qt5-qmake qtbase5-dev-tools` 가 필요하고 이 계획은 그걸 실행할 수 없다. 설치되지 않은 채로 끝나면 "Qt 5 미검증" 을 명시한다.
+**Qt 5.15와 Qt 6.10이 모두 현재 설치돼 있다.** 두 major의 configure/build/test evidence가
+없으면 Task 5는 완료가 아니다. 환경이 나중에 바뀌면 실제 미설치 capability를 report에 남기고,
+검증하지 않은 major를 지원 완료로 적지 않는다.
 
 ## 이 계획에 없는 것
 

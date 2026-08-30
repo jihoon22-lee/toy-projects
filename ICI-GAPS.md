@@ -1,5 +1,10 @@
 # ICI-GAPS
 
+> 제품 확장과 신규 실물 검증 프로젝트의 실행 순서는
+> [toy-projects 포트폴리오 마스터 계획](docs/superpowers/plans/2026-08-30-product-portfolio-master-plan.md),
+> ici 엔진 구현 순서는
+> [ici 품질 분석기 마스터 계획](https://github.com/jihoon22-lee/ici/blob/main/docs/superpowers/plans/2026-08-30-python-cpp-qt-quality-analyzer-master-plan.md)을 따른다.
+
 `ici` 를 실제 C++/Qt 프로젝트에 적용하면서 발견한 갭 목록.
 Phase 5(Qt/CMake 어댑터) 설계의 입력이다. 각 항목은 **코드 위치 + 재현 조건 + 영향**을 남긴다.
 
