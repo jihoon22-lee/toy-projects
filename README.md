@@ -72,6 +72,12 @@ diskmap은 파일·디렉터리·심볼릭 링크와 링크 대상, 하드 링�
 followed directory는 안전하게 `complete=false`와 오류를 남긴다. listing/iterator 오류도 같은
 방식으로 보존하고, stat의 `metadata.logical_size`와 자식 합계인 `FsNode::size`는 별도 값이다.
 
+명시적으로 선택한 root가 regular file이면 디렉터리로 열려고 실패하지 않고, complete한 한
+노드 scan으로 반환한다. 이 노드는 logical/allocated/reclaimable facts와 `files_scanned=1`을
+그대로 가진다. 선택한 root가 symlink이면 `follow_symlinks`와 무관하게 target을 dereference
+하며, target이 file이면 leaf로 남긴다. 이 옵션은 root 아래 descendants에만 적용된다. 깨진
+root symlink target은 root를 incomplete로 남기고 오류를 `ScanResult.errors`에도 포함한다.
+
 `FsNode::size`는 directory entry마다 logical bytes를 세고, `allocated_size`는 유효한 물리
 identity별로 한 번만 합산한다. `reclaimable_size`는 해당 subtree가 known hard-link reference를
 모두 소유할 때만 known으로 계산하며, symlink target alias는 소유 reference로 세지 않는다.
@@ -99,6 +105,9 @@ duration 24.24초였다. 생성한 HTML은 180,624 bytes이며 외부 `src`/`hre
 이후 `da2b8ba`/`eedd4ec`에서 finite-depth truncation과 saturating logical aggregation을
 추가했으므로, 이 커밋들 이후의 전체 native/ici 재검증과 원격 PR CI·sticky HTML comment·Pages
 응답 검증은 아직 대기 중이다. PR에서 최신 결과를 재확인한 뒤에만 병합한다.
+
+`4a0109d`/`4cd1779`에서는 regular-file root, root symlink dereference와 broken-target error
+전파를 추가했다. 이 커밋들 이후의 final full/local/remote verification 역시 대기 중이다.
 
 ### GUI 는 빌드되고 테스트된다
 
@@ -342,3 +351,18 @@ mkdir -p ../gui-qt5 && cd ../gui-qt5
 
 경로를 주면 폴더 선택 대화상자를 건너뛰고 바로 스캔한다. 덕분에
 `QT_QPA_PLATFORM=offscreen` 으로 헤드리스 스모크 실행이 가능하고, CI 가 그렇게 쓴다.
+
+## CLI root scan
+
+CLI는 디렉터리뿐 아니라 regular file도 직접 받을 수 있다. 파일 root는 JSON에서
+`"is_dir":false`인 한 노드로 출력되며, logical size는 실행 시 파일 metadata에서 읽는다.
+root symlink는 항상 target을 확인하고, descendant symlink follow 여부는 scanner 옵션의
+의미를 따른다. 실제 파일 root smoke는 다음처럼 실행한다.
+
+```bash
+cd diskmap
+./build/gui/src/diskmap path/to/main.cpp --json
+```
+
+파일 크기는 source에 따라 달라지므로 예시 출력의 `size` 숫자를 고정된 fixture로 취급하지
+않는다. 깨진 root symlink는 JSON 출력과 함께 stderr 및 `ScanResult.errors`에 오류를 남긴다.

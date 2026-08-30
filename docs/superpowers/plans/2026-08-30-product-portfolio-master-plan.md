@@ -390,6 +390,9 @@ unknown으로 만든다. logical aggregate는 별도 known bit가 없으므로 `
   back-edge를 실제 metadata로 재검증한다.
 - [x] qmake static consumer에 `PRE_TARGETDEPS`를 연결해 test binary가 최신 archive를
   다시 링크하도록 하고 stale `.gcda`/`.gcno` coverage 혼입을 막는다.
+- [x] regular-file root를 complete한 one-node scan으로 반환하고, 명시적으로 선택한 root
+  symlink는 descendant `follow_symlinks` 설정과 무관하게 dereference한다. symlink-to-file은
+  leaf로 남기며, broken root target 오류는 `ScanResult.errors`에도 포함한다.
 
 **Slice 2 로컬 실측(보수적 truncation 후속 커밋 전 기준):** Qt 5.15.18
 (`/usr/bin/qmake`)과 Qt 6.10.2(`/usr/bin/qmake6`)에서
@@ -406,6 +409,11 @@ fresh full build와 `make check` 9/9가 각각 통과했다. 두 GUI는
 `uint64_t` 최댓값에서 포화하도록 보수적 truncation semantics를 추가했다. 이 후속 커밋
 이후의 최종 full native/ici 검증과 원격 PR CI, sticky HTML comment 및 Pages 응답 검증은
 아직 pending이며, 최신 결과를 확인한 뒤에만 Slice 2를 원격 완료로 표시한다.
+
+이후 `4a0109d`/`4cd1779`에서 regular-file root의 실제 CLI 경로와 root symlink semantics를
+추가했다. 실제 file-root smoke는 JSON에서 `name=main.cpp`, `is_dir=false`, `size`가 source
+metadata와 일치하는 one-node 결과를 냈다(파일 크기는 source 변경에 따라 고정하지 않는다).
+이 후속 커밋 이후의 최종 full/local/remote 검증은 아직 pending이다.
 
 ### D2. cancellable scanner와 stale result 방지
 

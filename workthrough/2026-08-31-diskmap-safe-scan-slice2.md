@@ -95,6 +95,24 @@ The native and ici measurements below were collected before this follow-up.
 They are retained as the Slice 2 baseline; full re-verification after these
 commits and all remote PR/report checks are still pending.
 
+### 6. Scan-root semantics follow-up
+
+Test commit: `4a0109d`; production commit: `4cd1779`.
+
+- A regular-file root is now a complete one-node scan rather than a failed
+  directory listing. Its logical, allocated, and reclaimable facts are
+  aggregated normally and `files_scanned` is one.
+- The explicitly selected root symlink is always dereferenced, independent of
+  the descendant `follow_symlinks` setting. A symlink-to-file is a leaf.
+- A broken root target remains incomplete and contributes its inspection error
+  to `ScanResult.errors`.
+- A real CLI file-root smoke emitted JSON with `name=main.cpp`,
+  `is_dir=false`, and a source-dependent logical `size`; the size is not
+  pinned because the source file may change.
+
+The full local/native/ici rerun after this root-semantics follow-up, together
+with remote PR CI, sticky HTML comment, and Pages verification, remains pending.
+
 ## Code Examples
 
 The public boundary is now path-typed:
