@@ -47,9 +47,9 @@ Qt 셸 테스트와 양 Qt major matrix까지 끝나야 T0 전체가 완료된�
 
 | 프로젝트 | 빌드 | 검증 | Qt 테스트 |
 |---|---|---|---|
-| `loglens` | CMake | PASS · TEM 4.08 | `QAbstractItemModelTester` |
-| `diskmap` | qmake | PASS · TEM 4.85 | `QSignalSpy` + `test_main_window` |
-| `ici/viewer` | CMake | PASS · TEM 4.94 | — (코어만) |
+| `loglens` | CMake · Qt5/Qt6 | PASS · TEM 4.84 | `QAbstractItemModelTester` + MainWindow QtTest |
+| `diskmap` | qmake · Qt5/Qt6 | PASS · TEM 4.85 | `QSignalSpy` + MainWindow QtTest |
+| `ici/viewer` | CMake · Qt5/Qt6 | PASS · TEM 4.86 | MainWindow QtTest 4/4 |
 
 ### 완료 기준이 실제로는 바뀌었다
 
@@ -102,18 +102,19 @@ Qt 셸 테스트와 양 Qt major matrix까지 끝나야 T0 전체가 완료된�
 있다 — 기존 프로젝트에 아이콘 `.qrc` 하나를 넣으면 같은 것이 실측된다. 도구 자체가 갖고
 싶다면 그건 별개의 이유이고, 그렇다면 그 이유로 정당화해야 한다.
 
-### Qt 셸 검증 현황
+### Qt 셸 테스트 현황
 
-어댑터가 GUI 를 커버리지에 넣으면서 드러났다. 이 갭은 마스터 계획의 T0-3(loglens)와
-T0-4(diskmap)가 담당한다. `loglens/src/gui/main_window.cpp`(128
-statements)와 `timeline_widget.cpp`(37)는 아직 테스트가 없다.
-`diskmap/src/gui/main_window.cpp` 는 이제 `test_main_window` 로 scan result 표시,
-breadcrumb, directory descend/up, leaf no-op를 검증한다. `loglens` 셸의 일부는 아직 CI 의
-헤드리스 스모크가 유일한 커버다.
+`loglens`는 `test_main_window`에서 실제 임시 파일의 open/growth/truncation/read error와
+follow checkbox/timer/status 상태를 검증한다. `TimelineWidget`도 빈 상태와 색상 막대
+렌더링 분기를 헤드리스 렌더링으로 확인한다. Qt5.15와 Qt6.10에서 동일한 CMake/CTest
+10개 테스트가 통과했다.
+`diskmap`도 MainWindow 내비게이션을 `test_main_window`로 검증하며 T0-4를 완료했다.
 
-`loglens` 의 커버리지 임계값을 80/90 에서 55/80 으로 내린 것이 이 때문이다. **코드가 나빠져서가
-아니라 이전에 보이지 않던 코드가 보이기 시작해서다.** `diskmap` 은 셸이 작아 80/90 을 그대로
-두고도 통과한다. 셸에 테스트가 붙으면 `loglens` 도 도로 올린다.
+ici 0.6.0 실측은 line 93.2% / function 96.9% / branch 81.8% / TEM 4.84이다.
+`loglens/ici.toml`은 실측값에 6.8%p/4.9%p slack을 둔 branch 75.0 / function 92.0을
+게이트로 사용한다. 남은 것은 QPainter/Qt 내부 예외 경로와 ici의 C++ type-check 미지원이다.
+`diskmap/src/gui/main_window.cpp`는 T0-4에서 scan, breadcrumb, descend/up, leaf no-op를
+검증했다.
 
 ### 4단계 — 여유가 되면
 

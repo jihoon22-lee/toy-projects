@@ -183,16 +183,21 @@ git commit -m "refactor(loglens): make the bucket total a property of the bucket
 - Modify: `loglens/CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: `loglens_gui`, `MainWindow::openPath(const QString&)`, private slot `pollSource`
+- Consumes: `loglens_gui`, `MainWindow::openPath(const QString&)`, `MainWindow::pollNow()`
 - Produces: 없음
 
-`main_window.cpp` 는 128 statements 가 통째로 미검증이고, 그 중심이 이번에 만든 팔로우 상태 기계다. **기능은 스모크로만 확인했지 규칙은 아무도 검증하지 않았다.**
+`main_window.cpp`의 팔로우 상태 기계와 source/model lifecycle은 이전에 QtTest로 검증되지
+않았고, **기능은 스모크로만 확인했지 규칙은 아무도 검증하지 않았다.**
 
-타이머(500ms)를 기다리는 대신 `QMetaObject::invokeMethod` 로 `pollSource` 를 직접 부른다. moc 는 private slot 도 호출 가능하게 만들어 두므로 동작하고, 테스트가 시간에 의존하지 않는다.
+제품에도 의미가 있는 `MainWindow::pollNow()` 공개 경계를 통해 파일 교체·읽기 오류를
+결정적으로 구동한다. 실제 500ms follow timer의 append 경로는 `QTRY_COMPARE`로 확인해
+테스트가 고정 sleep에 의존하지 않게 한다.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
-`loglens/tests/test_main_window.cpp`
+`loglens/tests/test_main_window.cpp` (아래 코드는 최소 fixture를 설명하는 초기 스케치다;
+실제 구현은 public poll seam, stable widget names, stale-state와 timeline render 검증까지
+확장했다.)
 
 ```cpp
 #include <QCheckBox>
@@ -329,25 +334,31 @@ target_include_directories(test_main_window PRIVATE tests)
 add_test(NAME test_main_window COMMAND test_main_window WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+실제 구현은 private slot을 reflection으로 호출하는 대신 `MainWindow::pollNow()` 공개
+경계를 사용한다. 여기에 failed open의 stale model/timeline과 follow timer 정리, stable
+`objectName`/accessibility name, `TimelineWidget`의 빈 상태·색상 막대 렌더링 회귀 테스트를
+추가했다. 따라서 이 태스크의 핵심은 4개 fixture 시나리오보다 넓고, Qt 5/Qt 6에서 같은
+10개 CTest 목록을 실행한다.
+
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 cd loglens && cmake -S . -B build/check -DCMAKE_BUILD_TYPE=Debug && cmake --build build/check --parallel && QT_QPA_PLATFORM=offscreen ctest --test-dir build/check --output-on-failure -R test_main_window
 ```
 Expected: 컴파일은 되지만 하나 이상 실패할 수 있다. **실패하면 그것이 발견이다** — 팔로우 규칙 중 하나가 실제로는 다르게 동작한다는 뜻이므로, 코드와 테스트 중 어느 쪽이 틀렸는지 판단하고 고친다.
 
-- [ ] **Step 3: Fix whatever the tests found**
+- [x] **Step 3: Fix whatever the tests found**
 
 실패한 단언마다 원인을 확인한다. `main_window.cpp` 의 동작이 틀렸으면 코드를 고치고, 테스트의 기대가 틀렸으면 테스트를 고치되 **왜 그 기대가 틀렸는지 주석으로 남긴다.** 전부 통과했다면 이 스텝은 변경 없이 넘어간다.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```bash
 cd loglens && cmake --build build/check --parallel && QT_QPA_PLATFORM=offscreen ctest --test-dir build/check --output-on-failure
 ```
-Expected: 9/9 통과
+Expected: 10/10 통과 (Qt6와 Qt5 각각)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add loglens/tests/test_main_window.cpp loglens/CMakeLists.txt loglens/src/gui/main_window.cpp

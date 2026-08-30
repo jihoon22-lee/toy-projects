@@ -34,22 +34,34 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     auto* bar = new QHBoxLayout();
     auto* openButton = new QPushButton(tr("Open log…"), central);
+    openButton->setObjectName(QStringLiteral("openButton"));
+    openButton->setAccessibleName(tr("Open log file"));
     filterEdit_ = new QLineEdit(central);
+    filterEdit_->setObjectName(QStringLiteral("filterEdit"));
+    filterEdit_->setAccessibleName(tr("Log filter"));
     filterEdit_->setPlaceholderText(tr("level>=WARN AND message~timeout"));
     auto* applyButton = new QPushButton(tr("Apply"), central);
+    applyButton->setObjectName(QStringLiteral("applyFilterButton"));
+    applyButton->setAccessibleName(tr("Apply log filter"));
     bar->addWidget(openButton);
     bar->addWidget(filterEdit_, 1);
     bar->addWidget(applyButton);
     followBox_ = new QCheckBox(tr("Follow"), central);
+    followBox_->setObjectName(QStringLiteral("followCheckBox"));
+    followBox_->setAccessibleName(tr("Follow log file"));
     followBox_->setChecked(true);
     bar->addWidget(followBox_);
     layout->addLayout(bar);
 
     timeline_ = new TimelineWidget(central);
+    timeline_->setObjectName(QStringLiteral("timelineWidget"));
+    timeline_->setAccessibleName(tr("Log timeline"));
     layout->addWidget(timeline_);
 
     model_ = new LogModel(this);
     table_ = new QTableView(central);
+    table_->setObjectName(QStringLiteral("logTable"));
+    table_->setAccessibleName(tr("Log records"));
     table_->setModel(model_);
     table_->setSelectionBehavior(QAbstractItemView::SelectRows);
     table_->verticalHeader()->setVisible(false);
@@ -61,9 +73,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     setCentralWidget(central);
     status_ = new QLabel(tr("Ready"), this);
+    status_->setObjectName(QStringLiteral("statusLabel"));
+    status_->setAccessibleName(tr("Log status"));
     statusBar()->addWidget(status_);
 
     pollTimer_ = new QTimer(this);
+    pollTimer_->setObjectName(QStringLiteral("followPollTimer"));
     pollTimer_->setInterval(500);
     connect(pollTimer_, &QTimer::timeout, this, &MainWindow::pollSource);
     connect(followBox_, &QCheckBox::toggled, this, &MainWindow::setFollowing);
@@ -119,6 +134,12 @@ void MainWindow::openPath(const QString& path) {
         tailer_.reset();
         assembler_.reset();
         model_->resetRecords();
+        refreshTimeline();
+        setWindowTitle(tr("loglens"));
+        // A failed replacement must not leave the old source's timer spinning
+        // against an empty model. This also makes a failed open recoverable:
+        // the user can re-enable follow after a successful replacement open.
+        followBox_->setChecked(false);
         return;
     }
     assembler_.reset(tailer_->generation());
