@@ -129,6 +129,8 @@ TEM 4.85 (10 passed, 2 skipped)`다. Qt5 강제 CMake build는 loglens에서
 출력하고 major prefix를 검증한다. CMake leg는 반대 major의 `CMAKE_DISABLE_FIND_PACKAGE_*`
 guard와 configure output, 최종 `ldd`의 `libQt${major}Widgets`를 확인한다. qmake leg는
 고정 경로와 `-query QT_VERSION`을 확인한 뒤 같은 binary를 테스트와 smoke에 사용한다.
+CMake GUI descriptor는 `-- <project>: using Qt<major> <version>` status line을 출력하는
+공통 convention을 따른다.
 
 ### loglens 스트림 계약
 

@@ -665,7 +665,8 @@ diskmap도 `/usr/bin/qmake`가 보고하는 Qt 5.15로 별도 shadow build와 `m
 
 T0-5에서 위 검증을 CI와 같은 네 leg로 재실행했다. `gui-build`는 각 leg에서 선택 major의
 pkg-config `Core`, `Gui`, `Widgets`, `Concurrent`, `Test` 버전을 출력·검증하고, CMake는
-반대 major disable guard와 configure output 및 최종 `ldd` 링크를 확인한다. qmake는 명시적
+반대 major disable guard와 `-- <project>: using Qt<major> <version>` configure output 및 최종
+`ldd` 링크를 확인한다. qmake는 명시적
 경로와 `-query QT_VERSION`을 확인한다. 이어서 CMake는 CTest, qmake는 `make check`, 두
 경로 모두 실제 GUI binary의 offscreen smoke를 실행한다. Qt6/Qt5 모두 build/test/smoke가
 통과했다.
