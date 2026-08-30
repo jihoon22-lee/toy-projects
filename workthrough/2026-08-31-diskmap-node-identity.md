@@ -129,18 +129,20 @@ g++ -std=c++17 -Wall -Wextra -pedantic -fsyntax-only diskmap/tests/test_fs_sourc
 exit code: 0
 ```
 
-After the production source adapter was restored, both complete qmake/make
-legs built every diskmap subproject and ran every `make check` target:
+The final local verification covered both complete qmake/make legs, the actual
+GUI executable, and the public ici release asset:
 
 ```text
 Qt 6: qmake6 + full project make, all `make check` targets: All checks passed
 Qt 5: qmake  + full project make, all `make check` targets: All checks passed
+Qt 6: diskmap-gui, QT_QPA_PLATFORM=offscreen, 8-second smoke: passed
+Qt 5: diskmap-gui, QT_QPA_PLATFORM=offscreen, 8-second smoke: passed
 ```
 
-The evidence above is limited to the Qt5/Qt6 qmake builds and their complete
-`make check` suites. No ici verification or GUI smoke result is claimed here;
-those are release/PR evidence to be collected after the implementation is
-reviewed and integrated.
+Using public ici 0.6.0 against the identity-slice source produced `Suite PASS`
+with TEM 4.87, maximum complexity 9/10, 0 FAIL, 2 WARN, and 2 SKIP. The
+generated `/tmp/diskmap-identity-report.html` is 162615 bytes and contains no
+external `src` or `href` references.
 
 ## Next Steps
 
