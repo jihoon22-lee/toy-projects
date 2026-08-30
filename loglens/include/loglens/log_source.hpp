@@ -6,6 +6,33 @@
 
 namespace loglens {
 
+struct FileIdentity {
+    std::uint64_t device = 0;
+    std::uint64_t file = 0;
+    bool valid = false;
+
+    bool operator==(const FileIdentity& other) const;
+    bool operator!=(const FileIdentity& other) const;
+};
+
+enum class SourceChange { None, Truncated, Replaced };
+
+enum class SourceErrorKind {
+    None,
+    Missing,
+    PermissionDenied,
+    OpenFailed,
+    StatFailed,
+    ReadFailed,
+    UnsupportedFileType,
+};
+
+struct SourceError {
+    SourceErrorKind kind = SourceErrorKind::None;
+    std::string message;
+    bool retryable = false;
+};
+
 // Abstraction over "give me any new lines" so tailing logic can be unit-tested
 // without a real file on disk.
 class LogSource {
@@ -24,17 +51,19 @@ struct SourceChunk {
     std::string bytes;
     bool generation_changed = false;
     std::uint64_t generation = 0;
+    std::uint64_t position = 0;
+    SourceChange change = SourceChange::None;
+    FileIdentity identity;
+    SourceError error;
+
+    bool ok() const;
 };
 
 // Polling tailer.
 //
-// Restart detection is by size only: if the file is now smaller than the offset
-// we already consumed, it was truncated or replaced, so reading resumes from the
-// beginning instead of silently emitting nothing. Modification time cannot serve
-// as a file identity here — it changes on every ordinary append, so using it
-// would treat normal writes as rotations. Detecting a rotation to a file that is
-// already larger than the old one needs the inode, which std::filesystem does
-// not expose; that case is knowingly not covered.
+// POSIX builds compare device/inode from the opened handle, so replacement is
+// detected even when the new file is equal in size or larger. Other platforms
+// retain the size-based fallback until a native identity adapter is available.
 class FileTailer : public LogSource {
 public:
     explicit FileTailer(std::string path);
@@ -45,6 +74,7 @@ public:
     // this preserves a final non-newline-terminated fragment for the shared
     // RecordAssembler to carry across polls.
     bool pollChunk(SourceChunk& out, std::string& error);
+    SourceChunk pollChunk();
 
     std::uint64_t offset() const;
     std::size_t restarts() const;
@@ -55,8 +85,15 @@ private:
     std::uint64_t offset_ = 0;
     std::size_t restarts_ = 0;
     std::uint64_t generation_ = 0;
+    FileIdentity identity_;
 
-    bool detectRestart(std::uint64_t size);
+    SourceChunk initialChunk() const;
+#ifndef _WIN32
+    SourceChunk pollPosixChunk();
+#else
+    SourceChunk pollPortableChunk();
+#endif
+    SourceChange detectRestart(const FileIdentity& identity, std::uint64_t size);
 };
 
 } // namespace loglens

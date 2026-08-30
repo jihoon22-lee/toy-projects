@@ -138,6 +138,16 @@ CMake GUI descriptor는 `-- <project>: using Qt<major> <version>` status line을
 poll에서 읽은 raw bytes와 source generation을 전달하고, assembler가 다음 상태를 한 곳에서
 보존한다.
 
+POSIX에서 `FileTailer`는 경로의 timestamp가 아니라 열린 파일 handle의 device/inode를
+비교한다. 따라서 같은 경로가 더 작거나, 같은 크기이거나, 더 큰 파일로 원자적 rename
+교체되어도 `Replaced`로 감지하며, 같은 inode에 쓰는 in-place 축소는 별도의 `Truncated`로
+구분한다. source 계층은 missing, permission denied, open/stat/read failure와 unsupported
+file type을 typed error로 보존한다.
+
+현재 GUI는 follow 중 source 오류가 발생하면 상태를 표시하고 follow를 멈춘다. missing 파일이
+다시 나타났을 때의 stateful retry/reappear UX는 이 source identity slice의 범위가 아니며,
+다음 L1 slice에서 다룬다.
+
 - newline을 기준으로 한 physical line 번호
 - 다음 poll에서 이어 붙일 partial bytes
 - stack-trace continuation을 확장할 pending record
