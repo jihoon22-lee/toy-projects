@@ -29,6 +29,10 @@ public:
     // load path can be exercised headlessly.
     void openPath(const QString& path);
 
+    // Performs one synchronous follow poll. The timer uses the same boundary,
+    // while an explicit refresh is useful to hosts and deterministic tests.
+    void pollNow();
+
 private slots:
     void chooseFile();
     void applyFilter();
