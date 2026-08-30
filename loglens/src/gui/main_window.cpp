@@ -150,8 +150,6 @@ void MainWindow::openPath(const QString& path) {
     setFollowing(followBox_->isChecked());
 }
 
-void MainWindow::pollNow() { pollSource(); }
-
 void MainWindow::pollSource() {
     if (!tailer_) {
         return;

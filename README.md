@@ -107,10 +107,10 @@ done
 ```
 
 결과는 `loglens: Suite PASS, TEM 4.84 (10 passed, 2 skipped)`와 `diskmap: Suite PASS,
-TEM 4.85 (10 passed, 2 skipped)`다. Qt5 강제 CMake build와 Qt5 qmake build/test는
-loglens는 `CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON`으로 이미 별도 실측했다. diskmap의 Qt5 qmake
-build/test는 T0-5에서 `/usr/bin/qmake`를 사용해 별도로 실측하며, 그 전까지 diskmap의 Qt5
-지원은 완료로 간주하지 않는다.
+TEM 4.85 (10 passed, 2 skipped)`다. Qt5 강제 CMake build는 loglens에서
+`CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON`으로, diskmap의 Qt5 qmake build/test는 #16에서
+`/usr/bin/qmake`로 각각 별도 실측했다. T0-5에는 이 양 major 선택을 매 PR의 명시적 CI
+matrix로 강제하는 공통 계약이 남아 있다.
 
 ### loglens 스트림 계약
 
@@ -188,8 +188,8 @@ QT_QPA_PLATFORM=offscreen ../../ici/dist/ici.pyz verify --report
 ```
 
 `loglens`의 셸 상태 테스트만 빠르게 돌리려면 CTest를 쓴다. 테스트는 프로젝트 루트에서
-실행되며, 실제 follow timer는 `QTRY_COMPARE`로 기다리고 truncation/read error는 공개
-`MainWindow::pollNow()` 경계로 구동한다.
+실행되며, 실제 follow timer는 `QTRY_COMPARE`로 기다리고 truncation/read error는 Qt
+meta-object로 기존 `pollSource` slot을 동기 호출해 구동한다.
 
 ```bash
 cd loglens

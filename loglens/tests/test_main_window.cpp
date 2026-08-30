@@ -81,6 +81,12 @@ void writeFile(const QString& path, const QByteArray& bytes, bool append = false
     file.close();
 }
 
+void pollNow(MainWindow& window) {
+    // pollSource is an application slot, so Qt's meta-object provides a
+    // synchronous seam without widening MainWindow's public product API.
+    QVERIFY(QMetaObject::invokeMethod(&window, "pollSource", Qt::DirectConnection));
+}
+
 } // namespace
 
 void TestMainWindow::openingAFileFillsTheTable() {
@@ -142,7 +148,7 @@ void TestMainWindow::truncationResetsStaleRows() {
     QCOMPARE(rowCount(window), 2);
 
     writeFile(path, line("WARN", 9));
-    window.pollNow();
+    pollNow(window);
 
     QTRY_COMPARE(rowCount(window), 1);
     QCOMPARE(cell(window, 0, LogModel::ColumnLine), QStringLiteral("1"));
@@ -168,7 +174,7 @@ void TestMainWindow::readErrorStopsFollowingAndExplainsWhy() {
     QVERIFY(timer->isActive());
 
     QVERIFY(QFile::remove(path));
-    window.pollNow();
+    pollNow(window);
 
     QVERIFY(!follow->isChecked());
     QVERIFY(!timer->isActive());

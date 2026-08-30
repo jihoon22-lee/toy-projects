@@ -18,9 +18,6 @@ checkbox/timer/status와 접근성 식별자를 회귀 테스트한다. Timeline
 
 ### 1. MainWindow 셸 계약과 상태 정리
 
-- `loglens/include/loglens/gui/main_window.hpp`
-  - 동일한 poll 경계를 직접 실행하는 공개 `pollNow()`를 추가했다. timer와 테스트/호스트가
-    서로 다른 구현을 사용하지 않는다.
 - `loglens/src/gui/main_window.cpp`
   - open button, filter, follow checkbox, timeline, table, status label, poll timer에
     안정적인 `objectName`과 필요한 `accessibleName`을 부여했다.
@@ -51,8 +48,8 @@ find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Test)
   - 임시 fixture 파일 open, timer 기반 append, truncation reset, read error stop,
     failed open stale-state clear를 검증한다.
   - `QTRY_COMPARE_WITH_TIMEOUT`은 실제 timer 연결을 확인하면서 고정 sleep을 피한다.
-  - `pollNow()`는 파일 교체와 오류를 동기적으로 재현해 filesystem/timer 경계를
-    결정적으로 만든다.
+  - 파일 교체와 오류는 Qt meta-object로 기존 private `pollSource` slot을 동기 호출해
+    filesystem/timer 경계를 결정적으로 만들며, 테스트만을 위한 public API는 추가하지 않는다.
   - object/accessibility names와 TimelineWidget empty/populated paint path를 검증한다.
 - `loglens/ici.toml`
   - Qt5/Qt6 pkg-config 이름을 모두 선언했다.
@@ -101,11 +98,8 @@ the not-yet-implemented C++ type checker.
 
 ## Next Steps
 
-- Keep the `diskmap` navigation shell on its own T0-4 branch and run the same Qt5/Qt6 evidence.
+- T0-5에서 이미 로컬 실측을 마친 loglens/diskmap Qt5·Qt6 선택을 명시적인 CI matrix로
+  강제한다.
 - Treat larger/equal-size inode replacement and retryable read semantics as the planned loglens
   L1 tailing work; this patch intentionally retains the existing size-based generation contract.
 - Add a C++ type-check engine in ici before claiming type coverage for this project.
-
-Branch: `test/loglens-qt-shell`
-Worktree: `/home/jihoon/projects/.worktrees/toy-loglens-shell`
-PR/push: intentionally not performed by this worker.

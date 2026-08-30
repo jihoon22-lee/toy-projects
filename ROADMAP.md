@@ -49,7 +49,7 @@ Qt 셸 테스트와 양 Qt major matrix까지 끝나야 T0 전체가 완료된�
 |---|---|---|---|
 | `loglens` | CMake · Qt5/Qt6 | PASS · TEM 4.84 | `QAbstractItemModelTester` + MainWindow QtTest |
 | `diskmap` | qmake · Qt5/Qt6 | PASS · TEM 4.85 | `QSignalSpy` + MainWindow QtTest |
-| `ici/viewer` | CMake | PASS · TEM 4.94 | — (코어만) |
+| `ici/viewer` | CMake · Qt5/Qt6 | PASS · TEM 4.86 | MainWindow QtTest 4/4 |
 
 ### 완료 기준이 실제로는 바뀌었다
 
