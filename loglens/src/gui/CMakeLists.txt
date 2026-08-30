@@ -5,12 +5,19 @@
 # ici could not provide before the build adapter existed.
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
 
+# The headers are listed explicitly because they sit under include/ rather than
+# beside their .cpp. AUTOMOC finds a Q_OBJECT header on its own only when it
+# shares a directory and a basename with a source in the target; anywhere else
+# it has to be named here or moc never runs on it.
 add_library(loglens_gui STATIC
     log_model.cpp
     main_window.cpp
     timeline_widget.cpp
+    ${CMAKE_SOURCE_DIR}/include/loglens/gui/log_model.hpp
+    ${CMAKE_SOURCE_DIR}/include/loglens/gui/main_window.hpp
+    ${CMAKE_SOURCE_DIR}/include/loglens/gui/timeline_widget.hpp
 )
-target_include_directories(loglens_gui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+# Include paths come from loglens_core, which exports include/ publicly.
 target_link_libraries(loglens_gui PUBLIC loglens_core Qt6::Widgets)
 
 add_executable(loglens-gui gui_main.cpp)

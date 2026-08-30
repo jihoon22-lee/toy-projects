@@ -2,7 +2,7 @@ TEMPLATE = app
 QT += core gui widgets concurrent
 
 TARGET = diskmap-gui
-INCLUDEPATH += $$PWD/../../include $$PWD
+INCLUDEPATH += $$PWD/../../include
 
 SOURCES += gui_main.cpp
 

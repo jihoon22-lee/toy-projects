@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "fake_source.hpp"
-#include "log_model.hpp"
+#include "loglens/gui/log_model.hpp"
 #include "loglens/filter_expr.hpp"
 
 using loglens::Level;

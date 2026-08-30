@@ -1,4 +1,4 @@
-#include "treemap_widget.hpp"
+#include "diskmap/gui/treemap_widget.hpp"
 
 #include <QMouseEvent>
 #include <QPainter>

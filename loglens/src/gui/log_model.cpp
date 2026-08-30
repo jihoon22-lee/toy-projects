@@ -1,4 +1,4 @@
-#include "log_model.hpp"
+#include "loglens/gui/log_model.hpp"
 
 #include <QBrush>
 #include <QColor>
