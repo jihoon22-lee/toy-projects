@@ -8,7 +8,7 @@
 `ici` 를 실제 C++/Qt 프로젝트에 적용하면서 발견한 갭 목록.
 Phase 5(Qt/CMake 어댑터) 설계의 입력이다. 각 항목은 **코드 위치 + 재현 조건 + 영향**을 남긴다.
 
-버전 기준: `ici 0.6.0` release asset (`ici/dist/ici.pyz`)
+버전 기준: `ici 0.6.0` release asset (`ici.pyz`)
 
 
 ## 현황 (2026-08-31)
