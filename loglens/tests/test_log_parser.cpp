@@ -3,6 +3,7 @@
 #include "loglens/log_parser.hpp"
 
 using loglens::detectFormat;
+using loglens::EncodingErrorPolicy;
 using loglens::Format;
 using loglens::isContinuation;
 using loglens::Level;
@@ -206,6 +207,18 @@ void testAssemblerResetDropsOldGenerationState() {
     CHECK_EQ(fresh[1].physical_line_number, static_cast<std::size_t>(2));
 }
 
+void testAssemblerMakesTheBytePreservingErrorPolicyExplicit() {
+    RecordAssembler assembler(Format::Auto, EncodingErrorPolicy::PreserveBytes);
+    CHECK(assembler.encodingErrorPolicy() == EncodingErrorPolicy::PreserveBytes);
+
+    std::string invalid = "2026-08-26T04:15:22Z INFO raw ";
+    invalid.push_back(static_cast<char>(0xff));
+    invalid.push_back('\n');
+    const std::vector<RecordDelta> deltas = assembler.consumeBytes(invalid);
+    CHECK_EQ(deltas.size(), static_cast<std::size_t>(1));
+    CHECK_EQ(deltas[0].record.raw, invalid.substr(0, invalid.size() - 1));
+}
+
 } // namespace
 
 int main() {
@@ -220,5 +233,6 @@ int main() {
     testAssemblerDoesNotDropLeadingContinuation();
     testAssemblerBuffersPartialBytesUntilNewline();
     testAssemblerResetDropsOldGenerationState();
+    testAssemblerMakesTheBytePreservingErrorPolicyExplicit();
     return checkSummary();
 }

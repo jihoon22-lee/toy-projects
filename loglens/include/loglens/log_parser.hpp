@@ -17,6 +17,12 @@ enum class Format {
     JsonLine, // {"ts":"...","level":"warn","logger":"x","msg":"..."}
 };
 
+// Parsing is byte preserving at this layer: invalid UTF-8 is neither dropped
+// nor silently rewritten, so raw evidence can always be exported. UI adapters
+// decide how to render those bytes. Naming the policy makes that choice part
+// of the stream state instead of an undocumented platform conversion.
+enum class EncodingErrorPolicy { PreserveBytes };
+
 Format detectFormat(const std::string& line);
 
 // Never throws and never drops input: an unparseable line still comes back
@@ -51,7 +57,9 @@ struct RecordDelta {
 // fragment. Call flush() only when the caller has an explicit EOF policy.
 class RecordAssembler {
 public:
-    explicit RecordAssembler(Format format = Format::Auto);
+    explicit RecordAssembler(
+        Format format = Format::Auto,
+        EncodingErrorPolicy encodingPolicy = EncodingErrorPolicy::PreserveBytes);
 
     std::vector<RecordDelta> consumeBytes(std::string_view bytes);
     std::vector<RecordDelta> consumeLine(const std::string& line);
@@ -67,12 +75,14 @@ public:
 
     void setFormat(Format format);
     Format format() const;
+    EncodingErrorPolicy encodingErrorPolicy() const;
     std::uint64_t generation() const;
     std::size_t nextLineNumber() const;
     std::size_t recordCount() const;
 
 private:
     Format format_ = Format::Auto;
+    EncodingErrorPolicy encoding_error_policy_ = EncodingErrorPolicy::PreserveBytes;
     std::uint64_t generation_ = 0;
     std::size_t next_line_number_ = 1;
     std::size_t record_count_ = 0;

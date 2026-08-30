@@ -142,13 +142,13 @@
 - selected format과 encoding/error policy
 - source generation/rotation id
 
-- [ ] initial batch가 line 1부터 정확히 번호를 붙인다.
-- [ ] 다음 poll은 이전 physical line 다음 번호에서 시작한다.
-- [ ] stack trace continuation이 poll 경계를 넘어도 이전 record에 붙는다.
-- [ ] 파일 첫 줄이 continuation이면 유실하지 않는다.
-- [ ] partial line은 newline 또는 explicit flush 전까지 완성 record가 되지 않는다.
-- [ ] truncation/rotation 시 partial과 continuation state를 초기화한다.
-- [ ] CLI와 GUI가 같은 assembler를 사용하고 중복 `appendLine`/`parseLines`를 제거한다.
+- [x] initial batch가 line 1부터 정확히 번호를 붙인다.
+- [x] 다음 poll은 이전 physical line 다음 번호에서 시작한다.
+- [x] stack trace continuation이 poll 경계를 넘어도 이전 record에 붙는다.
+- [x] 파일 첫 줄이 continuation이면 유실하지 않는다.
+- [x] partial line은 newline 또는 explicit flush 전까지 완성 record가 되지 않는다.
+- [x] truncation/rotation 시 partial과 continuation state를 초기화한다.
+- [x] CLI와 GUI가 같은 assembler를 사용하고 중복 `appendLine`/`parseLines`를 제거한다.
 
 ### T0-3. loglens Qt 셸 테스트
 

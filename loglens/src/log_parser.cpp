@@ -261,7 +261,8 @@ LogRecord parseLine(const std::string& line, Format format, std::size_t lineNumb
     return record;
 }
 
-RecordAssembler::RecordAssembler(Format format) : format_(format) {}
+RecordAssembler::RecordAssembler(Format format, EncodingErrorPolicy encodingPolicy)
+    : format_(format), encoding_error_policy_(encodingPolicy) {}
 
 std::vector<RecordDelta> RecordAssembler::consumeCompleteLine(const std::string& input) {
     // std::getline() removes LF but leaves CR when a Windows-written file is
@@ -353,6 +354,10 @@ void RecordAssembler::reset(std::uint64_t generation) {
 void RecordAssembler::setFormat(Format format) { format_ = format; }
 
 Format RecordAssembler::format() const { return format_; }
+
+EncodingErrorPolicy RecordAssembler::encodingErrorPolicy() const {
+    return encoding_error_policy_;
+}
 
 std::uint64_t RecordAssembler::generation() const { return generation_; }
 

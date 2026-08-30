@@ -86,6 +86,7 @@ poll에서 읽은 raw bytes와 source generation을 전달하고, assembler가 �
 - 다음 poll에서 이어 붙일 partial bytes
 - stack-trace continuation을 확장할 pending record
 - truncation/restart 뒤 초기화되는 generation
+- 선택된 format과 byte-preserving encoding/error policy
 
 새 record는 `Append`, 기존 record의 continuation은 `Extend` delta로 구분된다. 따라서 GUI는
 이미 표시한 행을 갱신하고 CLI는 같은 결과 벡터를 갱신한다. newline 없는 마지막 조각은

@@ -24,6 +24,8 @@ poll 사이에 stack trace continuation을 기억하지 못했다. `FileTailer`�
   - `RecordAssembler::consumeBytes()`는 LF가 없는 조각을 보류하고, `flush()`에서만
     명시적으로 완성한다.
   - `consumeLine()`과 `consumeLines()`도 같은 partial 상태를 사용한다.
+  - `EncodingErrorPolicy::PreserveBytes`를 상태로 보존해 invalid UTF-8도 raw evidence에서
+    유실하거나 조용히 치환하지 않는다. 렌더링 변환은 UI adapter의 책임이다.
   - continuation은 이미 발표한 record의 전체 갱신본을 `Extend`로 발행한다.
   - `reset(generation)`은 line/index/partial/pending 상태를 함께 초기화한다.
 
@@ -66,13 +68,15 @@ auto eof = assembler.flush();  // one-shot CLI's explicit EOF policy
   continuation, partial bytes, mixed line/byte input, explicit flush, generation reset
 - source: partial chunk suffix, truncation generation and bytes
 - model: visible update and filter membership transitions
+- CLI integration: continuation output and the next physical line number after
+  a multiline record, proving the executable consumes the shared assembler
 
 ## Verification Results
 
 ```text
 cmake -S loglens -B loglens/build/stream-check -DCMAKE_BUILD_TYPE=Debug
 cmake --build loglens/build/stream-check --parallel
-100% tests passed, 0 tests failed out of 8
+100% tests passed, 0 tests failed out of 9
 
 QT_QPA_PLATFORM=offscreen /home/jihoon/projects/ici/dist/ici.pyz verify --report
 Suite: PASS — all applicable engines passed
