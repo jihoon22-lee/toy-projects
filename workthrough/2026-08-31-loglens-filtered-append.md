@@ -51,7 +51,10 @@ will occupy after the full batch is appended to `records_`.
 
 ## Verification Results
 
-### Qt6
+### Historical focused Qt6 model check
+
+These focused checks were run immediately after the implementation, before the
+full release verification below.
 
 ```text
 cmake -S loglens -B /tmp/ici-loglens-filter-qt6 -DCMAKE_BUILD_TYPE=Debug
@@ -63,7 +66,7 @@ ctest --test-dir /tmp/ici-loglens-filter-qt6 -R '^test_log_model$' --output-on-f
 
 Configured with Qt6 `6.10.2`.
 
-### Qt5
+### Historical focused Qt5 model check
 
 ```text
 cmake -S loglens -B /tmp/ici-loglens-filter-qt5 -DCMAKE_BUILD_TYPE=Debug \
@@ -79,6 +82,22 @@ Configured with Qt5 `5.15.18`. `git diff --check` also passed. No standalone
 formatter/linter command was run; the focused CMake builds compile the changed
 translation unit and test.
 
+### Full release verification (completed later)
+
+The complete Release matrix and headless GUI smoke checks subsequently passed:
+
+| Build | CTest | Offscreen GUI smoke |
+|---|---|---|
+| Qt6 `6.10.2` Release | 10/10 PASS | 8 seconds PASS |
+| Qt5 `5.15.18` Release | 10/10 PASS | 8 seconds PASS |
+
+The public ici `v0.6.0` release asset checksum was verified. Running
+`ici verify --report --html verify_report.html --github-summary` for `loglens`
+also passed with 10/10 tests, line coverage 93.2%, function coverage 96.9%,
+branch coverage 81.8%, TEM 4.84, and 10 Pass / 2 Skip. The two skips are the
+known C++ type-check and Python dead-code limitations; the generated HTML had
+zero external references.
+
 ## Commits
 
 - `42ee930 fix(loglens): preserve filtered append indexes`
@@ -88,5 +107,3 @@ translation unit and test.
 
 - This change addresses only filtered append backing indexes. File identity and
   rotation semantics remain outside this P0 fix.
-- The full loglens CTest suite and GUI smoke run were not repeated; both Qt
-  major focused model tests passed.
