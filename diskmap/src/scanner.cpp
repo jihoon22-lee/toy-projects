@@ -90,6 +90,22 @@ bool rememberDirectoryIdentity(FsNode& child,
     return true;
 }
 
+void scheduleDirectoryPass(std::vector<FsNode>& children,
+                           bool followedPass,
+                           int childDepth,
+                           ScanResult& result,
+                           std::vector<WorkItem>& stack,
+                           std::set<IdentityKey>& visited) {
+    for (FsNode& child : children) {
+        if (!child.is_dir || child.followed != followedPass) {
+            continue;
+        }
+        if (rememberDirectoryIdentity(child, visited, result)) {
+            stack.push_back(WorkItem{child.path, childDepth, &child});
+        }
+    }
+}
+
 // Fills node.children from entries (skipping symlinks/undersized files per
 // options) and pushes follow-up work items for any subdirectories found.
 // Children are appended in a single pass before any pointer into the vector
@@ -113,16 +129,8 @@ void expandDirectory(WorkItem& item,
     // Prefer real directory entries to symlink aliases. This makes the stable
     // lexical source order choose the canonical entry before an alias that
     // resolves to the same identity.
-    for (const bool followedPass : {false, true}) {
-        for (FsNode& child : item.node->children) {
-            if (!child.is_dir || child.followed != followedPass) {
-                continue;
-            }
-            if (rememberDirectoryIdentity(child, visited, result)) {
-                stack.push_back(WorkItem{child.path, item.depth + 1, &child});
-            }
-        }
-    }
+    scheduleDirectoryPass(item.node->children, false, item.depth + 1, result, stack, visited);
+    scheduleDirectoryPass(item.node->children, true, item.depth + 1, result, stack, visited);
 }
 
 } // namespace
