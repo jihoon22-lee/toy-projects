@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -29,6 +30,23 @@ FsNode makeChain(int depth, FsNode leaf) {
         parent.children.push_back(std::move(node));
         node = std::move(parent);
     }
+    return node;
+}
+
+FsNode storageFile(std::string name,
+                   FileIdentity fileIdentity,
+                   std::uint64_t allocatedSize,
+                   bool allocatedKnown,
+                   std::uint64_t hardLinkCount,
+                   bool hardLinksKnown,
+                   bool complete = true) {
+    FsNode node = makeFileNode(std::move(name), 1);
+    node.metadata.identity = fileIdentity;
+    node.metadata.allocated_size = allocatedSize;
+    node.metadata.allocated_size_known = allocatedKnown;
+    node.metadata.hard_link_count = hardLinkCount;
+    node.metadata.hard_link_count_known = hardLinksKnown;
+    node.metadata.complete = complete;
     return node;
 }
 
@@ -208,6 +226,122 @@ int main() {
         CHECK_EQ(topLone[0]->name, std::string("lone"));
     }
 
+    // --- identity-free files are safely reclaimable only when the adapter
+    // proves that they have exactly one link ---
+    {
+        FsNode oneLink = storageFile("one-link", FileIdentity{}, 2048, true, 1, true);
+        diskmap::aggregateStorage(oneLink);
+        CHECK_EQ(oneLink.allocated_size, static_cast<std::uint64_t>(2048));
+        CHECK(oneLink.allocated_size_known);
+        CHECK_EQ(oneLink.reclaimable_size, static_cast<std::uint64_t>(2048));
+        CHECK(oneLink.reclaimable_size_known);
+
+        FsNode multiLink = storageFile("multi-link", FileIdentity{}, 2048, true, 2, true);
+        diskmap::aggregateStorage(multiLink);
+        CHECK_EQ(multiLink.allocated_size, static_cast<std::uint64_t>(0));
+        CHECK(!multiLink.allocated_size_known);
+        CHECK_EQ(multiLink.reclaimable_size, static_cast<std::uint64_t>(0));
+        CHECK(!multiLink.reclaimable_size_known);
+    }
+
+    // --- physical metadata conflicts never become a false precise answer ---
+    {
+        const FileIdentity shared{21, 210, true};
+        FsNode root = makeDirNode("conflict", {
+            storageFile("first", shared, 4096, true, 2, true),
+            storageFile("second", shared, 8192, true, 3, true),
+        });
+        diskmap::aggregateStorage(root);
+        // Conflicting observations are intentionally represented as unknown;
+        // the aggregate must not advertise either observation as authoritative.
+        CHECK_EQ(root.allocated_size, static_cast<std::uint64_t>(0));
+        CHECK(!root.allocated_size_known);
+        CHECK_EQ(root.reclaimable_size, static_cast<std::uint64_t>(0));
+        CHECK(!root.reclaimable_size_known);
+
+        FsNode unknown = storageFile("unknown-allocation", shared, 0, false, 1, true);
+        diskmap::aggregateStorage(unknown);
+        CHECK_EQ(unknown.allocated_size, static_cast<std::uint64_t>(0));
+        CHECK(!unknown.allocated_size_known);
+        CHECK_EQ(unknown.reclaimable_size, static_cast<std::uint64_t>(0));
+        CHECK(!unknown.reclaimable_size_known);
+    }
+
+    // A valid identity with unknown physical fields propagates those unknown
+    // bits through the identity merge rather than being treated as zero.
+    {
+        const FileIdentity known = FileIdentity{21, 211, true};
+        FsNode root = makeDirNode("unknown-identity-facts", {
+            storageFile("known", known, 4096, true, 1, true),
+            storageFile("unknown", FileIdentity{21, 212, true}, 0, false, 0, false),
+        });
+        diskmap::aggregateStorage(root);
+        CHECK_EQ(root.allocated_size, static_cast<std::uint64_t>(4096));
+        CHECK(!root.allocated_size_known);
+        CHECK_EQ(root.reclaimable_size, static_cast<std::uint64_t>(4096));
+        CHECK(!root.reclaimable_size_known);
+    }
+
+    // Inconsistent link counts (more observed names than nlink reports) are
+    // also uncertain, even though the allocation observation agrees.
+    {
+        const FileIdentity shared = FileIdentity{21, 213, true};
+        FsNode root = makeDirNode("over-referenced", {
+            storageFile("first", shared, 512, true, 2, true),
+            storageFile("second", shared, 512, true, 2, true),
+            storageFile("third", shared, 512, true, 2, true),
+        });
+        diskmap::aggregateStorage(root);
+        CHECK_EQ(root.allocated_size, static_cast<std::uint64_t>(512));
+        CHECK(root.allocated_size_known);
+        CHECK_EQ(root.reclaimable_size, static_cast<std::uint64_t>(0));
+        CHECK(!root.reclaimable_size_known);
+    }
+
+    // --- an incomplete leaf or subtree invalidates aggregate certainty even
+    // when its numeric fields happen to look usable ---
+    {
+        FsNode root = makeDirNode("incomplete", {
+            storageFile("partial", FileIdentity{}, 1024, true, 1, true, false),
+            storageFile("known", FileIdentity{}, 512, true, 1, true),
+        });
+        diskmap::aggregateStorage(root);
+        CHECK_EQ(root.allocated_size, static_cast<std::uint64_t>(1536));
+        CHECK(!root.allocated_size_known);
+        CHECK_EQ(root.reclaimable_size, static_cast<std::uint64_t>(1536));
+        CHECK(!root.reclaimable_size_known);
+    }
+
+    // --- distinct maximum-sized objects exercise checked aggregate overflow;
+    // saturation is retained while the known bit is cleared ---
+    {
+        constexpr std::uint64_t maximum = std::numeric_limits<std::uint64_t>::max();
+        FsNode root = makeDirNode("overflow", {
+            storageFile("first", FileIdentity{22, 220, true}, maximum, true, 1, true),
+            storageFile("second", FileIdentity{22, 221, true}, maximum, true, 1, true),
+        });
+        diskmap::aggregateStorage(root);
+        CHECK_EQ(root.allocated_size, maximum);
+        CHECK(!root.allocated_size_known);
+        CHECK_EQ(root.reclaimable_size, maximum);
+        CHECK(!root.reclaimable_size_known);
+    }
+
+    // Unidentified allocations are merged independently of identity-aware
+    // entries, so overflow there must be conservative as well.
+    {
+        constexpr std::uint64_t maximum = std::numeric_limits<std::uint64_t>::max();
+        FsNode root = makeDirNode("unidentified-overflow", {
+            storageFile("first", FileIdentity{}, maximum, true, 1, true),
+            storageFile("second", FileIdentity{}, maximum, true, 1, true),
+        });
+        diskmap::aggregateStorage(root);
+        CHECK_EQ(root.allocated_size, maximum);
+        CHECK(!root.allocated_size_known);
+        CHECK_EQ(root.reclaimable_size, maximum);
+        CHECK(!root.reclaimable_size_known);
+    }
+
     // --- kMaxTreeDepth guard: a pathologically deep tree neither crashes
     // nor gets fully walked; every helper's recursion silently stops once
     // depth reaches kMaxTreeDepth, so anything past the cap (including the
@@ -221,6 +355,10 @@ int main() {
         const std::uint64_t total = diskmap::aggregateSizes(deepRoot);
         CHECK_EQ(total, static_cast<std::uint64_t>(0)); // leaf lies past the cap
         CHECK_EQ(deepRoot.size, static_cast<std::uint64_t>(0));
+
+        diskmap::aggregateStorage(deepRoot);
+        CHECK(!deepRoot.allocated_size_known);
+        CHECK(!deepRoot.reclaimable_size_known);
 
         diskmap::sortBySizeDesc(deepRoot); // must complete without crashing
 

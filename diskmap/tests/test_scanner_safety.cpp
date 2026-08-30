@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -25,6 +26,27 @@ using diskmap::ScanOptions;
 using diskmap::ScanResult;
 using diskmap::scan;
 using diskmap_test::FakeFsSource;
+
+class InspectingFakeFsSource : public FakeFsSource {
+public:
+    void addInspection(const std::filesystem::path& path,
+                       bool follow,
+                       diskmap::FsMetadata metadata) {
+        inspections_[std::make_pair(path, follow)] = std::move(metadata);
+    }
+
+    diskmap::FsMetadata inspect(const std::filesystem::path& path,
+                                bool follow) const override {
+        const auto it = inspections_.find(std::make_pair(path, follow));
+        if (it != inspections_.end()) {
+            return it->second;
+        }
+        return diskmap::FsSource::inspect(path, follow);
+    }
+
+private:
+    std::map<std::pair<std::filesystem::path, bool>, diskmap::FsMetadata> inspections_;
+};
 
 FileIdentity identity(std::uint64_t device, std::uint64_t file) {
     return FileIdentity{device, file, true};
@@ -72,6 +94,32 @@ DirEntry directorySymlink(std::string name, FileIdentity targetIdentity) {
     entry.has_target_metadata = true;
     entry.target_metadata.kind = FsKind::Directory;
     entry.target_metadata.identity = targetIdentity;
+    entry.target_metadata.complete = true;
+    return entry;
+}
+
+DirEntry fileSymlink(std::string name,
+                     std::uint64_t logicalSize,
+                     FileIdentity linkIdentity,
+                     FileIdentity targetIdentity,
+                     std::uint64_t allocatedSize,
+                     std::uint64_t hardLinkCount) {
+    DirEntry entry;
+    entry.name = std::move(name);
+    entry.is_dir = false;
+    entry.is_symlink = true;
+    entry.size = logicalSize;
+    entry.metadata.kind = FsKind::Symlink;
+    entry.metadata.identity = linkIdentity;
+    entry.metadata.complete = true;
+    entry.has_target_metadata = true;
+    entry.target_metadata.kind = FsKind::RegularFile;
+    entry.target_metadata.identity = targetIdentity;
+    entry.target_metadata.logical_size = logicalSize;
+    entry.target_metadata.allocated_size = allocatedSize;
+    entry.target_metadata.allocated_size_known = true;
+    entry.target_metadata.hard_link_count = hardLinkCount;
+    entry.target_metadata.hard_link_count_known = true;
     entry.target_metadata.complete = true;
     return entry;
 }
@@ -222,6 +270,212 @@ int main() {
             CHECK(!node->allocated_size_known);
             CHECK(!node->reclaimable_size_known);
         }
+    }
+
+    // --- a followed file symlink uses target storage facts but is not a
+    // reclaimable hard-link reference of its target ---
+    {
+        FakeFsSource fs;
+        const FileIdentity linkIdentity = identity(11, 110);
+        const FileIdentity targetIdentity = identity(11, 111);
+        fs.addListing("/followed-file/root",
+                      {fileSymlink("target-link", 32, linkIdentity, targetIdentity, 4096, 1)});
+
+        ScanOptions options;
+        options.follow_symlinks = true;
+        const ScanResult result = scan(fs, "/followed-file/root", options);
+        const FsNode* link = child(result.root, "target-link");
+        CHECK(link != nullptr);
+        CHECK_EQ(result.root.size, static_cast<std::uint64_t>(32));
+        CHECK_EQ(result.root.allocated_size, static_cast<std::uint64_t>(4096));
+        CHECK(result.root.allocated_size_known);
+        CHECK_EQ(result.root.reclaimable_size, static_cast<std::uint64_t>(0));
+        CHECK(result.root.reclaimable_size_known);
+        if (link != nullptr) {
+            CHECK(link->followed);
+            CHECK(link->has_target_metadata);
+            CHECK_EQ(link->metadata.identity, linkIdentity);
+            CHECK_EQ(link->target_metadata.identity, targetIdentity);
+            CHECK_EQ(link->allocated_size, static_cast<std::uint64_t>(4096));
+            CHECK(link->allocated_size_known);
+            CHECK_EQ(link->reclaimable_size, static_cast<std::uint64_t>(0));
+            CHECK(link->reclaimable_size_known);
+        }
+    }
+
+    // --- a directory with a valid stat record but a failed listing makes the
+    // entire physical aggregate incomplete ---
+    {
+        FakeFsSource fs;
+        fs.addListing("/incomplete/root", {physicalDirectory("blocked", identity(12, 120))});
+        fs.addError("/incomplete/root/blocked", "permission denied: blocked");
+
+        const ScanResult result = scan(fs, "/incomplete/root", ScanOptions{});
+        const FsNode* blocked = child(result.root, "blocked");
+        CHECK(blocked != nullptr);
+        if (blocked != nullptr) {
+            CHECK(!blocked->complete);
+            CHECK_EQ(blocked->error, std::string("permission denied: blocked"));
+            CHECK(blocked->metadata.complete);
+        }
+        CHECK(!result.root.allocated_size_known);
+        CHECK(!result.root.reclaimable_size_known);
+        CHECK_EQ(result.errors.size(), static_cast<std::size_t>(1));
+    }
+
+    // --- duplicate physical directories are retained as visible aliases but
+    // only the first one is expanded ---
+    {
+        FakeFsSource fs;
+        const FileIdentity sharedDirectory = identity(13, 130);
+        fs.addListing("/duplicate/root",
+                      {physicalDirectory("canonical", sharedDirectory),
+                       physicalDirectory("alias", sharedDirectory)});
+        fs.addListing("/duplicate/root/canonical", {physicalFile("payload", 7, identity(13, 131), 512, 1)});
+        fs.addListing("/duplicate/root/alias", {physicalFile("not-walked", 99, identity(13, 132), 512, 1)});
+
+        const ScanResult result = scan(fs, "/duplicate/root", ScanOptions{});
+        const FsNode* canonical = child(result.root, "canonical");
+        const FsNode* alias = child(result.root, "alias");
+        CHECK(canonical != nullptr);
+        CHECK(alias != nullptr);
+        if (canonical != nullptr) {
+            CHECK(!canonical->cycle_skipped);
+            CHECK_EQ(canonical->children.size(), static_cast<std::size_t>(1));
+        }
+        if (alias != nullptr) {
+            CHECK(alias->cycle_skipped);
+            CHECK(alias->children.empty());
+            CHECK(alias->complete);
+        }
+        CHECK_EQ(result.dirs_scanned, static_cast<std::size_t>(2));
+        CHECK_EQ(result.files_scanned, static_cast<std::size_t>(1));
+    }
+
+    // --- following a directory without a target identity is rejected before
+    // any untrusted target listing is attempted ---
+    {
+        FakeFsSource fs;
+        DirEntry unsafe = directorySymlink("unsafe", FileIdentity{});
+        unsafe.target_metadata.complete = true;
+        fs.addListing("/unsafe/root", {unsafe});
+
+        ScanOptions options;
+        options.follow_symlinks = true;
+        const ScanResult result = scan(fs, "/unsafe/root", options);
+        const FsNode* node = child(result.root, "unsafe");
+        CHECK(node != nullptr);
+        if (node != nullptr) {
+            CHECK(node->followed);
+            CHECK(!node->complete);
+            CHECK(!node->cycle_skipped);
+            CHECK(node->children.empty());
+            CHECK(node->error.find("target identity is unavailable") != std::string::npos);
+        }
+        CHECK_EQ(result.dirs_scanned, static_cast<std::size_t>(1));
+        CHECK_EQ(result.errors.size(), static_cast<std::size_t>(1));
+    }
+
+    // A dangling followed link is retained with its own metadata and the
+    // target lookup error; it must not silently become a complete file.
+    {
+        FakeFsSource fs;
+        DirEntry dangling;
+        dangling.name = "dangling";
+        dangling.is_symlink = true;
+        dangling.size = 0;
+        dangling.metadata.kind = FsKind::Symlink;
+        dangling.metadata.complete = true;
+        dangling.has_target_metadata = false;
+        dangling.target_metadata.error = "target is missing";
+        fs.addListing("/dangling/root", {dangling});
+
+        ScanOptions options;
+        options.follow_symlinks = true;
+        const ScanResult result = scan(fs, "/dangling/root", options);
+        const FsNode* node = child(result.root, "dangling");
+        CHECK(node != nullptr);
+        if (node != nullptr) {
+            CHECK(node->followed);
+            CHECK(!node->has_target_metadata);
+            CHECK(!node->complete);
+            CHECK_EQ(node->error, std::string("target is missing"));
+        }
+        CHECK_EQ(result.files_scanned, static_cast<std::size_t>(1));
+    }
+
+    // --- root metadata is allowed to be a symlink, including an incomplete
+    // target, and root lookup errors remain explicit ---
+    {
+        InspectingFakeFsSource fs;
+        const std::filesystem::path root = "/root-link/root";
+        diskmap::FsMetadata linkMetadata;
+        linkMetadata.kind = FsKind::Symlink;
+        linkMetadata.identity = identity(14, 140);
+        linkMetadata.complete = true;
+        diskmap::FsMetadata targetMetadata;
+        targetMetadata.kind = FsKind::Directory;
+        targetMetadata.identity = identity(14, 141);
+        targetMetadata.complete = true;
+        fs.addInspection(root, false, linkMetadata);
+        fs.addInspection(root, true, targetMetadata);
+        fs.addListing(root, {});
+
+        const ScanResult result = scan(fs, root, ScanOptions{});
+        CHECK(result.root.followed);
+        CHECK(result.root.is_dir);
+        CHECK(result.root.complete);
+        CHECK(result.root.has_target_metadata);
+        CHECK_EQ(result.root.target_metadata.identity, targetMetadata.identity);
+        CHECK_EQ(result.root.metadata.identity, linkMetadata.identity);
+        CHECK(result.errors.empty());
+    }
+
+    {
+        InspectingFakeFsSource fs;
+        const std::filesystem::path root = "/root-link/broken";
+        diskmap::FsMetadata linkMetadata;
+        linkMetadata.kind = FsKind::Symlink;
+        linkMetadata.identity = identity(14, 142);
+        linkMetadata.complete = true;
+        diskmap::FsMetadata targetMetadata;
+        targetMetadata.error = "target disappeared";
+        fs.addInspection(root, false, linkMetadata);
+        fs.addInspection(root, true, targetMetadata);
+        fs.addListing(root, {});
+
+        const ScanResult result = scan(fs, root, ScanOptions{});
+        CHECK(result.root.followed);
+        CHECK(!result.root.is_dir);
+        CHECK(!result.root.complete);
+        CHECK(!result.root.has_target_metadata);
+        CHECK_EQ(result.root.error, std::string("target disappeared"));
+        CHECK(result.errors.empty());
+    }
+
+    {
+        InspectingFakeFsSource fs;
+        const std::filesystem::path root = "/root-error";
+        diskmap::FsMetadata failed;
+        failed.error = "root metadata unavailable";
+        fs.addInspection(root, false, failed);
+
+        const ScanResult result = scan(fs, root, ScanOptions{});
+        CHECK(!result.root.complete);
+        CHECK(result.root.error.find("no listing registered") != std::string::npos);
+        CHECK_EQ(result.errors.size(), static_cast<std::size_t>(2));
+        CHECK_EQ(result.errors[0], std::string("root metadata unavailable"));
+        CHECK(result.errors[1].find("no listing registered") != std::string::npos);
+    }
+
+    // The root fallback in lastPathComponent is observable only for a path
+    // whose normalized filename is empty (the filesystem root itself).
+    {
+        FakeFsSource fs;
+        fs.addListing("/", {});
+        const ScanResult result = scan(fs, "/", ScanOptions{});
+        CHECK_EQ(result.root.name, std::string("/"));
+        CHECK_EQ(result.dirs_scanned, static_cast<std::size_t>(1));
     }
 
     return testSummary();

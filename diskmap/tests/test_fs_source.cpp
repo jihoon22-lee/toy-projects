@@ -165,16 +165,25 @@ int runTests() {
 
     const fs::path base = temp.path();
     const fs::path subdirPath = base / "subdir";
+    const fs::path emptyDirPath = base / "empty";
     const fs::path filePath = base / "file.txt";
     const fs::path hardlinkPath = base / "hardlink.txt";
     const fs::path sparsePath = base / "sparse.bin";
     const fs::path symlinkPath = base / "link_to_file";
+    const fs::path directorySymlinkPath = base / "link_to_subdir";
     const fs::path danglingPath = base / "dangling_link";
     const fs::path danglingTargetPath = base / "missing_target";
+#if defined(__unix__) || defined(__APPLE__)
+    const fs::path fifoPath = base / "named-pipe";
+#endif
 
     std::error_code ec;
     const bool madeSubdir = fs::create_directories(subdirPath, ec);
     CHECK(madeSubdir);
+    CHECK(!ec);
+    ec.clear();
+    const bool madeEmptyDir = fs::create_directory(emptyDirPath, ec);
+    CHECK(madeEmptyDir);
     CHECK(!ec);
 
     const std::string fileContents = "hello";
@@ -206,6 +215,19 @@ int runTests() {
     std::error_code symlinkEc;
     fs::create_symlink(filePath, symlinkPath, symlinkEc);
     const bool symlinkSupported = !symlinkEc;
+
+    bool directorySymlinkSupported = false;
+    if (symlinkSupported) {
+        symlinkEc.clear();
+        fs::create_directory_symlink(subdirPath, directorySymlinkPath, symlinkEc);
+        directorySymlinkSupported = !symlinkEc;
+    }
+
+#if defined(__unix__) || defined(__APPLE__)
+    bool fifoSupported = ::mkfifo(fifoPath.c_str(), 0600) == 0;
+#else
+    const bool fifoSupported = false;
+#endif
 
     bool danglingSymlinkSupported = false;
     if (symlinkSupported) {
@@ -264,6 +286,28 @@ int runTests() {
         checkPosixStat(nestedEntry->metadata, subdirPath / "nested.txt", false);
     }
 
+    // An empty directory exercises the iterator's natural end condition and
+    // keeps the source contract explicit for directories with no entries.
+    std::string emptyError;
+    const std::vector<DirEntry> emptyEntries = source.list(emptyDirPath, emptyError);
+    CHECK(emptyEntries.empty());
+    CHECK(emptyError.empty());
+
+    // POSIX special files are not regular files, directories, or symlinks;
+    // they remain visible as FsKind::Other with no fabricated size.
+    if (fifoSupported) {
+        const std::vector<DirEntry> fifoParentEntries = source.list(base, error);
+        CHECK(error.empty());
+        const DirEntry* fifoEntry = findEntry(fifoParentEntries, "named-pipe");
+        CHECK(fifoEntry != nullptr);
+        if (fifoEntry != nullptr) {
+            CHECK_EQ(fifoEntry->metadata.kind, FsKind::Other);
+            CHECK(!fifoEntry->is_dir);
+            CHECK(!fifoEntry->is_symlink);
+            CHECK_EQ(fifoEntry->size, static_cast<std::uint64_t>(0));
+        }
+    }
+
     // --- hard links: one physical identity and an nlink count of at least 2 ---
     if (hardLinkSupported) {
         const DirEntry* first = findEntry(entries, "file.txt");
@@ -280,6 +324,26 @@ int runTests() {
             CHECK(first->metadata.hard_link_count >= 2U);
             CHECK(second->metadata.hard_link_count >= 2U);
             checkPosixStat(second->metadata, hardlinkPath, false);
+        }
+    }
+
+    // A directory symlink keeps its own lstat identity while exposing the
+    // followed directory metadata used by the scanner's traversal decision.
+    if (directorySymlinkSupported) {
+        const DirEntry* linkEntry = findEntry(entries, "link_to_subdir");
+        CHECK(linkEntry != nullptr);
+        if (linkEntry != nullptr) {
+            CHECK_EQ(linkEntry->path, directorySymlinkPath);
+            CHECK(linkEntry->is_symlink);
+            CHECK(linkEntry->is_dir);
+            CHECK_EQ(linkEntry->metadata.kind, FsKind::Symlink);
+            CHECK(linkEntry->metadata.identity.valid);
+            CHECK(linkEntry->has_target_metadata);
+            if (linkEntry->has_target_metadata) {
+                CHECK_EQ(linkEntry->target_metadata.kind, FsKind::Directory);
+                CHECK(linkEntry->target_metadata.identity.valid);
+                CHECK(linkEntry->target_metadata.identity != linkEntry->metadata.identity);
+            }
         }
     }
 
@@ -362,6 +426,32 @@ int runTests() {
         source.list((base / "does_not_exist_at_all").string(), missingError);
     CHECK(missingEntries.empty());
     CHECK(!missingError.empty());
+
+    // The same non-throwing error contract applies when a path exists but is
+    // not a directory, and to both metadata lookup modes.
+    std::string fileListingError;
+    const std::vector<DirEntry> fileListing = source.list(filePath, fileListingError);
+    CHECK(fileListing.empty());
+    CHECK(!fileListingError.empty());
+
+    const FsMetadata missingLstat = source.inspect(base / "missing-metadata", false);
+    CHECK(!missingLstat.complete);
+    CHECK(!missingLstat.identity.valid);
+    CHECK(!missingLstat.error.empty());
+    const FsMetadata missingStat = source.inspect(base / "missing-metadata", true);
+    CHECK(!missingStat.complete);
+    CHECK(!missingStat.identity.valid);
+    CHECK(!missingStat.error.empty());
+
+    if (symlinkSupported) {
+        const FsMetadata linkLstat = source.inspect(symlinkPath, false);
+        const FsMetadata linkStat = source.inspect(symlinkPath, true);
+        CHECK(linkLstat.complete);
+        CHECK(linkStat.complete);
+        CHECK_EQ(linkLstat.kind, FsKind::Symlink);
+        CHECK_EQ(linkStat.kind, FsKind::RegularFile);
+        CHECK(linkLstat.identity != linkStat.identity);
+    }
 
     // --- virtual dispatch and virtual destruction still work ---
     {
