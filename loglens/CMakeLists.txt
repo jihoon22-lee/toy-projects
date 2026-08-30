@@ -26,6 +26,14 @@ add_subdirectory(src/gui)
 
 enable_testing()
 
+add_test(
+    NAME test_cli_stream
+    COMMAND ${CMAKE_COMMAND}
+        -DLOGLENS=$<TARGET_FILE:loglens>
+        -DINPUT=${CMAKE_SOURCE_DIR}/tests/data/sample.log
+        -P ${CMAKE_SOURCE_DIR}/tests/test_cli_stream.cmake
+)
+
 foreach(name IN ITEMS
         filter_expr highlight_rules log_parser log_record log_source log_stats ring_buffer)
     add_executable(test_${name} tests/test_${name}.cpp)

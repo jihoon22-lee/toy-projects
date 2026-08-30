@@ -10,6 +10,7 @@
 
 using loglens::FileTailer;
 using loglens::LogSource;
+using loglens::SourceChunk;
 
 namespace {
 
@@ -108,6 +109,47 @@ void testTailerDetectsTruncation() {
     std::remove(path.c_str());
 }
 
+void testTailerPreservesPartialChunk() {
+    const std::string path = tempPath("partial");
+    writeFile(path, "part");
+
+    FileTailer tailer(path);
+    SourceChunk chunk;
+    std::string error;
+    CHECK(tailer.pollChunk(chunk, error));
+    CHECK_EQ(chunk.bytes, std::string("part"));
+    CHECK(!chunk.generation_changed);
+    CHECK_EQ(chunk.generation, static_cast<std::uint64_t>(0));
+
+    // The tailer advances only through bytes it returned. The assembler can
+    // therefore join this suffix with the partial bytes from the first poll.
+    appendFile(path, "ial\n");
+    CHECK(tailer.pollChunk(chunk, error));
+    CHECK_EQ(chunk.bytes, std::string("ial\n"));
+    CHECK(!chunk.generation_changed);
+    CHECK_EQ(tailer.restarts(), static_cast<std::size_t>(0));
+    std::remove(path.c_str());
+}
+
+void testTailerGenerationChangesOnTruncation() {
+    const std::string path = tempPath("generation");
+    writeFile(path, "old record\nwith continuation");
+
+    FileTailer tailer(path);
+    SourceChunk chunk;
+    std::string error;
+    CHECK(tailer.pollChunk(chunk, error));
+    CHECK_EQ(chunk.generation, static_cast<std::uint64_t>(0));
+
+    writeFile(path, "new\n");
+    CHECK(tailer.pollChunk(chunk, error));
+    CHECK(chunk.generation_changed);
+    CHECK_EQ(chunk.generation, static_cast<std::uint64_t>(1));
+    CHECK_EQ(chunk.bytes, std::string("new\n"));
+    CHECK_EQ(tailer.generation(), static_cast<std::uint64_t>(1));
+    std::remove(path.c_str());
+}
+
 void testTailerMissingFile() {
     FileTailer tailer("/tmp/loglens_definitely_absent.log");
     std::vector<std::string> lines;
@@ -125,6 +167,8 @@ int main() {
     testPolymorphicDestruction();
     testTailerReadsAndResumes();
     testTailerDetectsTruncation();
+    testTailerPreservesPartialChunk();
+    testTailerGenerationChangesOnTruncation();
     testTailerMissingFile();
     return checkSummary();
 }

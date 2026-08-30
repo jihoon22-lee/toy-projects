@@ -4,8 +4,10 @@
 
 #include <memory>
 #include <optional>
+#include <vector>
 
 #include "loglens/filter_expr.hpp"
+#include "loglens/log_parser.hpp"
 #include "loglens/log_source.hpp"
 
 class LogModel;
@@ -43,10 +45,14 @@ private:
     // Owned rather than local: the tailer carries the read offset and the
     // restart count, which is the entire state that makes following work.
     std::unique_ptr<loglens::FileTailer> tailer_;
+    // The parser owns line numbering, partial bytes and continuation state;
+    // both initial open and follow polls feed this same instance.
+    loglens::RecordAssembler assembler_;
     QTimer* pollTimer_ = nullptr;
     QCheckBox* followBox_ = nullptr;
     bool autoScroll_ = true;
 
     void refreshTimeline();
     void updateStatus(const QString& extra);
+    void applyDeltas(const std::vector<loglens::RecordDelta>& deltas);
 };

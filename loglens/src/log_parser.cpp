@@ -3,6 +3,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <ctime>
+#include <utility>
 
 namespace loglens {
 
@@ -259,5 +260,109 @@ LogRecord parseLine(const std::string& line, Format format, std::size_t lineNumb
     }
     return record;
 }
+
+RecordAssembler::RecordAssembler(Format format, EncodingErrorPolicy encodingPolicy)
+    : format_(format), encoding_error_policy_(encodingPolicy) {}
+
+std::vector<RecordDelta> RecordAssembler::consumeCompleteLine(const std::string& input) {
+    // std::getline() removes LF but leaves CR when a Windows-written file is
+    // read in binary mode. Treat CRLF as one newline while keeping raw useful
+    // to callers instead of leaking a carriage return into the table/filter.
+    std::string line = input;
+    if (!line.empty() && line.back() == '\r') {
+        line.pop_back();
+    }
+
+    const std::size_t physicalLine = next_line_number_++;
+    std::vector<RecordDelta> deltas;
+    if (isContinuation(line) && has_pending_) {
+        pending_record_.message += "\n" + line;
+        pending_record_.raw += "\n" + line;
+        deltas.push_back(RecordDelta{RecordDelta::Kind::Extend, pending_index_, physicalLine,
+                                     generation_, pending_record_});
+        return deltas;
+    }
+
+    pending_record_ = parseLine(line, format_, physicalLine);
+    pending_index_ = record_count_++;
+    has_pending_ = true;
+    deltas.push_back(RecordDelta{RecordDelta::Kind::Append, pending_index_, physicalLine,
+                                 generation_, pending_record_});
+    return deltas;
+}
+
+std::vector<RecordDelta> RecordAssembler::consumeBytes(std::string_view bytes) {
+    if (!bytes.empty()) {
+        partial_.append(bytes.data(), bytes.size());
+    }
+
+    std::vector<RecordDelta> deltas;
+    std::size_t start = 0;
+    while (true) {
+        const std::size_t newline = partial_.find('\n', start);
+        if (newline == std::string::npos) {
+            break;
+        }
+        std::vector<RecordDelta> lineDeltas =
+            consumeCompleteLine(partial_.substr(start, newline - start));
+        deltas.insert(deltas.end(), lineDeltas.begin(), lineDeltas.end());
+        start = newline + 1;
+    }
+    if (start != 0) {
+        partial_.erase(0, start);
+    }
+    return deltas;
+}
+
+std::vector<RecordDelta> RecordAssembler::consumeLine(const std::string& line) {
+    // Line-oriented callers still participate in the same partial-byte state:
+    // a line obtained after a previous byte chunk completes that chunk rather
+    // than creating a second record.
+    std::string framed = line;
+    framed.push_back('\n');
+    return consumeBytes(framed);
+}
+
+std::vector<RecordDelta> RecordAssembler::consumeLines(const std::vector<std::string>& lines) {
+    std::vector<RecordDelta> deltas;
+    for (const std::string& line : lines) {
+        std::vector<RecordDelta> lineDeltas = consumeLine(line);
+        deltas.insert(deltas.end(), lineDeltas.begin(), lineDeltas.end());
+    }
+    return deltas;
+}
+
+std::vector<RecordDelta> RecordAssembler::flush() {
+    if (partial_.empty()) {
+        return {};
+    }
+    std::string line = std::move(partial_);
+    partial_.clear();
+    return consumeCompleteLine(line);
+}
+
+void RecordAssembler::reset(std::uint64_t generation) {
+    generation_ = generation;
+    next_line_number_ = 1;
+    record_count_ = 0;
+    partial_.clear();
+    pending_record_ = LogRecord{};
+    pending_index_ = 0;
+    has_pending_ = false;
+}
+
+void RecordAssembler::setFormat(Format format) { format_ = format; }
+
+Format RecordAssembler::format() const { return format_; }
+
+EncodingErrorPolicy RecordAssembler::encodingErrorPolicy() const {
+    return encoding_error_policy_;
+}
+
+std::uint64_t RecordAssembler::generation() const { return generation_; }
+
+std::size_t RecordAssembler::nextLineNumber() const { return next_line_number_; }
+
+std::size_t RecordAssembler::recordCount() const { return record_count_; }
 
 } // namespace loglens

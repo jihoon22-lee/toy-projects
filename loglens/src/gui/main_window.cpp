@@ -13,7 +13,6 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
-#include <fstream>
 #include <string>
 #include <vector>
 
@@ -26,22 +25,6 @@
 namespace {
 
 constexpr std::uint64_t kBucketMs = 60000;
-
-// Folds continuation lines into the previous record, so a stack trace stays
-// attached to the message that produced it instead of becoming orphan rows.
-std::vector<loglens::LogRecord> parseLines(const std::vector<std::string>& lines) {
-    std::vector<loglens::LogRecord> records;
-    records.reserve(lines.size());
-    for (std::size_t i = 0; i < lines.size(); ++i) {
-        if (loglens::isContinuation(lines[i]) && !records.empty()) {
-            records.back().message += "\n" + lines[i];
-            records.back().raw += "\n" + lines[i];
-            continue;
-        }
-        records.push_back(loglens::parseLine(lines[i], loglens::Format::Auto, i + 1));
-    }
-    return records;
-}
 
 } // namespace
 
@@ -100,6 +83,24 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setWindowTitle(tr("loglens"));
 }
 
+void MainWindow::applyDeltas(const std::vector<loglens::RecordDelta>& deltas) {
+    std::vector<loglens::LogRecord> appends;
+    for (const loglens::RecordDelta& delta : deltas) {
+        if (delta.kind == loglens::RecordDelta::Kind::Append) {
+            appends.push_back(delta.record);
+            continue;
+        }
+        if (!appends.empty()) {
+            model_->appendRecords(appends);
+            appends.clear();
+        }
+        model_->updateRecord(delta.record_index, delta.record);
+    }
+    if (!appends.empty()) {
+        model_->appendRecords(appends);
+    }
+}
+
 void MainWindow::chooseFile() {
     const QString path = QFileDialog::getOpenFileName(this, tr("Open a log file"));
     if (path.isEmpty()) {
@@ -110,15 +111,19 @@ void MainWindow::chooseFile() {
 
 void MainWindow::openPath(const QString& path) {
     tailer_ = std::make_unique<loglens::FileTailer>(path.toStdString());
-    std::vector<std::string> lines;
+    loglens::SourceChunk chunk;
     std::string error;
-    if (!tailer_->poll(lines, error)) {
+    if (!tailer_->pollChunk(chunk, error)) {
         // Report it rather than showing an empty window with no explanation.
         status_->setText(tr("Cannot read: %1").arg(QString::fromStdString(error)));
         tailer_.reset();
+        assembler_.reset();
+        model_->resetRecords();
         return;
     }
-    model_->setRecords(parseLines(lines));
+    assembler_.reset(tailer_->generation());
+    model_->setRecords(std::vector<loglens::LogRecord>());
+    applyDeltas(assembler_.consumeBytes(chunk.bytes));
     applyFilter();
     setWindowTitle(tr("loglens — %1").arg(path));
     setFollowing(followBox_->isChecked());
@@ -129,10 +134,17 @@ void MainWindow::pollSource() {
         return;
     }
     const std::size_t restartsBefore = tailer_->restarts();
-    std::vector<std::string> lines;
+    loglens::SourceChunk chunk;
     std::string error;
-    if (!tailer_->poll(lines, error)) {
+    if (!tailer_->pollChunk(chunk, error)) {
         // Stop rather than spin: whatever broke will keep breaking every tick.
+        // pollChunk may already have observed a truncation before opening the
+        // replacement failed. Discard the old generation now, otherwise a
+        // later retry could append fresh bytes to stale parser/model state.
+        if (tailer_->generation() != assembler_.generation()) {
+            assembler_.reset(tailer_->generation());
+            model_->resetRecords();
+        }
         status_->setText(tr("Follow stopped: %1").arg(QString::fromStdString(error)));
         followBox_->setChecked(false);
         return;
@@ -140,13 +152,15 @@ void MainWindow::pollSource() {
 
     // A truncated or replaced file makes every retained row stale, so the model
     // starts over instead of appending new lines under old ones.
-    if (tailer_->restarts() != restartsBefore) {
+    if (tailer_->restarts() != restartsBefore || chunk.generation_changed) {
+        assembler_.reset(tailer_->generation());
         model_->resetRecords();
     }
-    if (lines.empty()) {
+    const std::vector<loglens::RecordDelta> deltas = assembler_.consumeBytes(chunk.bytes);
+    if (deltas.empty()) {
         return;
     }
-    model_->appendRecords(parseLines(lines));
+    applyDeltas(deltas);
     refreshTimeline();
     updateStatus(QString());
     if (autoScroll_) {

@@ -143,16 +143,22 @@ std::string buildFilterText(const CliOptions& options) {
     return options.filter.empty() ? levelClause : levelClause + " AND (" + options.filter + ")";
 }
 
-// Folds continuation lines into the preceding record so a stack trace stays
-// attached to the message that produced it.
-void appendLine(const std::string& line, loglens::Format format, std::size_t number,
-                std::vector<loglens::LogRecord>& records) {
-    if (loglens::isContinuation(line) && !records.empty()) {
-        records.back().message += "\n" + line;
-        records.back().raw += "\n" + line;
-        return;
+// Applies the parser's explicit append/extend contract to a one-shot record
+// vector. The GUI applies the same deltas to its model, so continuation
+// behavior cannot diverge between the two front ends.
+void applyDeltas(const std::vector<loglens::RecordDelta>& deltas,
+                 std::vector<loglens::LogRecord>& records) {
+    for (const loglens::RecordDelta& delta : deltas) {
+        if (delta.kind == loglens::RecordDelta::Kind::Append) {
+            if (delta.record_index == records.size()) {
+                records.push_back(delta.record);
+            }
+            continue;
+        }
+        if (delta.record_index < records.size()) {
+            records[delta.record_index] = delta.record;
+        }
     }
-    records.push_back(loglens::parseLine(line, format, number));
 }
 
 void printRecords(const std::vector<loglens::LogRecord>& records,
@@ -195,9 +201,9 @@ void printStats(const std::vector<loglens::LogRecord>& records,
 
 int run(const CliOptions& options) {
     loglens::FileTailer tailer(options.path);
-    std::vector<std::string> lines;
+    loglens::SourceChunk chunk;
     std::string error;
-    if (!tailer.poll(lines, error)) {
+    if (!tailer.pollChunk(chunk, error)) {
         std::cerr << "fatal: " << error << "\n";
         return 1;
     }
@@ -215,10 +221,13 @@ int run(const CliOptions& options) {
     }
 
     const loglens::Format format = resolveFormat(options.format);
+    loglens::RecordAssembler assembler(format);
     std::vector<loglens::LogRecord> records;
-    for (std::size_t i = 0; i < lines.size(); ++i) {
-        appendLine(lines[i], format, i + 1, records);
-    }
+    applyDeltas(assembler.consumeBytes(chunk.bytes), records);
+    // A one-shot CLI invocation is an explicit EOF decision: expose a final
+    // record even when the file does not end in a newline. Follow mode never
+    // calls flush(), so an append can still complete the same partial line.
+    applyDeltas(assembler.flush(), records);
 
     if (options.stats) {
         printStats(records, filter, options, std::cout);

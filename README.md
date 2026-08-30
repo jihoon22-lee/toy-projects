@@ -1,6 +1,6 @@
 # toy-projects
 
-C++17 / Qt6 로 만드는 실사용 데스크톱 도구 모음.
+C++17 / Qt 5.15+ / Qt6 로 만드는 실사용 데스크톱 도구 모음.
 동시에 [ici](https://github.com/jihoon22-lee/ici) 품질 게이트의 **외부 C++ 검증 대상**으로 쓰인다.
 
 앞으로의 방향과 그 순서를 정한 이유는 [ROADMAP.md](ROADMAP.md) 에, 이 과정에서 발견한
@@ -15,7 +15,9 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 
 ## 공통 구조 규칙
 
-모든 프로젝트는 아래 배치를 따른다. 로직은 `core`, Qt 는 그 위의 껍데기라는 설계를 강제한다.
+모든 프로젝트는 아래 배치를 따른다. 공용 파서·모델은 `core`에 두고, Qt 셸은 그 계약을
+사용하는 별도 계층으로 둔다. Qt 사용 자체를 core에서 금지하지는 않지만, CLI와 GUI가 같은
+핵심 의미론을 공유하도록 한다.
 
 ```
 <project>/
@@ -25,7 +27,7 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 │   └── gui/              Qt 셸의 헤더
 ├── src/                  구현. 전부 ici 검증 대상이다
 │   ├── main.cpp          CLI 드라이버
-│   └── gui/              Qt6 셸의 .cpp. 라이브러리 + 실행 파일로 나뉜다
+│   └── gui/              Qt 셸의 .cpp. 라이브러리 + 실행 파일로 나뉜다
 └── tests/                각각 자체 실행 파일이 되는 테스트
 ```
 
@@ -73,6 +75,22 @@ cpp_pkg_config = ["Qt6Widgets"]   # lint 가 Qt 헤더를 찾을 수 있게
 
 `cpp_external_build_dirs` 는 더 이상 쓰지 않는다. 루트에 빌드 디스크립터가 없는 프로젝트
 (g++ 경로)에서는 여전히 유효하다.
+
+### loglens 스트림 계약
+
+`loglens`의 CLI와 GUI는 같은 `RecordAssembler`를 사용한다. `FileTailer::pollChunk`가
+poll에서 읽은 raw bytes와 source generation을 전달하고, assembler가 다음 상태를 한 곳에서
+보존한다.
+
+- newline을 기준으로 한 physical line 번호
+- 다음 poll에서 이어 붙일 partial bytes
+- stack-trace continuation을 확장할 pending record
+- truncation/restart 뒤 초기화되는 generation
+- 선택된 format과 byte-preserving encoding/error policy
+
+새 record는 `Append`, 기존 record의 continuation은 `Extend` delta로 구분된다. 따라서 GUI는
+이미 표시한 행을 갱신하고 CLI는 같은 결과 벡터를 갱신한다. newline 없는 마지막 조각은
+follow 모드에서는 보류하며, one-shot CLI의 명시적 EOF `flush()`에서만 record가 된다.
 
 ### 알려진 갭: Qt 셸에 단위 테스트가 없다
 

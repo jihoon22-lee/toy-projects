@@ -2,6 +2,7 @@
 
 #include <QAbstractTableModel>
 
+#include <cstddef>
 #include <optional>
 #include <vector>
 
@@ -34,6 +35,11 @@ public:
     // Drops everything. Used when the source file is truncated or rotated,
     // where the retained rows no longer correspond to anything on disk.
     void resetRecords();
+
+    // Replaces one already-published record after a continuation line arrives.
+    // The method preserves filter semantics and emits the smallest valid model
+    // change for visible rows.
+    void updateRecord(std::size_t index, const loglens::LogRecord& record);
 
     const loglens::LogRecord* recordAt(int row) const;
     int totalCount() const;

@@ -17,6 +17,15 @@ public:
     virtual bool poll(std::vector<std::string>& out, std::string& error) = 0;
 };
 
+// Bytes read during one poll plus the source generation that owns them. The
+// generation changes when FileTailer detects truncation/replacement by size;
+// consumers must discard parser/model state before applying the new bytes.
+struct SourceChunk {
+    std::string bytes;
+    bool generation_changed = false;
+    std::uint64_t generation = 0;
+};
+
 // Polling tailer.
 //
 // Restart detection is by size only: if the file is now smaller than the offset
@@ -32,13 +41,20 @@ public:
 
     bool poll(std::vector<std::string>& out, std::string& error) override;
 
+    // Reads raw bytes after the current offset. Unlike poll(vector<string>&),
+    // this preserves a final non-newline-terminated fragment for the shared
+    // RecordAssembler to carry across polls.
+    bool pollChunk(SourceChunk& out, std::string& error);
+
     std::uint64_t offset() const;
     std::size_t restarts() const;
+    std::uint64_t generation() const;
 
 private:
     std::string path_;
     std::uint64_t offset_ = 0;
     std::size_t restarts_ = 0;
+    std::uint64_t generation_ = 0;
 
     bool detectRestart(std::uint64_t size);
 };
