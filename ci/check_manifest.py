@@ -53,7 +53,7 @@ def discover(
 
     names: list[str] = []
     verify_projects: list[dict[str, str]] = []
-    gui_projects: list[dict[str, str]] = []
+    gui_projects: list[dict[str, Any]] = []
     for entry in entries:
         if not isinstance(entry, dict):
             raise ValueError("every project manifest entry must be an object")
@@ -112,7 +112,7 @@ def discover(
 
 def write_github_outputs(
     verify_projects: list[dict[str, str]],
-    gui_projects: list[dict[str, str]],
+    gui_projects: list[dict[str, Any]],
     names: list[str],
 ) -> None:
     output_name = os.environ.get("GITHUB_OUTPUT")

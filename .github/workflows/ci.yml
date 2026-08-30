@@ -37,7 +37,10 @@ jobs:
 
       - name: Validate manifest and discover matrices
         id: manifest
-        run: python3 ci/check_manifest.py
+        run: |
+          set -euo pipefail
+          python3 -m unittest ci/test_check_manifest.py -v
+          python3 ci/check_manifest.py
 
   verify:
     name: ici verify (${{ matrix.project.name }})
