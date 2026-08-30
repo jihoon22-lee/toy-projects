@@ -36,6 +36,8 @@ private slots:
     void setFollowing(bool following);
 
 private:
+    enum class FollowState { Stopped, Following, WaitingRetry };
+
     LogModel* model_ = nullptr;
     QTableView* table_ = nullptr;
     QLineEdit* filterEdit_ = nullptr;
@@ -50,6 +52,8 @@ private:
     loglens::RecordAssembler assembler_;
     QTimer* pollTimer_ = nullptr;
     QCheckBox* followBox_ = nullptr;
+    FollowState followState_ = FollowState::Stopped;
+    std::size_t retryAttempts_ = 0;
     bool autoScroll_ = true;
 
     void refreshTimeline();
