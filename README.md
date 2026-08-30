@@ -10,8 +10,8 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 
 | 이름 | 설명 | 상태 |
 |---|---|---|
-| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | 코어 + Qt GUI (현재 Qt6) |
-| [loglens](loglens/) | 로그 뷰어 / 분석기 | 코어 + Qt GUI (현재 Qt6) · 라이브 팔로우 |
+| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | 코어 + Qt5/Qt6 GUI · 7 tests |
+| [loglens](loglens/) | 로그 뷰어 / 분석기 | 코어 + Qt GUI (현재 Qt6) · 라이브 팔로우 · 9 tests |
 
 ## 공통 구조 규칙
 
@@ -24,10 +24,10 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 ├── ici.toml              project.source_dirs = ["src"]
 ├── <빌드 정의>           loglens 는 CMakeLists.txt, diskmap 은 diskmap.pro
 ├── include/<project>/    헤더는 전부 여기. 코어와 GUI 모두
-│   └── gui/              Qt 셸의 헤더
+│   └── gui/              Qt5/Qt6 셸의 헤더
 ├── src/                  구현. 전부 ici 검증 대상이다
 │   ├── main.cpp          CLI 드라이버
-│   └── gui/              Qt 셸의 .cpp. 라이브러리 + 실행 파일로 나뉜다
+│   └── gui/              Qt5/Qt6 셸의 .cpp. 라이브러리 + 실행 파일로 나뉜다
 └── tests/                각각 자체 실행 파일이 되는 테스트
 ```
 
@@ -127,7 +127,7 @@ poll에서 읽은 raw bytes와 source generation을 전달하고, assembler가 �
 이미 표시한 행을 갱신하고 CLI는 같은 결과 벡터를 갱신한다. newline 없는 마지막 조각은
 follow 모드에서는 보류하며, one-shot CLI의 명시적 EOF `flush()`에서만 record가 된다.
 
-### 알려진 갭: Qt 셸에 단위 테스트가 없다
+### Qt 셸 검증 현황
 
 GUI 가 커버리지에 잡히기 시작하면서 드러난 사실이다.
 
@@ -137,9 +137,9 @@ GUI 가 커버리지에 잡히기 시작하면서 드러난 사실이다.
 | `diskmap/src/gui/treemap_widget.cpp` | `QSignalSpy` 로 검증 |
 | `loglens/src/gui/main_window.cpp` | **미검증** (128 statements) |
 | `loglens/src/gui/timeline_widget.cpp` | **미검증** (37 statements) |
-| `diskmap/src/gui/main_window.cpp` | **미검증** |
+| `diskmap/src/gui/main_window.cpp` | `test_main_window` — scan result, breadcrumb, descend/up, leaf no-op |
 
-지금은 CI 의 헤드리스 스모크 실행이 유일한 커버다. `loglens` 의 커버리지 임계값이 80/90 에서
+`loglens` 의 커버리지 임계값이 80/90 에서
 55/80 으로 내려간 것이 이 때문이며, **코드가 나빠져서가 아니라 이전에 보이지 않던 코드가
 보이기 시작해서다.** 근거는 `loglens/ici.toml` 에 수치와 함께 적어 두었다. 셸에 테스트가
 붙으면 도로 올린다.
@@ -201,10 +201,15 @@ cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release
 cmake --build build/gui --parallel
 ./build/gui/src/gui/loglens-gui [경로]
 
-# diskmap (qmake)
+# diskmap (qmake, Qt 6)
 cd diskmap
 mkdir -p build/gui && cd build/gui
 qmake6 ../../diskmap.pro && make -j
+./src/gui/diskmap-gui [경로]
+
+# diskmap (qmake, Qt 5.15)
+mkdir -p ../gui-qt5 && cd ../gui-qt5
+qmake ../../diskmap.pro && make -j
 ./src/gui/diskmap-gui [경로]
 ```
 
