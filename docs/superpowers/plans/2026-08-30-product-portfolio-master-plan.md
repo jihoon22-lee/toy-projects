@@ -210,6 +210,13 @@ smoke를 실행한다. discovery 자동 확장은 `ci/test_check_manifest.py` st
 
 **브랜치:** `feat/loglens-reliable-tailing`
 
+**L1 진행 분할 (2026-08-31):**
+
+- [x] Slice 1 — source identity/typed chunk contract: POSIX device/inode 기반 교체 감지와
+  generation/position/error를 담은 core poll 결과, real-filesystem 회귀 테스트.
+- [ ] Slice 2 — follow recovery GUI state: missing/reappear retry, stopped/follow resume와
+  그 상태를 표시하는 사용자 경험.
+
 - [ ] POSIX에서는 device/inode, 다른 platform에서는 사용 가능한 file identity abstraction을 도입한다.
 - [ ] 더 크거나 같은 새 파일로 교체돼도 rotation을 탐지한다.
 - [ ] truncate, replace, permission loss, file disappear/reappear를 구분한다.
