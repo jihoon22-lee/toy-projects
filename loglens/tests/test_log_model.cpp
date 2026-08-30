@@ -39,6 +39,8 @@ private slots:
     void appendWithFilterInsertsOnlyMatches();
     void appendThatMatchesNothingEmitsNoInsert();
     void resetClearsEverything();
+    void updateVisibleRecordEmitsDataChanged();
+    void updateRespectsFilterMembership();
 };
 
 // QAbstractItemModelTester asserts the whole QAbstractItemModel contract on
@@ -115,6 +117,42 @@ void TestLogModel::resetClearsEverything() {
     QCOMPARE(spy.count(), 1);
     QCOMPARE(model.rowCount(), 0);
     QCOMPARE(model.totalCount(), 0);
+}
+
+void TestLogModel::updateVisibleRecordEmitsDataChanged() {
+    LogModel model;
+    QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::Fatal);
+
+    model.setRecords(batch({Level::Error}));
+    QSignalSpy spy(&model, &QAbstractItemModel::dataChanged);
+    loglens::LogRecord updated = makeRecord(Level::Fatal, "svc", "boom\n  detail");
+    updated.line_number = 1;
+    model.updateRecord(0, updated);
+
+    QCOMPARE(model.rowCount(), 1);
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(model.recordAt(0)->message, std::string("boom\n  detail"));
+    QCOMPARE(model.recordAt(0)->line_number, static_cast<std::size_t>(1));
+}
+
+void TestLogModel::updateRespectsFilterMembership() {
+    LogModel model;
+    QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::Fatal);
+    model.setRecords(batch({Level::Info, Level::Error}));
+    const loglens::Filter filter = errorsOnly();
+    model.setFilter(&filter);
+    QCOMPARE(model.rowCount(), 1);
+
+    QSignalSpy inserted(&model, &QAbstractItemModel::rowsInserted);
+    QSignalSpy removed(&model, &QAbstractItemModel::rowsRemoved);
+    model.updateRecord(0, makeRecord(Level::Fatal, "svc", "now visible"));
+    QCOMPARE(model.rowCount(), 2);
+    QCOMPARE(inserted.count(), 1);
+
+    model.updateRecord(1, makeRecord(Level::Info, "svc", "now hidden"));
+    QCOMPARE(model.rowCount(), 1);
+    QCOMPARE(removed.count(), 1);
+    QCOMPARE(model.recordAt(0)->message, std::string("now visible"));
 }
 
 QTEST_MAIN(TestLogModel)

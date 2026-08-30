@@ -1,5 +1,7 @@
 #include "loglens/gui/log_model.hpp"
 
+#include <algorithm>
+
 #include <QBrush>
 #include <QColor>
 
@@ -97,6 +99,45 @@ void LogModel::resetRecords() {
     records_.clear();
     visible_.clear();
     endResetModel();
+}
+
+void LogModel::updateRecord(std::size_t index, const loglens::LogRecord& record) {
+    if (index >= records_.size()) {
+        return;
+    }
+
+    const bool wasVisible = !filter_ || filter_->matches(records_[index]);
+    const bool isVisible = !filter_ || filter_->matches(record);
+    const int recordIndex = static_cast<int>(index);
+    auto position = std::lower_bound(visible_.begin(), visible_.end(), recordIndex);
+
+    if (wasVisible && isVisible) {
+        records_[index] = record;
+        const int row = static_cast<int>(position - visible_.begin());
+        const QModelIndex first = this->index(row, 0);
+        const QModelIndex last = this->index(row, ColumnCount - 1);
+        emit dataChanged(first, last,
+                         {Qt::DisplayRole, Qt::ForegroundRole, Qt::ToolTipRole});
+        return;
+    }
+
+    if (wasVisible && !isVisible) {
+        const int row = static_cast<int>(position - visible_.begin());
+        beginRemoveRows(QModelIndex(), row, row);
+        records_[index] = record;
+        visible_.erase(position);
+        endRemoveRows();
+        return;
+    }
+
+    records_[index] = record;
+    if (!wasVisible && isVisible) {
+        position = std::lower_bound(visible_.begin(), visible_.end(), recordIndex);
+        const int row = static_cast<int>(position - visible_.begin());
+        beginInsertRows(QModelIndex(), row, row);
+        visible_.insert(position, recordIndex);
+        endInsertRows();
+    }
 }
 
 void LogModel::rebuildVisible(const loglens::Filter* filter) {

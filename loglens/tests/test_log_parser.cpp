@@ -8,6 +8,8 @@ using loglens::isContinuation;
 using loglens::Level;
 using loglens::LogRecord;
 using loglens::parseLine;
+using loglens::RecordAssembler;
+using loglens::RecordDelta;
 
 namespace {
 
@@ -103,6 +105,107 @@ void testContinuation() {
     CHECK(!isContinuation("attention: not a continuation"));
 }
 
+void testAssemblerPreservesPollState() {
+    RecordAssembler assembler;
+    const std::vector<RecordDelta> first = assembler.consumeLines({
+        "2026-08-26T04:15:22Z INFO first",
+        "2026-08-26T04:15:23Z WARN second",
+    });
+    CHECK_EQ(first.size(), static_cast<std::size_t>(2));
+    CHECK(first[0].kind == RecordDelta::Kind::Append);
+    CHECK(first[1].kind == RecordDelta::Kind::Append);
+    CHECK_EQ(first[0].record.line_number, static_cast<std::size_t>(1));
+    CHECK_EQ(first[1].record.line_number, static_cast<std::size_t>(2));
+    CHECK_EQ(first[0].physical_line_number, static_cast<std::size_t>(1));
+    CHECK_EQ(first[1].physical_line_number, static_cast<std::size_t>(2));
+
+    const std::vector<RecordDelta> second =
+        assembler.consumeLines({"2026-08-26T04:15:24Z ERROR third"});
+    CHECK_EQ(second.size(), static_cast<std::size_t>(1));
+    CHECK_EQ(second[0].record.line_number, static_cast<std::size_t>(3));
+    CHECK_EQ(second[0].record_index, static_cast<std::size_t>(2));
+}
+
+void testAssemblerExtendsPreviousRecordAcrossPolls() {
+    RecordAssembler assembler;
+    const std::vector<RecordDelta> root =
+        assembler.consumeLines({"2026-08-26T04:15:22Z ERROR boom"});
+    CHECK_EQ(root.size(), static_cast<std::size_t>(1));
+    CHECK(root[0].kind == RecordDelta::Kind::Append);
+
+    const std::vector<RecordDelta> continuation =
+        assembler.consumeLines({"    at Service.call(Service.java:10)"});
+    CHECK_EQ(continuation.size(), static_cast<std::size_t>(1));
+    CHECK(continuation[0].kind == RecordDelta::Kind::Extend);
+    CHECK_EQ(continuation[0].record_index, static_cast<std::size_t>(0));
+    CHECK_EQ(continuation[0].physical_line_number, static_cast<std::size_t>(2));
+    CHECK_EQ(continuation[0].record.line_number, static_cast<std::size_t>(1));
+    CHECK_EQ(continuation[0].record.message,
+             std::string("boom\n    at Service.call(Service.java:10)"));
+    CHECK_EQ(continuation[0].record.raw,
+             std::string("2026-08-26T04:15:22Z ERROR boom\n"
+                          "    at Service.call(Service.java:10)"));
+}
+
+void testAssemblerDoesNotDropLeadingContinuation() {
+    RecordAssembler assembler;
+    const std::vector<RecordDelta> first = assembler.consumeLine("  detail before root");
+    CHECK_EQ(first.size(), static_cast<std::size_t>(1));
+    CHECK(first[0].kind == RecordDelta::Kind::Append);
+    CHECK_EQ(first[0].record.line_number, static_cast<std::size_t>(1));
+    CHECK_EQ(first[0].record.message, std::string("  detail before root"));
+
+    const std::vector<RecordDelta> second =
+        assembler.consumeLine("2026-08-26T04:15:22Z INFO root");
+    CHECK_EQ(second.size(), static_cast<std::size_t>(1));
+    CHECK_EQ(second[0].record.line_number, static_cast<std::size_t>(2));
+}
+
+void testAssemblerBuffersPartialBytesUntilNewline() {
+    RecordAssembler assembler;
+    CHECK(assembler.consumeBytes("2026-08-26T04:15:22Z INFO part").empty());
+    CHECK_EQ(assembler.nextLineNumber(), static_cast<std::size_t>(1));
+
+    const std::vector<RecordDelta> completed = assembler.consumeBytes(
+        "ial\n2026-08-26T04:15:23Z INFO complete\n");
+    CHECK_EQ(completed.size(), static_cast<std::size_t>(2));
+    CHECK(completed[0].kind == RecordDelta::Kind::Append);
+    CHECK(completed[1].kind == RecordDelta::Kind::Append);
+    CHECK_EQ(completed[0].record.message, std::string("partial"));
+    CHECK_EQ(completed[0].record.line_number, static_cast<std::size_t>(1));
+    CHECK_EQ(completed[1].record.line_number, static_cast<std::size_t>(2));
+
+    RecordAssembler mixed;
+    CHECK(mixed.consumeBytes("2026-08-26T04:15:22Z INFO par").empty());
+    const std::vector<RecordDelta> lineCompletion = mixed.consumeLine("tial");
+    CHECK_EQ(lineCompletion.size(), static_cast<std::size_t>(1));
+    CHECK_EQ(lineCompletion[0].record.message, std::string("partial"));
+
+    RecordAssembler eof;
+    CHECK(eof.consumeBytes("2026-08-26T04:15:22Z INFO final").empty());
+    CHECK(eof.flush().size() == static_cast<std::size_t>(1));
+    CHECK_EQ(eof.recordCount(), static_cast<std::size_t>(1));
+}
+
+void testAssemblerResetDropsOldGenerationState() {
+    RecordAssembler assembler;
+    CHECK(assembler.consumeBytes("2026-08-26T04:15:22Z INFO stale").empty());
+    assembler.reset(7);
+    CHECK_EQ(assembler.generation(), static_cast<std::uint64_t>(7));
+    CHECK_EQ(assembler.nextLineNumber(), static_cast<std::size_t>(1));
+    CHECK_EQ(assembler.recordCount(), static_cast<std::size_t>(0));
+
+    const std::vector<RecordDelta> fresh = assembler.consumeBytes(
+        "2026-08-26T04:15:22Z INFO fresh\n  fresh continuation\n");
+    CHECK_EQ(fresh.size(), static_cast<std::size_t>(2));
+    CHECK(fresh[0].kind == RecordDelta::Kind::Append);
+    CHECK(fresh[1].kind == RecordDelta::Kind::Extend);
+    CHECK_EQ(fresh[0].generation, static_cast<std::uint64_t>(7));
+    CHECK_EQ(fresh[1].generation, static_cast<std::uint64_t>(7));
+    CHECK_EQ(fresh[0].record.line_number, static_cast<std::size_t>(1));
+    CHECK_EQ(fresh[1].physical_line_number, static_cast<std::size_t>(2));
+}
+
 } // namespace
 
 int main() {
@@ -112,5 +215,10 @@ int main() {
     testJsonLine();
     testUnparseableKeepsData();
     testContinuation();
+    testAssemblerPreservesPollState();
+    testAssemblerExtendsPreviousRecordAcrossPolls();
+    testAssemblerDoesNotDropLeadingContinuation();
+    testAssemblerBuffersPartialBytesUntilNewline();
+    testAssemblerResetDropsOldGenerationState();
     return checkSummary();
 }
