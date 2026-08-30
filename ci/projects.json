@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "projects": [
+    {
+      "name": "diskmap",
+      "verify": true,
+      "gui": {
+        "enabled": true,
+        "build_system": "qmake",
+        "build_descriptor": "diskmap.pro",
+        "binary": "build/gui/src/gui/diskmap-gui",
+        "smoke_arg": "src"
+      }
+    },
+    {
+      "name": "loglens",
+      "verify": true,
+      "gui": {
+        "enabled": true,
+        "build_system": "cmake",
+        "build_descriptor": "CMakeLists.txt",
+        "binary": "build/gui/src/gui/loglens-gui",
+        "smoke_arg": "tests/data/sample.log"
+      }
+    }
+  ]
+}

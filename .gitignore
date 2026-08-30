@@ -21,3 +21,7 @@ verify_report.md
 .idea/
 *.swp
 .DS_Store
+
+# CI helper
+__pycache__/
+*.pyc

@@ -17,13 +17,36 @@ env:
   ICI_VERSION: v0.6.0
 
 jobs:
+  # ci/projects.json is the only project list. Both verification and GUI jobs
+  # consume outputs from this job, so adding a project without adding its
+  # verification or GUI metadata fails before a matrix can silently omit it.
+  discover:
+    name: Validate project manifest
+    runs-on: ubuntu-latest
+    outputs:
+      projects: ${{ steps.manifest.outputs.projects }}
+      gui_projects: ${{ steps.manifest.outputs.gui_projects }}
+      names: ${{ steps.manifest.outputs.names }}
+      count: ${{ steps.manifest.outputs.count }}
+      gui_count: ${{ steps.manifest.outputs.gui_count }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate manifest and discover matrices
+        id: manifest
+        run: python3 ci/check_manifest.py
+
   verify:
-    name: ici verify (${{ matrix.project }})
+    name: ici verify (${{ matrix.project.name }})
+    needs: discover
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        project: [diskmap, loglens]
+        project: ${{ fromJSON(needs.discover.outputs.projects) }}
 
     steps:
       - name: Checkout
@@ -37,10 +60,8 @@ jobs:
         with:
           python-version: "3.10"
 
-      # Both projects are driven by their own build systems now: loglens
-      # configures with cmake, diskmap with qmake6, and the Q_OBJECT unit tests
-      # link Qt Test. qmake6 is a separate package from qt6-base-dev; cmake
-      # ships with the runner image.
+      # Both projects are driven by their own build systems now. The Qt
+      # headers are needed by ici lint as well as by the build adapters.
       - name: Install the Qt6 build toolchain
         run: |
           sudo apt-get update
@@ -50,23 +71,15 @@ jobs:
         run: |
           set -euo pipefail
           base="https://github.com/jihoon22-lee/ici/releases/download/${ICI_VERSION}"
-          curl -fsSL -o ici.pyz "${base}/ici.pyz"
-          curl -fsSL -o ici.pyz.sha256 "${base}/ici.pyz.sha256"
-          # 체크섬 파일은 'dist/ici.pyz' 경로 접두사를 담고 있어 sha256sum -c 가 그대로는 안 맞는다.
-          expected="$(cut -d' ' -f1 ici.pyz.sha256)"
-          actual="$(sha256sum ici.pyz | cut -d' ' -f1)"
+          curl -fsSL --retry 3 -o ici.pyz "${base}/ici.pyz"
+          curl -fsSL --retry 3 -o ici.pyz.sha256 "${base}/ici.pyz.sha256"
+          expected="$(awk 'NR == 1 {print $1; exit}' ici.pyz.sha256)"
+          actual="$(sha256sum ici.pyz | awk '{print $1}')"
           if [ "$expected" != "$actual" ]; then
             echo "::error::ici.pyz 체크섬 불일치 (expected=$expected actual=$actual)"
             exit 1
           fi
           chmod +x ici.pyz
-
-      # src/gui is project source and is linted like the rest of it, so the
-      # verify job needs Qt's headers — not to build a GUI, but to parse one.
-      - name: Install Qt6 headers for linting
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qt6-base-dev pkg-config
 
       - name: Report toolchain
         run: |
@@ -75,10 +88,9 @@ jobs:
           gcov --version | head -1
 
       # verify 는 FAIL/ERROR 에서 exit 1, SKIP 에서 exit 2, PASS/WARN 에서 exit 0 이다.
-      - name: Verify ${{ matrix.project }}
-        working-directory: ${{ matrix.project }}
+      - name: Verify ${{ matrix.project.name }}
+        working-directory: ${{ matrix.project.name }}
         env:
-          # diskmap's widget test constructs QWidgets, and there is no display.
           QT_QPA_PLATFORM: offscreen
         run: ../ici.pyz verify --report --html verify_report.html --github-summary
 
@@ -86,31 +98,93 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ici-report-${{ matrix.project }}
-          path: ${{ matrix.project }}/verify_report.*
+          name: ici-report-${{ matrix.project.name }}
+          path: ${{ matrix.project.name }}/verify_report.*
           if-no-files-found: warn
           retention-days: 14
 
-  # One comment for the whole run, not one per project.
-  #
-  # Each matrix leg produces its own verify_report.html, so the obvious approach
-  # is to publish from inside the leg — but ici's sticky marker is a single fixed
-  # string, so the second project would overwrite the first project's comment
-  # rather than sit beside it, and parallel legs would race pushing to the same
-  # gh-pages branch (the Contents API needs the current blob sha to overwrite).
-  #
-  # So the legs only upload artifacts and this job publishes them together:
-  # sequential uploads under per-project paths, then one comment carrying a row
-  # and a link per project.
-  #
-  # It deliberately does not check out the pull request. Everything it runs comes
-  # from the checksum-verified ici release and everything it publishes comes from
-  # the verify job's artifacts, so a pull request cannot reach the write token.
+  # ici builds and unit-tests the widget libraries now, but it never launches
+  # the application. This matrix does: a GUI that links and then dies on
+  # startup still fails the gate here.
+  gui-build:
+    name: Qt6 GUI build (${{ matrix.project.name }})
+    if: ${{ needs.discover.outputs.gui_count != '0' }}
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(needs.discover.outputs.gui_projects) }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Qt6
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qt6-base-dev qmake6
+
+      - name: Configure and build
+        working-directory: ${{ matrix.project.name }}
+        env:
+          BUILD_SYSTEM: ${{ matrix.project.build_system }}
+          BUILD_DESCRIPTOR: ${{ matrix.project.build_descriptor }}
+        run: |
+          set -euo pipefail
+          case "$BUILD_SYSTEM" in
+            cmake)
+              cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release
+              cmake --build build/gui --parallel
+              ;;
+            qmake)
+              mkdir -p build/gui
+              (cd build/gui && qmake6 "../../$BUILD_DESCRIPTOR" && make -j"$(nproc)")
+              ;;
+            *)
+              echo "::error::unsupported GUI build system: $BUILD_SYSTEM"
+              exit 1
+              ;;
+          esac
+
+      # Runs the real binary headlessly against a known directory, so a GUI
+      # that links but crashes on startup or on its first scan still fails.
+      - name: Headless smoke run
+        working-directory: ${{ matrix.project.name }}
+        env:
+          QT_QPA_PLATFORM: offscreen
+          GUI_BINARY: ${{ matrix.project.gui_binary }}
+          SMOKE_ARG: ${{ matrix.project.smoke_arg }}
+        run: |
+          set -euo pipefail
+          "$GUI_BINARY" "$PWD/$SMOKE_ARG" &
+          pid=$!
+          cleanup() {
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          sleep 8
+          if ! kill -0 "$pid" 2>/dev/null; then
+            echo "::error::GUI exited before the smoke window elapsed"
+            exit 1
+          fi
+          echo "GUI stayed up through a scan"
+
+  # One comment for the whole run, not one per project. It always starts after
+  # both matrices have reached a terminal result, including failures, so a PR
+  # never loses the report job behind a skipped dependency.
   report-pr:
     name: Publish Reports & Sticky Comment
-    if: github.event_name == 'pull_request'
-    needs: verify
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    needs: [discover, verify, gui-build]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: gh-pages-${{ github.repository }}
+      cancel-in-progress: false
     permissions:
       contents: write       # gh-pages 업로드
       pull-requests: write  # sticky 댓글
@@ -126,14 +200,11 @@ jobs:
         run: |
           set -euo pipefail
           base="https://github.com/jihoon22-lee/ici/releases/download/${ICI_VERSION}"
-          curl -fsSL -o ici.pyz "${base}/ici.pyz"
-          curl -fsSL -o ici.pyz.sha256 "${base}/ici.pyz.sha256"
-          expected="$(cut -d' ' -f1 ici.pyz.sha256)"
-          actual="$(sha256sum ici.pyz | cut -d' ' -f1)"
-          if [ "$expected" != "$actual" ]; then
-            echo "::error::ici.pyz 체크섬 불일치"
-            exit 1
-          fi
+          curl -fsSL --retry 3 -o ici.pyz "${base}/ici.pyz"
+          curl -fsSL --retry 3 -o ici.pyz.sha256 "${base}/ici.pyz.sha256"
+          expected="$(awk 'NR == 1 {print $1; exit}' ici.pyz.sha256)"
+          actual="$(sha256sum ici.pyz | awk '{print $1}')"
+          test "$expected" = "$actual"
           chmod +x ici.pyz
 
       - name: Download all project reports
@@ -143,93 +214,196 @@ jobs:
           path: reports
 
       # Each artifact's root is the project directory's contents, so a download
-      # lands at reports/ici-report-<project>/verify_report.*. Strip the prefix so
-      # the directory name is the label that shows up in the comment.
+      # lands at reports/ici-report-<project>/verify_report.*. Strip the prefix
+      # so the directory name is the manifest label used by ici publish.
       - name: Normalise report directory names
         run: |
           set -euo pipefail
           for dir in reports/ici-report-*; do
             [ -d "$dir" ] || continue
-            mv "$dir" "reports/$(basename "$dir" | sed 's/^ici-report-//')"
+            project="${dir##*/ici-report-}"
+            mv "$dir" "reports/$project"
           done
-          ls -R reports
+          find reports -maxdepth 2 -type f -print | sort
+
+      - name: Validate complete report set
+        env:
+          PROJECT_NAMES: ${{ needs.discover.outputs.names }}
+          EXPECTED_REPORTS: ${{ needs.discover.outputs.count }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          names = [name for name in os.environ["PROJECT_NAMES"].split(",") if name]
+          expected = int(os.environ["EXPECTED_REPORTS"])
+          if len(names) != expected:
+              raise SystemExit(f"manifest count mismatch: {len(names)} != {expected}")
+          actual = sorted(path.name for path in Path("reports").iterdir() if path.is_dir())
+          if sorted(names) != actual:
+              raise SystemExit(f"artifact/project mismatch: expected={sorted(names)!r} actual={actual!r}")
+          for name in names:
+              directory = Path("reports") / name
+              for filename in ("verify_report.html", "verify_report.json"):
+                  if not (directory / filename).is_file():
+                      raise SystemExit(f"missing {directory / filename}")
+          PY
 
       - name: Publish reports and update the sticky comment
-        run: |
-          set -euo pipefail
-          dirs=()
-          for dir in reports/*/; do
-            [ -f "${dir}verify_report.html" ] && dirs+=(--report-dir "${dir%/}")
-          done
-          if [ ${#dirs[@]} -eq 0 ]; then
-            echo "::error::no verify_report.html found in any artifact"
-            exit 1
-          fi
-          ./ici.pyz publish "${dirs[@]}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # ici builds and unit-tests the widget libraries now, but it never launches
-  # the application. This job does: a GUI that links and then dies on startup
-  # still fails the gate here.
-  gui-build:
-    name: Qt6 GUI build (${{ matrix.project }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # smoke_arg is what the GUI is pointed at headlessly: diskmap scans a
-        # directory, loglens opens a file, so it cannot be one shared value.
-        include:
-          - project: diskmap
-            smoke_arg: src
-            gui_binary: build/gui/src/gui/diskmap-gui
-          - project: loglens
-            smoke_arg: tests/data/sample.log
-            gui_binary: build/gui/src/gui/loglens-gui
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install Qt6
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qt6-base-dev qmake6
-
-      # Each project builds with its own system: loglens on CMake, diskmap on
-      # qmake. That split is deliberate — it gives each of ici's two build
-      # adapters a real project rather than a fixture.
-      - name: Configure and build
-        working-directory: ${{ matrix.project }}
         run: |
           set -euo pipefail
-          if [ -f CMakeLists.txt ]; then
-            cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release
-            cmake --build build/gui --parallel
-          else
-            mkdir -p build/gui
-            cd build/gui && qmake6 ../../${{ matrix.project }}.pro && make -j"$(nproc)"
-          fi
+          args=()
+          while IFS= read -r dir; do
+            args+=(--report-dir "$dir")
+          done < <(find reports -mindepth 1 -maxdepth 1 -type d -print | sort)
+          test "${#args[@]}" -gt 0
+          ./ici.pyz publish "${args[@]}"
 
-      # Runs the real binary headlessly against a known directory, so a GUI that
-      # links but crashes on startup or on its first scan still fails the gate.
-      - name: Headless smoke run
-        working-directory: ${{ matrix.project }}
+      # ici publish checks that the upload/comment API calls succeeded. This
+      # second check verifies the user-visible contract too: the current sticky
+      # comment contains exactly one Pages link per manifest project, and every
+      # link serves actual HTML after GitHub Pages catches up with gh-pages.
+      - name: Verify Sticky Comment & Published HTML
         env:
-          QT_QPA_PLATFORM: offscreen
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PROJECT_NAMES: ${{ needs.discover.outputs.names }}
+          EXPECTED_REPORTS: ${{ needs.discover.outputs.count }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          ./${{ matrix.gui_binary }} "$PWD/${{ matrix.smoke_arg }}" &
-          pid=$!
-          sleep 8
-          if ! kill -0 "$pid" 2>/dev/null; then
-            echo "::error::GUI exited before the smoke window elapsed"
-            wait "$pid" || true
-            exit 1
+          pages_url="$(gh api "repos/${GITHUB_REPOSITORY}/pages" --jq '.html_url // empty')"
+          test -n "$pages_url"
+          pages_url="${pages_url%/}"
+          comments_file="$(mktemp)"
+          comment_file="$(mktemp)"
+          for attempt in $(seq 1 36); do
+            echo "checking sticky comment and Pages deployment (attempt $attempt/36)"
+            gh api --paginate --slurp \
+              "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments?per_page=100" \
+              > "$comments_file"
+            if python3 - "$comments_file" "$comment_file" "$pages_url" "$PR_NUMBER" \
+              "$PROJECT_NAMES" "$EXPECTED_REPORTS" "$RUN_URL" <<'PY'
+          import json
+          import re
+          import sys
+          from pathlib import Path
+
+          comments_pages = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          comments = [comment for page in comments_pages for comment in page]
+          marked = [
+              comment
+              for comment in comments
+              if "<!-- ici-report -->" in (comment.get("body") or "")
+          ]
+          if not marked:
+              raise SystemExit("sticky comment not visible yet")
+          # ici updates the existing marker comment in place. Use the most
+          # recently updated marker so an old duplicate from a manual run
+          # cannot make this check inspect stale links.
+          marked.sort(
+              key=lambda comment: (
+                  comment.get("updated_at") or comment.get("created_at") or ""
+              )
+          )
+          body = marked[-1].get("body") or ""
+          pages_url = sys.argv[3].rstrip("/")
+          pr_number = sys.argv[4]
+          names = [name for name in sys.argv[5].split(",") if name]
+          expected_count = int(sys.argv[6])
+          run_url = sys.argv[7]
+          if len(names) != expected_count:
+              raise SystemExit("manifest count changed while checking comment")
+          if f"]({run_url})" not in body:
+              raise SystemExit("sticky comment is not from the current workflow run")
+          expected_urls = {
+              f"{pages_url}/{name}/pr/{pr_number}/" for name in names
+          }
+          links = re.findall(r"\]\((https?://[^)\s]+)\)", body)
+          report_link_values = [link for link in links if link.startswith(pages_url + "/")]
+          report_links = set(report_link_values)
+          if (
+              report_links != expected_urls
+              or len(report_link_values) != expected_count
+              or len(report_links) != expected_count
+          ):
+              raise SystemExit(
+                  f"sticky report links not ready: expected={sorted(expected_urls)!r} "
+                  f"actual={sorted(report_links)!r}"
+              )
+          Path(sys.argv[2]).write_text(body, encoding="utf-8")
+          PY
+            then
+              pages_ok=true
+              while IFS= read -r project; do
+                [ -n "$project" ] || continue
+                url="${pages_url}/${project}/pr/${PR_NUMBER}/"
+                header_file="$(mktemp)"
+                body_file="$(mktemp)"
+                if curl -fsSL --location --max-time 20 -D "$header_file" -o "$body_file" "$url" \
+                  && grep -Eiq '^content-type:[[:space:]]*text/html' "$header_file" \
+                  && grep -Eiq '<!doctype[[:space:]]+html|<html([[:space:]]>])' "$body_file"; then
+                  echo "verified HTML: $url"
+                else
+                  echo "Pages not ready: $url"
+                  pages_ok=false
+                fi
+              done < <(tr ',' '\n' <<< "$PROJECT_NAMES")
+              if [ "$pages_ok" = true ]; then
+                echo "verified ${EXPECTED_REPORTS} sticky HTML links and Pages responses"
+                exit 0
+              fi
+            fi
+            sleep 10
+          done
+          echo "::error::sticky comment or Pages HTML did not become ready"
+          exit 1
+
+      - name: Enforce prerequisite matrix results
+        env:
+          DISCOVER_RESULT: ${{ needs.discover.result }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          GUI_RESULT: ${{ needs.gui-build.result }}
+          GUI_COUNT: ${{ needs.discover.outputs.gui_count }}
+        run: |
+          set -euo pipefail
+          test "$DISCOVER_RESULT" = success
+          test "$VERIFY_RESULT" = success
+          if [ "$GUI_RESULT" != success ]; then
+            test "$GUI_COUNT" = 0
+            test "$GUI_RESULT" = skipped
           fi
-          kill "$pid"
-          wait "$pid" 2>/dev/null || true
-          echo "GUI stayed up through a scan"
+
+  # A stable check name for branch protection. Matrix check names can change as
+  # projects are added, but this job always requires every current matrix leg
+  # and the PR report contract. On push, report-pr is intentionally skipped.
+  merge-gate:
+    name: Merge Gate
+    if: ${{ always() }}
+    needs: [discover, verify, gui-build, report-pr]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every quality job
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISCOVER_RESULT: ${{ needs.discover.result }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          GUI_RESULT: ${{ needs.gui-build.result }}
+          GUI_COUNT: ${{ needs.discover.outputs.gui_count }}
+          REPORT_RESULT: ${{ needs.report-pr.result }}
+        run: |
+          set -euo pipefail
+          test "$DISCOVER_RESULT" = success
+          test "$VERIFY_RESULT" = success
+          if [ "$GUI_RESULT" != success ]; then
+            test "$GUI_COUNT" = 0
+            test "$GUI_RESULT" = skipped
+          fi
+          if [ "$EVENT_NAME" = pull_request ]; then
+            test "$REPORT_RESULT" = success
+          else
+            test "$REPORT_RESULT" = skipped || test "$REPORT_RESULT" = success
+          fi
