@@ -157,9 +157,15 @@ POSIX에서 `FileTailer`는 경로의 timestamp가 아니라 열린 파일 handl
 구분한다. source 계층은 missing, permission denied, open/stat/read failure와 unsupported
 file type을 typed error로 보존한다.
 
-현재 GUI는 follow 중 source 오류가 발생하면 상태를 표시하고 follow를 멈춘다. missing 파일이
-다시 나타났을 때의 stateful retry/reappear UX는 이 source identity slice의 범위가 아니며,
-다음 L1 slice에서 다룬다.
+GUI는 follow 중 발생한 source 오류를 retryable/fatal로 나눈다. missing, permission, open,
+stat, read 계열의 retryable 오류에서는 마지막으로 정상적으로 읽은 행을 유지하고 follow
+checkbox와 poll timer를 켠 채 `Follow waiting (attempt N)` 상태를 표시한다. 경로에 새 파일이
+다시 나타나 새 identity가 확인되면 이전 generation의 assembler와 모델을 비우고 새 파일의
+첫 행부터 표시한다. 사용자가 대기 중 Follow를 끄면 retry timer도 멈추며, 다시 켜면 같은
+경로를 명시적으로 재개한다. 디렉터리 같은 fatal unsupported file type은 follow를 중지하지만
+마지막으로 읽은 화면은 유지하여 사용자가 원인을 확인하거나 다른 파일을 선택할 수 있게
+한다. 최초 open 자체가 실패한 경우에는 기존 source를 비우고 Follow를 끄는 기존 계약을
+유지한다.
 
 - newline을 기준으로 한 physical line 번호
 - 다음 poll에서 이어 붙일 partial bytes
@@ -182,13 +188,20 @@ headless smoke까지 실행한다.
 |---|---|
 | `loglens/src/gui/log_model.cpp` | `QAbstractItemModelTester` 로 검증 |
 | `diskmap/src/gui/treemap_widget.cpp` | `QSignalSpy` 로 검증 |
-| `loglens/src/gui/main_window.cpp` | `test_main_window` — open/growth/truncation/read error/follow timer |
+| `loglens/src/gui/main_window.cpp` | `test_main_window` — open/growth/truncation, retryable missing/reappear, follow stop/resume, fatal source와 timer/status |
 | `loglens/src/gui/timeline_widget.cpp` | `test_main_window` — empty/populated paint branch |
 | `diskmap/src/gui/main_window.cpp` | `test_main_window` — scan, breadcrumb, descend/up, leaf no-op |
 
 `loglens`의 ici 0.6.0 실측은 line 93.2% / function 96.9% / branch 81.8% / TEM 4.84이다.
 `loglens/ici.toml`은 이 실측 아래에 slack을 둔 branch 75.0 / function 92.0을 게이트로
 사용한다. QPainter/Qt 내부 예외 경로와 C++ type-check 미지원은 남은 명시적 한계다.
+
+L1 Slice 2의 GUI 회귀 테스트는 `QTemporaryDir`로 실제 파일을 만들고
+`QMetaObject::invokeMethod(..., Qt::DirectConnection)`으로 poll 경계를 결정적으로 구동한다.
+`test_main_window`는 retryable missing 상태에서 기존 행을 보존하는지, 동일 경로의 replacement를
+새 generation으로 재개하는지, 사용자의 Follow 중지/재개와 fatal unsupported source를 각각
+확인한다. 이 브랜치에서 기록된 native CMake/CTest 결과는 Qt 6과 Qt 5 각각 10/10 PASS이며,
+ici verify, CI report-pr/sticky HTML, headless GUI smoke 결과는 PR 검증에서 별도로 수집한다.
 
 ## CI 리포트
 

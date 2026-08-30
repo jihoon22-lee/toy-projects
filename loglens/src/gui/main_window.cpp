@@ -151,34 +151,43 @@ void MainWindow::openPath(const QString& path) {
 }
 
 void MainWindow::pollSource() {
-    if (!tailer_) {
+    if (!tailer_ || followState_ == FollowState::Stopped) {
         return;
     }
     const std::size_t restartsBefore = tailer_->restarts();
     loglens::SourceChunk chunk;
     std::string error;
     if (!tailer_->pollChunk(chunk, error)) {
-        // Stop rather than spin: whatever broke will keep breaking every tick.
-        // pollChunk may already have observed a truncation before opening the
-        // replacement failed. Discard the old generation now, otherwise a
-        // later retry could append fresh bytes to stale parser/model state.
-        if (tailer_->generation() != assembler_.generation()) {
-            assembler_.reset(tailer_->generation());
-            model_->resetRecords();
+        if (chunk.error.retryable) {
+            followState_ = FollowState::WaitingRetry;
+            ++retryAttempts_;
+            status_->setText(tr("Follow waiting (attempt %1): %2")
+                                 .arg(retryAttempts_)
+                                 .arg(QString::fromStdString(error)));
+            return;
         }
+
         status_->setText(tr("Follow stopped: %1").arg(QString::fromStdString(error)));
         followBox_->setChecked(false);
         return;
     }
 
+    followState_ = FollowState::Following;
+    retryAttempts_ = 0;
     // A truncated or replaced file makes every retained row stale, so the model
-    // starts over instead of appending new lines under old ones.
-    if (tailer_->restarts() != restartsBefore || chunk.generation_changed) {
+    // starts over instead of appending new lines under old ones. Comparing the
+    // parser generation as well handles a replacement that was detected during
+    // a retryable read failure: the old rows remain visible while waiting, but
+    // are discarded before the first successful bytes from the new source.
+    if (tailer_->restarts() != restartsBefore || chunk.generation_changed
+        || chunk.generation != assembler_.generation()) {
         assembler_.reset(tailer_->generation());
         model_->resetRecords();
     }
     const std::vector<loglens::RecordDelta> deltas = assembler_.consumeBytes(chunk.bytes);
     if (deltas.empty()) {
+        refreshTimeline();
+        updateStatus(QString());
         return;
     }
     applyDeltas(deltas);
@@ -191,9 +200,13 @@ void MainWindow::pollSource() {
 
 void MainWindow::setFollowing(bool following) {
     if (following && tailer_) {
+        followState_ = FollowState::Following;
+        retryAttempts_ = 0;
         pollTimer_->start();
         return;
     }
+    followState_ = FollowState::Stopped;
+    retryAttempts_ = 0;
     pollTimer_->stop();
 }
 

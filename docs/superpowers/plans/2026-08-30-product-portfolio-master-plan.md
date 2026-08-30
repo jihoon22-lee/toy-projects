@@ -214,15 +214,45 @@ smoke를 실행한다. discovery 자동 확장은 `ci/test_check_manifest.py` st
 
 - [x] Slice 1 — source identity/typed chunk contract: POSIX device/inode 기반 교체 감지와
   generation/position/error를 담은 core poll 결과, real-filesystem 회귀 테스트.
-- [ ] Slice 2 — follow recovery GUI state: missing/reappear retry, stopped/follow resume와
+- [x] Slice 2 — follow recovery GUI state: missing/reappear retry, stopped/follow resume와
   그 상태를 표시하는 사용자 경험.
 
 - [ ] POSIX에서는 device/inode, 다른 platform에서는 사용 가능한 file identity abstraction을 도입한다.
 - [ ] 더 크거나 같은 새 파일로 교체돼도 rotation을 탐지한다.
 - [ ] truncate, replace, permission loss, file disappear/reappear를 구분한다.
 - [ ] poll 결과를 `records`, `generation_changed`, `error`, `position` 구조로 만든다.
-- [ ] stopped/retryable/fatal 상태와 사용자의 resume 동작을 정의한다.
+- [x] stopped/retryable/fatal 상태와 사용자의 resume 동작을 정의한다.
 - [ ] real filesystem integration test와 fake source deterministic test를 함께 둔다.
+
+**Slice 2 구현·검증 증거 (2026-08-31):** `FollowState`를 `Stopped`, `Following`,
+`WaitingRetry`로 분리했다. retryable missing/permission/open/stat/read 오류에서는 기존
+행과 timer를 유지하고 시도 횟수와 대기 상태를 표시한다. 새 file identity가 확인된
+replacement를 성공적으로 읽을 때만 assembler/model을 새 generation으로 reset한다. 사용자가
+Follow를 끄면 retry를 중지하고, 다시 켜면 명시적으로 재개한다. fatal unsupported file type은
+follow를 중지하되 마지막 정상 화면은 보존한다. `retryableSourceErrorKeepsFollowingAndVisibleRows`,
+`sourceReplacementRecoversWithCleanRows`, `disablingFollowWhileWaitingStopsPolling`,
+`unsupportedSourceStopsFollowing`를 포함한 `test_main_window` 회귀 테스트가 추가됐고,
+Qt 6 및 Qt 5 CMake/CTest에서 각각 10/10 PASS를 기록했다. 구현 커밋은 `4094ff5`, 테스트
+커밋은 `ca56d2e`다. PR #22 첫 CI 실행
+[`33335607699`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33335607699)에서
+missing 직후 inode이 재사용되는 파일시스템 경계가 드러나
+`disablingFollowWhileWaitingStopsPolling`의 기대 rowCount 1 대신 2가 관측됐고, Qt5·Qt6
+native와 `ici verify`가 실패했다. 더 큰 replacement가 이전 offset에서 읽혀 stale/new
+bytes가 섞이는 것이 원인이었다. `d419d2f`가 `recovery_pending_`/
+`recovery_restart_started_`로 unavailable interval 뒤 단일 generation 증가와 offset 0
+재시작을 강제하도록 수정했고, 수정 후 Qt5·Qt6 전체 CTest는 다시 10/10 PASS다. 로컬 ici
+0.6.0 verify도 Suite PASS(10 pass, 2 skip), TEM 4.86,
+line/function/branch 92.5/97.1/80.8%를 기록했고 Zero-CDN HTML과 Qt5·Qt6 8초 headless
+smoke를 확인했다. 이 수치는 원격 PR 집계와 분리된 local evidence다. 검증 대상 구현 head
+`3d7a7a5`의 PR #22 workflow
+[`33336242400`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33336242400)은
+manifest, `ici verify`(diskmap/loglens), 두 프로젝트의 Qt5·Qt6 GUI,
+`Publish Reports & Sticky Comment`, `Merge Gate`를 포함한 모든 checks가 SUCCESS였다.
+[sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/22#issuecomment-5471277839)는
+`diskmap: PASS · TEM 4.87`, `loglens: PASS · TEM 4.82`와 최신 run 링크를 게시했다.
+Pages의 `diskmap/pr/22/`는 HTTP 200·161211 bytes·external refs 0개,
+`loglens/pr/22/`는 HTTP 200·262156 bytes·external refs 0개였다. 이로써 L1 Slice 2의
+원격 CI, sticky comment, Pages 완료 조건까지 닫혔다.
 
 ### L2. bounded storage와 큰 파일 UX
 

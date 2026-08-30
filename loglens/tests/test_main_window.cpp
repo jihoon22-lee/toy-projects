@@ -1,6 +1,7 @@
 #include <QAbstractItemModel>
 #include <QCheckBox>
 #include <QColor>
+#include <QDir>
 #include <QFile>
 #include <QImage>
 #include <QLabel>
@@ -23,7 +24,10 @@ private slots:
     void openingAFileFillsTheTable();
     void growthIsObservedByTheFollowTimer();
     void truncationResetsStaleRows();
-    void readErrorStopsFollowingAndExplainsWhy();
+    void retryableSourceErrorKeepsFollowingAndVisibleRows();
+    void sourceReplacementRecoversWithCleanRows();
+    void disablingFollowWhileWaitingStopsPolling();
+    void unsupportedSourceStopsFollowing();
     void failedOpenClearsThePreviousSourceState();
     void controlsHaveStableNamesAndFollowIsSwitchable();
     void timelineRendersEmptyAndPopulatedStates();
@@ -79,6 +83,13 @@ void writeFile(const QString& path, const QByteArray& bytes, bool append = false
     QCOMPARE(file.write(bytes), static_cast<qint64>(bytes.size()));
     QVERIFY(file.flush());
     file.close();
+}
+
+void recreateFile(const QString& path, const QByteArray& bytes) {
+    const QString stagingPath = path + QStringLiteral(".staging");
+    writeFile(stagingPath, bytes);
+    QVERIFY(!QFile::exists(path));
+    QVERIFY(QFile::rename(stagingPath, path));
 }
 
 void pollNow(MainWindow& window) {
@@ -158,7 +169,7 @@ void TestMainWindow::truncationResetsStaleRows() {
     QCOMPARE(statusLabel->text(), QStringLiteral("1 / 1 line(s)"));
 }
 
-void TestMainWindow::readErrorStopsFollowingAndExplainsWhy() {
+void TestMainWindow::retryableSourceErrorKeepsFollowingAndVisibleRows() {
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
     const QString path = dir.filePath(QStringLiteral("app.log"));
@@ -176,15 +187,112 @@ void TestMainWindow::readErrorStopsFollowingAndExplainsWhy() {
     QVERIFY(QFile::remove(path));
     pollNow(window);
 
-    QVERIFY(!follow->isChecked());
-    QVERIFY(!timer->isActive());
+    // A missing pathname is a transient source failure. Follow remains armed
+    // so a file restored by log rotation can be observed without reopening it.
+    QVERIFY(follow->isChecked());
+    QVERIFY(timer->isActive());
     auto* statusLabel = status(window);
     QVERIFY(statusLabel != nullptr);
-    QVERIFY(statusLabel->text().startsWith(QStringLiteral("Follow stopped:")));
+    const QString statusText = statusLabel->text().toLower();
+    QVERIFY(statusText.contains(QStringLiteral("wait"))
+            || statusText.contains(QStringLiteral("retr")));
     QVERIFY(statusLabel->text().contains(QStringLiteral("cannot stat")));
-    // A transient read error stops polling but does not invent a new empty
-    // source; the last successfully read record remains visible for recovery.
+    // A transient read error does not invent a new empty source; the last
+    // successfully read record remains visible for recovery.
     QCOMPARE(rowCount(window), 1);
+    QCOMPARE(cell(window, 0, LogModel::ColumnLine), QStringLiteral("1"));
+}
+
+void TestMainWindow::sourceReplacementRecoversWithCleanRows() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("app.log"));
+    writeFile(path, line("INFO", 1) + line("INFO", 2));
+
+    MainWindow window;
+    window.openPath(path);
+    QCOMPARE(rowCount(window), 2);
+
+    QVERIFY(QFile::remove(path));
+    pollNow(window);
+    QCOMPARE(rowCount(window), 2);
+    QVERIFY(followBox(window)->isChecked());
+
+    // Atomic replacement gives the tailer a new identity even when the new
+    // file happens to have the same size as the old one.
+    const QByteArray replacement = line("WARN", 9);
+    recreateFile(path, replacement);
+    QFile restored(path);
+    QVERIFY(restored.open(QIODevice::ReadOnly));
+    QCOMPARE(restored.readAll(), replacement);
+    pollNow(window);
+
+    QCOMPARE(rowCount(window), 1);
+    QCOMPARE(cell(window, 0, LogModel::ColumnLine), QStringLiteral("1"));
+    QCOMPARE(cell(window, 0, LogModel::ColumnLevel), QStringLiteral("WARN"));
+    QCOMPARE(status(window)->text(), QStringLiteral("1 / 1 line(s)"));
+    QVERIFY(followBox(window)->isChecked());
+    QVERIFY(pollTimer(window)->isActive());
+}
+
+void TestMainWindow::disablingFollowWhileWaitingStopsPolling() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("app.log"));
+    writeFile(path, line("INFO", 1));
+
+    MainWindow window;
+    window.openPath(path);
+    QCOMPARE(rowCount(window), 1);
+
+    QVERIFY(QFile::remove(path));
+    pollNow(window);
+    QVERIFY(followBox(window)->isChecked());
+    QVERIFY(pollTimer(window)->isActive());
+
+    followBox(window)->setChecked(false);
+    QVERIFY(!followBox(window)->isChecked());
+    QVERIFY(!pollTimer(window)->isActive());
+
+    // Recreating the file alone must not change the view while Follow is
+    // disabled. No timer sleep is needed: processEvents only services work
+    // already queued and the stopped timer cannot enqueue a poll.
+    recreateFile(path, line("ERROR", 7));
+    QCoreApplication::processEvents();
+    QCOMPARE(rowCount(window), 1);
+    QCOMPARE(cell(window, 0, LogModel::ColumnLine), QStringLiteral("1"));
+
+    // Explicitly resuming Follow makes the same pending replacement visible.
+    followBox(window)->setChecked(true);
+    QVERIFY(pollTimer(window)->isActive());
+    pollNow(window);
+    QCOMPARE(rowCount(window), 1);
+    QCOMPARE(cell(window, 0, LogModel::ColumnLine), QStringLiteral("1"));
+    QCOMPARE(cell(window, 0, LogModel::ColumnLevel), QStringLiteral("ERROR"));
+}
+
+void TestMainWindow::unsupportedSourceStopsFollowing() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("app.log"));
+    writeFile(path, line("INFO", 1));
+
+    MainWindow window;
+    window.openPath(path);
+    QCOMPARE(rowCount(window), 1);
+    QVERIFY(QFile::remove(path));
+    QDir parent(dir.path());
+    QVERIFY(parent.mkdir(QStringLiteral("app.log")));
+
+    pollNow(window);
+
+    QVERIFY(!followBox(window)->isChecked());
+    QVERIFY(!pollTimer(window)->isActive());
+    QVERIFY(status(window)->text().contains(QStringLiteral("cannot follow")));
+    // An unsupported replacement is not a reason to erase the last usable
+    // view; the user can choose another file from the same window.
+    QCOMPARE(rowCount(window), 1);
+    QCOMPARE(cell(window, 0, LogModel::ColumnLine), QStringLiteral("1"));
 }
 
 void TestMainWindow::failedOpenClearsThePreviousSourceState() {
