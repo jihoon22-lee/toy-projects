@@ -4,6 +4,7 @@
 #include <QPainter>
 #include <QPaintEvent>
 #include <QResizeEvent>
+#include <QtGlobal>
 
 #include "diskmap/format.hpp"
 
@@ -17,6 +18,17 @@ constexpr double kMinLabelHeight = 18.0;
 
 QRectF toRect(const diskmap::Rect& rect) {
     return QRectF(rect.x, rect.y, rect.w, rect.h);
+}
+
+// QMouseEvent::position() arrived in Qt 6; Qt 5 spells the same local widget
+// coordinate localPos(). Keeping the compatibility at this boundary lets the
+// rest of the widget and its tests use one coordinate contract.
+QPointF eventPos(const QMouseEvent* event) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    return event->position();
+#else
+    return event->localPos();
+#endif
 }
 
 // Distinct but stable per name, so a tile keeps its colour across rescans.
@@ -34,6 +46,10 @@ QColor tileColor(const diskmap::FsNode& node, bool hovered) {
 } // namespace
 
 TreemapWidget::TreemapWidget(QWidget* parent) : QWidget(parent) {
+    // Qt 5 requires pointer signal payloads to be registered before a queued
+    // consumer such as QSignalSpy can inspect them. Qt 6 infers more cases,
+    // but registering at the signal boundary keeps both majors equivalent.
+    qRegisterMetaType<const diskmap::FsNode*>();
     setMouseTracking(true);
     setMinimumSize(320, 240);
 }
@@ -105,7 +121,7 @@ void TreemapWidget::paintEvent(QPaintEvent* event) {
 }
 
 void TreemapWidget::mouseMoveEvent(QMouseEvent* event) {
-    const diskmap::Tile* tile = tileAt(event->position());
+    const diskmap::Tile* tile = tileAt(eventPos(event));
     const diskmap::FsNode* node = tile == nullptr ? nullptr : tile->node;
     if (node == hovered_) {
         return;
@@ -116,7 +132,7 @@ void TreemapWidget::mouseMoveEvent(QMouseEvent* event) {
 }
 
 void TreemapWidget::mousePressEvent(QMouseEvent* event) {
-    const diskmap::Tile* tile = tileAt(event->position());
+    const diskmap::Tile* tile = tileAt(eventPos(event));
     if (tile == nullptr || tile->node == nullptr || !tile->node->is_dir) {
         return;
     }

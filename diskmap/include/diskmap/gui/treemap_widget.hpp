@@ -1,11 +1,14 @@
 #pragma once
 
+#include <QMetaType>
 #include <QWidget>
 
 #include <vector>
 
 #include "diskmap/fs_node.hpp"
 #include "diskmap/treemap.hpp"
+
+Q_DECLARE_METATYPE(const diskmap::FsNode*)
 
 // Renders one level of a squarified treemap and lets the user drill into it.
 //
