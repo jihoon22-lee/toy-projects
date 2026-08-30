@@ -140,7 +140,8 @@ Qt 5: diskmap-gui, QT_QPA_PLATFORM=offscreen, 8-second smoke: passed
 ```
 
 Using public ici 0.6.0 against the identity-slice source produced `Suite PASS`
-with TEM 4.87, maximum complexity 9/10, 0 FAIL, 2 WARN, and 2 SKIP. The
+with TEM 4.87, maximum complexity 9 (limit 15), 10 PASS, 0 WARN, 0 FAIL, and
+2 SKIP. The
 generated `/tmp/diskmap-identity-report.html` is 162615 bytes and contains no
 external `src` or `href` references.
 
