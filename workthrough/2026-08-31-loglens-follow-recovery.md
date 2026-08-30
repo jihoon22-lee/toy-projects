@@ -7,9 +7,9 @@
 retryable source 오류 동안 유지하고, 새 file identity가 확인된 뒤에만 parser와 모델을
 새 generation으로 교체한다.
 
-이 문서는 구현 커밋 `4094ff5`와 테스트 커밋 `ca56d2e`의 설계·검증을 기록한다. 이
-작업의 현재 증거는 native Qt5/Qt6 CMake/CTest에 한정하며, ici verify, GitHub Actions
-CI, report-pr sticky HTML 게시, 실제 headless GUI smoke는 PR 검증에서 별도로 확인한다.
+이 문서는 구현 커밋 `4094ff5`와 테스트 커밋 `ca56d2e`의 설계·검증을 기록한다. local
+ici 0.6.0 검증과 Qt5/Qt6 headless smoke도 완료했지만, GitHub Actions CI와 report-pr sticky
+HTML/Pages 게시 검증은 아직 원격 PR 게이트로 남아 있다.
 
 ## Context
 
@@ -124,14 +124,38 @@ The four new recovery cases ran as part of `test_main_window`; the existing CLI,
 and GUI tests remained green in both runs. This documentation-only follow-up commit did not
 rerun the native suite.
 
+### Local ici verification
+
+The primary agent ran `/home/jihoon/projects/ici/dist/ici.pyz` version `0.6.0` against this
+branch. The result was:
+
+```text
+Suite: PASS
+Engine summary: 10 pass / 0 warn / 0 fail / 0 error / 2 skip
+Tests: 10/10
+Coverage: line 92.4% / function 97.1% / branch 80.9%
+TEM: 4.86 / 5.0
+Maximum complexity: 12
+Duplication: 1.3%
+Elapsed: 92.15 s
+```
+
+The standalone HTML report `/tmp/loglens-follow-recovery.html` was `264850` bytes and had
+`0` external HTTP `src`/`href` references.
+
+### Headless GUI smoke
+
+The Qt5 and Qt6 GUI binaries each remained alive for the complete eight-second smoke timeout
+with `QT_QPA_PLATFORM=offscreen`. The expected timeout exit was `124` in both runs; this is
+the success condition for the long-running GUI process.
+
 ### Deliberately pending evidence
 
-- `ici verify` against the current ici release/candidate
 - repository CI and Merge Gate
 - `report-pr` sticky comment containing the generated HTML links, with each link checked over HTTP
-- eight-second headless GUI smoke in both Qt majors
 
-These are release/PR gates, not claims made by this native-only workthrough.
+These remote checks are release/PR gates and are intentionally not inferred from the local
+verification above.
 
 ## Next Steps
 
