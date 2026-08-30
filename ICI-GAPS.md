@@ -6,24 +6,48 @@ Phase 5(Qt/CMake 어댑터) 설계의 입력이다. 각 항목은 **코드 위�
 버전 기준: `ici 0.5.0` (`dist/ici.pyz`)
 
 
-## 현황 (2026-08-27)
+## 현황 (2026-08-30)
 
-전체 17건 중 **13건 수정됨**. ici 는 v0.5.5 까지 왔다.
+**A-3 이 닫혔다.** ici 0.6.0 이 CMake/CTest 와 qmake/Make 빌드 어댑터를 갖췄고, 이 저장소의
+두 프로젝트가 그 실측 대상이었다 — `loglens` 는 CMake, `diskmap` 은 qmake 로 전환했다.
+`Q_OBJECT` 클래스의 단위 테스트가 `tests/` 안에서 실제로 통과한다.
 
 ### 남은 것
 
 | | 항목 | 성격 |
 |---|---|---|
-| **A-2** | 루트에 빌드 디스크립터가 있으면 `build` 엔진이 거부 | Qt/CMake 어댑터 |
-| **A-3** | 테스트 컴파일이 plain g++ 고정 (moc·gtest 없음) | Qt/CMake 어댑터 |
+| **A-2** | 손으로 쓴 `Makefile` 만 있는 프로젝트는 여전히 거부 | **부분 수정** — CMake·qmake 는 해결 |
 | B-2 | C++ include 해석이 basename 단독 | 탐지력 저하(조용함) |
 | B-3 | `dead`/`cognitive`/`resource` 가 Python 전용 | 문서·표기 문제 |
 
-`C-7`(ESTIMATED 가 SKIP 보다 관대)은 `NOT_APPLICABLE` 도입(#68)으로 상당 부분 해소됐다.
+A-2 를 "수정됨" 으로 옮기지 않는 이유는 남은 거부 경로가 문서에서 사라지지 않게 하기
+위해서다. 실측 대상이 될 `Makefile` 전용 프로젝트가 없으므로 어댑터도 만들지 않았다.
 
-**A-2 와 A-3 이 Phase 5(Qt/CMake 어댑터)의 본체다.** 그런데 이 저장소의 세 프로젝트는
-전부 그 둘을 **피해가도록 설계돼 있어서**, 지금 상태로는 요구사항이 실측되지 않는다.
-어떻게 정면으로 부딪힐지는 [ROADMAP.md](ROADMAP.md) 에 적었다.
+### 어댑터 작업에서 새로 발견한 것
+
+전부 **전환하다 나왔고, 코드를 읽어서 찾은 것은 하나도 없다.** 그리고 대부분은
+**픽스처로는 드러나지 않았다** — 실물 프로젝트라야 나오는 것들이었다.
+
+| | 발견 | 결과 |
+|---|---|---|
+| D-1 | `sanitize` 를 어댑터 범위 밖에 둔 설계가 성립 불가 | ✅ ici #76 |
+| D-2 | `build` 가 릴리스 산출물에 `--coverage` 를 주입 | ✅ ici #76 |
+| D-3 | 어댑터 빌드 실패가 `NOT_APPLICABLE` 로 보고됨 | ✅ ici #76 |
+| D-4 | `test` 와 `sanitize` 의 진입점 판정 규칙이 서로 다름 | ✅ ici #76 |
+| D-5 | 진입점이 커버리지 분모에 들어가 전환만으로 커버리지 하락 | ✅ ici #76 |
+| D-6 | `-xunitxml` 은 QtTest 전용 — 나머지 테스트가 보고에서 사라짐 | ✅ ici #76 |
+| D-7 | qmake 의 `target_wrapper.sh` 실행이 테스트 카운트에서 누락 | ✅ ici #76 |
+| D-8 | qmake 의 상대 경로 때문에 line 커버리지 전부 유실 | ✅ ici #76 |
+| D-9 | CTest·QtTest 가 낸 XML 의 엔티티 확장(DoS) | ✅ ici #76 |
+
+**D-1 이 가장 중요하다.** 스펙은 `sanitize` 를 "나중에 옮겨도 되는 것" 으로 분류했는데,
+`sanitize` 는 `tests/**/*.cpp` 를 각각 plain g++ 로 컴파일한다. Qt 테스트를 `tests/` 에 두는
+순간 헤더를 못 찾고 깨진다. **"Qt 테스트를 `tests/` 안에 두고 통과시킨다" 는 목표 자체가
+`sanitize` 전환을 전제하고 있었다.**
+
+**D-7 은 픽스처가 놓친 전형적인 예다.** qmake 는 Qt 링크 바이너리를 `target_wrapper.sh` 로
+실행하는데 ici 가 그 줄을 못 읽어 `diskmap` 의 테스트 6개 중 5개만 셌다. ici 의 qmake 픽스처는
+Qt 테스트 하나뿐이라 다른 경로로 구제돼 이 결함이 드러나지 않았다.
 
 ### 수정된 것
 
@@ -61,15 +85,17 @@ Phase 5(Qt/CMake 어댑터) 설계의 입력이다. 각 항목은 **코드 위�
   소스를 **분석은 유지한 채** 링크 대상에서만 뺄 수 있다.
 - **효과**: 이 저장소의 Qt GUI 가 스코프 밖(검증 엔진 0개)에서 `src/gui/`(8개) 로 들어왔다.
 
-### A-2. 루트에 빌드 디스크립터가 있으면 build 엔진이 거부한다
+### A-2. ⚠️ [부분 수정 · ici PR #76 / v0.6.0] 루트에 빌드 디스크립터가 있으면 build 엔진이 거부한다
 - **위치**: `src/ici/engines/build.py` — `_has_build_descriptor()`, `_compile_cpp()`
 - **현상**: 프로젝트 루트에 `CMakeLists.txt` / `Makefile` / `*.pro` 중 하나라도 있으면
   `"C++ build descriptor requires an adapter; generic g++ was not invoked"` ERROR 로 끝난다.
 - **영향**: 정상적인 CMake/qmake 프로젝트는 `ici build` 를 아예 쓸 수 없다.
-- **참고**: 검사 범위가 **루트 한 단계뿐**이라, 빌드 디스크립터를 하위 디렉터리(`gui/`)에 두면 회피된다.
-  이번 토이 프로젝트들이 쓰는 우회책이다.
+- **수정 (v0.6.0)**: 루트에 `CMakeLists.txt` 나 `*.pro` 가 있으면 이제 그 빌드 시스템에 configure·build 를
+  위임한다. 거부하던 바로 그 조건이 어댑터 진입 조건이 됐다.
+- **남은 것**: 손으로 쓴 `Makefile` 만 있는 프로젝트는 여전히 거부된다. 어댑터가 없기 때문이며,
+  실측 대상이 될 프로젝트가 없어 만들지 않았다.
 
-### A-3. 테스트 컴파일이 plain g++ 고정
+### A-3. ✅ [수정됨 · ici PR #76 / v0.6.0] 테스트 컴파일이 plain g++ 고정이었다
 - **위치**: `src/ici/engines/test.py` — `_run_cpp_tests()`, `_run_cpp_test_case()`
 - **현상**: `tests/**/*.cpp` 를 각각 `g++ --coverage -std=c++17` 로 컴파일하고 `main.cpp` 를 제외한
   모든 src cpp 를 링크한다. moc 실행 없음, gtest/Catch2 링크 없음, 사용자 플래그 주입 지점 없음.
@@ -77,6 +103,10 @@ Phase 5(Qt/CMake 어댑터) 설계의 입력이다. 각 항목은 **코드 위�
   - `Q_OBJECT` 를 가진 클래스는 vtable 미해결로 링크 실패 → Qt 클래스는 단위 테스트 불가
   - gtest/Catch2 등 표준 프레임워크 사용 불가. 각 테스트 파일이 자체 `main()` 을 가져야 한다
   - `-std=c++17` 고정 → C++20/23 프로젝트 검증 불가
+- **수정 (v0.6.0)**: `build`·`test`·`sanitize` 가 프로젝트의 빌드 정의로 configure·build·test 한다.
+  moc 는 빌드 시스템이 돌리고, 표준과 프레임워크는 프로젝트가 정한다.
+  `loglens/tests/test_log_model.cpp`(`QAbstractItemModelTester`)와
+  `diskmap/tests/test_treemap_widget.cpp`(`QSignalSpy`)가 그 증거다.
 
 ---
 
