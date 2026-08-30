@@ -43,13 +43,21 @@
 A-3 은 닫혔다. `Q_OBJECT` 클래스의 단위 테스트가 `tests/` 안에서 통과한다. 이어서
 loglens의 poll 경계 parser state와 CLI/GUI 공통 delta 계약도
 [#14](https://github.com/jihoon22-lee/toy-projects/pull/14)로 병합됐다. 이것은 T0-2 완료이며,
-Qt 셸 테스트와 양 Qt major matrix까지 끝나야 T0 전체가 완료된다.
+Qt 셸 테스트와 양 Qt major matrix까지 끝나야 T0 전체가 완료된다. T0-5 구현의 원격 PR
+gate에서는 아래 네 leg가 같은 계약을 다시 실행한다.
 
 | 프로젝트 | 빌드 | 검증 | Qt 테스트 |
 |---|---|---|---|
 | `loglens` | CMake · Qt5/Qt6 | PASS · TEM 4.84 | `QAbstractItemModelTester` + MainWindow QtTest |
 | `diskmap` | qmake · Qt5/Qt6 | PASS · TEM 4.85 | `QSignalSpy` + MainWindow QtTest |
 | `ici/viewer` | CMake · Qt5/Qt6 | PASS · TEM 4.86 | MainWindow QtTest 4/4 |
+
+T0-5의 `discover`는 GUI 프로젝트 한 항목을 Qt5·Qt6 두 항목으로 확장한다. 따라서 현재
+`gui-build`는 `diskmap/Qt5`, `diskmap/Qt6`, `loglens/Qt5`, `loglens/Qt6` 네 leg이며,
+job 이름에도 실제 major가 표시된다. Qt5는 `qtbase5-dev`/`qt5-qmake`, Qt6는
+`qt6-base-dev`/`qmake6`를 조건부 설치하고, 두 leg 모두 선택된 pkg-config Core/Gui/Widgets/
+Concurrent/Test 버전, native tests, 실제 headless GUI smoke를 기록한다. report-pr는 기존처럼
+PR 소스를 실행하지 않는 별도 집계 job으로 유지한다.
 
 ### 완료 기준이 실제로는 바뀌었다
 
@@ -109,6 +117,12 @@ follow checkbox/timer/status 상태를 검증한다. `TimelineWidget`도 빈 상
 렌더링 분기를 헤드리스 렌더링으로 확인한다. Qt5.15와 Qt6.10에서 동일한 CMake/CTest
 10개 테스트가 통과했다.
 `diskmap`도 MainWindow 내비게이션을 `test_main_window`로 검증하며 T0-4를 완료했다.
+
+T0-5 로컬 실측은 Qt6 CMake와 Qt5 CMake 각각 `10/10 CTest PASS`, qmake6와 `/usr/bin/qmake`
+각각 `make check PASS`, 네 GUI binary 모두 해당 `libQt{5,6}Widgets` 링크와 2초 이상
+headless smoke 생존을 확인했다. CMake는 반대 major disable guard와 configure output을,
+qmake는 `-query QT_VERSION`을 검증한다. `ci/test_check_manifest.py`의 stdlib 테스트는
+새 GUI manifest 항목도 `(5,6)` 두 leg로 확장되는지 확인한다.
 
 ici 0.6.0 실측은 line 93.2% / function 96.9% / branch 81.8% / TEM 4.84이다.
 `loglens/ici.toml`은 실측값에 6.8%p/4.9%p slack을 둔 branch 75.0 / function 92.0을

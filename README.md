@@ -108,9 +108,29 @@ done
 
 결과는 `loglens: Suite PASS, TEM 4.84 (10 passed, 2 skipped)`와 `diskmap: Suite PASS,
 TEM 4.85 (10 passed, 2 skipped)`다. Qt5 강제 CMake build는 loglens에서
-`CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON`으로, diskmap의 Qt5 qmake build/test는 #16에서
-`/usr/bin/qmake`로 각각 별도 실측했다. T0-5에는 이 양 major 선택을 매 PR의 명시적 CI
-matrix로 강제하는 공통 계약이 남아 있다.
+`CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON`으로, diskmap의 Qt5 qmake build/test는
+`/usr/bin/qmake`로 각각 별도 실측했다. T0-5에서는 이 선택을 매 PR의 명시적 CI matrix로
+강제한다. 현재 로컬에서는 CMake Qt6/Qt5와 qmake6/Qt5 네 조합 모두 native test와
+`QT_QPA_PLATFORM=offscreen` 실제 GUI smoke가 통과했다.
+
+### Qt major matrix 계약
+
+[`ci/check_manifest.py`](ci/check_manifest.py)의 `SUPPORTED_QT_MAJORS = (5, 6)`가
+`gui.enabled = true`인 각 manifest 항목을 자동으로 두 개의 discovery 항목으로 확장한다.
+따라서 현재 `diskmap`과 `loglens`는 다음 네 job이 되고, 새 GUI 프로젝트도 manifest에
+한 번만 추가하면 같은 양쪽 검증을 받는다.
+
+| 프로젝트 | Qt5 | Qt6 |
+|---|---|---|
+| `diskmap` | `/usr/bin/qmake` · `make check` · headless smoke | `/usr/bin/qmake6` · `make check` · headless smoke |
+| `loglens` | CMake + Qt6 disable guard · CTest · headless smoke | CMake + Qt5 disable guard · CTest · headless smoke |
+
+각 matrix leg는 선택 major의 Core/Gui/Widgets/Concurrent/Test pkg-config 버전을 로그에
+출력하고 major prefix를 검증한다. CMake leg는 반대 major의 `CMAKE_DISABLE_FIND_PACKAGE_*`
+guard와 configure output, 최종 `ldd`의 `libQt${major}Widgets`를 확인한다. qmake leg는
+고정 경로와 `-query QT_VERSION`을 확인한 뒤 같은 binary를 테스트와 smoke에 사용한다.
+CMake GUI descriptor는 `-- <project>: using Qt<major> <version>` status line을 출력하는
+공통 convention을 따른다.
 
 ### loglens 스트림 계약
 
@@ -132,7 +152,8 @@ follow 모드에서는 보류하며, one-shot CLI의 명시적 EOF `flush()`에�
 
 GUI는 헤드리스 QtTest와 실제 fixture 파일을 사용해 상태 전이를 검증한다. `loglens`는
 Qt5/Qt6 CMake/CTest에서 같은 테스트를 실행했고, `diskmap`의 내비게이션 셸도 T0-4에서
-완료했다.
+완료했다. T0-5의 CI matrix는 이 두 프로젝트를 Qt5와 Qt6로 각각 빌드·native test·실제
+headless smoke까지 실행한다.
 
 | 파일 | 상태 |
 |---|---|
@@ -165,9 +186,16 @@ Qt5/Qt6 CMake/CTest에서 같은 테스트를 실행했고, `diskmap`의 내비�
 현재 프로젝트 목록과 각 Qt GUI의 빌드·smoke 입력은
 [`ci/projects.json`](ci/projects.json)이 유일한 기준이다. `discover` 잡은 이 manifest를
 검증하고 `ici.toml`을 가진 프로젝트가 하나라도 목록에서 빠지면 실패한다. `ici verify`
-matrix와 Qt GUI build/smoke matrix는 모두 같은 manifest 출력에서 생성되므로, 새 프로젝트를
-추가할 때 한쪽 matrix만 수정하는 실수를 허용하지 않는다. GUI가 없는 순수 CLI 프로젝트는
+matrix와 Qt GUI build/smoke matrix는 모두 같은 manifest 출력에서 생성되며, GUI 항목은
+discovery 단계에서 자동으로 Qt5·Qt6 두 major로 확장된다. 따라서 새 프로젝트를 추가할 때
+한쪽 matrix만 수정하는 실수를 허용하지 않는다. GUI가 없는 순수 CLI 프로젝트는
 `gui.enabled = false`를 명시해야 하며, 그 경우에도 ici verify에는 포함된다.
+
+discovery contract 자체는 의존성 없는 `python3 -m unittest ci/test_check_manifest.py`로
+현재 프로젝트와 새 GUI 프로젝트 fixture의 양 major 확장을 검증한다. `gui-build`는
+repository-level `contents: read` 권한만 상속하며, PR 소스를 체크아웃하는 빌드 job에는
+write token이 없다. write 권한이 필요한 `report-pr`는 소스를 체크아웃하지 않고 체크섬을
+검증한 ici release asset과 verify artifact만 처리한다.
 
 PR의 `report-pr`는 verify·GUI matrix가 성공 또는 실패로 끝난 뒤 항상 평가된다. 성공한
 실행에서는 checksum을 확인한 ici `v0.6.0` release asset으로 모든 report artifact를
@@ -192,8 +220,26 @@ QT_QPA_PLATFORM=offscreen ../../ici/dist/ici.pyz verify --report
 meta-object로 기존 `pollSource` slot을 동기 호출해 구동한다.
 
 ```bash
+# manifest/discovery
+python3 -m unittest ci/test_check_manifest.py -v
+
+# loglens — Qt 6 and Qt 5 CMake legs
 cd loglens
+cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON
+cmake --build build/gui --parallel
 QT_QPA_PLATFORM=offscreen ctest --test-dir build/gui --output-on-failure
+cmake -S . -B build/gui-qt5 -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_Qt6=ON
+cmake --build build/gui-qt5 --parallel
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/gui-qt5 --output-on-failure
+
+# diskmap — explicit qmake6 and Qt 5 legs
+cd ../diskmap
+mkdir -p build/gui-qt6 && cd build/gui-qt6
+/usr/bin/qmake6 ../../diskmap.pro && make -j"$(nproc)"
+QT_QPA_PLATFORM=offscreen make check
+mkdir -p ../gui-qt5 && cd ../gui-qt5
+/usr/bin/qmake ../../diskmap.pro && make -j"$(nproc)"
+QT_QPA_PLATFORM=offscreen make check
 ```
 
 위 명령은 `ici`와 `toy-projects`를 같은 프로젝트 디렉터리 아래의 형제 저장소로 둔 배치를
@@ -208,7 +254,7 @@ ici 0.6.0 이상이 필요하다. 그 아래 버전에는 빌드 어댑터가 �
 ```bash
 # loglens (CMake)
 cd loglens
-cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON
 cmake --build build/gui --parallel
 ./build/gui/src/gui/loglens-gui [경로]
 
@@ -219,12 +265,14 @@ cmake --build build/qt5 --parallel
 # diskmap (qmake)
 cd diskmap
 mkdir -p build/gui && cd build/gui
-qmake6 ../../diskmap.pro && make -j
+/usr/bin/qmake6 -query QT_VERSION
+/usr/bin/qmake6 ../../diskmap.pro && make -j
 ./src/gui/diskmap-gui [경로]
 
 # diskmap (qmake, Qt 5.15)
 mkdir -p ../gui-qt5 && cd ../gui-qt5
-qmake ../../diskmap.pro && make -j
+/usr/bin/qmake -query QT_VERSION
+/usr/bin/qmake ../../diskmap.pro && make -j
 ./src/gui/diskmap-gui [경로]
 ```
 

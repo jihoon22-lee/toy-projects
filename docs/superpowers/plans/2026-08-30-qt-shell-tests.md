@@ -578,7 +578,7 @@ git commit -m "test(diskmap): assert the navigation trail, not just that it draw
 
 여기는 Qt 6 가 설치돼 있고 내부망은 Qt 5.15 다. 빌드 정의가 버전을 고정하면 같은 소스가 한쪽에서 안 빌드된다.
 
-- [ ] **Step 1: Detect the Qt version in CMake**
+- [x] **Step 1: Detect the Qt version in CMake**
 
 `loglens/CMakeLists.txt` 의 `find_package` 를 바꾼다.
 
@@ -590,9 +590,9 @@ find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Test)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Test)
 ```
 
-같은 파일과 `loglens/src/gui/CMakeLists.txt` 의 `Qt6::Widgets` / `Qt6::Test` 를 `Qt${QT_VERSION_MAJOR}::Widgets` / `Qt${QT_VERSION_MAJOR}::Test` 로 바꾼다. `src/gui/CMakeLists.txt` 의 `find_package(Qt6 REQUIRED COMPONENTS Widgets)` 줄은 루트가 이미 찾았으므로 지운다.
+같은 파일과 `loglens/src/gui/CMakeLists.txt` 의 `Qt6::Widgets` / `Qt6::Test` 를 `Qt${QT_VERSION_MAJOR}::Widgets` / `Qt${QT_VERSION_MAJOR}::Test` 로 바꾼다. `src/gui/CMakeLists.txt` 의 `find_package(Qt6 REQUIRED COMPONENTS Widgets)` 줄은 루트가 이미 찾았으므로 지운다. CI가 반대 major를 명시적으로 비활성화할 수 있도록 `CMAKE_DISABLE_FIND_PACKAGE_Qt5`와 `CMAKE_DISABLE_FIND_PACKAGE_Qt6`가 설정된 이름은 `REQUIRED NAMES` 목록에서 먼저 제거한다.
 
-- [ ] **Step 2: Guard the two Qt 6-only calls**
+- [x] **Step 2: Guard the two Qt 6-only calls**
 
 `QMouseEvent::position()` 은 Qt 6 에서 들어왔고 Qt 5 는 `localPos()` 다. 이 저장소에서 Qt 5 와 어긋나는 곳은 여기 두 줄뿐이다.
 
@@ -617,7 +617,7 @@ QPointF eventPos(const QMouseEvent* event) {
 
 `mouseMoveEvent` 와 `mousePressEvent` 의 `event->position()` 을 `eventPos(event)` 로 바꾼다. 기존 익명 네임스페이스가 이미 있으면 그 안에 넣는다.
 
-- [ ] **Step 3: List both Qt packages for lint**
+- [x] **Step 3: List both Qt packages for lint**
 
 두 `ici.toml` 의 `cpp_pkg_config` 를 바꾼다. `get_cpp_pkg_config_flags` 는 **해석에 실패한 패키지를 건너뛰므로** 둘을 나열하면 설치된 쪽이 잡힌다.
 
@@ -630,16 +630,20 @@ cpp_pkg_config = ["Qt6Widgets", "Qt5Widgets"]
 
 `diskmap` 은 `Qt6Concurrent` 도 쓰므로 `["Qt6Widgets", "Qt6Concurrent", "Qt5Widgets", "Qt5Concurrent"]` 로 한다.
 
-- [ ] **Step 4: Let qmake fall back**
+- [x] **Step 4: Select qmake explicitly per matrix leg**
 
-`.github/workflows/ci.yml` 의 `gui-build` 잡에서 diskmap 빌드 명령을 바꾼다. 로컬 문서(`README.md`)의 예시도 같이 고친다.
+`.github/workflows/ci.yml` 의 `gui-build` 잡은 diskmap Qt6에 `/usr/bin/qmake6`, Qt5에 `/usr/bin/qmake`를 명시한다. 두 경로 모두 `-query QT_VERSION`의 major를 matrix 값과 비교한 뒤 shadow build를 시작한다. 로컬 문서(`README.md`)의 예시도 같은 경로를 사용한다.
 
 ```bash
-QMAKE=$(command -v qmake6 || command -v qmake)
+case "$QT_MAJOR" in
+  5) QMAKE=/usr/bin/qmake ;;
+  6) QMAKE=/usr/bin/qmake6 ;;
+esac
+test "$("$QMAKE" -query QT_VERSION | cut -d. -f1)" = "$QT_MAJOR"
 "$QMAKE" ../../diskmap.pro && make -j"$(nproc)"
 ```
 
-- [ ] **Step 5: Verify under the installed Qt 6 and Qt 5 toolchains**
+- [x] **Step 5: Verify under the installed Qt 6 and Qt 5 toolchains**
 
 ```bash
 cd loglens && rm -rf build/check && cmake -S . -B build/check -DCMAKE_BUILD_TYPE=Debug \
@@ -659,7 +663,18 @@ cd loglens && rm -rf build/qt5 \
 ```
 diskmap도 `/usr/bin/qmake`가 보고하는 Qt 5.15로 별도 shadow build와 `make check`를 실행한다.
 
-- [ ] **Step 6: Commit**
+T0-5에서 위 검증을 CI와 같은 네 leg로 재실행했다. `gui-build`는 각 leg에서 선택 major의
+pkg-config `Core`, `Gui`, `Widgets`, `Concurrent`, `Test` 버전을 출력·검증하고, CMake는
+반대 major disable guard와 `-- <project>: using Qt<major> <version>` configure output 및 최종
+`ldd` 링크를 확인한다. qmake는 명시적
+경로와 `-query QT_VERSION`을 확인한다. 이어서 CMake는 CTest, qmake는 `make check`, 두
+경로 모두 실제 GUI binary의 offscreen smoke를 실행한다. Qt6/Qt5 모두 build/test/smoke가
+통과했다.
+
+- [x] **Step 6: Commit**
+
+구현은 `chore/qt5-qt6-matrix` 브랜치에서 작업 단위별 Conventional Commit으로 기록하고,
+원격 CI에서 같은 네 leg를 재실행한다.
 
 ```bash
 git add loglens/CMakeLists.txt loglens/src/gui/CMakeLists.txt \

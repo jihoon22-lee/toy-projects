@@ -184,11 +184,21 @@
 
 **브랜치:** `chore/qt5-qt6-matrix`
 
-- [ ] CMake는 `find_package(QT NAMES Qt6 Qt5 ...)`와 versioned target을 쓴다.
-- [ ] Qt5 강제 job은 `CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON`으로 선택을 확인한다.
-- [ ] qmake는 명시적인 Qt6/Qt5 job에서 각각 실제 executable을 선택한다.
-- [ ] pkg-config scope에는 Qt5/Qt6 이름을 모두 두되 실제 선택 evidence를 report에서 확인한다.
-- [ ] CI와 README에 “컴파일 가능”이 아니라 실행한 version을 기록한다.
+- [x] CMake는 `find_package(QT NAMES Qt6 Qt5 ...)`와 versioned target을 쓴다.
+- [x] Qt5 강제 job은 `CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON`으로, Qt6 job은 Qt5 disable로 선택을 확인한다.
+- [x] qmake는 명시적인 `/usr/bin/qmake6`/`/usr/bin/qmake` job에서 각각 실제 executable을 선택한다.
+- [x] pkg-config scope에는 Qt5/Qt6 이름과 필요한 Widgets/Concurrent modules를 모두 두고 실제 선택 evidence를 CI log에서 확인한다.
+- [x] CI와 README에 “컴파일 가능”이 아니라 실행한 version을 기록한다.
+
+**T0-5 실측·구현 증거 (2026-08-31):** `ci/check_manifest.py`가 각 GUI manifest 항목을
+`SUPPORTED_QT_MAJORS = (5, 6)`으로 확장해 현재 네 leg를 생성한다. Qt6 leg는
+`qt6-base-dev`/`qmake6`, Qt5 leg는 `qtbase5-dev`/`qt5-qmake`를 설치하며, 선택 major의
+Core/Gui/Widgets/Concurrent/Test pkg-config 버전을 출력·검증한다. loglens CMake는 반대
+major disable guard, configure output, `ldd` linked library와 CTest를 확인하고, diskmap qmake는
+`-query QT_VERSION`, linked library, `make check`를 확인한 뒤 양쪽에서 실제 headless GUI
+smoke를 실행한다. discovery 자동 확장은 `ci/test_check_manifest.py` stdlib 테스트로
+검증했고, report-pr의 PR 소스 미체크아웃·write 권한 분리 경계는 유지했다. 네 조합의
+로컬 실측은 모두 통과했으며, 원격 PR에서는 이 matrix와 Merge Gate가 최종 재검증한다.
 
 **T0 완료 조건:** loglens와 diskmap shell test가 양 Qt major에서 통과하고, loglens line/continuation state가 poll 경계에서도 정확하다.
 

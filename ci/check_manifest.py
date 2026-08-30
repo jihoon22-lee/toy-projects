@@ -19,6 +19,10 @@ from typing import Any
 MANIFEST_PATH = Path("ci/projects.json")
 SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 SAFE_PATH = re.compile(r"^[A-Za-z0-9._/-]+$")
+# Every enabled GUI project gets one leg for each supported major. Keeping this
+# in discovery, rather than duplicating entries in projects.json, means a new
+# project cannot accidentally enter only half of the GUI matrix.
+SUPPORTED_QT_MAJORS = (5, 6)
 
 
 def _required_path(value: Any, label: str) -> str:
@@ -30,8 +34,17 @@ def _required_path(value: Any, label: str) -> str:
     return value
 
 
-def discover() -> tuple[list[dict[str, str]], list[dict[str, str]], list[str]]:
-    payload = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+def discover(
+    root: Path = Path("."),
+) -> tuple[list[dict[str, str]], list[dict[str, Any]], list[str]]:
+    """Validate the manifest and expand every GUI project across Qt majors.
+
+    ``root`` is injectable for the dependency-free unit tests. The workflow
+    still calls the default, repository-relative location.
+    """
+
+    root = Path(root)
+    payload = json.loads((root / MANIFEST_PATH).read_text(encoding="utf-8"))
     if payload.get("schema") != 1:
         raise ValueError("ci/projects.json must declare schema 1")
     entries = payload.get("projects")
@@ -40,7 +53,7 @@ def discover() -> tuple[list[dict[str, str]], list[dict[str, str]], list[str]]:
 
     names: list[str] = []
     verify_projects: list[dict[str, str]] = []
-    gui_projects: list[dict[str, str]] = []
+    gui_projects: list[dict[str, Any]] = []
     for entry in entries:
         if not isinstance(entry, dict):
             raise ValueError("every project manifest entry must be an object")
@@ -49,7 +62,7 @@ def discover() -> tuple[list[dict[str, str]], list[dict[str, str]], list[str]]:
             raise ValueError(f"invalid project name: {name!r}")
         if name in names:
             raise ValueError(f"duplicate project name: {name}")
-        project_dir = Path(name)
+        project_dir = root / name
         if not project_dir.is_dir() or not (project_dir / "ici.toml").is_file():
             raise ValueError(f"{name} must be a directory containing ici.toml")
         if entry.get("verify") is not True:
@@ -72,19 +85,21 @@ def discover() -> tuple[list[dict[str, str]], list[dict[str, str]], list[str]]:
         smoke_arg = _required_path(gui.get("smoke_arg"), f"{name}.gui.smoke_arg")
         if not (project_dir / descriptor).is_file():
             raise ValueError(f"{name} GUI descriptor does not exist: {descriptor}")
-        gui_projects.append(
-            {
-                "name": name,
-                "build_system": build_system,
-                "build_descriptor": descriptor,
-                "gui_binary": binary,
-                "smoke_arg": smoke_arg,
-            }
-        )
+        for qt_major in SUPPORTED_QT_MAJORS:
+            gui_projects.append(
+                {
+                    "name": name,
+                    "build_system": build_system,
+                    "build_descriptor": descriptor,
+                    "gui_binary": binary,
+                    "smoke_arg": smoke_arg,
+                    "qt_major": qt_major,
+                }
+            )
 
     discovered_projects = sorted(
         path.name
-        for path in Path(".").iterdir()
+        for path in root.iterdir()
         if path.is_dir() and (path / "ici.toml").is_file()
     )
     if sorted(names) != discovered_projects:
@@ -97,7 +112,7 @@ def discover() -> tuple[list[dict[str, str]], list[dict[str, str]], list[str]]:
 
 def write_github_outputs(
     verify_projects: list[dict[str, str]],
-    gui_projects: list[dict[str, str]],
+    gui_projects: list[dict[str, Any]],
     names: list[str],
 ) -> None:
     output_name = os.environ.get("GITHUB_OUTPUT")
