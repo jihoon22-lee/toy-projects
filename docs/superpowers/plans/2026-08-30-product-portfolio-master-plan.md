@@ -233,10 +233,19 @@ follow를 중지하되 마지막 정상 화면은 보존한다. `retryableSource
 `sourceReplacementRecoversWithCleanRows`, `disablingFollowWhileWaitingStopsPolling`,
 `unsupportedSourceStopsFollowing`를 포함한 `test_main_window` 회귀 테스트가 추가됐고,
 Qt 6 및 Qt 5 CMake/CTest에서 각각 10/10 PASS를 기록했다. 구현 커밋은 `4094ff5`, 테스트
-커밋은 `ca56d2e`다. 로컬 ici 0.6.0 verify도 Suite PASS(10 pass, 2 skip), TEM 4.86,
+커밋은 `ca56d2e`다. PR #22 첫 CI 실행
+[`33335607699`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33335607699)에서
+missing 직후 inode이 재사용되는 파일시스템 경계가 드러나
+`disablingFollowWhileWaitingStopsPolling`의 기대 rowCount 1 대신 2가 관측됐고, Qt5·Qt6
+native와 `ici verify`가 실패했다. 더 큰 replacement가 이전 offset에서 읽혀 stale/new
+bytes가 섞이는 것이 원인이었다. `d419d2f`가 `recovery_pending_`/
+`recovery_restart_started_`로 unavailable interval 뒤 단일 generation 증가와 offset 0
+재시작을 강제하도록 수정했고, 수정 후 Qt5·Qt6 전체 CTest는 다시 10/10 PASS다. 로컬 ici
+0.6.0 verify도 Suite PASS(10 pass, 2 skip), TEM 4.86,
 line/function/branch 92.4/97.1/80.9%를 기록했고 Zero-CDN HTML과 Qt5·Qt6 8초 headless
 smoke를 확인했다. 원격 CI Merge Gate와 report-pr sticky HTML·Pages는 해당 PR에서
-별도로 확인한다.
+수정 커밋을 포함해 재실행한 뒤 별도로 확인한다. 현재는 재실행, sticky comment와 Pages
+HTTP 확인이 남아 있으므로 Slice 2의 원격 완료 조건은 아직 닫지 않는다.
 
 ### L2. bounded storage와 큰 파일 UX
 

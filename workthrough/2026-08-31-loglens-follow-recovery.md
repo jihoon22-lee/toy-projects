@@ -5,9 +5,12 @@
 `loglens`가 follow 중인 파일이 잠시 사라지거나 읽을 수 없게 되어도 사용자가 다시
 열지 않고 복구할 수 있도록 GUI 상태를 보강했다. 마지막으로 정상적으로 읽은 행은
 retryable source 오류 동안 유지하고, 새 file identity가 확인된 뒤에만 parser와 모델을
-새 generation으로 교체한다.
+새 generation으로 교체한다. PR #22의 첫 원격 검증에서 일부 파일시스템의 즉시 inode
+재사용 경계가 추가로 드러났고, 후속 수정 `d419d2f`로 identity가 재사용돼도 복구를
+새 generation으로 강제하도록 보완했다.
 
-이 문서는 구현 커밋 `4094ff5`와 테스트 커밋 `ca56d2e`의 설계·검증을 기록한다. local
+이 문서는 구현 커밋 `4094ff5`, 테스트 커밋 `ca56d2e`, 복구 경계 보완 커밋 `d419d2f`의
+설계·검증을 기록한다. local
 ici 0.6.0 검증과 Qt5/Qt6 headless smoke도 완료했지만, GitHub Actions CI와 report-pr sticky
 HTML/Pages 게시 검증은 아직 원격 PR 게이트로 남아 있다.
 
@@ -25,6 +28,24 @@ error를 반환할 수 있게 됐다. 그러나 GUI가 모든 source 오류를 �
 - fatal unsupported source는 follow를 중지하지만 마지막으로 유효했던 화면은 보존한다.
 - 사용자가 Follow를 끄면 timer와 retry를 멈추고, 다시 켜야 polling을 재개한다.
 - 최초 open 실패는 기존 계약대로 source/model을 비우고 Follow를 끈다.
+
+## CI에서 발견된 복구 경계와 후속 수정
+
+PR #22의 첫 GitHub Actions 실행
+[`33335607699`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33335607699)은
+`disablingFollowWhileWaitingStopsPolling`에서 Qt5·Qt6 native test와 `ici verify`
+모두 실패했다. missing 상태에서 파일을 제거한 직후 다시 만들면 일부 파일시스템이
+이전 파일의 device/inode을 즉시 재사용할 수 있는데, 기존 구현은 이를 동일 source로
+오인했다. 특히 더 큰 replacement가 Follow 재개 시 이전 offset에서 읽혀 stale/new
+bytes가 섞였고, 해당 테스트의 실제 `rowCount`가 2가 됐다.
+
+`d419d2f` (`fix(loglens): force generation after source recovery`)는
+`FileTailer`에 `recovery_pending_`와 `recovery_restart_started_`를 추가했다. unavailable
+interval을 한 번이라도 관측하면 identity가 재사용돼도 다음 성공 read를 새
+`Replaced` generation으로 처리하고 offset을 0으로 되돌린다. 같은 대기 구간에서
+poll이 여러 번 발생해도 restart/generation은 한 번만 증가하도록 하여 double increment도
+막는다. 회귀 테스트도 실제로 unlink 후 replacement를 생성하는 순서로 바꿔 inode 재사용
+경계를 재현한다.
 
 ## Design
 
@@ -63,6 +84,10 @@ error를 반환할 수 있게 됐다. 그러나 GUI가 모든 source 오류를 �
   - retryable `SourceChunk` 오류에서 기존 model을 지우지 않고 대기 상태를 표시한다.
   - generation/restart 경계를 성공 poll에서 확인해 stale parser/model을 함께 reset한다.
   - Follow 토글이 timer와 상태 머신을 명시적으로 제어하도록 했다.
+- `loglens/include/loglens/log_source.hpp`, `loglens/src/log_source.cpp`
+  - unavailable interval 이후 identity가 재사용돼도 새 generation과 offset reset을
+    보장하는 `recovery_pending_`/`recovery_restart_started_` 상태를 추가했다.
+  - 한 recovery interval에서 restart/generation이 중복 증가하지 않도록 경계를 분리했다.
 
 ### Deterministic tests
 
@@ -112,17 +137,19 @@ performed only after a successful poll proves that the source generation changed
 
 ### Native Qt matrix
 
-The implementation and test commits were verified with the complete Release CMake/CTest suite
-in both installed Qt environments:
+첫 PR 검증 전의 구현·테스트 커밋은 설치된 두 Qt 환경에서 complete Release CMake/CTest
+suite를 통과했지만, 원격에서 즉시 inode 재사용 경계가 발견됐다. `d419d2f` 수정 후
+Qt5와 Qt6에서 전체 suite를 다시 실행해 다음을 확인했다.
 
 ```text
 Qt 6 — CMake build + QT_QPA_PLATFORM=offscreen ctest: 10/10 passed
 Qt 5 — CMake build + QT_QPA_PLATFORM=offscreen ctest: 10/10 passed
 ```
 
-The four new recovery cases ran as part of `test_main_window`; the existing CLI, core, model,
-and GUI tests remained green in both runs. This documentation-only follow-up commit did not
-rerun the native suite.
+The four recovery cases, including `disablingFollowWhileWaitingStopsPolling`, ran as part of
+`test_main_window`; the existing CLI, core, model, and GUI tests remained green in both runs.
+The first remote run reported `loglens` 9/10 with one sanitize defect and therefore also
+failed the `ici verify` and Merge Gate jobs; `diskmap` remained green.
 
 ### Local ici verification
 
@@ -151,8 +178,8 @@ the success condition for the long-running GUI process.
 
 ### Deliberately pending evidence
 
-- repository CI and Merge Gate
-- `report-pr` sticky comment containing the generated HTML links, with each link checked over HTTP
+- d419d2f를 포함한 PR #22의 원격 CI 재실행과 Merge Gate
+- 재실행 결과의 `report-pr` sticky comment와 generated HTML 링크 게시, 각 링크 HTTP 확인
 
 These remote checks are release/PR gates and are intentionally not inferred from the local
 verification above.
