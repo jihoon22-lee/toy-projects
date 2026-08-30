@@ -138,6 +138,13 @@ void MainWindow::pollSource() {
     std::string error;
     if (!tailer_->pollChunk(chunk, error)) {
         // Stop rather than spin: whatever broke will keep breaking every tick.
+        // pollChunk may already have observed a truncation before opening the
+        // replacement failed. Discard the old generation now, otherwise a
+        // later retry could append fresh bytes to stale parser/model state.
+        if (tailer_->generation() != assembler_.generation()) {
+            assembler_.reset(tailer_->generation());
+            model_->resetRecords();
+        }
         status_->setText(tr("Follow stopped: %1").arg(QString::fromStdString(error)));
         followBox_->setChecked(false);
         return;
