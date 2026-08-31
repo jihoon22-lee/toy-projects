@@ -30,6 +30,6 @@ if(NOT _consumer_result EQUAL 0)
     message(FATAL_ERROR
         "C++ consumer failed (${_consumer_result}): ${_consumer_stdout}${_consumer_stderr}")
 endif()
-if(NOT _consumer_stdout MATCHES "Compilation entries: 2.+buildscope.snapshot/v1")
+if(NOT _consumer_stdout MATCHES "Compilation entries: 2.+buildscope.snapshot/v2")
     message(FATAL_ERROR "unexpected consumer output: ${_consumer_stdout}")
 endif()

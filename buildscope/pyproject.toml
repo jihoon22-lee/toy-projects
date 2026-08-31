@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "buildscope"
-version = "0.1.0"
+version = "0.2.0"
 description = "Offline explorer for C and C++ compilation databases"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -17,6 +17,10 @@ buildscope = "buildscope.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["python/buildscope"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"schemas/buildscope-snapshot-v1.schema.json" = "buildscope/schemas/buildscope-snapshot-v1.schema.json"
+"schemas/buildscope-snapshot-v2.schema.json" = "buildscope/schemas/buildscope-snapshot-v2.schema.json"
 
 [tool.pytest.ini_options]
 testpaths = ["tests/python"]

@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jihoon22-lee/toy-projects/buildscope/schemas/buildscope-snapshot-v1.schema.json",
+  "title": "BuildScope raw compilation snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["entries", "producer", "schema_version", "source"],
+  "properties": {
+    "schema_version": {"const": "buildscope.snapshot/v1"},
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "buildscope"},
+        "version": {"type": "string", "minLength": 1, "maxLength": 1048576}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entry_count", "path"],
+      "properties": {
+        "entry_count": {"type": "integer", "minimum": 0, "maximum": 100000},
+        "path": {"type": "string", "minLength": 1, "maxLength": 1048576}
+      }
+    },
+    "entries": {
+      "type": "array",
+      "maxItems": 100000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["arguments", "command", "directory", "file", "output"],
+        "properties": {
+          "arguments": {
+            "oneOf": [
+              {"type": "null"},
+              {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 32768,
+                "items": {"type": "string", "maxLength": 1048576}
+              }
+            ]
+          },
+          "command": {
+            "oneOf": [
+              {"type": "null"},
+              {"type": "string", "minLength": 1, "maxLength": 4194304}
+            ]
+          },
+          "directory": {"type": "string", "minLength": 1, "maxLength": 1048576},
+          "file": {"type": "string", "minLength": 1, "maxLength": 1048576},
+          "output": {
+            "oneOf": [
+              {"type": "null"},
+              {"type": "string", "minLength": 1, "maxLength": 1048576}
+            ]
+          }
+        },
+        "oneOf": [
+          {
+            "properties": {
+              "arguments": {"type": "array"},
+              "command": {"type": "null"}
+            }
+          },
+          {
+            "properties": {
+              "arguments": {"type": "null"},
+              "command": {"type": "string", "minLength": 1}
+            }
+          }
+        ]
+      }
+    }
+  }
+}
