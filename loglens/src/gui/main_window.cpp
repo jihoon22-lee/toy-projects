@@ -271,6 +271,9 @@ void MainWindow::handleLoadBatch(loglens::LoadBatch batch) {
     backlog_pending_ = batch.backlog_pending;
     if (!batch.error.isEmpty()) {
         handleLoadError(batch);
+        emit loadProgress(static_cast<qulonglong>(model_->totalSeen()),
+                          static_cast<qulonglong>(model_->totalCount()), false,
+                          batch.error);
         emit acknowledgeRequested(batch.job_id, batch.sequence);
         return;
     }
@@ -284,6 +287,9 @@ void MainWindow::handleLoadBatch(loglens::LoadBatch batch) {
     if (autoScroll_ && !batch.deltas.empty()) {
         table_->scrollToBottom();
     }
+    emit loadProgress(static_cast<qulonglong>(model_->totalSeen()),
+                      static_cast<qulonglong>(model_->totalCount()),
+                      batch.initial_complete, QString());
     emit acknowledgeRequested(batch.job_id, batch.sequence);
 }
 
