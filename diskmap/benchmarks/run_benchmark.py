@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import platform
 import subprocess
 import sys
@@ -21,16 +22,29 @@ def positive_int(value: str) -> int:
     return parsed
 
 
+def non_negative_finite_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed < 0:
+        raise argparse.ArgumentTypeError("value must be finite and non-negative")
+    return parsed
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser()
     result.add_argument("--binary", type=Path, required=True)
     result.add_argument("--entries", type=positive_int, default=1_000_000)
     result.add_argument("--cancel-after", type=positive_int, default=10_000)
     result.add_argument("--timeout-seconds", type=positive_int, default=60)
-    result.add_argument("--min-entries-per-s", type=float, default=100_000.0)
-    result.add_argument("--max-rss-mib", type=float, default=1536.0)
-    result.add_argument("--max-elapsed-ms", type=float, default=30_000.0)
-    result.add_argument("--max-cancel-ms", type=float, default=2_000.0)
+    result.add_argument(
+        "--min-entries-per-s", type=non_negative_finite_float, default=100_000.0
+    )
+    result.add_argument("--max-rss-mib", type=non_negative_finite_float, default=1536.0)
+    result.add_argument(
+        "--max-elapsed-ms", type=non_negative_finite_float, default=30_000.0
+    )
+    result.add_argument(
+        "--max-cancel-ms", type=non_negative_finite_float, default=2_000.0
+    )
     result.add_argument("--skip-budgets", action="store_true")
     result.add_argument("--output-dir", type=Path, required=True)
     return result
@@ -116,8 +130,8 @@ def markdown(summary: dict[str, Any]) -> str:
 def main() -> int:
     args = parser().parse_args()
     binary = args.binary.resolve(strict=True)
-    if args.cancel_after > args.entries:
-        raise SystemExit("--cancel-after cannot exceed --entries")
+    if args.cancel_after >= args.entries:
+        raise SystemExit("--cancel-after must be smaller than --entries")
 
     full = run_sample(binary, args.entries, args.timeout_seconds)
     cancelled = run_sample(

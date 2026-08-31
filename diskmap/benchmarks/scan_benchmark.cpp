@@ -44,7 +44,7 @@ public:
         }
 
         std::vector<diskmap::DirEntry> result;
-        result.reserve(entries_);
+        result.reserve(cancelAfter_ == 0 ? entries_ : cancelAfter_);
         for (std::size_t index = 0; index < entries_; ++index) {
             if ((cancelled && cancelled()) || shouldCancel(index)) {
                 break;
@@ -146,7 +146,7 @@ Options parseOptions(int argc, char** argv) {
         }
     }
     if (options.entries == 0 || options.entries > kMaximumEntries
-        || options.cancel_after > options.entries) {
+        || (options.cancel_after > 0 && options.cancel_after >= options.entries)) {
         options.valid = false;
     }
     return options;
@@ -176,7 +176,10 @@ double peakRssMiB() {
 }
 
 bool checkFullResult(const diskmap::ScanResult& result, const Options& options) {
-    if (result.cancelled || result.error_count != 0 || result.files_scanned != options.entries
+    if (result.cancelled || !result.root.complete || !result.fatal_error.empty()
+        || result.error_count != 0 || result.dirs_scanned != 1
+        || result.files_scanned != options.entries || result.entries_filtered != 0
+        || result.totals_filtered || result.mount_boundaries_skipped != 0
         || result.generation != options.generation
         || diskmap::countNodes(result.root) != options.entries + 1
         || result.root.size != expectedLogicalSize(options.entries)
