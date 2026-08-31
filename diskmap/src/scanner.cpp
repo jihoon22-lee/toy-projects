@@ -324,7 +324,15 @@ ScanResult scan(const FsSource& source,
     result.root.metadata.complete = true;
 
     const bool rootKindResolved = inspectRoot(source, rootPath, options, result);
+    if (!rootKindResolved && !result.root.error.empty()) {
+        result.fatal_error = result.root.error;
+        return result;
+    }
     if (rootKindResolved && !result.root.is_dir) {
+        if (!result.root.complete && !result.root.error.empty()) {
+            result.fatal_error = result.root.error;
+            return result;
+        }
         if (cancellation != nullptr && cancellation->isCancelled()) {
             result.cancelled = true;
             result.root.complete = false;
@@ -374,6 +382,9 @@ ScanResult scan(const FsSource& source,
             item.node->complete = false;
             item.node->error = error;
             recordError(result, options, error);
+            if (item.depth == 0 && entries.empty()) {
+                result.fatal_error = error;
+            }
         } else {
             ++result.dirs_scanned;
         }
