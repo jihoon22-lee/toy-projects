@@ -320,13 +320,13 @@ int runDiskmap(const CliOptions& options) {
     scanOptions.exclude_patterns = options.exclude_patterns;
 
     diskmap::ScanResult result = diskmap::scan(source, options.path, scanOptions);
-    diskmap::sortBySizeDesc(result.root);
-    printScanErrors(result.errors);
-
     if (scanFailedFatally(result)) {
         std::cerr << "fatal: " << result.fatal_error << "\n";
         return 1;
     }
+
+    diskmap::sortBySizeDesc(result.root);
+    printScanErrors(result.errors);
 
     const int depthCap = effectiveDepthCap(options.depth);
     if (options.json) {
