@@ -726,10 +726,47 @@ int main() {
 
         const ScanResult result = scan(fs, root, ScanOptions{});
         CHECK(!result.root.complete);
-        CHECK(result.root.error.find("no listing registered") != std::string::npos);
-        CHECK_EQ(result.errors.size(), static_cast<std::size_t>(2));
+        CHECK_EQ(result.root.error, std::string("root metadata unavailable"));
+        CHECK_EQ(result.fatal_error, std::string("root metadata unavailable"));
+        CHECK_EQ(result.errors.size(), static_cast<std::size_t>(1));
         CHECK_EQ(result.errors[0], std::string("root metadata unavailable"));
-        CHECK(result.errors[1].find("no listing registered") != std::string::npos);
+        CHECK(fs.listedPaths.empty());
+    }
+
+    {
+        InspectingFakeFsSource fs;
+        const std::filesystem::path root = "/unreadable-root";
+        diskmap::FsMetadata metadata;
+        metadata.kind = FsKind::Directory;
+        metadata.identity = identity(15, 151);
+        metadata.complete = true;
+        fs.addInspection(root, false, metadata);
+        fs.addError(root, "permission denied: root");
+
+        const ScanResult result = scan(fs, root, ScanOptions{});
+        CHECK(!result.root.complete);
+        CHECK_EQ(result.fatal_error, std::string("permission denied: root"));
+        CHECK_EQ(result.error_count, static_cast<std::size_t>(1));
+        CHECK_EQ(result.errors.size(), static_cast<std::size_t>(1));
+        CHECK_EQ(result.dirs_scanned, static_cast<std::size_t>(0));
+    }
+
+    {
+        PartialListingFsSource fs;
+        const std::filesystem::path root = "/partial-root";
+        diskmap::FsMetadata metadata;
+        metadata.kind = FsKind::Directory;
+        metadata.identity = identity(16, 161);
+        metadata.complete = true;
+        fs.addInspection(root, false, metadata);
+        fs.addPartialListing(root, {makeFileEntry("kept.bin", 17)},
+                             "directory changed during enumeration");
+
+        const ScanResult result = scan(fs, root, ScanOptions{});
+        CHECK(!result.root.complete);
+        CHECK(result.fatal_error.empty());
+        CHECK_EQ(result.files_scanned, static_cast<std::size_t>(1));
+        CHECK(diskmap::findChild(result.root, "kept.bin") != nullptr);
     }
 
     // The root fallback in lastPathComponent is observable only for a path
