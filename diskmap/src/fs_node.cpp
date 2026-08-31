@@ -30,6 +30,12 @@ struct StorageFacts {
     bool complete = true;
 };
 
+struct StorageFrame {
+    FsNode* node;
+    std::size_t next_child = 0;
+    StorageFacts facts;
+};
+
 bool addSize(std::uint64_t& total, std::uint64_t value) {
     if (value > std::numeric_limits<std::uint64_t>::max() - total) {
         total = std::numeric_limits<std::uint64_t>::max();
@@ -175,6 +181,46 @@ bool byDescendingFileSize(const FsNode* a, const FsNode* b) {
     return a->size > b->size;
 }
 
+StorageFrame makeStorageFrame(FsNode* node) {
+    StorageFrame frame{node, 0, StorageFacts{}};
+    frame.facts.complete = node->complete;
+    return frame;
+}
+
+bool descendStorageTree(StorageFrame& frame, std::vector<StorageFrame>& stack) {
+    if (!frame.node->is_dir || frame.next_child >= frame.node->children.size()) {
+        return false;
+    }
+    FsNode* child = &frame.node->children[frame.next_child++];
+    stack.push_back(makeStorageFrame(child));
+    return true;
+}
+
+void observeLeafStorage(StorageFrame& frame) {
+    if (frame.node->is_dir) {
+        return;
+    }
+    const FsMetadata& metadata = effectiveMetadata(*frame.node);
+    frame.facts.complete = frame.facts.complete && metadata.complete;
+    if (metadata.identity.valid) {
+        observeIdentity(frame.facts.identities[{metadata.identity.device, metadata.identity.file}],
+                        *frame.node, metadata);
+        return;
+    }
+    addUnidentified(frame.facts, *frame.node, metadata);
+}
+
+void finishStorageFrame(std::vector<StorageFrame>& stack) {
+    StorageFrame& frame = stack.back();
+    observeLeafStorage(frame);
+    assignStorage(*frame.node, frame.facts);
+    StorageFacts completed = std::move(frame.facts);
+    stack.pop_back();
+    if (!stack.empty()) {
+        mergeFacts(stack.back().facts, std::move(completed));
+    }
+}
+
 } // namespace
 
 std::uint64_t aggregateSizes(FsNode& node) {
@@ -207,45 +253,12 @@ std::uint64_t aggregateSizes(FsNode& node) {
 }
 
 void aggregateStorage(FsNode& node) {
-    struct Frame {
-        FsNode* node;
-        std::size_t next_child = 0;
-        StorageFacts facts;
-    };
-
-    std::vector<Frame> stack;
-    Frame rootFrame{&node, 0, StorageFacts{}};
-    rootFrame.facts.complete = node.complete;
-    stack.push_back(std::move(rootFrame));
-
+    std::vector<StorageFrame> stack{makeStorageFrame(&node)};
     while (!stack.empty()) {
-        Frame& frame = stack.back();
-        if (frame.node->is_dir && frame.next_child < frame.node->children.size()) {
-            FsNode* child = &frame.node->children[frame.next_child++];
-            Frame childFrame{child, 0, StorageFacts{}};
-            childFrame.facts.complete = child->complete;
-            stack.push_back(std::move(childFrame));
+        if (descendStorageTree(stack.back(), stack)) {
             continue;
         }
-
-        if (!frame.node->is_dir) {
-            const FsMetadata& metadata = effectiveMetadata(*frame.node);
-            frame.facts.complete = frame.facts.complete && metadata.complete;
-            if (metadata.identity.valid) {
-                observeIdentity(
-                    frame.facts.identities[{metadata.identity.device, metadata.identity.file}],
-                    *frame.node, metadata);
-            } else {
-                addUnidentified(frame.facts, *frame.node, metadata);
-            }
-        }
-
-        assignStorage(*frame.node, frame.facts);
-        StorageFacts completed = std::move(frame.facts);
-        stack.pop_back();
-        if (!stack.empty()) {
-            mergeFacts(stack.back().facts, std::move(completed));
-        }
+        finishStorageFrame(stack);
     }
 }
 

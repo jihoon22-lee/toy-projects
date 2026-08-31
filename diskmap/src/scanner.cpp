@@ -14,6 +14,11 @@ struct WorkItem {
     FsNode* node = nullptr;
 };
 
+enum class RootDisposition {
+    Traverse,
+    Complete,
+};
+
 using IdentityKey = std::pair<std::uint64_t, std::uint64_t>;
 
 void recordError(ScanResult& result, const ScanOptions& options, std::string message) {
@@ -216,6 +221,48 @@ bool rememberDirectoryIdentity(FsNode& child,
     return true;
 }
 
+bool isDirectoryForPass(const FsNode& child, bool followedPass) {
+    return child.is_dir && child.followed == followedPass;
+}
+
+bool crossesMountBoundary(const FileIdentity& identity,
+                          const FileIdentity& rootIdentity,
+                          const ScanOptions& options) {
+    return options.one_file_system
+           && (!rootIdentity.valid || !identity.valid
+               || identity.device != rootIdentity.device);
+}
+
+void markMountBoundary(FsNode& child,
+                       const FileIdentity& identity,
+                       const FileIdentity& rootIdentity,
+                       const ScanOptions& options,
+                       ScanResult& result) {
+    child.complete = false;
+    child.mount_boundary_skipped = identity.valid && rootIdentity.valid;
+    child.error = child.mount_boundary_skipped
+                      ? "mount boundary excluded"
+                      : "cannot verify mount boundary: directory identity is unavailable";
+    if (child.mount_boundary_skipped) {
+        ++result.mount_boundaries_skipped;
+        return;
+    }
+    recordError(result, options, child.error + " ('" + child.path.string() + "')");
+}
+
+bool directoryMayBeScheduled(FsNode& child,
+                             const FileIdentity& rootIdentity,
+                             const ScanOptions& options,
+                             ScanResult& result,
+                             std::set<IdentityKey>& visited) {
+    const FileIdentity& identity = effectiveMetadata(child).identity;
+    if (crossesMountBoundary(identity, rootIdentity, options)) {
+        markMountBoundary(child, identity, rootIdentity, options, result);
+        return false;
+    }
+    return rememberDirectoryIdentity(child, visited, options, result);
+}
+
 void scheduleDirectoryPass(std::vector<FsNode>& children,
                            bool followedPass,
                            int childDepth,
@@ -223,31 +270,15 @@ void scheduleDirectoryPass(std::vector<FsNode>& children,
                            const FileIdentity& rootIdentity,
                            ScanResult& result,
                            std::vector<WorkItem>& stack,
-                           std::set<IdentityKey>& visited) {
+    std::set<IdentityKey>& visited) {
     for (FsNode& child : children) {
-        if (!child.is_dir || child.followed != followedPass) {
+        if (!isDirectoryForPass(child, followedPass)) {
             continue;
         }
-        const FileIdentity& identity = effectiveMetadata(child).identity;
-        if (options.one_file_system
-            && (!rootIdentity.valid || !identity.valid
-                || identity.device != rootIdentity.device)) {
-            child.complete = false;
-            child.mount_boundary_skipped = identity.valid && rootIdentity.valid;
-            child.error = child.mount_boundary_skipped
-                              ? "mount boundary excluded"
-                              : "cannot verify mount boundary: directory identity is unavailable";
-            if (child.mount_boundary_skipped) {
-                ++result.mount_boundaries_skipped;
-            } else {
-                recordError(result, options,
-                            child.error + " ('" + child.path.string() + "')");
-            }
+        if (!directoryMayBeScheduled(child, rootIdentity, options, result, visited)) {
             continue;
         }
-        if (rememberDirectoryIdentity(child, visited, options, result)) {
-            stack.push_back(WorkItem{child.path, childDepth, &child});
-        }
+        stack.push_back(WorkItem{child.path, childDepth, &child});
     }
 }
 
@@ -307,6 +338,147 @@ void markCancelled(ScanResult& result, std::vector<WorkItem>& stack) {
     }
 }
 
+bool cancellationRequested(const ScanCancellationToken* cancellation) {
+    return cancellation != nullptr && cancellation->isCancelled();
+}
+
+void initializeResult(ScanResult& result,
+                      const std::filesystem::path& rootPath,
+                      const ScanOptions& options) {
+    result.generation = options.generation;
+    result.root.name = lastPathComponent(rootPath);
+    result.root.path = rootPath;
+    result.root.is_dir = true;
+    result.root.scan_generation = options.generation;
+    result.root.metadata.kind = FsKind::Directory;
+    result.root.metadata.complete = true;
+}
+
+RootDisposition resolveRoot(const FsSource& source,
+                            const std::filesystem::path& rootPath,
+                            const ScanOptions& options,
+                            const ProgressFn& progress,
+                            const ScanCancellationToken* cancellation,
+                            ScanResult& result) {
+    const bool rootKindResolved = inspectRoot(source, rootPath, options, result);
+    if (!rootKindResolved && !result.root.error.empty()) {
+        result.fatal_error = result.root.error;
+        return RootDisposition::Complete;
+    }
+    if (!rootKindResolved || result.root.is_dir) {
+        return RootDisposition::Traverse;
+    }
+    if (!result.root.complete && !result.root.error.empty()) {
+        result.fatal_error = result.root.error;
+        return RootDisposition::Complete;
+    }
+    if (cancellationRequested(cancellation)) {
+        result.cancelled = true;
+        result.root.complete = false;
+        result.root.error = "scan cancelled before completion";
+        return RootDisposition::Complete;
+    }
+    finalizeLeafRoot(result, progress);
+    return RootDisposition::Complete;
+}
+
+CancellationCheck cancellationCheck(const ScanCancellationToken* cancellation) {
+    if (cancellation == nullptr) {
+        return CancellationCheck();
+    }
+    return [cancellation]() { return cancellation->isCancelled(); };
+}
+
+void recordListingOutcome(WorkItem& item,
+                          const std::vector<DirEntry>& entries,
+                          const std::string& error,
+                          const ScanOptions& options,
+                          ScanResult& result) {
+    if (error.empty()) {
+        ++result.dirs_scanned;
+        return;
+    }
+    item.node->complete = false;
+    item.node->error = error;
+    recordError(result, options, error);
+    if (item.depth == 0 && entries.empty()) {
+        result.fatal_error = error;
+    }
+}
+
+bool processWorkItem(const FsSource& source,
+                     WorkItem item,
+                     const std::filesystem::path& rootPath,
+                     const ScanOptions& options,
+                     const FileIdentity& rootIdentity,
+                     const ProgressFn& progress,
+                     const ScanCancellationToken* cancellation,
+                     ScanResult& result,
+                     std::vector<WorkItem>& stack,
+                     std::set<IdentityKey>& visited) {
+    std::string error;
+    const std::vector<DirEntry> entries =
+        source.list(item.path, error, cancellationCheck(cancellation));
+    if (cancellationRequested(cancellation)) {
+        stack.push_back(std::move(item));
+        markCancelled(result, stack);
+        return false;
+    }
+    recordListingOutcome(item, entries, error, options, result);
+    expandDirectory(item, entries, rootPath, options, rootIdentity, result, stack, visited,
+                    cancellation);
+    if (cancellationRequested(cancellation)) {
+        markCancelled(result, stack);
+        return false;
+    }
+    if (progress && (error.empty() || !entries.empty())) {
+        progress(result.dirs_scanned, result.files_scanned);
+    }
+    return true;
+}
+
+void traverseDirectories(const FsSource& source,
+                         const std::filesystem::path& rootPath,
+                         const ScanOptions& options,
+                         const ProgressFn& progress,
+                         const ScanCancellationToken* cancellation,
+                         ScanResult& result) {
+    std::set<IdentityKey> visited;
+    const FileIdentity& rootIdentity = effectiveMetadata(result.root).identity;
+    if (rootIdentity.valid) {
+        visited.insert(IdentityKey{rootIdentity.device, rootIdentity.file});
+    }
+    std::vector<WorkItem> stack{WorkItem{rootPath, 0, &result.root}};
+    while (!stack.empty()) {
+        if (cancellationRequested(cancellation)) {
+            markCancelled(result, stack);
+            return;
+        }
+        WorkItem item = std::move(stack.back());
+        stack.pop_back();
+        if (!depthIsExpandable(item.depth, options.max_depth)) {
+            item.node->complete = false;
+            item.node->error = "scan depth limit reached";
+            continue;
+        }
+        if (!processWorkItem(source, std::move(item), rootPath, options, rootIdentity,
+                             progress, cancellation, result, stack, visited)) {
+            return;
+        }
+    }
+}
+
+void finalizeTraversal(ScanResult& result, const ProgressFn& progress) {
+    if (result.cancelled) {
+        if (progress) {
+            progress(result.dirs_scanned, result.files_scanned);
+        }
+        return;
+    }
+    aggregateSizes(result.root);
+    aggregateStorage(result.root);
+}
+
 } // namespace
 
 ScanResult scan(const FsSource& source,
@@ -315,101 +487,13 @@ ScanResult scan(const FsSource& source,
                  const ProgressFn& progress,
                  const ScanCancellationToken* cancellation) {
     ScanResult result;
-    result.generation = options.generation;
-    result.root.name = lastPathComponent(rootPath);
-    result.root.path = rootPath;
-    result.root.is_dir = true;
-    result.root.scan_generation = options.generation;
-    result.root.metadata.kind = FsKind::Directory;
-    result.root.metadata.complete = true;
-
-    const bool rootKindResolved = inspectRoot(source, rootPath, options, result);
-    if (!rootKindResolved && !result.root.error.empty()) {
-        result.fatal_error = result.root.error;
+    initializeResult(result, rootPath, options);
+    if (resolveRoot(source, rootPath, options, progress, cancellation, result)
+        == RootDisposition::Complete) {
         return result;
     }
-    if (rootKindResolved && !result.root.is_dir) {
-        if (!result.root.complete && !result.root.error.empty()) {
-            result.fatal_error = result.root.error;
-            return result;
-        }
-        if (cancellation != nullptr && cancellation->isCancelled()) {
-            result.cancelled = true;
-            result.root.complete = false;
-            result.root.error = "scan cancelled before completion";
-            return result;
-        }
-        finalizeLeafRoot(result, progress);
-        return result;
-    }
-
-    std::set<IdentityKey> visited;
-    const FileIdentity& rootIdentity = effectiveMetadata(result.root).identity;
-    if (rootIdentity.valid) {
-        visited.insert(IdentityKey{rootIdentity.device, rootIdentity.file});
-    }
-
-    std::vector<WorkItem> stack;
-    stack.push_back(WorkItem{rootPath, 0, &result.root});
-
-    while (!stack.empty()) {
-        if (cancellation != nullptr && cancellation->isCancelled()) {
-            markCancelled(result, stack);
-            break;
-        }
-        WorkItem item = std::move(stack.back());
-        stack.pop_back();
-
-        if (!depthIsExpandable(item.depth, options.max_depth)) {
-            item.node->complete = false;
-            item.node->error = "scan depth limit reached";
-            continue;
-        }
-
-        std::string error;
-        const CancellationCheck cancelled = cancellation == nullptr
-                                                ? CancellationCheck()
-                                                : [cancellation]() {
-                                                      return cancellation->isCancelled();
-                                                  };
-        std::vector<DirEntry> entries = source.list(item.path, error, cancelled);
-        if (cancellation != nullptr && cancellation->isCancelled()) {
-            stack.push_back(std::move(item));
-            markCancelled(result, stack);
-            break;
-        }
-        if (!error.empty()) {
-            item.node->complete = false;
-            item.node->error = error;
-            recordError(result, options, error);
-            if (item.depth == 0 && entries.empty()) {
-                result.fatal_error = error;
-            }
-        } else {
-            ++result.dirs_scanned;
-        }
-
-        expandDirectory(item, entries, rootPath, options, rootIdentity, result, stack, visited,
-                        cancellation);
-
-        if (cancellation != nullptr && cancellation->isCancelled()) {
-            markCancelled(result, stack);
-            break;
-        }
-
-        if (progress && (error.empty() || !entries.empty())) {
-            progress(result.dirs_scanned, result.files_scanned);
-        }
-    }
-
-    if (result.cancelled) {
-        if (progress) {
-            progress(result.dirs_scanned, result.files_scanned);
-        }
-        return result;
-    }
-    aggregateSizes(result.root);
-    aggregateStorage(result.root);
+    traverseDirectories(source, rootPath, options, progress, cancellation, result);
+    finalizeTraversal(result, progress);
     return result;
 }
 
