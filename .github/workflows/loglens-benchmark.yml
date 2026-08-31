@@ -1,0 +1,253 @@
+name: LogLens large-file benchmark
+
+# This is intentionally opt-in/nightly only.  It must never become a normal
+# pull-request or merge-gate dependency: a 1 GiB input and capacity sweep are
+# too expensive for the ordinary quality workflow.
+on:
+  workflow_dispatch:
+    inputs:
+      repetitions:
+        description: "Runs per component/capacity (default: 3)"
+        required: false
+        default: "3"
+        type: string
+      timeout_seconds:
+        description: "Hard timeout for each benchmark process (default: 180)"
+        required: false
+        default: "180"
+        type: string
+  schedule:
+    - cron: "17 3 * * 0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: loglens-large-file-benchmark-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  BENCHMARK_BYTES: "1073741824"
+  BENCHMARK_RECORDS: "1000000"
+  BENCHMARK_CAPACITIES: "8192,16384,32768,65536,131072,262144"
+  BENCHMARK_REPETITIONS: ${{ inputs.repetitions || '3' }}
+  BENCHMARK_TIMEOUT_SECONDS: ${{ inputs.timeout_seconds || '180' }}
+
+jobs:
+  benchmark:
+    name: Qt${{ matrix.qt_major }} large-file benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        qt_major: [5, 6]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+
+      - name: Install Qt${{ matrix.qt_major }} toolchain
+        env:
+          QT_MAJOR: ${{ matrix.qt_major }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          if [ "$QT_MAJOR" = 5 ]; then
+            sudo apt-get install -y --no-install-recommends qtbase5-dev qt5-qmake pkg-config cmake g++
+          else
+            sudo apt-get install -y --no-install-recommends qt6-base-dev qmake6 pkg-config cmake g++
+          fi
+
+      - name: Check available disk space
+        run: |
+          set -euo pipefail
+          df -Pk "$RUNNER_TEMP" .
+          available_kib="$(df -Pk "$RUNNER_TEMP" | awk 'NR == 2 {print $4}')"
+          test "$available_kib" -ge 4194304
+
+      - name: Configure benchmark targets
+        working-directory: loglens
+        env:
+          QT_MAJOR: ${{ matrix.qt_major }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/loglens-benchmark/build"
+          if [ "$QT_MAJOR" = 5 ]; then
+            qt_guard=-DCMAKE_DISABLE_FIND_PACKAGE_Qt6=ON
+            qmake=qmake
+          else
+            qt_guard=-DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON
+            qmake=qmake6
+          fi
+          "$qmake" -query QT_VERSION
+          cmake -S . -B "$RUNNER_TEMP/loglens-benchmark/build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLOGLENS_BUILD_BENCHMARKS=ON \
+            "$qt_guard" \
+            2>&1 | tee "$RUNNER_TEMP/loglens-benchmark/configure.log"
+          grep -Eq "using Qt${QT_MAJOR} " "$RUNNER_TEMP/loglens-benchmark/configure.log"
+
+      - name: Build benchmark targets
+        working-directory: loglens
+        run: |
+          set -euo pipefail
+          cmake --build "$RUNNER_TEMP/loglens-benchmark/build" --parallel \
+            --target loglens-bench-generate loglens-bench-core loglens-bench-gui
+
+      - name: Run generator, core, GUI, and aggregate
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_MAJOR: ${{ matrix.qt_major }}
+        run: |
+          set -euo pipefail
+          mkdir -p "benchmark-artifacts/qt${QT_MAJOR}"
+          python3 loglens/benchmarks/run_benchmark.py \
+            --build-dir "$RUNNER_TEMP/loglens-benchmark/build" \
+            --scratch "$RUNNER_TEMP/loglens-benchmark/scratch" \
+            --artifact-dir "$GITHUB_WORKSPACE/benchmark-artifacts/qt${QT_MAJOR}" \
+            --qt-major "$QT_MAJOR" \
+            --bytes "$BENCHMARK_BYTES" \
+            --records "$BENCHMARK_RECORDS" \
+            --capacities "$BENCHMARK_CAPACITIES" \
+            --repetitions "$BENCHMARK_REPETITIONS" \
+            --timeout-seconds "$BENCHMARK_TIMEOUT_SECONDS"
+
+      - name: Validate artifact allowlist
+        if: always()
+        run: |
+          set -euo pipefail
+          artifact="benchmark-artifacts/qt${{ matrix.qt_major }}"
+          test -d "$artifact"
+          bad="$(find "$artifact" -type f ! \( -name '*.json' -o -name '*.md' -o -name '*.txt' \) -print -quit)"
+          if [ -n "$bad" ]; then
+            echo "::error::artifact contains a non-report file: $bad"
+            exit 1
+          fi
+          oversized="$(find "$artifact" -type f -size +1G -print -quit)"
+          if [ -n "$oversized" ]; then
+            echo "::error::artifact contains an unexpectedly large file: $oversized"
+            exit 1
+          fi
+          find "$artifact" -type f -print | sort
+
+      - name: Upload Qt benchmark artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: loglens-benchmark-qt${{ matrix.qt_major }}
+          path: benchmark-artifacts/qt${{ matrix.qt_major }}
+          if-no-files-found: error
+          retention-days: 30
+
+  aggregate:
+    name: Combine Qt benchmark summaries
+    if: always()
+    needs: benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Set up Python 3.10
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+
+      - name: Download benchmark artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: loglens-benchmark-qt*
+          path: benchmark-artifacts
+
+      - name: Validate downloaded artifacts contain no log input
+        run: |
+          set -euo pipefail
+          test -d benchmark-artifacts
+          log_file="$(find benchmark-artifacts -type f -iname '*.log' -print -quit)"
+          if [ -n "$log_file" ]; then
+            echo "::error::benchmark log leaked into an artifact: $log_file"
+            exit 1
+          fi
+          bad="$(find benchmark-artifacts -type f ! \( -name '*.json' -o -name '*.md' -o -name '*.txt' \) -print -quit)"
+          if [ -n "$bad" ]; then
+            echo "::error::artifact contains a non-report file: $bad"
+            exit 1
+          fi
+
+      - name: Publish combined summary
+        env:
+          MATRIX_RESULT: ${{ needs.benchmark.result }}
+        run: |
+          set -euo pipefail
+          mkdir -p combined-benchmark
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          files = sorted(Path("benchmark-artifacts").glob("**/summary.json"))
+          if not files:
+              raise SystemExit("no Qt benchmark summaries were downloaded")
+          documents = [json.loads(path.read_text(encoding="utf-8")) for path in files]
+          combined = {
+              "schema": "loglens-benchmark/v1",
+              "benchmark": documents[0].get("benchmark", {}),
+              "environments": [doc.get("environment", {}) for doc in documents],
+              "policies": [doc.get("policy", {}) for doc in documents],
+              "qt_summaries": documents,
+              "workflow_matrix_result": os.environ.get("MATRIX_RESULT"),
+              "status": "pass" if os.environ.get("MATRIX_RESULT") == "success"
+              and all(doc.get("decision", {}).get("status") == "pass" for doc in documents)
+              else "fail",
+          }
+          Path("combined-benchmark/summary.json").write_text(
+              json.dumps(combined, indent=2, sort_keys=True, allow_nan=False) + "\n",
+              encoding="utf-8",
+          )
+          lines = [
+              "# LogLens large-file benchmark — Qt matrix", "",
+              f"**Status:** `{combined['status'].upper()}`", "",
+              "| Qt | Status | Recommended capacity |", "|---:|:---:|---:|",
+          ]
+          for doc in documents:
+              environment = doc.get("environment", {})
+              decision = doc.get("decision", {})
+              lines.append(
+                  f"| {environment.get('qt_major')} | "
+                  f"{decision.get('status', 'fail').upper()} | "
+                  f"{decision.get('recommended_default_capacity') or 'none'} |"
+              )
+          lines.extend(["", "Detailed per-Qt reports are in the corresponding artifacts."])
+          Path("combined-benchmark/summary.md").write_text(
+              "\n".join(lines) + "\n", encoding="utf-8"
+          )
+          PY
+
+      - name: Upload combined summary
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: loglens-benchmark-combined
+          path: combined-benchmark
+          if-no-files-found: error
+          retention-days: 30
+
+  verdict:
+    name: Benchmark verdict
+    if: always()
+    needs: [benchmark, aggregate]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require complete benchmark result
+        env:
+          BENCHMARK_RESULT: ${{ needs.benchmark.result }}
+          AGGREGATE_RESULT: ${{ needs.aggregate.result }}
+        run: |
+          set -euo pipefail
+          test "$BENCHMARK_RESULT" = success
+          test "$AGGREGATE_RESULT" = success
