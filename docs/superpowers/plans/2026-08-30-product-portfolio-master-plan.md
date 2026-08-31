@@ -26,11 +26,11 @@
 
 ## 2. 현재 포트폴리오와 검증 공백
 
-2026-08-30 기준:
+2026-08-31 기준:
 
 | 프로젝트 | 현재 형태 | 실측 | 제품 상태 |
 |---|---|---|---|
-| loglens | C++17, Qt, CMake | L2 bounded foundation · PR #24 CI green · 10 tests | bounded 기반 완료, 대용량 UX는 남은 L2~L6에서 확장 |
+| loglens | C++17, Qt, CMake | L2 bounded/background slice · local Qt5/Qt6 12 CTest targets | Tail N/From start와 worker UX 완료, benchmark/default capacity는 남은 L2 작업 |
 | diskmap | C++17, Qt, qmake | D1 Slice 2 merged · PR #23 · CI green · TEM 4.90 | treemap viewer, cleanup UX는 D2~D6에서 확장 |
 | ici/viewer | Qt-free core + Qt6 GUI | 3 tests, TEM 4.94 | core 중심, 셸과 report workflow 부족 |
 
@@ -256,13 +256,13 @@ Pages의 `diskmap/pr/22/`는 HTTP 200·161211 bytes·external refs 0개,
 
 ### L2. bounded storage와 큰 파일 UX
 
-**브랜치:** `feat/loglens-bounded-model`
+**브랜치:** `feat/loglens-bounded-model` (foundation), `feat/loglens-background-loader` (current slice)
 
 - [x] 기존 RingBuffer를 GUI/CLI 실제 record store에 연결한다.
 - [x] capacity, dropped record count와 oldest/newest line을 노출한다.
 - [x] model reset 대신 incremental insert/remove contract를 테스트한다.
-- [ ] 초기 open은 tail N 또는 streaming index mode 중 사용자 선택을 제공한다.
-- [ ] background parsing 중 UI가 filter/search를 안전하게 처리한다.
+- [x] 초기 open은 `Latest records`(Tail N) 또는 `From start` 중 사용자 선택을 제공한다.
+- [x] background parsing 중 UI가 filter/search를 안전하게 처리한다.
 - [ ] 1 GiB synthetic log와 100만 record benchmark를 만들고 first-paint, throughput, peak RSS를 기록한다.
 - [ ] 실측 후 default capacity와 성능 budget을 고정한다.
 
@@ -274,19 +274,39 @@ zero-delay event로 협력적으로 소진한다. one-shot CLI는 첫 file-size 
 동시 append를 무한 추격하지 않는다. pathological physical/logical record는 기본 64 KiB·상한
 1 MiB로 제한하고 `input_bytes`/`omitted_bytes`로 손실을 명시한다.
 
-Qt 5.15과 Qt 6.10의 전체 CTest는 각각 10/10, `-Wall -Wextra -Wpedantic -Werror` Qt6
-build/CTest도 10/10 PASS였다. ici 0.6.0 최종 local verify는 Suite PASS, 10 pass / 0 warn /
-0 fail / 0 error / 2 skip, TEM 4.85, line/function/branch 93.9%/96.9%/83.1%, maximum
-complexity 15(0 issues), duplication 1.43%, sanitizer clean이었다. HTML은 283,077 bytes이며
-외부 script/link/image 참조가 0개다. 구현·local evidence head `fa4fd1a`의 PR
+초기 GUI 로드는 `LogLoadWorker`가 전용 `QThread`에서 `FileTailer`와 `RecordAssembler`를
+소유하고, GUI thread의 `LogModel`에는 `LoadBatch`만 전달한다. Tail N은 continuation을
+포함한 logical record root의 byte offset을 먼저 찾은 뒤 parser를 선택된 offset에서 시작해
+physical line number를 보존한다. From start와 Tail N 모두 source identity와 snapshot boundary를
+확인하며, 선택 중 rotation이면 retryable error로 보고 stale bytes를 섞지 않는다.
+각 batch는 최대 512개 delta로 제한되고, GUI ACK 전에는 worker가 다음 chunk/batch를 읽거나
+발행하지 않는다. `job_id`/`sequence` 검증은 stale job·queued ack·순서 오류를 차단하며,
+Follow 중지/취소는 pending poll을 버린다. structured filter와 대소문자 구분 없는 search는
+background load 중에도 GUI thread에서 즉시 변경할 수 있고 timeline 갱신은 debounce된다.
+
+Qt 5.15과 Qt 6.10의 전체 CTest는 각각 12/12, `-Wall -Wextra -Wpedantic -Werror` Qt6
+build/CTest도 12/12 PASS였다. 현재 background loader 구현 head `e19fea9`에 대한 ici deep
+no-cache local verify는 Suite PASS, 11 pass / 0 warn / 0 fail / 0 error / 2 skip, TEM 4.83,
+line/function/branch 93.4%/96.6%/81.6%, maximum complexity 15(0 issues), duplication 1.72%,
+sanitizer PASS, HTML 428,025 bytes·external refs 0개였다. 이전 bounded foundation의 ici
+0.6.0 local verify는 Suite PASS, 10 pass / 0 warn / 0 fail / 0 error / 2 skip, TEM 4.85,
+line/function/branch 93.9%/96.9%/83.1%, maximum complexity 15(0 issues), duplication 1.43%,
+sanitizer clean, HTML 283,077 bytes·외부 script/link/image 참조 0개였다. 구현·local evidence
+head `fa4fd1a`의 PR
 [#24](https://github.com/jihoon22-lee/toy-projects/pull/24) workflow
 [`33348597272`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33348597272)는 manifest,
 두 프로젝트의 `ici verify`, Qt5·Qt6 GUI, report publish와 Merge Gate를 모두 통과했다.
 [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/24#issuecomment-5472700934)는
 두 프로젝트 PASS와 HTML 링크를 포함하며, Pages `diskmap/pr/24/`와 `loglens/pr/24/`는 각각
-HTTP 200·`text/html`·180,160/279,484 bytes·외부 참조 0개였다. Tail N/index 선택, 실제
-background parsing, 1 GiB·100만 record benchmark와 실측 기반 기본값은 의도적으로 다음 L2
-slice로 남긴다.
+HTTP 200·`text/html`·180,160/279,484 bytes·외부 참조 0개였다. 위 원격 수치는 background
+loader/Tail N 변경 이전 bounded foundation에 대한 기록이다. 현재 변경의 local ici 수치는
+위에 적은 deep no-cache 실행으로 별도 관리하며, 새 원격 PR·sticky comment·Pages 링크는
+아직 만들지 않았다.
+
+현재 L2에서 남은 것은 1 GiB synthetic log·100만 record benchmark, first-paint/throughput/
+peak RSS 측정, 그리고 그 결과에 따른 성능 budget과 default capacity 결정이다. benchmark
+전까지 기본 capacity 32,768은 provisional 값으로 유지하며, 이 미완료 항목을 닫기 전에는
+L2 전체를 완료로 표시하지 않는다.
 
 ### L3. parser와 filter 완성도
 
@@ -923,9 +943,10 @@ ici와 toy-projects가 함께 바뀌는 기능은 다음 순서를 따른다.
 1. 이 마스터 계획과 ici 마스터 계획을 문서 PR로 보존한다.
 2. T0에서 기존 Qt shell 계획을 stateful log parsing과 정확한 failure-state 테스트로 보정해 실행한다.
 3. L1과 D1로 기존 앱의 신뢰성 기반을 만든다.
-4. ici finding v3와 맞춰 Q0 runner를 만든다.
-5. ici compile context I3와 함께 B0/B1 buildscope를 시작한다.
-6. ici Python compatibility I5와 함께 E0/E1 envlens를 시작한다.
-7. ici Make/ABI I7와 함께 A0/A1 abilens를 시작한다.
+4. L2의 1 GiB/100만 record benchmark와 측정 기반 capacity 결정을 먼저 닫는다.
+5. ici finding v3와 맞춰 Q0 runner를 만든다.
+6. ici compile context I3와 함께 B0/B1 buildscope를 시작한다.
+7. ici Python compatibility I5와 함께 E0/E1 envlens를 시작한다.
+8. benchmark 결과가 안정되면 ici Make/ABI I7와 함께 A0/A1 abilens를 시작한다.
 
 이 순서를 바꾸려면 제품 dependency나 ici release boundary라는 구체적 근거를 문서에 남긴다.
