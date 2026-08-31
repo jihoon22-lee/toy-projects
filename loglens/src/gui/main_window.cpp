@@ -206,6 +206,8 @@ void MainWindow::openPath(const QString& path, loglens::InitialLoadMode mode,
     expected_sequence_ = 0;
     retryAttempts_ = 0;
     backlog_pending_ = true;
+    source_active_ = true;
+    followBox_->setEnabled(true);
     model_->resetRecords();
     refreshTimeline();
     updateStatus(tr("loading…"));
@@ -231,9 +233,11 @@ void MainWindow::pollSource() {
 void MainWindow::handleLoadError(const loglens::LoadBatch& batch) {
     backlog_pending_ = false;
     if (batch.initial_phase) {
+        source_active_ = false;
         status_->setText(tr("Cannot read: %1").arg(batch.error));
         setWindowTitle(tr("loglens"));
         followBox_->setChecked(false);
+        followBox_->setEnabled(false);
         return;
     }
     if (batch.retryable) {
@@ -250,7 +254,16 @@ void MainWindow::handleLoadError(const loglens::LoadBatch& batch) {
 }
 
 void MainWindow::handleLoadBatch(loglens::LoadBatch batch) {
-    if (batch.job_id != active_job_ || batch.sequence != expected_sequence_) {
+    if (batch.job_id != active_job_) {
+        return;
+    }
+    if (batch.sequence != expected_sequence_) {
+        ++active_job_;
+        loader_->selectJob(active_job_);
+        source_active_ = false;
+        backlog_pending_ = false;
+        followBox_->setChecked(false);
+        status_->setText(tr("Load stopped: background batch sequence mismatch"));
         return;
     }
     ++expected_sequence_;
@@ -275,7 +288,8 @@ void MainWindow::handleLoadBatch(loglens::LoadBatch batch) {
 }
 
 void MainWindow::setFollowing(bool following) {
-    if (following && active_job_ != 0) {
+    loader_->setFollowing(active_job_, following && source_active_);
+    if (following && source_active_ && active_job_ != 0) {
         followState_ = FollowState::Following;
         retryAttempts_ = 0;
         pollTimer_->start();

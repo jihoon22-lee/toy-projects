@@ -3,7 +3,10 @@
 #include <QTimer>
 
 #include <algorithm>
+#include <exception>
 #include <iterator>
+#include <stdexcept>
+#include <string>
 #include <utility>
 
 namespace loglens {
@@ -11,11 +14,22 @@ namespace loglens {
 LogLoadWorker::LogLoadWorker(QObject* parent) : QObject(parent) {}
 
 void LogLoadWorker::selectJob(quint64 jobId) {
+    following_enabled_.store(false, std::memory_order_release);
     selected_job_.store(jobId, std::memory_order_release);
+}
+
+void LogLoadWorker::setFollowing(quint64 jobId, bool following) {
+    if (selected_job_.load(std::memory_order_acquire) == jobId) {
+        following_enabled_.store(following, std::memory_order_release);
+    }
 }
 
 bool LogLoadWorker::cancelled() const {
     return selected_job_.load(std::memory_order_acquire) != request_.job_id;
+}
+
+bool LogLoadWorker::followingEnabled() const {
+    return following_enabled_.load(std::memory_order_acquire);
 }
 
 void LogLoadWorker::clearState() {
@@ -42,35 +56,48 @@ void LogLoadWorker::startLoad(loglens::LoadRequest request) {
         return;
     }
 
-    if (request_.mode == InitialLoadMode::TailRecords) {
-        const InitialLoadWindow window = locateTailWindow(
-            request_.path.toStdString(), request_.tail_records,
-            request_.source_chunk_bytes, [this] { return cancelled(); });
-        if (window.cancelled || cancelled()) {
-            return;
+    try {
+        if (request_.tail_records == 0 || request_.source_chunk_bytes == 0
+            || request_.source_chunk_bytes > kMaxSourceChunkBytes) {
+            throw std::invalid_argument("background load request is outside supported bounds");
         }
-        if (!window.ok()) {
-            publishError(window.error, true);
-            return;
+        if (request_.mode == InitialLoadMode::TailRecords) {
+            const InitialLoadWindow window = locateTailWindow(
+                request_.path.toStdString(), request_.tail_records,
+                request_.source_chunk_bytes, [this] { return cancelled(); });
+            if (window.cancelled || cancelled()) {
+                return;
+            }
+            if (!window.ok()) {
+                publishError(window.error, true);
+                return;
+            }
+            selected_offset_ = window.offset;
+            initial_snapshot_end_ = window.snapshot_end;
+            initial_identity_ = window.identity;
+            validate_initial_identity_ = true;
+            assembler_.reset(0, window.first_line_number);
+            tailer_ = std::make_unique<FileTailer>(request_.path.toStdString(),
+                                                   request_.source_chunk_bytes, window.offset);
+        } else {
+            assembler_.reset();
+            tailer_ = std::make_unique<FileTailer>(request_.path.toStdString(),
+                                                   request_.source_chunk_bytes);
         }
-        selected_offset_ = window.offset;
-        initial_snapshot_end_ = window.snapshot_end;
-        initial_identity_ = window.identity;
-        validate_initial_identity_ = true;
-        assembler_.reset(0, window.first_line_number);
-        tailer_ = std::make_unique<FileTailer>(request_.path.toStdString(),
-                                               request_.source_chunk_bytes, window.offset);
-    } else {
-        assembler_.reset();
-        tailer_ = std::make_unique<FileTailer>(request_.path.toStdString(),
-                                               request_.source_chunk_bytes);
+    } catch (const std::exception& exception) {
+        SourceError error;
+        error.kind = SourceErrorKind::ReadFailed;
+        error.message = std::string("invalid background load request: ") + exception.what();
+        error.retryable = false;
+        publishError(error, true);
+        return;
     }
     initial_loading_ = true;
     scheduleStep();
 }
 
 void LogLoadWorker::poll(quint64 jobId) {
-    if (jobId != request_.job_id || cancelled() || !tailer_) {
+    if (jobId != request_.job_id || cancelled() || !tailer_ || !followingEnabled()) {
         return;
     }
     if (initial_loading_ || awaiting_ack_) {
@@ -117,6 +144,9 @@ void LogLoadWorker::processStep() {
         publishBatch(true);
         return;
     }
+    if (follow_drain_ && !followingEnabled()) {
+        follow_drain_ = false;
+    }
     if (follow_drain_) {
         processFollowChunk();
     }
@@ -133,8 +163,10 @@ void LogLoadWorker::processInitialChunk() {
     if (!initial_snapshot_end_) {
         initial_snapshot_end_ = chunk.snapshot_end;
         initial_identity_ = chunk.identity;
+        validate_initial_identity_ = true;
     } else if (validate_initial_identity_
-               && (chunk.generation_changed || chunk.identity != initial_identity_)) {
+               && (chunk.generation_changed || chunk.generation != assembler_.generation()
+                   || chunk.identity != initial_identity_)) {
         SourceError error;
         error.kind = SourceErrorKind::ReadFailed;
         error.message = "source changed before the selected tail window could be loaded";
@@ -143,11 +175,14 @@ void LogLoadWorker::processInitialChunk() {
         publishError(error, true);
         return;
     }
-    validate_initial_identity_ = false;
     acceptChunk(chunk, true);
 }
 
 void LogLoadWorker::processFollowChunk() {
+    if (!followingEnabled()) {
+        follow_drain_ = false;
+        return;
+    }
     follow_drain_ = false;
     const SourceChunk chunk = tailer_->pollChunk();
     if (!chunk.ok()) {

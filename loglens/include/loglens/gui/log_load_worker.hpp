@@ -51,6 +51,7 @@ public:
     // Direct-thread-safe cancellation gate. MainWindow calls this before it
     // queues a newer request or asks the thread to stop.
     void selectJob(quint64 jobId);
+    void setFollowing(quint64 jobId, bool following);
 
 public slots:
     void startLoad(loglens::LoadRequest request);
@@ -64,6 +65,7 @@ private:
     static constexpr std::size_t kRecordsPerBatch = 512;
 
     std::atomic<quint64> selected_job_{0};
+    std::atomic<bool> following_enabled_{false};
     LoadRequest request_;
     std::unique_ptr<FileTailer> tailer_;
     RecordAssembler assembler_;
@@ -82,6 +84,7 @@ private:
     bool validate_initial_identity_ = false;
 
     bool cancelled() const;
+    bool followingEnabled() const;
     void clearState();
     void scheduleStep();
     void processStep();

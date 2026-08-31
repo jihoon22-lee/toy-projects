@@ -72,6 +72,7 @@ private:
     std::size_t retryAttempts_ = 0;
     bool autoScroll_ = true;
     bool backlog_pending_ = false;
+    bool source_active_ = false;
     std::size_t source_chunk_bytes_ = loglens::kDefaultSourceChunkBytes;
     std::size_t record_capacity_ = loglens::kDefaultRecordCapacity;
     quint64 active_job_ = 0;
