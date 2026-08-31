@@ -29,10 +29,14 @@ void writeFile(const QString& path, const QByteArray& bytes, bool append = false
     QVERIFY(file.flush());
 }
 
-void recreateFile(const QString& path, const QByteArray& bytes) {
-    const QString stagingPath = path + QStringLiteral(".staging");
+void replaceFileWithDistinctIdentity(const QString& path, const QByteArray& bytes) {
+    const QString stagingPath = path + QStringLiteral(".replacement");
+    // Allocate the replacement while the original inode is still live. Some
+    // filesystems immediately reuse a just-unlinked inode, which would make a
+    // remove-then-create test nondeterministic even though production compares
+    // the strongest identity available on POSIX.
     writeFile(stagingPath, bytes);
-    QVERIFY(!QFile::exists(path));
+    QVERIFY(QFile::remove(path));
     QVERIFY(QFile::rename(stagingPath, path));
 }
 
@@ -438,8 +442,7 @@ void TestLogLoadWorker::sourceRotationBetweenInitialBatchAcksIsRejected() {
     QVERIFY(first.backlog_pending);
     QVERIFY(!first.deltas.empty());
 
-    QVERIFY(QFile::remove(path));
-    recreateFile(path, numberedFile(2));
+    replaceFileWithDistinctIdentity(path, numberedFile(2));
 
     harness.acknowledgeBlocking(first.job_id, first.sequence);
     QTRY_VERIFY_WITH_TIMEOUT(batches.count() > 0, 5000);
