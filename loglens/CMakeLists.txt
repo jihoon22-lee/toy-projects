@@ -67,6 +67,14 @@ target_link_libraries(test_log_model PRIVATE loglens_gui Qt${QT_VERSION_MAJOR}::
 target_include_directories(test_log_model PRIVATE tests)
 add_test(NAME test_log_model COMMAND test_log_model WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# The loader's I/O and parser run on a dedicated QThread. This test exercises
+# the real queued signal/ack protocol, rather than substituting a synchronous
+# fake that could hide queued-batch or stale-job races.
+add_executable(test_log_load_worker tests/test_log_load_worker.cpp)
+target_link_libraries(test_log_load_worker PRIVATE loglens_gui Qt${QT_VERSION_MAJOR}::Test)
+target_include_directories(test_log_load_worker PRIVATE tests)
+add_test(NAME test_log_load_worker COMMAND test_log_load_worker WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # MainWindow owns the follow state machine and the source/model lifecycle. It
 # links the same GUI library as the application so moc, widget ownership and
 # timer connections are exercised rather than replaced with a test double.
@@ -78,5 +86,8 @@ add_test(NAME test_main_window COMMAND test_main_window WORKING_DIRECTORY ${CMAK
 # Widget tests are intentionally headless in every environment. This keeps
 # CTest reproducible even when a developer happens to have no display server.
 set_tests_properties(test_log_model test_main_window PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+)
+set_tests_properties(test_log_load_worker PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
 )
