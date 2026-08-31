@@ -218,9 +218,9 @@ complete; only toy remote PR/CI, sticky comment, and Pages evidence remain pendi
 
 ## Next Steps
 
-- Open the candidate PR only after the local docs/evidence commit is reviewed;
+- Open the candidate PR after this local docs/evidence commit is reviewed, then
   wait for the toy PR/CI and `Merge Gate` result.
-- Open the candidate PR, then verify the toy PR/CI, sticky comment, and linked
-  Pages HTML before calling D2 remotely complete.
+- Verify the sticky comment and linked Pages HTML before calling D2 remotely
+  complete.
 - Keep the cancelled-result discard and fatal/partial error policy stable as
   D3 explorer UX adds refresh and selection behavior.
