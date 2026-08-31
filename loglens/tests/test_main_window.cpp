@@ -33,6 +33,7 @@ private slots:
     void disablingFollowWhileWaitingStopsPolling();
     void unsupportedSourceStopsFollowing();
     void failedOpenClearsThePreviousSourceState();
+    void loaderSequenceMismatchStopsFollowing();
     void controlsHaveStableNamesAndFollowIsSwitchable();
     void timelineRendersEmptyAndPopulatedStates();
     void boundedStorageEvictsOldRowsAndReportsWindow();
@@ -351,6 +352,42 @@ void TestMainWindow::failedOpenClearsThePreviousSourceState() {
     auto* statusLabel = status(window);
     QVERIFY(statusLabel != nullptr);
     QTRY_VERIFY(statusLabel->text().startsWith(QStringLiteral("Cannot read:")));
+}
+
+void TestMainWindow::loaderSequenceMismatchStopsFollowing() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("app.log"));
+    writeFile(path, line("INFO", 1));
+
+    MainWindow window;
+    window.openPath(path);
+    QTRY_COMPARE(rowCount(window), 1);
+    QTRY_COMPARE(status(window)->text(), statusText(1, 1, 1, 0, 1, 1, 32768));
+
+    QCheckBox* follow = followBox(window);
+    QTimer* timer = pollTimer(window);
+    QLabel* statusLabel = status(window);
+    QVERIFY(follow != nullptr);
+    QVERIFY(timer != nullptr);
+    QVERIFY(statusLabel != nullptr);
+    QVERIFY(follow->isChecked());
+    QVERIFY(timer->isActive());
+
+    // The first open is job 1 and its first accepted batch has sequence 0.
+    // Injecting a later sequence directly exercises the GUI's protocol guard
+    // without depending on timing or a second source request.
+    loglens::LoadBatch malformed;
+    malformed.job_id = 1;
+    malformed.sequence = 99;
+    QVERIFY(QMetaObject::invokeMethod(&window, "handleLoadBatch", Qt::DirectConnection,
+                                      Q_ARG(loglens::LoadBatch, malformed)));
+
+    QTRY_VERIFY_WITH_TIMEOUT(statusLabel->text().contains(QStringLiteral("sequence mismatch")),
+                             2500);
+    QVERIFY(!follow->isChecked());
+    QVERIFY(!timer->isActive());
+    QCOMPARE(rowCount(window), 1);
 }
 
 void TestMainWindow::controlsHaveStableNamesAndFollowIsSwitchable() {
