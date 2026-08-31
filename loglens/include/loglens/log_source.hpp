@@ -1,10 +1,14 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
 
 namespace loglens {
+
+constexpr std::size_t kDefaultSourceChunkBytes = 1024 * 1024;
+constexpr std::size_t kMaxSourceChunkBytes = 16 * 1024 * 1024;
 
 struct FileIdentity {
     std::uint64_t device = 0;
@@ -52,6 +56,10 @@ struct SourceChunk {
     bool generation_changed = false;
     std::uint64_t generation = 0;
     std::uint64_t position = 0;
+    // True when the same source generation had unread bytes at this poll's
+    // snapshot. Consumers can schedule another bounded poll without waiting for
+    // the normal follow interval.
+    bool more_available = false;
     SourceChange change = SourceChange::None;
     FileIdentity identity;
     SourceError error;
@@ -66,7 +74,8 @@ struct SourceChunk {
 // retain the size-based fallback until a native identity adapter is available.
 class FileTailer : public LogSource {
 public:
-    explicit FileTailer(std::string path);
+    explicit FileTailer(std::string path,
+                        std::size_t maxChunkBytes = kDefaultSourceChunkBytes);
 
     bool poll(std::vector<std::string>& out, std::string& error) override;
 
@@ -90,6 +99,7 @@ private:
     // generation even if the filesystem immediately reuses the old inode.
     bool recovery_pending_ = false;
     bool recovery_restart_started_ = false;
+    std::size_t max_chunk_bytes_ = kDefaultSourceChunkBytes;
 
     SourceChunk initialChunk() const;
 #ifndef _WIN32

@@ -277,6 +277,48 @@ void testTailerBoolChunkAdapterPreservesPartialBytes() {
     CHECK_EQ(tailer.restarts(), static_cast<std::size_t>(0));
 }
 
+void testTailerBoundsEachChunkAndReportsBacklog() {
+    TempDirectory directory;
+    const fs::path path = directory.path() / "bounded.log";
+    CHECK(writeFile(path, "first\nsecond\n"));
+
+    FileTailer tailer(path.string(), 5);
+    const SourceChunk first = tailer.pollChunk();
+    checkSuccessfulChunk(first);
+    CHECK_EQ(first.bytes, std::string("first"));
+    CHECK(first.more_available);
+    CHECK_EQ(first.position, static_cast<std::uint64_t>(5));
+
+    const SourceChunk second = tailer.pollChunk();
+    checkSuccessfulChunk(second);
+    CHECK_EQ(second.bytes, std::string("\nseco"));
+    CHECK(second.more_available);
+    CHECK_EQ(second.position, static_cast<std::uint64_t>(10));
+
+    const SourceChunk third = tailer.pollChunk();
+    checkSuccessfulChunk(third);
+    CHECK_EQ(third.bytes, std::string("nd\n"));
+    CHECK(!third.more_available);
+    CHECK_EQ(third.position, static_cast<std::uint64_t>(13));
+}
+
+void testTailerRejectsUnsafeChunkSizes() {
+    bool rejectedZero = false;
+    bool rejectedHuge = false;
+    try {
+        FileTailer tailer("unused", 0);
+    } catch (const std::invalid_argument&) {
+        rejectedZero = true;
+    }
+    try {
+        FileTailer tailer("unused", loglens::kMaxSourceChunkBytes + 1);
+    } catch (const std::invalid_argument&) {
+        rejectedHuge = true;
+    }
+    CHECK(rejectedZero);
+    CHECK(rejectedHuge);
+}
+
 void testTailerDetectsInPlaceTruncation() {
     TempDirectory directory;
     const fs::path path = directory.path() / "truncation.log";
@@ -445,6 +487,8 @@ int main() {
     testTailerInitialIdentityAndAppend();
     testTailerLineAdapterStillReadsAndResumes();
     testTailerBoolChunkAdapterPreservesPartialBytes();
+    testTailerBoundsEachChunkAndReportsBacklog();
+    testTailerRejectsUnsafeChunkSizes();
     testTailerDetectsInPlaceTruncation();
     testTailerDetectsAtomicRenameAtEverySize();
     testTailerMissingIsRetryableAndRecreateIsReplacement();

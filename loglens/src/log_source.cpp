@@ -1,5 +1,7 @@
 #include "loglens/log_source.hpp"
 
+#include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cstdint>
 #include <exception>
@@ -7,6 +9,7 @@
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -94,7 +97,12 @@ bool SourceChunk::ok() const { return error.kind == SourceErrorKind::None; }
 
 LogSource::~LogSource() = default;
 
-FileTailer::FileTailer(std::string path) : path_(std::move(path)) {}
+FileTailer::FileTailer(std::string path, std::size_t maxChunkBytes)
+    : path_(std::move(path)), max_chunk_bytes_(maxChunkBytes) {
+    if (maxChunkBytes == 0 || maxChunkBytes > kMaxSourceChunkBytes) {
+        throw std::invalid_argument("source chunk size is outside the supported range");
+    }
+}
 
 std::uint64_t FileTailer::offset() const { return offset_; }
 
@@ -178,8 +186,8 @@ SourceChunk FileTailer::pollPosixChunk() {
     observed.device = static_cast<std::uint64_t>(status.st_dev);
     observed.file = static_cast<std::uint64_t>(status.st_ino);
     observed.valid = true;
-    const SourceChange change =
-        detectRestart(observed, static_cast<std::uint64_t>(status.st_size));
+    const std::uint64_t observedSize = static_cast<std::uint64_t>(status.st_size);
+    const SourceChange change = detectRestart(observed, observedSize);
     out.change = change;
     out.generation_changed = change != SourceChange::None;
     out.generation = generation_;
@@ -195,11 +203,13 @@ SourceChunk FileTailer::pollPosixChunk() {
     }
 
     const std::uint64_t start = offset_;
-    char buffer[64 * 1024];
-    while (true) {
-        const ssize_t count = ::read(descriptor.get(), buffer, sizeof(buffer));
+    std::array<char, 64 * 1024> buffer{};
+    while (out.bytes.size() < max_chunk_bytes_) {
+        const std::size_t remaining = max_chunk_bytes_ - out.bytes.size();
+        const std::size_t requested = std::min(buffer.size(), remaining);
+        const ssize_t count = ::read(descriptor.get(), buffer.data(), requested);
         if (count > 0) {
-            out.bytes.append(buffer, static_cast<std::size_t>(count));
+            out.bytes.append(buffer.data(), static_cast<std::size_t>(count));
             continue;
         }
         if (count == 0) {
@@ -216,6 +226,7 @@ SourceChunk FileTailer::pollPosixChunk() {
     }
     offset_ = start + static_cast<std::uint64_t>(out.bytes.size());
     out.position = offset_;
+    out.more_available = offset_ < observedSize;
     return out;
 }
 #else
@@ -257,7 +268,12 @@ SourceChunk FileTailer::pollPortableChunk() {
     try {
         const std::uint64_t start = offset_;
         input.seekg(static_cast<std::streamoff>(start));
-        out.bytes.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+        const std::uint64_t available = static_cast<std::uint64_t>(size) - start;
+        const std::size_t requested = static_cast<std::size_t>(
+            std::min<std::uint64_t>(available, max_chunk_bytes_));
+        out.bytes.resize(requested);
+        input.read(out.bytes.data(), static_cast<std::streamsize>(requested));
+        out.bytes.resize(static_cast<std::size_t>(input.gcount()));
         if (input.bad()) {
             out.bytes.clear();
             out.error =
@@ -266,6 +282,7 @@ SourceChunk FileTailer::pollPortableChunk() {
         }
         offset_ = start + static_cast<std::uint64_t>(out.bytes.size());
         out.position = offset_;
+        out.more_available = offset_ < static_cast<std::uint64_t>(size);
     } catch (const std::exception& ex) {
         out.bytes.clear();
         out.error = sourceError(SourceErrorKind::ReadFailed, "error reading", path_, ex.what(),
