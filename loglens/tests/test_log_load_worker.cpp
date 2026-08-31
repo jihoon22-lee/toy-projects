@@ -5,6 +5,7 @@
 #include <QThread>
 #include <QtTest>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -20,11 +21,19 @@ QByteArray recordLine(int number) {
            + QByteArray::number(number) + '\n';
 }
 
-void writeFile(const QString& path, const QByteArray& bytes) {
+void writeFile(const QString& path, const QByteArray& bytes, bool append = false) {
     QFile file(path);
-    QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    QVERIFY(file.open(QIODevice::WriteOnly
+                      | (append ? QIODevice::Append : QIODevice::Truncate)));
     QCOMPARE(file.write(bytes), static_cast<qint64>(bytes.size()));
     QVERIFY(file.flush());
+}
+
+void recreateFile(const QString& path, const QByteArray& bytes) {
+    const QString stagingPath = path + QStringLiteral(".staging");
+    writeFile(stagingPath, bytes);
+    QVERIFY(!QFile::exists(path));
+    QVERIFY(QFile::rename(stagingPath, path));
 }
 
 QByteArray numberedFile(int count) {
@@ -57,6 +66,11 @@ public:
                 &loglens::LogLoadWorker::acknowledge, Qt::QueuedConnection);
         batches_ = std::make_unique<QSignalSpy>(
             worker_, &loglens::LogLoadWorker::batchReady);
+        QObject::connect(worker_, &loglens::LogLoadWorker::batchReady, this,
+                         [this](const loglens::LoadBatch&) {
+                             directBatchCount_.fetch_add(1, std::memory_order_release);
+                         },
+                         Qt::DirectConnection);
         thread_.start();
     }
 
@@ -78,6 +92,27 @@ public:
 
     void selectJob(quint64 jobId) { worker_->selectJob(jobId); }
 
+    void setFollowing(quint64 jobId, bool following) {
+        worker_->setFollowing(jobId, following);
+    }
+
+    void pollBlocking(quint64 jobId) {
+        const bool invoked = QMetaObject::invokeMethod(
+            worker_, "poll", Qt::BlockingQueuedConnection, Q_ARG(quint64, jobId));
+        QVERIFY(invoked);
+    }
+
+    void acknowledgeBlocking(quint64 jobId, quint64 sequence) {
+        const bool invoked = QMetaObject::invokeMethod(
+            worker_, "acknowledge", Qt::BlockingQueuedConnection, Q_ARG(quint64, jobId),
+            Q_ARG(quint64, sequence));
+        QVERIFY(invoked);
+    }
+
+    int directBatchCount() const {
+        return directBatchCount_.load(std::memory_order_acquire);
+    }
+
     void acknowledge(quint64 jobId, quint64 sequence) {
         emit acknowledgeRequested(jobId, sequence);
     }
@@ -90,6 +125,7 @@ private:
     QThread thread_;
     loglens::LogLoadWorker* worker_ = nullptr;
     std::unique_ptr<QSignalSpy> batches_;
+    std::atomic<int> directBatchCount_{0};
 };
 
 loglens::LoadRequest request(quint64 jobId, const QString& path,
@@ -115,6 +151,9 @@ private slots:
     void acknowledgementDrainsTheCompleteInitialLoad();
     void selectingANewJobCancelsAndSuppressesTheStaleJob();
     void tailSelectionPreservesPhysicalLineNumbers();
+    void invalidRequestsPublishNonRetryableInitialErrors();
+    void disablingFollowWhileInitialBatchIsAwaitingAckPreventsFollowPoll();
+    void sourceRotationBetweenInitialBatchAcksIsRejected();
 };
 
 void TestLogLoadWorker::batchesAreBoundedAndWaitForAcknowledgement() {
@@ -310,6 +349,108 @@ void TestLogLoadWorker::tailSelectionPreservesPhysicalLineNumbers() {
     QCOMPARE(last.physical_line_number, static_cast<std::size_t>(7));
     QCOMPARE(last.record.line_number, static_cast<std::size_t>(7));
     QCOMPARE(last.record.message, std::string("record-4"));
+}
+
+void TestLogLoadWorker::invalidRequestsPublishNonRetryableInitialErrors() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("invalid-request.log"));
+    writeFile(path, recordLine(1));
+
+    WorkerHarness harness;
+    auto expectInvalidRequest = [&harness](loglens::LoadRequest load) {
+        harness.start(std::move(load));
+        QSignalSpy& batches = harness.batches();
+        QTRY_VERIFY_WITH_TIMEOUT(batches.count() > 0, 5000);
+        QCOMPARE(batches.count(), 1);
+        const loglens::LoadBatch batch = takeBatch(batches);
+        QVERIFY(batch.initial_phase);
+        QVERIFY(!batch.initial_complete);
+        QVERIFY(!batch.backlog_pending);
+        QVERIFY(!batch.retryable);
+        QVERIFY(batch.deltas.empty());
+        QVERIFY(batch.error.contains(QStringLiteral("invalid background load request")));
+        harness.acknowledgeBlocking(batch.job_id, batch.sequence);
+    };
+
+    expectInvalidRequest(request(101, path, loglens::InitialLoadMode::TailRecords, 0));
+
+    loglens::LoadRequest zeroChunk =
+        request(102, path, loglens::InitialLoadMode::FromStart);
+    zeroChunk.source_chunk_bytes = 0;
+    expectInvalidRequest(std::move(zeroChunk));
+
+    loglens::LoadRequest oversizedChunk =
+        request(103, path, loglens::InitialLoadMode::FromStart);
+    oversizedChunk.source_chunk_bytes = loglens::kMaxSourceChunkBytes + 1;
+    expectInvalidRequest(std::move(oversizedChunk));
+}
+
+void TestLogLoadWorker::disablingFollowWhileInitialBatchIsAwaitingAckPreventsFollowPoll() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("follow-gate.log"));
+    writeFile(path, recordLine(1) + recordLine(2));
+
+    WorkerHarness harness;
+    harness.start(request(111, path, loglens::InitialLoadMode::FromStart));
+
+    QSignalSpy& batches = harness.batches();
+    QTRY_VERIFY_WITH_TIMEOUT(batches.count() > 0, 5000);
+    QCOMPARE(batches.count(), 1);
+    const loglens::LoadBatch initial = takeBatch(batches);
+    QVERIFY(initial.initial_complete);
+    QCOMPARE(harness.directBatchCount(), 1);
+
+    // Queue a follow request while the initial batch is still awaiting its
+    // acknowledgement. It must be discarded when Follow is disabled before
+    // that acknowledgement is released.
+    harness.setFollowing(initial.job_id, true);
+    writeFile(path, recordLine(3), true);
+    harness.pollBlocking(initial.job_id);
+    harness.setFollowing(initial.job_id, false);
+    harness.acknowledgeBlocking(initial.job_id, initial.sequence);
+
+    // The blocking poll is an event-loop barrier: the zero-delay step queued
+    // by acknowledge() is processed before the next worker invocation.
+    harness.pollBlocking(initial.job_id);
+    harness.pollBlocking(initial.job_id);
+    QCOMPARE(harness.directBatchCount(), 1);
+    QCoreApplication::processEvents(QEventLoop::AllEvents);
+    QCOMPARE(batches.count(), 0);
+}
+
+void TestLogLoadWorker::sourceRotationBetweenInitialBatchAcksIsRejected() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("initial-rotation.log"));
+    writeFile(path, numberedFile(20));
+
+    WorkerHarness harness;
+    harness.start(request(121, path, loglens::InitialLoadMode::FromStart, 1, 7));
+
+    QSignalSpy& batches = harness.batches();
+    QTRY_VERIFY_WITH_TIMEOUT(batches.count() > 0, 5000);
+    QCOMPARE(batches.count(), 1);
+    const loglens::LoadBatch first = takeBatch(batches);
+    QVERIFY(first.initial_phase);
+    QVERIFY(!first.initial_complete);
+    QVERIFY(first.backlog_pending);
+    QVERIFY(!first.deltas.empty());
+
+    QVERIFY(QFile::remove(path));
+    recreateFile(path, numberedFile(2));
+
+    harness.acknowledgeBlocking(first.job_id, first.sequence);
+    QTRY_VERIFY_WITH_TIMEOUT(batches.count() > 0, 5000);
+    QCOMPARE(batches.count(), 1);
+    const loglens::LoadBatch changed = takeBatch(batches);
+    QVERIFY(changed.initial_phase);
+    QVERIFY(!changed.initial_complete);
+    QVERIFY(changed.retryable);
+    QVERIFY(changed.deltas.empty());
+    QVERIFY(changed.error.contains(QStringLiteral("source changed")));
+    harness.acknowledgeBlocking(changed.job_id, changed.sequence);
 }
 
 QTEST_MAIN(TestLogLoadWorker)

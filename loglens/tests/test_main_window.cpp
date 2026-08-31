@@ -351,6 +351,7 @@ void TestMainWindow::failedOpenClearsThePreviousSourceState() {
     QCOMPARE(window.windowTitle(), QStringLiteral("loglens"));
     auto* statusLabel = status(window);
     QVERIFY(statusLabel != nullptr);
+    QVERIFY(!follow->isEnabled());
     QTRY_VERIFY(statusLabel->text().startsWith(QStringLiteral("Cannot read:")));
 }
 
