@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "buildscope"
+version = "0.1.0"
+description = "Offline explorer for C and C++ compilation databases"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "BuildScope contributors"}]
+dependencies = []
+
+[project.scripts]
+buildscope = "buildscope.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["python/buildscope"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/python"]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

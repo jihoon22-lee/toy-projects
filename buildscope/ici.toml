@@ -1,0 +1,15 @@
+name = "buildscope"
+type = "hybrid"
+version = "0.1.0"
+
+[project]
+source_dirs = ["python", "src", "include"]
+cpp_pkg_config = ["Qt6Core", "Qt6Widgets", "Qt5Core", "Qt5Widgets"]
+
+[engines.test]
+enabled = true
+mode = "pass_fail"
+coverage_required = true
+min_tem_score = 4.0
+min_branch_cov = 75.0
+min_func_cov = 90.0
