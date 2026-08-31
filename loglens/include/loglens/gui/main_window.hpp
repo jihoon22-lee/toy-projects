@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "loglens/filter_expr.hpp"
@@ -65,4 +66,7 @@ private:
     void refreshTimeline();
     void updateStatus(const QString& extra);
     void applyDeltas(const std::vector<loglens::RecordDelta>& deltas);
+    void handleSourceError(const loglens::SourceChunk& chunk, const std::string& error);
+    void applySourceChunk(const loglens::SourceChunk& chunk, std::size_t restartsBefore);
+    void scheduleBacklogPoll();
 };

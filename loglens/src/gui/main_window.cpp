@@ -165,9 +165,7 @@ void MainWindow::openPath(const QString& path) {
     applyFilter();
     setWindowTitle(tr("loglens — %1").arg(path));
     setFollowing(followBox_->isChecked());
-    if (backlog_pending_) {
-        QTimer::singleShot(0, this, &MainWindow::pollSource);
-    }
+    scheduleBacklogPoll();
 }
 
 void MainWindow::pollSource() {
@@ -178,21 +176,31 @@ void MainWindow::pollSource() {
     loglens::SourceChunk chunk;
     std::string error;
     if (!tailer_->pollChunk(chunk, error)) {
-        backlog_pending_ = false;
-        if (chunk.error.retryable) {
-            followState_ = FollowState::WaitingRetry;
-            ++retryAttempts_;
-            status_->setText(tr("Follow waiting (attempt %1): %2")
-                                 .arg(retryAttempts_)
-                                 .arg(QString::fromStdString(error)));
-            return;
-        }
-
-        status_->setText(tr("Follow stopped: %1").arg(QString::fromStdString(error)));
-        followBox_->setChecked(false);
+        handleSourceError(chunk, error);
         return;
     }
 
+    applySourceChunk(chunk, restartsBefore);
+}
+
+void MainWindow::handleSourceError(const loglens::SourceChunk& chunk,
+                                   const std::string& error) {
+    backlog_pending_ = false;
+    if (chunk.error.retryable) {
+        followState_ = FollowState::WaitingRetry;
+        ++retryAttempts_;
+        status_->setText(tr("Follow waiting (attempt %1): %2")
+                             .arg(retryAttempts_)
+                             .arg(QString::fromStdString(error)));
+        return;
+    }
+
+    status_->setText(tr("Follow stopped: %1").arg(QString::fromStdString(error)));
+    followBox_->setChecked(false);
+}
+
+void MainWindow::applySourceChunk(const loglens::SourceChunk& chunk,
+                                  std::size_t restartsBefore) {
     followState_ = followBox_->isChecked() ? FollowState::Following : FollowState::Stopped;
     retryAttempts_ = 0;
     backlog_pending_ = chunk.more_available;
@@ -210,9 +218,7 @@ void MainWindow::pollSource() {
     if (deltas.empty()) {
         refreshTimeline();
         updateStatus(backlog_pending_ ? tr("loading…") : QString());
-        if (backlog_pending_) {
-            QTimer::singleShot(0, this, &MainWindow::pollSource);
-        }
+        scheduleBacklogPoll();
         return;
     }
     applyDeltas(deltas);
@@ -221,6 +227,10 @@ void MainWindow::pollSource() {
     if (autoScroll_) {
         table_->scrollToBottom();
     }
+    scheduleBacklogPoll();
+}
+
+void MainWindow::scheduleBacklogPoll() {
     if (backlog_pending_) {
         QTimer::singleShot(0, this, &MainWindow::pollSource);
     }
