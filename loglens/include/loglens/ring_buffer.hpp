@@ -29,6 +29,7 @@ public:
 
     explicit RingBuffer(std::size_t capacity);
 
+    // Throws std::overflow_error before the absolute ID space would wrap.
     PushResult push(const LogRecord& record);
     void clear();
 

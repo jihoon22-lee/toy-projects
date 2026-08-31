@@ -1,5 +1,6 @@
 #include "loglens/ring_buffer.hpp"
 
+#include <limits>
 #include <stdexcept>
 
 namespace loglens {
@@ -19,6 +20,9 @@ RingBuffer::RingBuffer(std::size_t capacity) : capacity_(capacity) {
 }
 
 RingBuffer::PushResult RingBuffer::push(const LogRecord& record) {
+    if (total_ == std::numeric_limits<std::size_t>::max()) {
+        throw std::overflow_error("record index space exhausted");
+    }
     PushResult result;
     result.index = total_;
 
