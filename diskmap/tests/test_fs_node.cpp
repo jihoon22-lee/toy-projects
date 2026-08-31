@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 using diskmap::FsNode;
@@ -39,8 +40,9 @@ FsNode storageFile(std::string name,
                    bool allocatedKnown,
                    std::uint64_t hardLinkCount,
                    bool hardLinksKnown,
-                   bool complete = true) {
-    FsNode node = makeFileNode(std::move(name), 1);
+                   bool complete = true,
+                   std::uint64_t logicalSize = 1) {
+    FsNode node = makeFileNode(std::move(name), logicalSize);
     node.metadata.identity = fileIdentity;
     node.metadata.allocated_size = allocatedSize;
     node.metadata.allocated_size_known = allocatedKnown;
@@ -48,6 +50,37 @@ FsNode storageFile(std::string name,
     node.metadata.hard_link_count_known = hardLinksKnown;
     node.metadata.complete = complete;
     return node;
+}
+
+FsNode makeOwnedDeepTree(int depth) {
+    // Keep the path value-owned (FsNode contains children by value), with the
+    // only branching at the deepest directory.  That gives every iterative
+    // helper a 10,000-level path to walk while keeping aggregateStorage's
+    // identity map small enough for a fast regression test.
+    FsNode bottom = makeDirNode("bottom", {
+        storageFile("small.bin", FileIdentity{91, 1, true}, 1024, true, 1, true, true, 11),
+        storageFile("large.bin", FileIdentity{91, 2, true}, 2048, true, 1, true, true, 29),
+    });
+    return makeChain(depth - 1, std::move(bottom));
+}
+
+// FsNode's implicit destructor recursively destroys value-owned children.  A
+// 10,000-level fixture would therefore overflow the test process while being
+// torn down even though the production helpers are iterative.  Empty the
+// chain from the leaves upwards before the ordinary root destructor runs.
+void clearOwnedChain(FsNode& root) {
+    std::vector<FsNode*> path;
+    path.reserve(10002);
+    FsNode* current = &root;
+    path.push_back(current);
+    while (current->is_dir && current->children.size() == 1) {
+        current = &current->children.front();
+        path.push_back(current);
+    }
+
+    for (auto it = path.rbegin(); it != path.rend(); ++it) {
+        (*it)->children.clear();
+    }
 }
 
 } // namespace
@@ -354,32 +387,61 @@ int main() {
         CHECK(!root.reclaimable_size_known);
     }
 
-    // --- kMaxTreeDepth guard: a pathologically deep tree neither crashes
-    // nor gets fully walked; every helper's recursion silently stops once
-    // depth reaches kMaxTreeDepth, so anything past the cap (including the
-    // leaf file at the very bottom, here) is not counted. This is the
-    // documented anti-stack-overflow safety cap, not a bug.
+    // --- iterative helper coverage: every operation reaches a 10,000-level
+    // value-owned tree without stack recursion or a depth truncation cap ---
     {
-        constexpr int kExtra = 50;
-        constexpr int kDeep = diskmap::kMaxTreeDepth + kExtra;
-        FsNode deepRoot = makeChain(kDeep, makeFileNode("bottom", 7));
+        constexpr int kDeep = 10000;
+        constexpr std::uint64_t expectedLogicalSize = 40;
+        constexpr std::uint64_t expectedAllocatedSize = 3072;
+        FsNode deepRoot = makeOwnedDeepTree(kDeep);
 
         const std::uint64_t total = diskmap::aggregateSizes(deepRoot);
-        CHECK_EQ(total, static_cast<std::uint64_t>(0)); // leaf lies past the cap
-        CHECK_EQ(deepRoot.size, static_cast<std::uint64_t>(0));
+        CHECK_EQ(total, expectedLogicalSize);
+        CHECK_EQ(deepRoot.size, expectedLogicalSize);
 
         diskmap::aggregateStorage(deepRoot);
-        CHECK(!deepRoot.allocated_size_known);
-        CHECK(!deepRoot.reclaimable_size_known);
+        CHECK_EQ(deepRoot.allocated_size, expectedAllocatedSize);
+        CHECK(deepRoot.allocated_size_known);
+        CHECK_EQ(deepRoot.reclaimable_size, expectedAllocatedSize);
+        CHECK(deepRoot.reclaimable_size_known);
 
-        diskmap::sortBySizeDesc(deepRoot); // must complete without crashing
+        // Check every directory on the path, not just the root.  This catches
+        // helpers that stop at a fixed depth but still happen to produce a
+        // plausible root value for a different fixture shape.
+        std::size_t directoryCount = 0;
+        FsNode* bottom = &deepRoot;
+        while (bottom->is_dir) {
+            ++directoryCount;
+            CHECK_EQ(bottom->size, expectedLogicalSize);
+            CHECK_EQ(bottom->allocated_size, expectedAllocatedSize);
+            CHECK(bottom->allocated_size_known);
+            CHECK_EQ(bottom->reclaimable_size, expectedAllocatedSize);
+            CHECK(bottom->reclaimable_size_known);
+            if (bottom->children.size() != 1) {
+                break;
+            }
+            bottom = &bottom->children.front();
+        }
+        CHECK_EQ(directoryCount, static_cast<std::size_t>(kDeep));
+        CHECK_EQ(bottom->name, std::string("bottom"));
+        CHECK_EQ(bottom->children.size(), static_cast<std::size_t>(2));
 
-        // exactly kMaxTreeDepth+1 nodes get counted (depths 0..kMaxTreeDepth
-        // inclusive); everything deeper is never visited.
-        CHECK_EQ(diskmap::countNodes(deepRoot), static_cast<std::size_t>(diskmap::kMaxTreeDepth + 1));
+        diskmap::sortBySizeDesc(deepRoot);
+        CHECK_EQ(bottom->children[0].name, std::string("large.bin"));
+        CHECK_EQ(bottom->children[1].name, std::string("small.bin"));
 
-        // the leaf file lies past the cap, so it's never collected either.
-        CHECK_EQ(diskmap::topFiles(deepRoot, 5).size(), static_cast<std::size_t>(0));
+        CHECK_EQ(diskmap::countNodes(deepRoot), static_cast<std::size_t>(kDeep + 2));
+
+        const std::vector<const FsNode*> topFiles = diskmap::topFiles(deepRoot, 2);
+        CHECK_EQ(topFiles.size(), static_cast<std::size_t>(2));
+        CHECK_EQ(topFiles[0]->name, std::string("large.bin"));
+        CHECK_EQ(topFiles[0]->size, static_cast<std::uint64_t>(29));
+        CHECK_EQ(topFiles[1]->name, std::string("small.bin"));
+        CHECK_EQ(topFiles[1]->size, static_cast<std::uint64_t>(11));
+
+        // See clearOwnedChain(): the production helpers are iterative, but
+        // FsNode's implicit value-tree destructor is not.
+        clearOwnedChain(deepRoot);
     }
 
     return testSummary();
