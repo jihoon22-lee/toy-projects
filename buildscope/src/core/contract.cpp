@@ -3,6 +3,7 @@
 #include "contract_json_guard.hpp"
 #include "contract_parser.hpp"
 
+#include <QDateTime>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
@@ -19,7 +20,40 @@
 namespace buildscope {
 namespace {
 
-qint64 openSnapshot(const QString &path, QFile &file) {
+struct OpenedSnapshot {
+    qint64 size = 0;
+#if defined(Q_OS_UNIX)
+    struct stat identity {};
+#else
+    QString canonicalPath;
+    QDateTime modified;
+#endif
+};
+
+#if defined(Q_OS_UNIX)
+bool sameTimestamp(const struct timespec &left, const struct timespec &right) {
+    return left.tv_sec == right.tv_sec && left.tv_nsec == right.tv_nsec;
+}
+
+bool sameFileIdentity(const struct stat &left, const struct stat &right) {
+    return left.st_dev == right.st_dev && left.st_ino == right.st_ino;
+}
+
+bool sameFileState(const struct stat &left, const struct stat &right) {
+#if defined(Q_OS_DARWIN)
+    const auto modificationUnchanged =
+        sameTimestamp(left.st_mtimespec, right.st_mtimespec);
+    const auto changeUnchanged = sameTimestamp(left.st_ctimespec, right.st_ctimespec);
+#else
+    const auto modificationUnchanged = sameTimestamp(left.st_mtim, right.st_mtim);
+    const auto changeUnchanged = sameTimestamp(left.st_ctim, right.st_ctim);
+#endif
+    return sameFileIdentity(left, right) && left.st_size == right.st_size &&
+           modificationUnchanged && changeUnchanged;
+}
+#endif
+
+OpenedSnapshot openSnapshot(const QString &path, QFile &file) {
 #if defined(Q_OS_UNIX)
     auto flags = O_RDONLY;
 #if defined(O_CLOEXEC)
@@ -61,7 +95,7 @@ qint64 openSnapshot(const QString &path, QFile &file) {
         ::close(descriptor);
         throw ContractError("cannot open snapshot: " + message);
     }
-    return metadata.st_size;
+    return OpenedSnapshot{metadata.st_size, metadata};
 #else
     if (QFileInfo(path).isSymLink()) {
         throw ContractError("snapshot final symbolic links are forbidden");
@@ -73,7 +107,45 @@ qint64 openSnapshot(const QString &path, QFile &file) {
     if (!QFileInfo(file).isFile()) {
         throw ContractError("snapshot must be a regular file");
     }
-    return file.size();
+    const QFileInfo metadata(file);
+    return OpenedSnapshot{metadata.size(), metadata.canonicalFilePath(),
+                          metadata.lastModified()};
+#endif
+}
+
+void verifySnapshotUnchanged(const QString &path, QFile &file,
+                             const OpenedSnapshot &opened) {
+#if defined(Q_OS_UNIX)
+    struct stat descriptorMetadata {};
+    if (::fstat(file.handle(), &descriptorMetadata) != 0) {
+        throw ContractError("cannot re-inspect open snapshot: " +
+                            QString::fromLocal8Bit(std::strerror(errno)));
+    }
+    struct stat pathMetadata {};
+    const auto encodedPath = QFile::encodeName(path);
+    if (::lstat(encodedPath.constData(), &pathMetadata) != 0) {
+        throw ContractError("snapshot path changed while reading: " +
+                            QString::fromLocal8Bit(std::strerror(errno)));
+    }
+    if (!S_ISREG(pathMetadata.st_mode) || !sameFileIdentity(opened.identity, pathMetadata)) {
+        throw ContractError("snapshot path identity changed while reading");
+    }
+    if (!sameFileState(opened.identity, descriptorMetadata)) {
+        throw ContractError("snapshot content changed while reading");
+    }
+#else
+    const QFileInfo descriptorMetadata(file);
+    const QFileInfo pathMetadata(path);
+    if (!pathMetadata.isFile() || pathMetadata.isSymLink() ||
+        descriptorMetadata.canonicalFilePath() != opened.canonicalPath ||
+        pathMetadata.canonicalFilePath() != opened.canonicalPath) {
+        throw ContractError("snapshot path identity changed while reading");
+    }
+    if (descriptorMetadata.size() != opened.size || pathMetadata.size() != opened.size ||
+        descriptorMetadata.lastModified() != opened.modified ||
+        pathMetadata.lastModified() != opened.modified) {
+        throw ContractError("snapshot content changed while reading");
+    }
 #endif
 }
 
@@ -84,13 +156,18 @@ ContractError::ContractError(const QString &message) : std::runtime_error(messag
 Snapshot loadSnapshotFile(const QString &path) {
     constexpr qint64 kMaxSnapshotBytes = 256LL * 1024LL * 1024LL;
     QFile file;
-    if (openSnapshot(path, file) > kMaxSnapshotBytes) {
+    const auto opened = openSnapshot(path, file);
+    if (opened.size > kMaxSnapshotBytes) {
         throw ContractError("snapshot exceeds 268435456 byte limit");
     }
     const auto payload = file.read(kMaxSnapshotBytes + 1);
+    if (file.error() != QFileDevice::NoError) {
+        throw ContractError("cannot read snapshot: " + file.errorString());
+    }
     if (payload.size() > kMaxSnapshotBytes) {
         throw ContractError("snapshot exceeds 268435456 byte limit");
     }
+    verifySnapshotUnchanged(path, file, opened);
     QJsonParseError parseError;
     const auto document = QJsonDocument::fromJson(payload, &parseError);
     if (parseError.error != QJsonParseError::NoError) {
