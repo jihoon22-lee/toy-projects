@@ -71,6 +71,75 @@ void testSelectsCompleteLogicalRecordsAcrossTinyChunks() {
     CHECK_EQ(window.first_line_number, static_cast<std::size_t>(3));
 }
 
+void testEmptyFileProducesAnEmptySuccessfulWindow() {
+    TempDirectory directory;
+    const fs::path path = directory.path() / "empty.log";
+    writeFile(path, "");
+
+    const loglens::InitialLoadWindow window = loglens::locateTailWindow(path.string(), 1, 1);
+    CHECK(window.ok());
+    CHECK(!window.cancelled);
+    CHECK(window.identity.valid);
+    CHECK_EQ(window.snapshot_end, static_cast<std::uint64_t>(0));
+    CHECK_EQ(window.offset, static_cast<std::uint64_t>(0));
+    CHECK_EQ(window.first_line_number, static_cast<std::size_t>(1));
+    CHECK_EQ(window.complete_record_count, static_cast<std::size_t>(0));
+    CHECK_EQ(window.error.kind, loglens::SourceErrorKind::None);
+    CHECK(window.error.message.empty());
+}
+
+void testPartialOnlyFileProducesNoCompleteRecords() {
+    TempDirectory directory;
+    const fs::path path = directory.path() / "partial_only.log";
+    const std::string content = "  continuation-looking fragment\r";
+    writeFile(path, content);
+
+    const loglens::InitialLoadWindow window = loglens::locateTailWindow(path.string(), 3, 2);
+    CHECK(window.ok());
+    CHECK(window.identity.valid);
+    CHECK_EQ(window.snapshot_end, static_cast<std::uint64_t>(content.size()));
+    CHECK_EQ(window.offset, static_cast<std::uint64_t>(0));
+    CHECK_EQ(window.first_line_number, static_cast<std::size_t>(1));
+    CHECK_EQ(window.complete_record_count, static_cast<std::size_t>(0));
+}
+
+void testTailCountIsExactAcrossContinuationCrLfAndEveryChunkBoundary() {
+    TempDirectory directory;
+    const fs::path path = directory.path() / "exact_tail.log";
+    const std::string content = "root-one\r\n"
+                                "  one-detail\r\n"
+                                "at one-frame\r\n"
+                                "root-two\r\n"
+                                "\t two-detail\r\n"
+                                "root-three\r\n"
+                                "unfinished-root";
+    writeFile(path, content);
+
+    const loglens::InitialLoadWindow tailOne =
+        loglens::locateTailWindow(path.string(), 1, 1);
+    CHECK(tailOne.ok());
+    CHECK_EQ(tailOne.complete_record_count, static_cast<std::size_t>(3));
+    CHECK_EQ(tailOne.offset,
+             static_cast<std::uint64_t>(content.find("root-three")));
+    CHECK_EQ(tailOne.first_line_number, static_cast<std::size_t>(6));
+
+    const loglens::InitialLoadWindow tailTwo =
+        loglens::locateTailWindow(path.string(), 2, 1);
+    CHECK(tailTwo.ok());
+    CHECK_EQ(tailTwo.offset, static_cast<std::uint64_t>(content.find("root-two")));
+    CHECK_EQ(tailTwo.first_line_number, static_cast<std::size_t>(4));
+    CHECK_EQ(tailTwo.complete_record_count, static_cast<std::size_t>(3));
+
+    const loglens::InitialLoadWindow tailThree =
+        loglens::locateTailWindow(path.string(), 3, 1);
+    CHECK(tailThree.ok());
+    CHECK_EQ(tailThree.offset, static_cast<std::uint64_t>(0));
+    CHECK_EQ(tailThree.first_line_number, static_cast<std::size_t>(1));
+    CHECK_EQ(tailThree.complete_record_count, static_cast<std::size_t>(3));
+    CHECK_EQ(tailTwo.snapshot_end, static_cast<std::uint64_t>(content.size()));
+    CHECK(tailTwo.identity == tailThree.identity);
+}
+
 void testLeadingContinuationIsARecordAndLargeWindowStartsAtZero() {
     TempDirectory directory;
     const fs::path path = directory.path() / "leading.log";
@@ -91,6 +160,45 @@ void testCancellationStopsBeforeOpeningTheSource() {
     CHECK(window.error.kind == loglens::SourceErrorKind::None);
 }
 
+void testCancellationDuringScanIsReportedWithoutSourceError() {
+    TempDirectory directory;
+    const fs::path path = directory.path() / "cancel.log";
+    std::string content;
+    for (int index = 0; index < 32; ++index) {
+        content += "root-" + std::to_string(index) + "\n";
+    }
+    writeFile(path, content);
+
+    std::size_t callbackCalls = 0;
+    const loglens::InitialLoadWindow window = loglens::locateTailWindow(
+        path.string(), 1, 4, [&callbackCalls] { return ++callbackCalls >= 4; });
+    CHECK(window.cancelled);
+    CHECK(!window.ok());
+    CHECK(callbackCalls >= static_cast<std::size_t>(4));
+    CHECK_EQ(window.error.kind, loglens::SourceErrorKind::None);
+}
+
+void testMissingAndUnsupportedSourcesExposeDeterministicErrors() {
+    TempDirectory directory;
+    const fs::path missing = directory.path() / "missing.log";
+
+    const loglens::InitialLoadWindow missingWindow =
+        loglens::locateTailWindow(missing.string(), 1, 8);
+    CHECK(!missingWindow.ok());
+    CHECK(!missingWindow.cancelled);
+    CHECK_EQ(missingWindow.error.kind, loglens::SourceErrorKind::Missing);
+    CHECK(missingWindow.error.retryable);
+    CHECK(!missingWindow.error.message.empty());
+
+    const loglens::InitialLoadWindow directoryWindow =
+        loglens::locateTailWindow(directory.path().string(), 1, 8);
+    CHECK(!directoryWindow.ok());
+    CHECK(!directoryWindow.cancelled);
+    CHECK_EQ(directoryWindow.error.kind, loglens::SourceErrorKind::UnsupportedFileType);
+    CHECK(!directoryWindow.error.retryable);
+    CHECK(!directoryWindow.error.message.empty());
+}
+
 void testRejectsZeroTailSize() {
     bool threw = false;
     try {
@@ -105,8 +213,13 @@ void testRejectsZeroTailSize() {
 
 int main() {
     testSelectsCompleteLogicalRecordsAcrossTinyChunks();
+    testEmptyFileProducesAnEmptySuccessfulWindow();
+    testPartialOnlyFileProducesNoCompleteRecords();
+    testTailCountIsExactAcrossContinuationCrLfAndEveryChunkBoundary();
     testLeadingContinuationIsARecordAndLargeWindowStartsAtZero();
     testCancellationStopsBeforeOpeningTheSource();
+    testCancellationDuringScanIsReportedWithoutSourceError();
+    testMissingAndUnsupportedSourcesExposeDeterministicErrors();
     testRejectsZeroTailSize();
     return checkSummary();
 }
