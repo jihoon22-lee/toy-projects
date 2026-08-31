@@ -10,7 +10,7 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 
 | 이름 | 설명 | 상태 |
 |---|---|---|
-| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · identity-safe scan · 9 tests |
+| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D2 cancellable/latest-generation scan · identity-safe scan · 9 tests |
 | [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · L2 1 GiB benchmark merged in PR #26 · default capacity 8192 |
 
 ## 공통 구조 규칙
@@ -104,6 +104,51 @@ checks를 통과했고 merge commit `039052f9f30e355e12f3c812065657e3be4576f2`�
 [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/23#issuecomment-5471613383)와
 Pages HTML도 HTTP 200·`text/html`·외부 참조 0개로 확인했다.
 
+### diskmap D2 cancellable/latest-generation scan — local candidate
+
+D2는 스캔을 취소할 수 있고, 최신 요청의 결과만 화면에 반영하는 계약을 추가했다.
+core scanner는 `ScanCancellationToken`을 atomic flag로 공유하고 directory listing 전·중·후에
+협력적으로 checkpoint를 둔다. GUI의 `ProgressFn`은 queued callback으로 상태 라벨에
+`dirs/files` 진행을 전달하며, 새 `scanPath()`는 이전 token을 취소하고 generation을 증가시킨다.
+진행·완료 callback의 generation이 현재 값과 다르면 stale result로 폐기하므로, A가 늦게 끝나도
+그 결과가 먼저 시작한 B의 treemap이나 breadcrumb를 덮지 않는다.
+
+취소 정책은 명시적으로 **partial result를 폐기**하는 쪽이다. 취소된 `ScanResult`는
+`cancelled=true`와 incomplete root를 남기지만, GUI는 이를 `Scan cancelled — partial result
+discarded`로 표시하고 기존에 보이던 완전한 tree를 그대로 유지한다. 아직 표시된 결과가 없으면
+빈 화면을 유지한다. root metadata/open 실패와 비어 있는 root listing 실패는 fatal로 분류해
+CLI가 `fatal:` 한 줄을 내고 exit 1을 반환한다. 중간 subtree의 stat/list/iterator 실패와 entries를
+일부 반환한 listing 실패는 해당 node를 `complete=false`로 남기고 `error_count`와 오류 목록을
+보존하면서 형제 작업을 계속하는 partial/non-fatal 결과다. 의도적인 mount 경계 skip은 별도
+카운터로 표시하며 오류로 위장하지 않는다.
+
+scanner와 `aggregateSizes`, `aggregateStorage`, `sortBySizeDesc`, `countNodes`, `topFiles`,
+treemap layout은 explicit stack을 사용해 call stack recursion에 의존하지 않는다. scan의
+effective structural depth는 기본값과 512 초과 요청을 모두 `kMaxTreeDepth=512`로 제한하며,
+잘린 directory는 화면에 남기되 `complete=false`와 `scan depth limit reached`를 기록해
+physical total을 확정값처럼 보이지 않게 한다. CLI의 legacy `--depth`도 출력 깊이만 최대 512로
+제한한다 — `--depth`는 scan traversal을 줄이지 않고, 실제 traversal bound는 `--max-depth`다.
+
+CLI는 다음 옵션을 제공한다.
+
+| 옵션 | 의미 |
+|---|---|
+| `--max-depth N` | scanner traversal bound. `0`은 root만 list하며, 기본값/512 초과는 구조 안전 한계 512로 clamp한다. |
+| `--depth N` | legacy 출력(tree text/JSON) 깊이 제한. scan 자체는 계속 진행하며 출력 cap도 512다. |
+| `--follow-symlinks` | descendant directory symlink를 target identity 방문 집합으로 cycle-safe하게 확장한다. 명시적으로 선택한 root symlink는 이 flag와 무관하게 dereference한다. |
+| `--min-size BYTES` | regular file 중 지정 크기보다 작은 entry만 제외한다. directory와 symlink entry는 보존한다. |
+| `--one-file-system` | root와 device가 다른 directory를 visible incomplete node로 남기고 확장하지 않는다. identity를 확인할 수 없으면 안전하게 오류를 남긴다. |
+| `--exclude GLOB` | basename과 root-relative generic path에 `*`/`?` wildcard를 적용한다. repeatable이며 매칭된 entry는 aggregate에서 제외된다. |
+
+2026-08-31 local candidate에서는 `/usr/bin/qmake` Qt 5.15.18과 `/usr/bin/qmake6` Qt 6.10.2의
+full build 및 `make check`가 모두 통과했고, 두 `test_main_window`가 각각 `10/10 PASS`를
+보고했다. CLI integration smoke도 fixture에 `--max-depth`, legacy `--depth`, `--min-size`와
+반복 `--exclude`를 함께 적용한 JSON 검증으로 PASS했다. ici complexity-only gate에서 처음
+발견한 scan complexity/nesting FAIL은 `b7218c6`의 상태 전이 분리 refactor로 해소되어
+maximum cyclomatic 14 (limit 15), 129 functions, 0 issues로 PASS했다. 이 candidate의 toy
+remote PR/CI, full ici verify, sticky comment/Pages evidence는 아직 수집 전이며 이 문서는
+이를 merge 완료로 주장하지 않는다.
+
 ### GUI 는 빌드되고 테스트된다
 
 Qt 셸을 `src/` 밖에 두면 "검증할 필요 없는 코드" 라는 뜻이 되어버리므로 `src/gui/` 에 둔다.
@@ -142,7 +187,9 @@ $ pkg-config --modversion Qt6Core Qt6Widgets Qt6Concurrent Qt6Test
 6.10.2
 ```
 
-2026-08-31 현재 Qt6 기본 환경에서 ici 0.6.0 release asset으로 다음 실측도 통과했다.
+2026-08-31 Qt6 기본 환경에서 ici 0.6.0 release asset으로 수행한 T0/D1 기준 snapshot은
+다음과 같이 통과했다. 이는 D2 `b7218c6` 이후 local candidate의 full post-refactor
+`ici verify` 결과가 아니다.
 
 ```bash
 for p in loglens diskmap; do
@@ -152,7 +199,8 @@ done
 ```
 
 결과는 `loglens: Suite PASS, TEM 4.84 (10 passed, 2 skipped)`와 `diskmap: Suite PASS,
-TEM 4.85 (10 passed, 2 skipped)`다. Qt5 강제 CMake build는 loglens에서
+TEM 4.85 (10 passed, 2 skipped)`다. 이 historical snapshot 이후 D2 candidate의 full
+post-refactor `ici verify`는 아직 pending이며, Qt5 강제 CMake build는 loglens에서
 `CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON`으로, diskmap의 Qt5 qmake build/test는
 `/usr/bin/qmake`로 각각 별도 실측했다. T0-5에서는 이 선택을 매 PR의 명시적 CI matrix로
 강제한다. 현재 로컬에서는 CMake Qt6/Qt5와 qmake6/Qt5 네 조합 모두 native test와
@@ -488,3 +536,57 @@ cd diskmap
 
 파일 크기는 source에 따라 달라지므로 예시 출력의 `size` 숫자를 고정된 fixture로 취급하지
 않는다. 깨진 root symlink는 JSON 출력과 함께 stderr 및 `ScanResult.errors`에 오류를 남긴다.
+
+### DiskMap generated-source benchmark (opt-in/nightly)
+
+`diskmap/benchmarks/run_benchmark.py`는 실제 파일을 만들지 않고 deterministic fake source에서
+full scan과 cooperative cancellation을 각각 실행한다. 아래는 Qt6 local 재현 명령이다. Qt5는
+두 qmake 호출의 `/usr/bin/qmake6`를 `/usr/bin/qmake`로 바꾸고 별도 `benchmark_root`를 사용한다.
+
+```bash
+cd diskmap
+repo_root="$(pwd)"
+benchmark_root="$(mktemp -d /tmp/diskmap-benchmark.XXXXXX)"
+artifact_dir="$benchmark_root/artifact"
+mkdir -p "$benchmark_root/src" "$benchmark_root/benchmarks" "$artifact_dir"
+(
+  cd "$benchmark_root/src"
+  /usr/bin/qmake6 "$repo_root/src/src.pro"
+  make -j"$(nproc)"
+)
+(
+  cd "$benchmark_root/benchmarks"
+  /usr/bin/qmake6 "$repo_root/benchmarks/scan_benchmark.pro"
+  make -j"$(nproc)"
+)
+python3.10 benchmarks/run_benchmark.py \
+  --binary "$benchmark_root/benchmarks/diskmap-scan-benchmark" \
+  --entries 1000000 --cancel-after 10000 --timeout-seconds 60 \
+  --output-dir "$artifact_dir"
+sha256sum "$artifact_dir/summary.json"
+```
+
+runner의 기본 budget은 full throughput `≥ 100000 entries/s`, full peak RSS `≤ 1536 MiB`,
+full elapsed `≤ 30000 ms`, cancellation elapsed `≤ 2000 ms`이며 각 process에는 60초 hard
+timeout을 둔다. PR smoke처럼 correctness만 확인할 때는 `--skip-budgets`를 명시한다.
+
+2026-08-31에 기록한 local summary는 다음과 같다.
+
+| 시나리오 | 입력/생성 | elapsed | throughput | peak RSS | correctness |
+|---|---:|---:|---:|---:|:---:|
+| full | 1,000,000 / 1,000,000 | 4820.934 ms | 207428.692 entries/s | 1063.496 MiB | PASS |
+| cancellation | 1,000,000 / 10,000 | 2.676 ms | 3737316.017 entries/s | 15.414 MiB | PASS |
+
+full sample은 `nodes_retained=1,000,001`을 확인했고, summary JSON의 SHA-256은
+`743d5c5409101cfd9ef889da2da421e94cc205f585770ab19bb611472926246d`다. 이 수치는 단일
+local candidate artifact의 evidence이며, 실행마다 scheduler와 host RSS에 따라 시간·메모리는
+달라질 수 있다.
+
+PR 경로의 `.github/workflows/ci.yml` `diskmap-benchmark-smoke`는 Qt5/Qt6 matrix에서
+10,000 entries와 1,000-entry cancellation, 30초 timeout, `--skip-budgets`로 harness
+correctness만 확인하고 `Merge Gate` required check에 포함한다. 전체 1,000,000-entry 측정은
+`.github/workflows/diskmap-benchmark.yml`의 `workflow_dispatch`와 주간(일요일 03:37 UTC)
+schedule에서만 Qt5/Qt6 matrix로 실행한다. 이 workflow는 기본값 1,000,000/10,000/60초를
+runner에 전달하고 Qt별 summary를 aggregate/verdict job에서 합치며, artifact에는 JSON·MD·TXT
+report만 남기고 generated input과 process log는 올리지 않는다. 별도 workflow threshold를
+추가하지 않고 runner 기본 budget을 단일 정책으로 사용한다.
