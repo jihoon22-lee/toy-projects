@@ -148,7 +148,7 @@ void TestMainWindow::openingAFileFillsTheTable() {
     QVERIFY(statusLabel != nullptr);
     QVERIFY(follow != nullptr);
     QVERIFY(timer != nullptr);
-    QTRY_COMPARE(statusLabel->text(), statusText(2, 2, 2, 0, 1, 2, 32768));
+    QTRY_COMPARE(statusLabel->text(), statusText(2, 2, 2, 0, 1, 2, 8192));
     QVERIFY(follow->isChecked());
     QVERIFY(timer->isActive());
 }
@@ -175,7 +175,7 @@ void TestMainWindow::growthIsObservedByTheFollowTimer() {
     QTRY_COMPARE(cell(window, 1, LogModel::ColumnLine), QStringLiteral("2"));
     auto* statusLabel = status(window);
     QVERIFY(statusLabel != nullptr);
-    QTRY_COMPARE(statusLabel->text(), statusText(2, 2, 2, 0, 1, 2, 32768));
+    QTRY_COMPARE(statusLabel->text(), statusText(2, 2, 2, 0, 1, 2, 8192));
 }
 
 void TestMainWindow::truncationResetsStaleRows() {
@@ -196,7 +196,7 @@ void TestMainWindow::truncationResetsStaleRows() {
     QTRY_COMPARE(cell(window, 0, LogModel::ColumnLevel), QStringLiteral("WARN"));
     auto* statusLabel = status(window);
     QVERIFY(statusLabel != nullptr);
-    QTRY_COMPARE(statusLabel->text(), statusText(1, 1, 1, 0, 1, 1, 32768));
+    QTRY_COMPARE(statusLabel->text(), statusText(1, 1, 1, 0, 1, 1, 8192));
 }
 
 void TestMainWindow::retryableSourceErrorKeepsFollowingAndVisibleRows() {
@@ -264,7 +264,7 @@ void TestMainWindow::sourceReplacementRecoversWithCleanRows() {
     QTRY_COMPARE_WITH_TIMEOUT(rowCount(window), 1, 2500);
     QTRY_COMPARE(cell(window, 0, LogModel::ColumnLine), QStringLiteral("1"));
     QTRY_COMPARE(cell(window, 0, LogModel::ColumnLevel), QStringLiteral("WARN"));
-    QTRY_COMPARE(status(window)->text(), statusText(1, 1, 1, 0, 1, 1, 32768));
+    QTRY_COMPARE(status(window)->text(), statusText(1, 1, 1, 0, 1, 1, 8192));
     QVERIFY(followBox(window)->isChecked());
     QVERIFY(pollTimer(window)->isActive());
 }
@@ -369,7 +369,7 @@ void TestMainWindow::loaderSequenceMismatchStopsFollowing() {
     MainWindow window;
     window.openPath(path);
     QTRY_COMPARE(rowCount(window), 1);
-    QTRY_COMPARE(status(window)->text(), statusText(1, 1, 1, 0, 1, 1, 32768));
+    QTRY_COMPARE(status(window)->text(), statusText(1, 1, 1, 0, 1, 1, 8192));
 
     QCheckBox* follow = followBox(window);
     QTimer* timer = pollTimer(window);
@@ -431,8 +431,8 @@ void TestMainWindow::controlsHaveStableNamesAndFollowIsSwitchable() {
     QCOMPARE(loadMode->currentText(), QStringLiteral("Latest records"));
     QCOMPARE(tailRecords->accessibleName(), QStringLiteral("Latest record count"));
     QCOMPARE(tailRecords->minimum(), 1);
-    QCOMPARE(tailRecords->maximum(), 32768);
-    QCOMPARE(tailRecords->value(), 32768);
+    QCOMPARE(tailRecords->maximum(), 8192);
+    QCOMPARE(tailRecords->value(), 8192);
     QVERIFY(tailRecords->isEnabled());
     QCOMPARE(follow->accessibleName(), QStringLiteral("Follow log file"));
     QCOMPARE(logTable->accessibleName(), QStringLiteral("Log records"));
