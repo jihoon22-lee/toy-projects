@@ -42,7 +42,9 @@ std::string lastPathComponent(const std::filesystem::path& path) {
 }
 
 bool depthIsExpandable(int depth, int maxDepth) {
-    return maxDepth < 0 || depth <= maxDepth;
+    const int effectiveLimit =
+        maxDepth < 0 || maxDepth > kMaxTreeDepth ? kMaxTreeDepth : maxDepth;
+    return depth <= effectiveLimit;
 }
 
 bool wildcardMatches(const std::string& pattern, const std::string& value) {

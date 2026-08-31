@@ -362,7 +362,7 @@ int main() {
             CHECK(!result.root.reclaimable_size_known);
         }
         {
-            ScanOptions opts; // default max_depth = -1, unlimited
+            ScanOptions opts; // default uses the structural safety maximum
             const ScanResult result = scan(fs, "/depth/root", opts);
             CHECK_EQ(result.dirs_scanned, static_cast<std::size_t>(3));
             CHECK_EQ(result.root.size, static_cast<std::uint64_t>(42));
@@ -389,8 +389,8 @@ int main() {
     }
 
     // --- reasonably deep chain: confirms the walk copes with many levels ---
-    // (the implementation is documented as an iterative stack-based walk,
-    // not recursive, so this should complete without incident).
+    // (the implementation is an iterative stack-based walk and this stays
+    // below the structural value-tree safety maximum).
     {
         FakeFsSource fs;
         constexpr int kChainLength = 500;

@@ -187,7 +187,7 @@ int main() {
         CHECK_EQ(root.size, maximum);
     }
 
-    // --- sortBySizeDesc: size desc, ties broken by name asc, recursive ---
+    // --- sortBySizeDesc: size desc, ties broken by name asc, at every level ---
     {
         FsNode root = makeDirNode("root", {
             makeFileNode("small", 5),

@@ -14,8 +14,9 @@
 namespace diskmap {
 
 struct ScanOptions {
-    // Negative means unlimited. A directory pruned by a finite limit remains
-    // visible but is marked incomplete, so storage totals cannot look exact.
+    // Negative requests the structural safety maximum (kMaxTreeDepth). A
+    // directory pruned by the effective limit remains visible and incomplete,
+    // so storage totals cannot look exact.
     int max_depth = -1;
     // Controls descendants. The explicitly selected root is always
     // dereferenced, matching ordinary path argument semantics.
@@ -35,6 +36,7 @@ struct ScanOptions {
 struct ScanResult {
     FsNode root;
     std::vector<std::string> errors;
+    std::string fatal_error;
     std::size_t error_count = 0;
     bool errors_truncated = false;
     std::size_t dirs_scanned = 0;
@@ -65,8 +67,8 @@ private:
 
 // Iteratively walks a directory root via source, honoring options and
 // collecting every listing error instead of stopping at the first one. A
-// regular-file root is returned as a complete one-node scan. Never recurses,
-// so it cannot stack-overflow on a deep tree.
+// regular-file root is returned as a complete one-node scan. Traversal never
+// recurses and the value-owned result is bounded for safe destruction.
 ScanResult scan(const FsSource& source,
                  const std::filesystem::path& rootPath,
                  const ScanOptions& options,

@@ -10,9 +10,9 @@
 
 namespace diskmap {
 
-// Caps how many levels the recursive helpers below will descend, so a
-// pathological (or maliciously deep) tree cannot overflow the call stack.
-constexpr int kMaxTreeDepth = 4096;
+// Bounds value-owned FsNode destruction. Analysis/layout helpers are iterative,
+// but std::vector<FsNode> teardown is recursive in the C++ object model.
+constexpr int kMaxTreeDepth = 512;
 
 struct FsNode {
     std::string name;
@@ -58,7 +58,7 @@ std::uint64_t aggregateSizes(FsNode& node);
 // bytes are reclaimable only when every known hard-link reference is present.
 void aggregateStorage(FsNode& node);
 
-// Recursively sorts every level of children by size (descending), breaking
+// Iteratively sorts every level of children by size (descending), breaking
 // ties by name (ascending) so the ordering is stable and reproducible.
 void sortBySizeDesc(FsNode& node);
 
