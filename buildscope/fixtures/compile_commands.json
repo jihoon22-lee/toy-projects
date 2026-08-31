@@ -1,0 +1,22 @@
+[
+  {
+    "arguments": [
+      "/usr/bin/c++",
+      "-DBUILDSCOPE_APP=1",
+      "-std=c++20",
+      "-I/project/include",
+      "-c",
+      "/project/src/main.cpp",
+      "-o",
+      "CMakeFiles/buildscope.dir/src/main.cpp.o"
+    ],
+    "directory": "/project/build",
+    "file": "/project/src/main.cpp",
+    "output": "CMakeFiles/buildscope.dir/src/main.cpp.o"
+  },
+  {
+    "command": "/usr/bin/c++ -DBUILDSCOPE_CORE=1 -std=c++20 -I/project/include -c /project/src/core.cpp",
+    "directory": "/project/build",
+    "file": "/project/src/core.cpp"
+  }
+]

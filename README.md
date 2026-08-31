@@ -12,6 +12,33 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 |---|---|---|
 | [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D2 cancellable/latest-generation scan complete (PR #28) · identity-safe scan · D3 next |
 | [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · L2 1 GiB benchmark merged in PR #26 · default capacity 8192 |
+| [buildscope](buildscope/) | compile DB explorer | B0 released · ici v0.7.1 remote verified |
+
+### buildscope B0 hybrid skeleton — release-backed evidence
+
+[BuildScope 문서](buildscope/README.md)에 producer/consumer contract와 repository 밖 scratch
+빌드 명령을 정리했다. Python backend는 `compile_commands.json`을 shell 실행 없이 64 MiB 및
+100,000-entry bound 안에서 읽고, raw `arguments`/`command`를 보존한 deterministic
+`buildscope.snapshot/v1` JSON을 만든다. C++20/Qt CLI와 GUI는 이 versioned contract를
+검증하고 소비하며, CMake는 `AUTOMOC`·`AUTOUIC`·`AUTORCC`와 compile DB export를 실제로
+활성화한다.
+
+2026-09-01 로컬 실측에서 Qt 5.15.18과 Qt 6.10.2 build가 각각 CTest 4/4를 통과했고,
+Python producer → C++ consumer hybrid test도 포함됐다. 같은 Python 3.10 interpreter의
+`python -m` probe에서 `pytest`/`coverage`/`mypy` capability가 READY였고, mypy 실제 argv는
+C++ roots를 제외한 `python` root만 받아 rc0이었다. 공개 ici v0.7.1 release asset의 cold
+isolated verify는 suite WARN, `12 PASS / 1 WARN / 0 FAIL / 0 ERROR / 0 SKIP` 및 `9/9` tests,
+TEM `5.00`, line/function/branch `96.3% / 100.0% / 86.8%`, complexity `14 PASS`, compile DB
+`4/4` production units·`13` configurations, 총 `63.37s`였다. WARN은 C++ type 미지원 하나뿐이다.
+D11/I5 interpreter/tool capability 경로도 release에서 재검증되어 고정됐다.
+
+ici [PR #109](https://github.com/jihoon22-lee/ici/pull/109)의 sticky report와 두 Pages 검증이
+완료됐고, exact `main` `b87afba`의
+[CI run `33419851128`](https://github.com/jihoon22-lee/ici/actions/runs/33419851128)과
+[v0.7.1 release run `33420348698`](https://github.com/jihoon22-lee/ici/actions/runs/33420348698)이
+성공했다. [공개 v0.7.1 release asset](https://github.com/jihoon22-lee/ici/releases/tag/v0.7.1)은
+9개 asset을 제공하며 `sha256sum --check ici.pyz.sha256`가 통과했다. B1의
+compiler/configuration normalization과 ici I3 target comparison은 아직 완료로 표시하지 않는다.
 
 ## 공통 구조 규칙
 

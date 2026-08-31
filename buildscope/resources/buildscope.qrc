@@ -1,0 +1,5 @@
+<RCC>
+  <qresource prefix="/icons">
+    <file alias="buildscope.svg">icons/buildscope.svg</file>
+  </qresource>
+</RCC>

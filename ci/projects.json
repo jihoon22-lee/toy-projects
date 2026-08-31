@@ -22,6 +22,17 @@
         "binary": "build/gui/src/gui/loglens-gui",
         "smoke_arg": "tests/data/sample.log"
       }
+    },
+    {
+      "name": "buildscope",
+      "verify": true,
+      "gui": {
+        "enabled": true,
+        "build_system": "cmake",
+        "build_descriptor": "CMakeLists.txt",
+        "binary": "build/gui/src/gui/buildscope-gui",
+        "smoke_arg": "fixtures/sample.snapshot.json"
+      }
     }
   ]
 }

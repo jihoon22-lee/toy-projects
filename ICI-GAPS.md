@@ -8,10 +8,10 @@
 `ici` 를 실제 C++/Qt 프로젝트에 적용하면서 발견한 갭 목록.
 Phase 5(Qt/CMake 어댑터) 설계의 입력이다. 각 항목은 **코드 위치 + 재현 조건 + 영향**을 남긴다.
 
-버전 기준: `ici 0.6.0` release asset (`ici.pyz`)
+버전 기준: `ici 0.7.1` release asset (`ici.pyz`)
 
 
-## 현황 (2026-08-31)
+## 현황 (2026-09-01)
 
 **A-3 이 닫혔다.** ici 0.6.0 이 CMake/CTest 와 qmake/Make 빌드 어댑터를 갖췄고, 이 저장소의
 두 프로젝트가 그 실측 대상이었다 — `loglens` 는 CMake, `diskmap` 은 qmake 로 전환했다.
@@ -22,7 +22,6 @@ Phase 5(Qt/CMake 어댑터) 설계의 입력이다. 각 항목은 **코드 위�
 | | 항목 | 성격 |
 |---|---|---|
 | **A-2** | 손으로 쓴 `Makefile` 만 있는 프로젝트는 여전히 거부 | **부분 수정** — CMake·qmake 는 해결 |
-| B-2 | C++ include 해석이 basename 단독 | 탐지력 저하(조용함) |
 | B-3 | `dead`/`cognitive`/`resource` 가 Python 전용 | 문서·표기 문제 |
 
 A-2 를 "수정됨" 으로 옮기지 않는 이유는 남은 거부 경로가 문서에서 사라지지 않게 하기
@@ -45,6 +44,7 @@ A-2 를 "수정됨" 으로 옮기지 않는 이유는 남은 거부 경로가 �
 | D-8 | qmake 의 상대 경로 때문에 line 커버리지 전부 유실 | ✅ ici #76 |
 | D-9 | CTest·QtTest 가 낸 XML 의 엔티티 확장(DoS) | ✅ ici #76 |
 | D-10 | 재사용 qmake shadow가 stale static consumer와 coverage stamp를 혼합 | ✅ ici #94 |
+| D-11 | PATH의 pytest capability는 READY지만 선택 interpreter에는 module이 없을 수 있음 | ✅ [#109](https://github.com/jihoon22-lee/ici/pull/109) / v0.7.1 fixed |
 
 **D-1 이 가장 중요하다.** 스펙은 `sanitize` 를 "나중에 옮겨도 되는 것" 으로 분류했는데,
 `sanitize` 는 `tests/**/*.cpp` 를 각각 plain g++ 로 컴파일한다. Qt 테스트를 `tests/` 에 두는
@@ -67,12 +67,33 @@ consumer에 `PRE_TARGETDEPS`를 선언해 자체 그래프를 바로잡았고, i
 [sticky comment](https://github.com/jihoon22-lee/ici/pull/94#issuecomment-5471591533), ici/viewer
 Pages의 HTTP 200·external refs 0까지 확인했다.
 
+**D-11은 BuildScope B0의 첫 hybrid verify에서 드러났다.** PATH probe는 `pytest=ready`를
+보고했지만 launcher가 선택한 Python 3.14에는 pytest module이 없어 `test`와 `sanitize`가
+동시에 `ERROR`가 됐다. `ICI_PYTHON`으로 pytest·coverage가 설치된 Python 3.10을 지정하면
+동일 소스가 당시 우회 candidate에서 `8/8 tests`, TEM 5.00으로 통과했다. 이 `8/8`은
+초기 incident의 historical 기록이며 현재 release 결과가 아니다. toy CI는 검증 interpreter에
+필요한 tool을 명시적으로 설치해 재현성을 확보했고, ici #109 / v0.7.1은 I5의
+interpreter/tool capability를 같은 실행 경로로 묶는 계약으로 고정했다.
+
+공개 ici v0.7.1 release asset의 cold isolated BuildScope 재검증은 suite `WARN`,
+`12 PASS / 1 WARN / 0 FAIL / 0 ERROR / 0 SKIP`, `9/9` tests, TEM 5.00,
+line/function/branch `96.3% / 100.0% / 86.8%`, complexity `14 PASS`, compile DB `4/4`
+production units·`13` configurations, total `63.37s`였다. 같은 Python 3.10 interpreter의
+`python -m` pytest/coverage/mypy probe는 모두 `READY`였고, mypy는 C++ roots를 제외한
+`python` root만 받아 `rc=0`이었다. 유일한 WARN은 C++ type 미지원이다.
+[#109](https://github.com/jihoon22-lee/ici/pull/109)의 sticky report와 두 Pages 검증,
+exact `main` `b87afba`의 [CI run `33419851128`](https://github.com/jihoon22-lee/ici/actions/runs/33419851128),
+[v0.7.1 release run `33420348698`](https://github.com/jihoon22-lee/ici/actions/runs/33420348698)이
+성공했고, [공개 release](https://github.com/jihoon22-lee/ici/releases/tag/v0.7.1)는 9개 asset과
+성공한 `sha256sum --check ici.pyz.sha256` 검증을 남겼다.
+
 ### 수정된 것
 
 | | 항목 | 상태 |
 |---|---|---|
 | A-1 | C++ include 경로 설정 주입 | ✅ #57 |
 | B-1 | `cycle` 만 `source_dirs` 무시 | ✅ #62 |
+| B-2 | C++ include 해석이 basename 휴리스틱에 머묾 | ✅ #105 / v0.7.0 compiler-measured per configuration; BuildScope 외부 대조 pending |
 | C-1 | 순수 C++ 프로젝트가 초록불 불가 | ✅ #68 |
 | C-2 | 스위트 상태와 콘솔 카운트 모순 | ✅ #70 |
 | C-3 | test 엔진이 실패 사유를 안 남김 | ✅ #70 |
@@ -83,6 +104,7 @@ Pages의 HTTP 200·external refs 0까지 확인했다.
 | C-9 | C++ 테스트 CWD 가 엔진마다 다름 | ✅ #69 |
 | C-10 | `dup` 의 `warn_pct` 무력화 + 중복률 100% 초과 | ✅ #64 |
 | C-11 | 모노repo 리포트 게시 불가 | ✅ #59 |
+| D-11 | capability probe와 선택 Python interpreter가 불일치 | ✅ #109 / v0.7.1 |
 | — | C++ 함수 경계 탐지 (함수 절반이 미측정) | ✅ #55 |
 
 ---

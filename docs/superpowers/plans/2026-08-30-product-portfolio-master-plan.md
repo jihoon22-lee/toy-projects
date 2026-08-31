@@ -690,9 +690,28 @@ buildscope/
 - CMake `AUTOMOC`, `AUTOUIC`, `AUTORCC`를 모두 사용한다.
 - `ici.toml type = "hybrid"`로 양 언어의 test coverage를 요구한다.
 
-- [ ] minimal Python CLI와 Qt window가 각각 독립 실행된다.
-- [ ] Python output을 C++ CLI 또는 GUI model이 소비하는 E2E test가 있다.
-- [ ] Qt5/Qt6와 Python 3.10에서 skeleton build/test가 통과한다.
+- [x] minimal Python CLI와 Qt window가 각각 독립 실행된다. (local + remote evidence complete)
+- [x] Python output을 C++ CLI 또는 GUI model이 소비하는 E2E test가 있다. (local + remote evidence complete)
+- [x] Qt5/Qt6와 Python 3.10에서 skeleton build/test가 통과한다. (local + remote evidence complete)
+
+**B0 검증 및 원격 완료 증거 (2026-09-01):** Python 3.10 backend는
+`compile_commands.json`을 shell 실행 없이 64 MiB/100,000-entry bound 안에서 읽어
+deterministic `buildscope.snapshot/v1`을 만든다. C++20/Qt CLI·GUI consumer와
+`AUTOMOC`·`AUTOUIC`·`AUTORCC`를 사용하는 CMake skeleton은 Qt 5.15.18과 Qt 6.10.2에서
+각각 CTest 4/4를 통과했고, Python producer → C++ consumer E2E도 통과했다. 같은 Python
+3.10 interpreter의 `python -m` probe에서 pytest/coverage/mypy capability가 READY였고,
+mypy 실제 argv는 C++ roots를 제외한 `python` root만 받아 rc0이었다. 이를
+`ICI_PYTHON`으로 지정한 공개 ici v0.7.1 release asset의 cold isolated verify는 suite WARN,
+`12 PASS / 1 WARN / 0 FAIL / 0 ERROR / 0 SKIP`, `9/9` tests, TEM 5.00,
+line/function/branch 96.3%/100.0%/86.8%, complexity 14 PASS, compile DB 4/4 production
+units·13 configurations, 총 63.37초였다. WARN은 C++ type 미지원 하나뿐이며 D11/I5
+interpreter/tool capability gap은 v0.7.1 release에서 재검증되어 고정됐다. ici
+[PR #109](https://github.com/jihoon22-lee/ici/pull/109)의 sticky report와 두 Pages 검증,
+exact `main` `b87afba`의 [CI run `33419851128`](https://github.com/jihoon22-lee/ici/actions/runs/33419851128),
+[v0.7.1 release run `33420348698`](https://github.com/jihoon22-lee/ici/actions/runs/33420348698)이
+성공했다. [공개 v0.7.1 release](https://github.com/jihoon22-lee/ici/releases/tag/v0.7.1)는 9개
+asset을 제공하며 `sha256sum --check ici.pyz.sha256`가 통과했다. B1 normalization과 ici I3
+target comparison은 여전히 완료되지 않았다.
 
 ### B1. compile database Python core
 

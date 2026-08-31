@@ -15,7 +15,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-
 MANIFEST_PATH = Path("ci/projects.json")
 SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 SAFE_PATH = re.compile(r"^[A-Za-z0-9._/-]+$")
@@ -34,6 +33,30 @@ def _required_path(value: Any, label: str) -> str:
     return value
 
 
+def _validate_project_path(
+    project_dir: Path,
+    value: str,
+    label: str,
+    *,
+    require_regular_file: bool,
+) -> None:
+    """Require an existing project-relative path with optional file semantics."""
+
+    project_root = project_dir.resolve()
+    try:
+        resolved = (project_dir / value).resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        raise ValueError(f"{label} does not exist: {value!r}") from error
+
+    try:
+        resolved.relative_to(project_root)
+    except ValueError as error:
+        raise ValueError(f"unsafe {label}: {value!r}") from error
+
+    if require_regular_file and not resolved.is_file():
+        raise ValueError(f"{label} must be a regular file: {value!r}")
+
+
 def discover(
     root: Path = Path("."),
 ) -> tuple[list[dict[str, str]], list[dict[str, Any]], list[str]]:
@@ -45,6 +68,8 @@ def discover(
 
     root = Path(root)
     payload = json.loads((root / MANIFEST_PATH).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise TypeError("ci/projects.json root must be an object")
     if payload.get("schema") != 1:
         raise ValueError("ci/projects.json must declare schema 1")
     entries = payload.get("projects")
@@ -56,7 +81,7 @@ def discover(
     gui_projects: list[dict[str, Any]] = []
     for entry in entries:
         if not isinstance(entry, dict):
-            raise ValueError("every project manifest entry must be an object")
+            raise TypeError("every project manifest entry must be an object")
         name = entry.get("name")
         if not isinstance(name, str) or not SAFE_NAME.fullmatch(name):
             raise ValueError(f"invalid project name: {name!r}")
@@ -73,18 +98,40 @@ def discover(
 
         gui = entry.get("gui")
         if not isinstance(gui, dict) or not isinstance(gui.get("enabled"), bool):
-            raise ValueError(f"{name} must declare gui.enabled true or false")
+            raise TypeError(f"{name} must declare gui.enabled true or false")
         if gui["enabled"] is False:
             continue
 
         build_system = gui.get("build_system")
         if build_system not in ("cmake", "qmake"):
-            raise ValueError(f"{name} has unsupported GUI build system: {build_system!r}")
-        descriptor = _required_path(gui.get("build_descriptor"), f"{name}.gui.build_descriptor")
+            raise ValueError(
+                f"{name} has unsupported GUI build system: {build_system!r}"
+            )
+        descriptor = _required_path(
+            gui.get("build_descriptor"), f"{name}.gui.build_descriptor"
+        )
         binary = _required_path(gui.get("binary"), f"{name}.gui.binary")
         smoke_arg = _required_path(gui.get("smoke_arg"), f"{name}.gui.smoke_arg")
-        if not (project_dir / descriptor).is_file():
-            raise ValueError(f"{name} GUI descriptor does not exist: {descriptor}")
+        if build_system == "cmake" and descriptor != "CMakeLists.txt":
+            raise ValueError(
+                f"{name} CMake GUI descriptor must be CMakeLists.txt: {descriptor!r}"
+            )
+        if build_system == "qmake" and not descriptor.endswith(".pro"):
+            raise ValueError(
+                f"{name} qmake GUI descriptor must end in .pro: {descriptor!r}"
+            )
+        _validate_project_path(
+            project_dir,
+            descriptor,
+            f"{name}.gui.build_descriptor",
+            require_regular_file=True,
+        )
+        _validate_project_path(
+            project_dir,
+            smoke_arg,
+            f"{name}.gui.smoke_arg",
+            require_regular_file=False,
+        )
         for qt_major in SUPPORTED_QT_MAJORS:
             gui_projects.append(
                 {
@@ -119,8 +166,12 @@ def write_github_outputs(
     if not output_name:
         return
     with Path(output_name).open("a", encoding="utf-8") as output:
-        output.write("projects=" + json.dumps(verify_projects, separators=(",", ":")) + "\n")
-        output.write("gui_projects=" + json.dumps(gui_projects, separators=(",", ":")) + "\n")
+        output.write(
+            "projects=" + json.dumps(verify_projects, separators=(",", ":")) + "\n"
+        )
+        output.write(
+            "gui_projects=" + json.dumps(gui_projects, separators=(",", ":")) + "\n"
+        )
         output.write("names=" + ",".join(names) + "\n")
         output.write("count=" + str(len(names)) + "\n")
         output.write("gui_count=" + str(len(gui_projects)) + "\n")
@@ -129,10 +180,10 @@ def write_github_outputs(
 def main() -> int:
     try:
         verify_projects, gui_projects, names = discover()
-    except (OSError, ValueError, json.JSONDecodeError) as error:
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
         raise SystemExit(str(error)) from error
     write_github_outputs(verify_projects, gui_projects, names)
-    print(f"validated {len(names)} project(s), {len(gui_projects)} GUI matrix entrie(s)")
+    print(f"validated {len(names)} projects, {len(gui_projects)} GUI matrix entries")
     return 0
 
 

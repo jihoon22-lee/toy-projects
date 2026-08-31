@@ -26,6 +26,30 @@
 | A | abilens Make/ELF/ABI explorer | [A stream](docs/superpowers/plans/2026-08-30-product-portfolio-master-plan.md) |
 | Q | quality-zoo expected-finding corpus | [Q stream](docs/superpowers/plans/2026-08-30-product-portfolio-master-plan.md) |
 
+## 완료: BuildScope B0 hybrid skeleton (2026-09-01)
+
+BuildScope는 `compile_commands.json`을 shell 실행 없이 bounded read해 deterministic
+`buildscope.snapshot/v1` JSON으로 내보내는 Python 3.10 backend와, 그 계약을 검증해 표시하는
+C++20/Qt CLI·GUI를 첫 slice로 구현했다. CMake는 `AUTOMOC`·`AUTOUIC`·`AUTORCC`와 compile DB
+export를 모두 실제로 사용한다. 로컬 Qt 5.15.18과 Qt 6.10.2에서 각각 4/4 CTest가 통과했다.
+공개 ici v0.7.1 release asset의 cold isolated verify는 suite WARN,
+`12 PASS / 1 WARN / 0 FAIL / 0 ERROR / 0 SKIP`, `9/9` tests, TEM 5.00,
+line/function/branch 96.3%/100.0%/86.8%, complexity 14 PASS, compile DB 4/4 production
+units·13 configurations, 총 63.37초를 기록했다. 같은 Python 3.10 interpreter의 `python -m`
+probe에서 pytest/coverage/mypy capability가 READY였고, mypy 실제 argv는 C++ roots를 제외한
+`python` root만 받아 rc0이었다. WARN은 C++ type 미지원 하나뿐이다. D11/I5
+interpreter/tool capability gap도 v0.7.1 release에서 재검증되어 고정됐다.
+
+ici [PR #109](https://github.com/jihoon22-lee/ici/pull/109)의 sticky report와 두 Pages 검증,
+exact `main` `b87afba`의 [CI run `33419851128`](https://github.com/jihoon22-lee/ici/actions/runs/33419851128),
+[v0.7.1 release run `33420348698`](https://github.com/jihoon22-lee/ici/actions/runs/33420348698)이
+성공했다. [공개 v0.7.1 release](https://github.com/jihoon22-lee/ici/releases/tag/v0.7.1)는 9개
+asset을 제공하며 `sha256sum --check ici.pyz.sha256`가 통과했다.
+
+B1에서는 `arguments`/`command` tokenization과 compiler·language·standard·define·include·sysroot·
+target normalization을 완성하고, 이후 B3의 compiler-measured include explanation과 함께 ici I3의
+target-by-target 외부 대조를 닫는다.
+
 ## 배경
 
 이 프로젝트들은 재미와 검증을 동시에 노리고 시작했다. 실제로 쓸 C++/Qt 앱을 만들고,
