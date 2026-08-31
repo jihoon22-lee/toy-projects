@@ -31,7 +31,7 @@
 | 프로젝트 | 현재 형태 | 실측 | 제품 상태 |
 |---|---|---|---|
 | loglens | C++17, Qt, CMake | L2 bounded/background slice · PR #25 CI green · local Qt5/Qt6 12 CTest targets · 1 GiB benchmark PR #26 merged · main Qt5/Qt6 sweep green | Tail N/From start와 worker UX, benchmark/default 8192 완료 |
-| diskmap | C++17, Qt, qmake | D1 Slice 2 merged · D2 local candidate · ici local verify PASS | D2 local/native/ici complete; remote PR/CI·sticky·Pages pending; treemap/cleanup UX는 D3~D6에서 확장 |
+| diskmap | C++17, Qt, qmake | D1 Slice 2 merged · D2 fully complete (PR #28 remote evidence + main benchmark green) | D3 explorer UX next; treemap/cleanup UX는 D3~D6에서 확장 |
 | ici/viewer | Qt-free core + Qt6 GUI | 3 tests, TEM 4.94 | core 중심, 셸과 report workflow 부족 |
 
 현재 공백:
@@ -351,8 +351,9 @@ loader/Tail N 변경 이전 bounded foundation에 대한 historical evidence다.
 
 L2 bounded/background 구현과 1 GiB benchmark, 성능 budget/default capacity 결정은 완료됐다.
 PR26의 원격 CI·ici·sticky report·Pages 검증과 main Qt5/Qt6 full sweep도 완료됐다. D2
-cancellable scan local candidate와 current ici main의 full local verify도 닫혔으며, 다음 gate는
-D2 remote PR/CI·sticky·Pages evidence다.
+cancellable scan local candidate와 current ici main의 full local verify, PR #28 원격
+PR/CI·sticky·Pages evidence와 merged-main full benchmark도 모두 닫혔으며, 다음 diskmap 단계는
+D3 explorer UX다.
 L3 parser/filter와 L6 release 완료 조건은 이 결정으로 닫히지 않으며 체크리스트를 유지한다.
 
 ### L3. parser와 filter 완성도
@@ -525,7 +526,7 @@ green이었다. [sticky comment](https://github.com/jihoon22-lee/toy-projects/pu
 게시됐고, Pages의 `diskmap/pr/23/`와 `loglens/pr/23/`는 모두 HTTP 200 `text/html`이며
 외부 참조가 0개였다.
 
-### D2. cancellable scanner와 stale result 방지
+### D2. cancellable scanner와 stale result 방지 — 완료
 
 **브랜치:** `feat/diskmap-cancellable-scan`
 
@@ -563,8 +564,38 @@ max14 across 129 functions / 0 issues, sanitizer clean, duplication 3.11%, tools
 21 ready / 0 incomplete / 9 unavailable, cache hits 0, total 82.29초였다. HTML
 `/tmp/tmp.RFA39KzhyH.html`은 299034 bytes, SHA-256
 `cf75f9d6f28179d95645d0e1582022008804078d5e3844de503a8c1a130c64a0`이며 external
-script/link/img/iframe resource tags는 0개였다. D2 local verification은 완료됐고, 남은 gate는
-toy remote PR/CI, sticky comment, Pages evidence뿐이다.
+script/link/img/iframe resource tags는 0개였다. 이 local evidence에 아래 원격 증거를 더해 D2의
+병합·검증 조건을 모두 닫았다.
+
+2026-08-31 [PR #28](https://github.com/jihoon22-lee/toy-projects/pull/28)은 squash merge
+commit `ec075e57874d20654f7cbfbc604ad8aaee8401a6`으로 toy-projects `main`에 병합됐다.
+[PR CI run `33368958698`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33368958698)의
+12개 check가 모두 green이었고, DiskMap benchmark smoke Qt5/Qt6, 네 GUI matrix job, 두 ici
+verification job, publish와 Merge Gate를 포함한다. [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/28#issuecomment-5475254935)에는
+`diskmap: PASS · TEM 4.92 · 10 pass / 2 skip · tests 9/9`와
+`loglens: PASS · TEM 4.80 · 10 pass / 2 skip · tests 12/12`, 양쪽 report link가 게시됐다.
+Pages `diskmap/pr/28/`와 `loglens/pr/28/`는 각각 HTTP/2 `200`, content-type `text/html`,
+외부 `script`/`link`/`img`/`iframe` resource 0개로 확인됐다.
+
+| Pages 경로 | bytes | SHA-256 |
+|---|---:|---|
+| `diskmap/pr/28/` | 199843 | `c8a0d8009e1c19cd2d9df041969396f6abce95275713fe7ead6a499ac0b33b72` |
+| `loglens/pr/28/` | 334215 | `acda3bfb29bf5f3534256f614719e678ec89ed21b3420ee2b282ec55e2107830` |
+
+PR #28 병합 후 head `ec075e5`에서 수행한 [main full benchmark run `33369288586`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33369288586)은
+Qt5/Qt6 full, combine, verdict job을 모두 성공시켰다. 설정은 1,000,000 entries,
+`cancel-after 10000`, process timeout 60초이며, 양쪽 correctness는 `true`, failures는 0,
+budgets enforced는 `PASS`였다.
+
+| Qt | full elapsed | full throughput | full peak RSS | cancellation elapsed |
+|---|---:|---:|---:|---:|
+| 5 | 2131.069 ms | 469248.020 entries/s | 1064.094 MiB | 1.479 ms |
+| 6 | 3120.463 ms | 320465.315 entries/s | 1064.137 MiB | 1.580 ms |
+
+combined `summary.json`은 3567 bytes이며 SHA-256은
+`26391797763aed17fedb04e2a4aeb5cf8238ec4d5b5d040d473d32a513369251`이다. 이는 toy-projects
+`main`의 기능 병합 및 검증 기록이며, 별도 제품 버전 release를 의미하지 않는다. 따라서 D2는
+local/native/ici, PR CI, sticky report, Pages와 merged-main benchmark까지 모두 완료됐다.
 
 ### D3. 탐색과 설명 UX
 
@@ -1019,7 +1050,7 @@ ici와 toy-projects가 함께 바뀌는 기능은 다음 순서를 따른다.
 1. 이 마스터 계획과 ici 마스터 계획을 문서 PR로 보존한다.
 2. T0에서 기존 Qt shell 계획을 stateful log parsing과 정확한 failure-state 테스트로 보정해 실행한다.
 3. L1과 D1로 기존 앱의 신뢰성 기반을 만든다.
-4. D2 local candidate의 benchmark/native/full ici 증거를 기준으로 remote PR/CI·sticky·Pages gate를 닫고, 이후 D3 explorer UX로 진행한다.
+4. 완료된 D2의 PR #28 원격/merged-main 증거를 기준으로 D3 explorer UX를 진행한다.
 5. ici finding v3와 맞춰 Q0 runner를 만든다.
 6. ici compile context I3와 함께 B0/B1 buildscope를 시작한다.
 7. ici Python compatibility I5와 함께 E0/E1 envlens를 시작한다.

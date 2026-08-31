@@ -49,7 +49,7 @@ gate에서는 아래 네 leg가 같은 계약을 다시 실행한다.
 | 프로젝트 | 빌드 | 검증 | Qt 테스트 |
 |---|---|---|---|
 | `loglens` | CMake · Qt5/Qt6 | L2 benchmark PR #26 merged · main Qt5/Qt6 sweep green · default 8192 | `QAbstractItemModelTester` + MainWindow QtTest |
-| `diskmap` | qmake · Qt5/Qt6 | D1 Slice 2 merged · D2 local candidate complete · remote gate pending | `QSignalSpy` + 9 native test targets + MainWindow QtTest |
+| `diskmap` | qmake · Qt5/Qt6 | D1 Slice 2 merged · D2 fully complete (PR #28 remote evidence + main benchmark green) · D3 next | `QSignalSpy` + 9 native test targets + MainWindow QtTest |
 | `ici/viewer` | CMake · Qt5/Qt6 | PASS · TEM 4.86 | MainWindow QtTest 4/4 |
 
 T0-5의 `discover`는 GUI 프로젝트 한 항목을 Qt5·Qt6 두 항목으로 확장한다. 따라서 현재
@@ -138,7 +138,7 @@ source 및 실제 POSIX filesystem으로 확인한다. Qt5/qmake와 Qt6/qmake6 �
 4.90, line/function/branch 96.9%/97.9%/85.2%였다. PR #23의 전체 CI와 sticky report
 comment, Pages HTML 응답까지 확인한 뒤 `039052f9`로 병합됐다.
 
-**diskmap D2 local candidate (2026-08-31).** cooperative cancellation과 progress callback을
+**diskmap D2 complete (2026-08-31; local + remote evidence).** cooperative cancellation과 progress callback을
 GUI에 연결하고, rescan마다 generation을 증가시켜 최신 scan만 treemap/breadcrumb에 반영한다.
 늦게 끝난 이전 worker와 그 progress는 무시하며, 취소된 partial result는 폐기하고 기존에
 보이던 결과를 유지한다. root metadata/listing의 fatal 오류와 중간 subtree의 partial/non-fatal
@@ -163,8 +163,8 @@ post-refactor local `ici verify`는 `Suite PASS`, 10 pass / 0 warn / 0 fail / 0 
 across129 functions / 0 issues, dup3.11%, sanitize clean, 30 tools/21 ready/0 incomplete/
 9 unavailable, total82.29s, cache hits0이었다. HTML은 299034 bytes, SHA256
 `cf75f9d6f28179d95645d0e1582022008804078d5e3844de503a8c1a130c64a0`, external resource tags0이다.
-이 local evidence는 candidate에 한정되며 toy remote PR/CI, sticky comment/Pages evidence는
-아직 pending이다.
+이 local evidence는 candidate artifact에 대한 기록이며, 아래 D2 원격 완료 증거가 toy-projects
+`main` 병합과 PR/CI·sticky comment·Pages·merged-main benchmark gate를 닫는다.
 
 loglens L2의 첫 slice는 GUI/CLI에 absolute-ID bounded store를 연결하고 source polling과
 pathological record 크기를 제한했다. 이어진 background/Tail N slice는 Qt5·Qt6 및 엄격 경고
@@ -206,6 +206,37 @@ Qt5/Qt6 benchmark, combine, verdict를 모두 green으로 완료했고, combined
 병합 후 main의 ici 0.6.0 deep no-cache도 12/12 tests, TEM 4.83,
 line/function/branch 93.6%/96.6%/81.8%, sanitizer PASS, HTML 433,351 bytes·external refs
 0개로 통과했다.
+
+**diskmap D2 원격 완료 증거 (2026-08-31).** [PR #28](https://github.com/jihoon22-lee/toy-projects/pull/28)은
+squash merge commit `ec075e57874d20654f7cbfbc604ad8aaee8401a6`으로 toy-projects `main`에
+병합됐다. [PR CI run `33368958698`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33368958698)의
+12개 check가 모두 green이었고, DiskMap benchmark smoke Qt5/Qt6, 네 GUI matrix job, 두 ici
+verification job, publish와 Merge Gate를 포함한다. [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/28#issuecomment-5475254935)에는
+`diskmap: PASS · TEM 4.92 · 10 pass / 2 skip · tests 9/9`와
+`loglens: PASS · TEM 4.80 · 10 pass / 2 skip · tests 12/12`, 양쪽 report link가 게시됐다.
+Pages `diskmap/pr/28/`와 `loglens/pr/28/`는 각각 HTTP/2 `200`, content-type `text/html`,
+외부 `script`/`link`/`img`/`iframe` resource 0개로 확인됐다.
+
+| Pages 경로 | bytes | SHA-256 |
+|---|---:|---|
+| `diskmap/pr/28/` | 199843 | `c8a0d8009e1c19cd2d9df041969396f6abce95275713fe7ead6a499ac0b33b72` |
+| `loglens/pr/28/` | 334215 | `acda3bfb29bf5f3534256f614719e678ec89ed21b3420ee2b282ec55e2107830` |
+
+PR #28 병합 후 head `ec075e5`에서 수행한 [main full benchmark run `33369288586`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33369288586)은
+Qt5/Qt6 full, combine, verdict job을 모두 성공시켰다. 설정은 1,000,000 entries,
+`cancel-after 10000`, process timeout 60초이며, 양쪽 correctness는 `true`, failures는 0,
+budgets enforced는 `PASS`였다.
+
+| Qt | full elapsed | full throughput | full peak RSS | cancellation elapsed |
+|---|---:|---:|---:|---:|
+| 5 | 2131.069 ms | 469248.020 entries/s | 1064.094 MiB | 1.479 ms |
+| 6 | 3120.463 ms | 320465.315 entries/s | 1064.137 MiB | 1.580 ms |
+
+combined `summary.json`은 3567 bytes이며 SHA-256은
+`26391797763aed17fedb04e2a4aeb5cf8238ec4d5b5d040d473d32a513369251`이다. 이는 toy-projects
+`main`의 기능 병합 및 검증 기록이며, 별도 제품 버전 release를 의미하지 않는다. 따라서 D2는
+local/native/ici, PR CI, sticky report, Pages와 merged-main benchmark까지 모두 완료됐고 다음
+단계는 D3 explorer UX다.
 
 ### 4단계 — 여유가 되면
 
