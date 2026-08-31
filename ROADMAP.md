@@ -41,9 +41,9 @@ export를 모두 실제로 사용한다.
 > 현재 최종 결과가 아니며, BuildScope PR/remote CI/sticky report/Pages 완료를 의미하지 않는다.
 
 공개 ici v0.7.1 release asset의 checksum과 cold verification 최종 수치는 아래 B1 evidence에
-기록한다. BuildScope PR/remote CI, sticky report, Pages evidence는 아직 pending이다.
+기록한다. BuildScope PR #31의 remote integration evidence도 완료됐다.
 
-## 완료: BuildScope B1 compile database normalization (local implementation, 2026-09-01)
+## 완료: BuildScope B1 compile database normalization (implementation + PR #31 remote evidence, 2026-09-01)
 
 `feat/buildscope-compile-db`의 Python 3.10 core가 `buildscope.snapshot/v2`와 BuildScope `0.2.0`
 metadata를 구현했다. Python 입력 compile DB는 64 MiB/100,000-entry로 제한되고, serialized
@@ -95,7 +95,7 @@ model/UI로 전환하는 범위다. B1 구현 범위는 완료로 표시하되, 
 configuration diff, B5 hybrid release integration, ici I3 target-by-target 외부 대조는 아직
 완료하지 않는다.
 
-**B1 final local/public evidence (2026-09-01; BuildScope PR/remote evidence pending):** public
+**B1 final local/public evidence (2026-09-01):** public
 `ici v0.7.1` cold verification은 표준 `sha256sum --check ici.pyz.sha256`가 통과했고 suite
 `WARN`을 기록했다. `13 engines = 11 PASS / 2 WARN / 0 FAIL / 0 ERROR / 0 SKIP`, total
 `71.09s` (raw `71.08794903755188s`), tests `45/45`, line/function/branch
@@ -109,8 +109,29 @@ external dependencies는 `0`이다. HTML은 `489,978` bytes, SHA-256
 `ici Verification Report — buildscope`였다. Line inventory는 `2,798` total, `2,453` code,
 `345` blank lines across `19` files다. 현재 source line counts는 `contract.cpp` 111,
 `contract_json_guard.cpp` 125, `contract_parser.cpp` 382, `contract_parser_v2.cpp` 333이고,
-Python tests는 `41` (CTest aggregate `45`)이다. BuildScope PR/remote CI/sticky report/Pages
-evidence는 아직 pending이다.
+Python tests는 `41` (CTest aggregate `45`)이다. Local cold HTML은 `489,978` bytes,
+SHA-256 `538bdde8fae8cc769d212799e80ffeae1e39069662b214b19efb3d35a66f3257`이며 hosted HTML과
+별개다.
+
+**B1 PR #31 remote integration evidence:** [PR #31](https://github.com/jihoon22-lee/toy-projects/pull/31)의
+initial implementation/docs head는 `1ff08fe5d2accddc0e9107113eb83dd86bd6d50a`이고,
+[workflow run 33439733990](https://github.com/jihoon22-lee/toy-projects/actions/runs/33439733990)의
+동적 matrix 15 checks가 모두 SUCCESS였다: 3 ici verify, Qt5/Qt6 GUI 6, manifest, benchmark
+smoke 3, `Publish Reports & Sticky Comment`, `Merge Gate`. [Sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/31#issuecomment-5484640868)는
+marker 1개와 정확히 3개 project link를 포함하고 BuildScope `11 PASS / 2 WARN`, TEM `5.00`,
+`45/45`, `7/7`, `16` configurations, complexity max `13`/`140`을 기록했다.
+
+독립 Pages audit는 세 hosted report 모두 HTTP 200, `text/html`, external dependency `0`을
+확인했다.
+
+| Project | URL | Bytes | SHA-256 | Title |
+|---|---|---:|---|---|
+| BuildScope | [buildscope/pr/31](https://jihoon22-lee.github.io/toy-projects/buildscope/pr/31/) | 493,453 | `643a3e9e5c45a1512244cc90940146192399471621eac1a2dcb581cc534089c2` | `ici Verification Report — buildscope` |
+| diskmap | [diskmap/pr/31](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/31/) | 311,846 | `a8806808638c584312943d2551c1668a407c45830311de07cb0eed30d15e6924` | `ici Verification Report — diskmap` |
+| loglens | [loglens/pr/31](https://jihoon22-lee.github.io/toy-projects/loglens/pr/31/) | 446,796 | `56f3b2d54ed2a05ebf100313b4d9447553e9c6fb9c85f7e7adce8eccc838dc4f` | `ici Verification Report — loglens` |
+
+B1 implementation과 PR #31 remote integration evidence는 complete다. B2/B3/B4/B5와 ici I3
+target-by-target comparison은 아직 pending이다.
 
 ## 배경
 

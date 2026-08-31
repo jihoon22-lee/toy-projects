@@ -8,8 +8,8 @@ entry view and emits deterministic `buildscope.snapshot/v2` data. This workthrou
 implementation, compatibility reader, tests, schema, packaging, and documentation/version
 synchronization.
 
-The final public ici v0.7.1 cold verification and local inventory are recorded below. BuildScope PR,
-remote CI, sticky-report, and Pages evidence has not run and remains pending.
+The final public ici v0.7.1 cold verification, local inventory, and PR #31 remote integration
+evidence are recorded below.
 
 ## Context
 
@@ -101,8 +101,8 @@ displays the raw fields; normalized C++ model/UI presentation remains B2.
 - `buildscope/README.md` documents the v2 shape, precedence, non-expansion rules, root/scope/status
   caveats, bound and I/O hardening, explicit schema projection, no-install commands, and the B2
   consumer boundary.
-- `ROADMAP.md` and the B stream in the master plan mark B1 complete by implemented scope only;
-  B2/B3/B4/B5 and ici I3 target-by-target comparison remain pending.
+- `ROADMAP.md` and the B stream in the master plan mark B1 implementation and PR #31 remote
+  integration complete. B2/B3/B4/B5 and ici I3 target-by-target comparison remain pending.
 - The prior B0 workthrough remains intact; this file is the separate B1 record.
 
 ## Reproduction commands
@@ -154,10 +154,35 @@ The HTML report was `489,978` bytes with SHA-256
 `ici Verification Report — buildscope`. Line inventory is `2,798` total, `2,453` code, and
 `345` blank lines across `19` files. Current source line counts are `contract.cpp` 111,
 `contract_json_guard.cpp` 125, `contract_parser.cpp` 382, and `contract_parser_v2.cpp` 333.
-The Python suite contains `41` tests, and the CTest aggregate is `45`.
+The Python suite contains `41` tests, and the CTest aggregate is `45`. The local cold HTML is
+`489,978` bytes with SHA-256
+`538bdde8fae8cc769d212799e80ffeae1e39069662b214b19efb3d35a66f3257`; it is distinct from the
+hosted HTML below.
 
-These local/public results do not claim BuildScope PR, remote CI, sticky-report, or Pages
-completion; those external integration results remain pending.
+## PR #31 remote integration evidence
+
+The initial implementation/docs head for [PR #31](https://github.com/jihoon22-lee/toy-projects/pull/31)
+was `1ff08fe5d2accddc0e9107113eb83dd86bd6d50a`. [Workflow run
+33439733990](https://github.com/jihoon22-lee/toy-projects/actions/runs/33439733990) completed all
+15 dynamic-matrix checks successfully: 3 ici verify checks, 6 Qt5/Qt6 GUI checks, manifest, 3
+benchmark smokes, `Publish Reports & Sticky Comment`, and `Merge Gate`.
+
+The [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/31#issuecomment-5484640868)
+contains one marker, exactly three project links, and the BuildScope result `11 PASS / 2 WARN`,
+TEM `5.00`, `45/45` tests, `7/7` production units, `16` configurations, and complexity max `13`
+across `140` functions.
+
+An independent Pages audit found all three hosted reports at HTTP 200 `text/html` with zero
+external dependencies:
+
+| Project | Hosted report | Bytes | SHA-256 | Title |
+|---|---|---:|---|---|
+| BuildScope | [buildscope/pr/31](https://jihoon22-lee.github.io/toy-projects/buildscope/pr/31/) | 493,453 | `643a3e9e5c45a1512244cc90940146192399471621eac1a2dcb581cc534089c2` | `ici Verification Report — buildscope` |
+| diskmap | [diskmap/pr/31](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/31/) | 311,846 | `a8806808638c584312943d2551c1668a407c45830311de07cb0eed30d15e6924` | `ici Verification Report — diskmap` |
+| loglens | [loglens/pr/31](https://jihoon22-lee.github.io/toy-projects/loglens/pr/31/) | 446,796 | `56f3b2d54ed2a05ebf100313b4d9447553e9c6fb9c85f7e7adce8eccc838dc4f` | `ici Verification Report — loglens` |
+
+B1 implementation and PR #31 remote integration are complete. B2/B3/B4/B5 and the ici I3
+target-by-target comparison remain pending.
 
 ## Next steps
 

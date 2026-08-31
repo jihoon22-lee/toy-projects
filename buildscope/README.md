@@ -5,8 +5,9 @@ Python 3.10+ reads a `compile_commands.json` without executing its commands and 
 deterministic `buildscope.snapshot/v1` document; a C++20/Qt CLI and GUI validate and consume that
 document. B1 adds the Python compile-database normalization core and emits the additive
 `buildscope.snapshot/v2` contract. The final public ici v0.7.1 cold verification and local evidence
-recorded here remain separate from BuildScope PR, remote CI, sticky-report, and Pages evidence,
-which remains pending.
+recorded here remain separate from the hosted BuildScope evidence for
+[PR #31](https://github.com/jihoon22-lee/toy-projects/pull/31), whose initial verified
+implementation/docs head is `1ff08fe5d2accddc0e9107113eb83dd86bd6d50a`.
 
 ## B0 scope
 
@@ -237,10 +238,35 @@ The HTML report was `489,978` bytes, SHA-256
 `contract_json_guard.cpp` 125, `contract_parser.cpp` 382, and `contract_parser_v2.cpp` 333;
 the Python suite contains `41` tests and the CTest aggregate is `45`.
 
-These final public/local results do not imply BuildScope PR, remote CI, sticky-report, or Pages
-completion; those external integration results remain pending.
+These final public/local results are distinct from the hosted HTML and remote integration evidence
+below. The local cold HTML above is `489,978` bytes with SHA-256
+`538bdde8fae8cc769d212799e80ffeae1e39069662b214b19efb3d35a66f3257`; it must not be confused with
+the hosted Pages artifact.
+
+### PR #31 remote integration evidence
+
+The initial implementation/docs head was `1ff08fe5d2accddc0e9107113eb83dd86bd6d50a`.
+Workflow run [33439733990](https://github.com/jihoon22-lee/toy-projects/actions/runs/33439733990)
+for [PR #31](https://github.com/jihoon22-lee/toy-projects/pull/31) completed all 15 dynamic-matrix
+checks successfully: 3 ici verify checks, 6 Qt5/Qt6 GUI checks, manifest, 3 benchmark smokes,
+`Publish Reports & Sticky Comment`, and `Merge Gate`. The
+[sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/31#issuecomment-5484640868)
+contains one marker, exactly three project links, and the BuildScope result `11 PASS / 2 WARN`,
+TEM `5.00`, `45/45` tests, `7/7` production units, `16` configurations, and complexity max
+`13` across `140` functions.
+
+An independent Pages audit found all three hosted reports at HTTP 200 `text/html` with zero
+external dependencies:
+
+| Project | Hosted report | Bytes | SHA-256 | Title |
+|---|---|---:|---|---|
+| BuildScope | [buildscope/pr/31](https://jihoon22-lee.github.io/toy-projects/buildscope/pr/31/) | 493,453 | `643a3e9e5c45a1512244cc90940146192399471621eac1a2dcb581cc534089c2` | `ici Verification Report — buildscope` |
+| diskmap | [diskmap/pr/31](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/31/) | 311,846 | `a8806808638c584312943d2551c1668a407c45830311de07cb0eed30d15e6924` | `ici Verification Report — diskmap` |
+| loglens | [loglens/pr/31](https://jihoon22-lee.github.io/toy-projects/loglens/pr/31/) | 446,796 | `56f3b2d54ed2a05ebf100313b4d9447553e9c6fb9c85f7e7adce8eccc838dc4f` | `ici Verification Report — loglens` |
+
+B1 implementation and PR #31 remote integration evidence are complete. B2/B3/B4/B5 and the ici I3
+target-by-target comparison remain pending.
 
 BuildScope B1 is implemented locally as version `0.2.0`. Its native reader provides the bounded
-legacy-v1/core and v2 bounded/core/cross-entry validation described above; B2/B3/B4/B5 and the ici
-I3 target-by-target comparison remain incomplete, with B2 specifically reserved for normalized C++
-model/UI work.
+legacy-v1/core and v2 bounded/core/cross-entry validation described above, with B2 specifically
+reserved for normalized C++ model/UI work.

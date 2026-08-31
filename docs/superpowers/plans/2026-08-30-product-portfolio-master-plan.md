@@ -690,9 +690,9 @@ buildscope/
 - CMake `AUTOMOC`, `AUTOUIC`, `AUTORCC`를 모두 사용한다.
 - `ici.toml type = "hybrid"`로 양 언어의 test coverage를 요구한다.
 
-- [x] minimal Python CLI와 Qt window가 각각 독립 실행된다. (local/public evidence; PR/remote evidence pending)
-- [x] Python output을 C++ CLI 또는 GUI model이 소비하는 E2E test가 있다. (local/public evidence; PR/remote evidence pending)
-- [x] Qt5/Qt6와 Python 3.10에서 skeleton build/test가 통과한다. (local/public evidence; PR/remote evidence pending)
+- [x] minimal Python CLI와 Qt window가 각각 독립 실행된다. (local/public and PR #31 remote evidence)
+- [x] Python output을 C++ CLI 또는 GUI model이 소비하는 E2E test가 있다. (local/public and PR #31 remote evidence)
+- [x] Qt5/Qt6와 Python 3.10에서 skeleton build/test가 통과한다. (local/public and PR #31 remote evidence)
 
 **B0 당시 과거 pre-hardening local baseline (2026-09-01; 현재 B1 결과 및 PR/remote evidence 아님; superseded):** Python 3.10 backend는
 `compile_commands.json`을 shell 실행 없이 64 MiB/100,000-entry bound 안에서 읽어
@@ -766,10 +766,11 @@ raw command와 재토큰화해 full semantic attestation하지는 않는다. nat
 symlink도 읽기 전에 거부한다. 공개 Draft 2020-12
 `buildscope-snapshot-v1.schema.json` 및 `buildscope-snapshot-v2.schema.json`은 source tree와
 pure wheel에 함께 포함된다. v2 `producer.version`의 schema `maxLength` 1 MiB와 native reader
-문자열 bound도 일치한다. v2 normalized model/UI 전환은 B2 범위다. B1은
-구현 범위 기준으로만 완료 표시하며 B2~B5와 ici I3 비교는 미완료다.
+문자열 bound도 일치한다. v2 normalized model/UI 전환은 B2 범위다. B1 구현과 PR #31
+remote integration evidence는 complete이며, B2~B5와 ici I3
+비교는 미완료다.
 
-**B1 final local/public evidence (2026-09-01; BuildScope PR/remote evidence pending):** public
+**B1 final local/public evidence (2026-09-01):** public
 `ici v0.7.1` cold verification은 표준 `sha256sum --check ici.pyz.sha256`가 통과했고 suite
 `WARN`을 기록했다. `13 engines = 11 PASS / 2 WARN / 0 FAIL / 0 ERROR / 0 SKIP`, total
 `71.09s` (raw `71.08794903755188s`), tests `45/45`, line/function/branch
@@ -783,8 +784,29 @@ external dependencies는 `0`이다. HTML은 `489,978` bytes, SHA-256
 `ici Verification Report — buildscope`였다. Line inventory는 `2,798` total, `2,453` code,
 `345` blank lines across `19` files다. 현재 source line counts는 `contract.cpp` 111,
 `contract_json_guard.cpp` 125, `contract_parser.cpp` 382, `contract_parser_v2.cpp` 333이고,
-Python tests는 `41` (CTest aggregate `45`)이다. BuildScope PR/remote CI/sticky report/Pages
-evidence는 아직 pending이다.
+Python tests는 `41` (CTest aggregate `45`)이다. Local cold HTML은 `489,978` bytes,
+SHA-256 `538bdde8fae8cc769d212799e80ffeae1e39069662b214b19efb3d35a66f3257`이며 hosted HTML과
+별개다.
+
+**B1 PR #31 remote integration evidence:** [PR #31](https://github.com/jihoon22-lee/toy-projects/pull/31)의
+initial implementation/docs head는 `1ff08fe5d2accddc0e9107113eb83dd86bd6d50a`이고,
+[workflow run 33439733990](https://github.com/jihoon22-lee/toy-projects/actions/runs/33439733990)의
+동적 matrix 15 checks가 모두 SUCCESS였다: 3 ici verify, Qt5/Qt6 GUI 6, manifest, benchmark
+smoke 3, `Publish Reports & Sticky Comment`, `Merge Gate`. [Sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/31#issuecomment-5484640868)는
+marker 1개와 정확히 3개 project link를 포함하고 BuildScope `11 PASS / 2 WARN`, TEM `5.00`,
+`45/45`, `7/7`, `16` configurations, complexity max `13`/`140`을 기록했다.
+
+독립 Pages audit는 세 hosted report 모두 HTTP 200, `text/html`, external dependency `0`을
+확인했다.
+
+| Project | URL | Bytes | SHA-256 | Title |
+|---|---|---:|---|---|
+| BuildScope | [buildscope/pr/31](https://jihoon22-lee.github.io/toy-projects/buildscope/pr/31/) | 493,453 | `643a3e9e5c45a1512244cc90940146192399471621eac1a2dcb581cc534089c2` | `ici Verification Report — buildscope` |
+| diskmap | [diskmap/pr/31](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/31/) | 311,846 | `a8806808638c584312943d2551c1668a407c45830311de07cb0eed30d15e6924` | `ici Verification Report — diskmap` |
+| loglens | [loglens/pr/31](https://jihoon22-lee.github.io/toy-projects/loglens/pr/31/) | 446,796 | `56f3b2d54ed2a05ebf100313b4d9447553e9c6fb9c85f7e7adce8eccc838dc4f` | `ici Verification Report — loglens` |
+
+B1 implementation과 PR #31 remote integration evidence는 complete다. B2/B3/B4/B5와 ici I3
+target-by-target comparison은 아직 pending이다.
 
 ### B2. C++ model과 Qt UI
 
