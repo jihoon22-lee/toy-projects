@@ -46,7 +46,6 @@ METRIC_NAMES = (
 UPPER_BOUND_BUDGETS = {
     "first_result_ms": "first_result_ms",
     "load_ms": "load_ms",
-    "peak_rss_mib": "peak_rss_mib",
 }
 LOWER_BOUND_BUDGETS = {
     "throughput_mib_s": "throughput_mib_s",
@@ -507,6 +506,14 @@ def budget_failures(
             or value < budgets[limit]
         ):
             failures.append(f"{metric}<{budgets[limit]}")
+    rss_budget_name = f"{component}_peak_rss_mib"
+    rss = metrics.get("peak_rss_mib")
+    if (
+        not isinstance(rss, (int, float))
+        or isinstance(rss, bool)
+        or rss > budgets[rss_budget_name]
+    ):
+        failures.append(f"peak_rss_mib>{budgets[rss_budget_name]}")
     if component == "gui":
         value = metrics.get("first_paint_ms")
         if (
