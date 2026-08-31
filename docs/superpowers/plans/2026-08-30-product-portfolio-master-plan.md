@@ -30,7 +30,7 @@
 
 | 프로젝트 | 현재 형태 | 실측 | 제품 상태 |
 |---|---|---|---|
-| loglens | C++17, Qt, CMake | L1 merged · 10 tests · PR #22 TEM 4.82 | streaming 신뢰성 완료, 대용량 UX는 L2~L6에서 확장 |
+| loglens | C++17, Qt, CMake | L2 bounded foundation local PASS · 10 tests · TEM 4.85 | bounded 기반 완료, 대용량 UX는 남은 L2~L6에서 확장 |
 | diskmap | C++17, Qt, qmake | D1 Slice 2 merged · PR #23 · CI green · TEM 4.90 | treemap viewer, cleanup UX는 D2~D6에서 확장 |
 | ici/viewer | Qt-free core + Qt6 GUI | 3 tests, TEM 4.94 | core 중심, 셸과 report workflow 부족 |
 
@@ -258,13 +258,29 @@ Pages의 `diskmap/pr/22/`는 HTTP 200·161211 bytes·external refs 0개,
 
 **브랜치:** `feat/loglens-bounded-model`
 
-- [ ] 기존 RingBuffer를 GUI/CLI 실제 record store에 연결한다.
-- [ ] capacity, dropped record count와 oldest/newest line을 노출한다.
-- [ ] model reset 대신 incremental insert/remove contract를 테스트한다.
+- [x] 기존 RingBuffer를 GUI/CLI 실제 record store에 연결한다.
+- [x] capacity, dropped record count와 oldest/newest line을 노출한다.
+- [x] model reset 대신 incremental insert/remove contract를 테스트한다.
 - [ ] 초기 open은 tail N 또는 streaming index mode 중 사용자 선택을 제공한다.
 - [ ] background parsing 중 UI가 filter/search를 안전하게 처리한다.
 - [ ] 1 GiB synthetic log와 100만 record benchmark를 만들고 first-paint, throughput, peak RSS를 기록한다.
 - [ ] 실측 후 default capacity와 성능 budget을 고정한다.
+
+**L2 bounded foundation 로컬 증거 (2026-08-31):** GUI와 CLI는 absolute record ID를
+유지하는 같은 `RingBuffer` 계약을 사용한다. 기본 보존량은 32,768 records, 허용 상한은
+1,000,000이며 eviction 때 visible model은 contiguous remove/insert signal을 낸다. source
+poll은 기본 1 MiB·상한 16 MiB chunk로 제한되고, GUI는 Follow가 꺼져도 초기 backlog를
+zero-delay event로 협력적으로 소진한다. one-shot CLI는 첫 file-size snapshot까지만 읽으므로
+동시 append를 무한 추격하지 않는다. pathological physical/logical record는 기본 64 KiB·상한
+1 MiB로 제한하고 `input_bytes`/`omitted_bytes`로 손실을 명시한다.
+
+Qt 5.15과 Qt 6.10의 전체 CTest는 각각 10/10, `-Wall -Wextra -Wpedantic -Werror` Qt6
+build/CTest도 10/10 PASS였다. ici 0.6.0 최종 local verify는 Suite PASS, 10 pass / 0 warn /
+0 fail / 0 error / 2 skip, TEM 4.85, line/function/branch 93.9%/96.9%/83.1%, maximum
+complexity 15(0 issues), duplication 1.43%, sanitizer clean이었다. HTML은 283,077 bytes이며
+외부 script/link/image 참조가 0개다. PR CI·sticky comment·Pages는 아직 원격 검증 전이다.
+Tail N/index 선택, 실제 background parsing, 1 GiB·100만 record benchmark와 실측 기반 기본값은
+의도적으로 다음 L2 slice로 남긴다.
 
 ### L3. parser와 filter 완성도
 
