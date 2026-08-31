@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 project(loglens LANGUAGES CXX)
 
+option(LOGLENS_BUILD_BENCHMARKS "Build opt-in large-file benchmark tools" OFF)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
@@ -38,6 +40,10 @@ add_executable(loglens src/main.cpp)
 target_link_libraries(loglens PRIVATE loglens_core)
 
 add_subdirectory(src/gui)
+
+if(LOGLENS_BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
+endif()
 
 enable_testing()
 
