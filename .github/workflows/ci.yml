@@ -406,9 +406,9 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           if [ "$QT_MAJOR" = 5 ]; then
-            sudo apt-get install -y --no-install-recommends qtbase5-dev qt5-qmake pkg-config
+            sudo apt-get install -y --no-install-recommends qtbase5-dev qt5-qmake pkg-config g++
           elif [ "$QT_MAJOR" = 6 ]; then
-            sudo apt-get install -y --no-install-recommends qt6-base-dev qmake6 pkg-config
+            sudo apt-get install -y --no-install-recommends qt6-base-dev qmake6 pkg-config g++
           else
             echo "::error::unsupported Qt major: $QT_MAJOR"
             exit 1
