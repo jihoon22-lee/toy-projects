@@ -3,11 +3,13 @@
 #include <QAbstractTableModel>
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <vector>
 
 #include "loglens/filter_expr.hpp"
 #include "loglens/log_record.hpp"
+#include "loglens/ring_buffer.hpp"
 
 // Table model over parsed records.
 //
@@ -20,10 +22,11 @@ class LogModel : public QAbstractTableModel {
 
 public:
     enum Column { ColumnLine = 0, ColumnLevel, ColumnSource, ColumnMessage, ColumnCount };
+    explicit LogModel(QObject* parent = nullptr,
+                      std::size_t capacity = loglens::kDefaultRecordCapacity);
 
-    explicit LogModel(QObject* parent = nullptr);
-
-    void setRecords(std::vector<loglens::LogRecord> records);
+    void setRecords(std::vector<loglens::LogRecord> records,
+                    std::uint64_t generation = 0);
     // Passing nullptr clears the filter and shows everything.
     void setFilter(const loglens::Filter* filter);
 
@@ -31,18 +34,29 @@ public:
     // current filter are announced as one contiguous insert at the end, which
     // is always correct because appends never land in the middle.
     void appendRecords(const std::vector<loglens::LogRecord>& records);
+    void appendRecords(const std::vector<loglens::LogRecord>& records,
+                       std::size_t firstRecordIndex,
+                       std::uint64_t generation);
 
     // Drops everything. Used when the source file is truncated or rotated,
     // where the retained rows no longer correspond to anything on disk.
-    void resetRecords();
+    void resetRecords(std::uint64_t generation = 0);
 
     // Replaces one already-published record after a continuation line arrives.
     // The method preserves filter semantics and emits the smallest valid model
     // change for visible rows.
     void updateRecord(std::size_t index, const loglens::LogRecord& record);
+    void updateRecord(std::size_t index, const loglens::LogRecord& record,
+                      std::uint64_t generation);
 
     const loglens::LogRecord* recordAt(int row) const;
     int totalCount() const;
+    std::size_t totalSeen() const;
+    std::size_t droppedCount() const;
+    std::size_t capacity() const;
+    std::optional<std::size_t> oldestLine() const;
+    std::optional<std::size_t> newestLine() const;
+    std::uint64_t generation() const;
 
     int rowCount(const QModelIndex& parent = QModelIndex()) const override;
     int columnCount(const QModelIndex& parent = QModelIndex()) const override;
@@ -50,12 +64,15 @@ public:
     QVariant headerData(int section, Qt::Orientation orientation, int role) const override;
 
 private:
-    std::vector<loglens::LogRecord> records_;
-    std::vector<int> visible_;
+    loglens::RingBuffer records_;
+    // Absolute logical record IDs from RecordAssembler, never ring-slot indexes.
+    // IDs remain stable when the backing buffer wraps and old records are evicted.
+    std::vector<std::size_t> visible_;
     // Held by value, not by pointer: appendRecords needs the predicate later,
     // and the caller's optional<Filter> may be reassigned before then. A Filter
     // is one shared_ptr, so copying it is cheap.
     std::optional<loglens::Filter> filter_;
+    std::uint64_t generation_ = 0;
 
     void rebuildVisible(const loglens::Filter* filter);
 };

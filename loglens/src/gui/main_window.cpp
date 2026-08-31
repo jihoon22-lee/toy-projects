@@ -28,7 +28,8 @@ constexpr std::uint64_t kBucketMs = 60000;
 
 } // namespace
 
-MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
+MainWindow::MainWindow(QWidget* parent, std::size_t recordCapacity, std::size_t sourceChunkBytes)
+    : QMainWindow(parent), source_chunk_bytes_(sourceChunkBytes) {
     auto* central = new QWidget(this);
     auto* layout = new QVBoxLayout(central);
 
@@ -58,7 +59,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     timeline_->setAccessibleName(tr("Log timeline"));
     layout->addWidget(timeline_);
 
-    model_ = new LogModel(this);
+    model_ = new LogModel(this, recordCapacity);
     table_ = new QTableView(central);
     table_->setObjectName(QStringLiteral("logTable"));
     table_->setAccessibleName(tr("Log records"));
@@ -100,20 +101,34 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
 void MainWindow::applyDeltas(const std::vector<loglens::RecordDelta>& deltas) {
     std::vector<loglens::LogRecord> appends;
+    std::size_t firstAppendIndex = 0;
+    std::uint64_t appendGeneration = 0;
+    const auto flushAppends = [this, &appends, &firstAppendIndex, &appendGeneration]() {
+        if (!appends.empty()) {
+            model_->appendRecords(appends, firstAppendIndex, appendGeneration);
+            appends.clear();
+        }
+    };
     for (const loglens::RecordDelta& delta : deltas) {
         if (delta.kind == loglens::RecordDelta::Kind::Append) {
+            const bool contiguous = appends.empty()
+                                    || (delta.generation == appendGeneration
+                                        && delta.record_index
+                                               == firstAppendIndex + appends.size());
+            if (!contiguous) {
+                flushAppends();
+            }
+            if (appends.empty()) {
+                firstAppendIndex = delta.record_index;
+                appendGeneration = delta.generation;
+            }
             appends.push_back(delta.record);
             continue;
         }
-        if (!appends.empty()) {
-            model_->appendRecords(appends);
-            appends.clear();
-        }
-        model_->updateRecord(delta.record_index, delta.record);
+        flushAppends();
+        model_->updateRecord(delta.record_index, delta.record, delta.generation);
     }
-    if (!appends.empty()) {
-        model_->appendRecords(appends);
-    }
+    flushAppends();
 }
 
 void MainWindow::chooseFile() {
@@ -125,13 +140,14 @@ void MainWindow::chooseFile() {
 }
 
 void MainWindow::openPath(const QString& path) {
-    tailer_ = std::make_unique<loglens::FileTailer>(path.toStdString());
+    tailer_ = std::make_unique<loglens::FileTailer>(path.toStdString(), source_chunk_bytes_);
     loglens::SourceChunk chunk;
     std::string error;
     if (!tailer_->pollChunk(chunk, error)) {
         // Report it rather than showing an empty window with no explanation.
         status_->setText(tr("Cannot read: %1").arg(QString::fromStdString(error)));
         tailer_.reset();
+        backlog_pending_ = false;
         assembler_.reset();
         model_->resetRecords();
         refreshTimeline();
@@ -143,21 +159,26 @@ void MainWindow::openPath(const QString& path) {
         return;
     }
     assembler_.reset(tailer_->generation());
-    model_->setRecords(std::vector<loglens::LogRecord>());
+    backlog_pending_ = chunk.more_available;
+    model_->setRecords(std::vector<loglens::LogRecord>(), tailer_->generation());
     applyDeltas(assembler_.consumeBytes(chunk.bytes));
     applyFilter();
     setWindowTitle(tr("loglens — %1").arg(path));
     setFollowing(followBox_->isChecked());
+    if (backlog_pending_) {
+        QTimer::singleShot(0, this, &MainWindow::pollSource);
+    }
 }
 
 void MainWindow::pollSource() {
-    if (!tailer_ || followState_ == FollowState::Stopped) {
+    if (!tailer_ || (followState_ == FollowState::Stopped && !backlog_pending_)) {
         return;
     }
     const std::size_t restartsBefore = tailer_->restarts();
     loglens::SourceChunk chunk;
     std::string error;
     if (!tailer_->pollChunk(chunk, error)) {
+        backlog_pending_ = false;
         if (chunk.error.retryable) {
             followState_ = FollowState::WaitingRetry;
             ++retryAttempts_;
@@ -172,8 +193,9 @@ void MainWindow::pollSource() {
         return;
     }
 
-    followState_ = FollowState::Following;
+    followState_ = followBox_->isChecked() ? FollowState::Following : FollowState::Stopped;
     retryAttempts_ = 0;
+    backlog_pending_ = chunk.more_available;
     // A truncated or replaced file makes every retained row stale, so the model
     // starts over instead of appending new lines under old ones. Comparing the
     // parser generation as well handles a replacement that was detected during
@@ -182,19 +204,25 @@ void MainWindow::pollSource() {
     if (tailer_->restarts() != restartsBefore || chunk.generation_changed
         || chunk.generation != assembler_.generation()) {
         assembler_.reset(tailer_->generation());
-        model_->resetRecords();
+        model_->resetRecords(tailer_->generation());
     }
     const std::vector<loglens::RecordDelta> deltas = assembler_.consumeBytes(chunk.bytes);
     if (deltas.empty()) {
         refreshTimeline();
-        updateStatus(QString());
+        updateStatus(backlog_pending_ ? tr("loading…") : QString());
+        if (backlog_pending_) {
+            QTimer::singleShot(0, this, &MainWindow::pollSource);
+        }
         return;
     }
     applyDeltas(deltas);
     refreshTimeline();
-    updateStatus(QString());
+    updateStatus(backlog_pending_ ? tr("loading…") : QString());
     if (autoScroll_) {
         table_->scrollToBottom();
+    }
+    if (backlog_pending_) {
+        QTimer::singleShot(0, this, &MainWindow::pollSource);
     }
 }
 
@@ -245,7 +273,22 @@ void MainWindow::refreshTimeline() {
 }
 
 void MainWindow::updateStatus(const QString& extra) {
-    QString message = tr("%1 / %2 line(s)").arg(model_->rowCount()).arg(model_->totalCount());
+    QString lineRange = tr("none");
+    const std::optional<std::size_t> oldest = model_->oldestLine();
+    const std::optional<std::size_t> newest = model_->newestLine();
+    if (oldest && newest) {
+        lineRange = QStringLiteral("%1–%2")
+                        .arg(static_cast<qulonglong>(*oldest))
+                        .arg(static_cast<qulonglong>(*newest));
+    }
+    QString message =
+        tr("%1 visible / %2 retained · %3 seen · %4 dropped · lines %5 · cap %6")
+            .arg(model_->rowCount())
+            .arg(model_->totalCount())
+            .arg(static_cast<qulonglong>(model_->totalSeen()))
+            .arg(static_cast<qulonglong>(model_->droppedCount()))
+            .arg(lineRange)
+            .arg(static_cast<qulonglong>(model_->capacity()));
     if (!extra.isEmpty()) {
         message += QStringLiteral("  —  ") + extra;
     }

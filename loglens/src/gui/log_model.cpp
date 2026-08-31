@@ -1,6 +1,8 @@
 #include "loglens/gui/log_model.hpp"
 
 #include <algorithm>
+#include <limits>
+#include <stdexcept>
 
 #include <QBrush>
 #include <QColor>
@@ -28,6 +30,13 @@ QColor colourFor(loglens::Level level) {
     return QColor("#8a8f98");
 }
 
+std::size_t modelCapacity(std::size_t requested) {
+    if (requested > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        throw std::invalid_argument("log model capacity exceeds Qt row limit");
+    }
+    return requested;
+}
+
 QString columnText(const loglens::LogRecord& record, int column) {
     if (column == LogModel::ColumnLine) {
         return QString::number(record.line_number);
@@ -40,17 +49,27 @@ QString columnText(const loglens::LogRecord& record, int column) {
     }
     // Multi-line messages (a folded stack trace) would break row height, so the
     // table shows the first line and the tooltip carries the rest.
-    const QString message = QString::fromStdString(record.message);
-    return message.section(QLatin1Char('\n'), 0, 0);
+    QString message = QString::fromStdString(record.message).section(QLatin1Char('\n'), 0, 0);
+    if (record.omitted_bytes > 0) {
+        message += QStringLiteral("  [%1 source byte(s) omitted]")
+                       .arg(static_cast<qulonglong>(record.omitted_bytes));
+    }
+    return message;
 }
 
 } // namespace
 
-LogModel::LogModel(QObject* parent) : QAbstractTableModel(parent) {}
+LogModel::LogModel(QObject* parent, std::size_t capacity)
+    : QAbstractTableModel(parent), records_(modelCapacity(capacity)) {}
 
-void LogModel::setRecords(std::vector<loglens::LogRecord> records) {
+void LogModel::setRecords(std::vector<loglens::LogRecord> records,
+                          std::uint64_t generation) {
     beginResetModel();
-    records_ = std::move(records);
+    records_.clear();
+    generation_ = generation;
+    for (const loglens::LogRecord& record : records) {
+        records_.push(record);
+    }
     // Opening a new file drops the old filter. Leaving it would make
     // appendRecords filter rows that rebuildVisible(nullptr) just let through.
     filter_.reset();
@@ -66,54 +85,83 @@ void LogModel::setFilter(const loglens::Filter* filter) {
 }
 
 void LogModel::appendRecords(const std::vector<loglens::LogRecord>& records) {
+    appendRecords(records, records_.totalPushed(), generation_);
+}
+
+void LogModel::appendRecords(const std::vector<loglens::LogRecord>& records,
+                             std::size_t firstRecordIndex,
+                             std::uint64_t generation) {
     if (records.empty()) {
         return;
     }
+    if (generation != generation_ || firstRecordIndex != records_.totalPushed()) {
+        return;
+    }
+    if (records.size() > std::numeric_limits<std::size_t>::max() - firstRecordIndex) {
+        return;
+    }
 
-    const int first = static_cast<int>(visible_.size());
-    std::vector<int> arriving;
-    arriving.reserve(records.size());
-    for (std::size_t offset = 0; offset < records.size(); ++offset) {
-        const loglens::LogRecord& record = records[offset];
-        const int index = static_cast<int>(records_.size() + offset);
+    const std::size_t totalAfter = firstRecordIndex + records.size();
+    const std::size_t retainedAfter = std::min(records_.capacity(), totalAfter);
+    const std::size_t firstRetainedAfter = totalAfter - retainedAfter;
+    const auto retainedVisible =
+        std::lower_bound(visible_.begin(), visible_.end(), firstRetainedAfter);
+    const int removedVisible = static_cast<int>(retainedVisible - visible_.begin());
+    if (removedVisible > 0) {
+        beginRemoveRows(QModelIndex(), 0, removedVisible - 1);
+        visible_.erase(visible_.begin(), retainedVisible);
+        endRemoveRows();
+    }
+
+    for (const loglens::LogRecord& record : records) {
+        records_.push(record);
+    }
+
+    const std::size_t firstArriving = std::max(firstRecordIndex, firstRetainedAfter);
+    std::vector<std::size_t> arriving;
+    arriving.reserve(totalAfter - firstArriving);
+    for (std::size_t index = firstArriving; index < totalAfter; ++index) {
+        const loglens::LogRecord& record =
+            records[index - firstRecordIndex];
         if (!filter_ || filter_->matches(record)) {
             arriving.push_back(index);
         }
     }
-
-    // beginInsertRows with an empty range violates the model contract, so a
-    // batch where nothing passes the filter stays silent about rows while
-    // still retaining the records.
     if (arriving.empty()) {
-        records_.insert(records_.end(), records.begin(), records.end());
         return;
     }
 
+    const int first = static_cast<int>(visible_.size());
     beginInsertRows(QModelIndex(), first, first + static_cast<int>(arriving.size()) - 1);
-    records_.insert(records_.end(), records.begin(), records.end());
     visible_.insert(visible_.end(), arriving.begin(), arriving.end());
     endInsertRows();
 }
 
-void LogModel::resetRecords() {
+void LogModel::resetRecords(std::uint64_t generation) {
     beginResetModel();
     records_.clear();
     visible_.clear();
+    generation_ = generation;
     endResetModel();
 }
 
 void LogModel::updateRecord(std::size_t index, const loglens::LogRecord& record) {
-    if (index >= records_.size()) {
+    updateRecord(index, record, generation_);
+}
+
+void LogModel::updateRecord(std::size_t index, const loglens::LogRecord& record,
+                            std::uint64_t generation) {
+    const loglens::LogRecord* previous = records_.find(index);
+    if (generation != generation_ || previous == nullptr) {
         return;
     }
 
-    const bool wasVisible = !filter_ || filter_->matches(records_[index]);
     const bool isVisible = !filter_ || filter_->matches(record);
-    const int recordIndex = static_cast<int>(index);
-    auto position = std::lower_bound(visible_.begin(), visible_.end(), recordIndex);
+    auto position = std::lower_bound(visible_.begin(), visible_.end(), index);
+    const bool wasVisible = position != visible_.end() && *position == index;
 
     if (wasVisible && isVisible) {
-        records_[index] = record;
+        records_.replace(index, record);
         const int row = static_cast<int>(position - visible_.begin());
         const QModelIndex first = this->index(row, 0);
         const QModelIndex last = this->index(row, ColumnCount - 1);
@@ -125,18 +173,18 @@ void LogModel::updateRecord(std::size_t index, const loglens::LogRecord& record)
     if (wasVisible && !isVisible) {
         const int row = static_cast<int>(position - visible_.begin());
         beginRemoveRows(QModelIndex(), row, row);
-        records_[index] = record;
+        records_.replace(index, record);
         visible_.erase(position);
         endRemoveRows();
         return;
     }
 
-    records_[index] = record;
+    records_.replace(index, record);
     if (!wasVisible && isVisible) {
-        position = std::lower_bound(visible_.begin(), visible_.end(), recordIndex);
+        position = std::lower_bound(visible_.begin(), visible_.end(), index);
         const int row = static_cast<int>(position - visible_.begin());
         beginInsertRows(QModelIndex(), row, row);
-        visible_.insert(position, recordIndex);
+        visible_.insert(position, index);
         endInsertRows();
     }
 }
@@ -145,8 +193,9 @@ void LogModel::rebuildVisible(const loglens::Filter* filter) {
     visible_.clear();
     visible_.reserve(records_.size());
     for (std::size_t i = 0; i < records_.size(); ++i) {
-        if (filter == nullptr || filter->matches(records_[i])) {
-            visible_.push_back(static_cast<int>(i));
+        const loglens::LogRecord& record = records_.at(i);
+        if (filter == nullptr || filter->matches(record)) {
+            visible_.push_back(records_.firstIndex() + i);
         }
     }
 }
@@ -155,10 +204,32 @@ const loglens::LogRecord* LogModel::recordAt(int row) const {
     if (row < 0 || row >= static_cast<int>(visible_.size())) {
         return nullptr;
     }
-    return &records_[static_cast<std::size_t>(visible_[static_cast<std::size_t>(row)])];
+    return records_.find(visible_[static_cast<std::size_t>(row)]);
 }
 
 int LogModel::totalCount() const { return static_cast<int>(records_.size()); }
+
+std::size_t LogModel::totalSeen() const { return records_.totalPushed(); }
+
+std::size_t LogModel::droppedCount() const { return records_.droppedCount(); }
+
+std::size_t LogModel::capacity() const { return records_.capacity(); }
+
+std::optional<std::size_t> LogModel::oldestLine() const {
+    if (records_.empty()) {
+        return std::nullopt;
+    }
+    return records_.at(0).line_number;
+}
+
+std::optional<std::size_t> LogModel::newestLine() const {
+    if (records_.empty()) {
+        return std::nullopt;
+    }
+    return records_.at(records_.size() - 1).line_number;
+}
+
+std::uint64_t LogModel::generation() const { return generation_; }
 
 int LogModel::rowCount(const QModelIndex& parent) const {
     return parent.isValid() ? 0 : static_cast<int>(visible_.size());
@@ -180,7 +251,12 @@ QVariant LogModel::data(const QModelIndex& index, int role) const {
         return QBrush(colourFor(record->level));
     }
     if (role == Qt::ToolTipRole) {
-        return QString::fromStdString(record->raw);
+        QString tooltip = QString::fromStdString(record->raw);
+        if (record->omitted_bytes > 0) {
+            tooltip += QStringLiteral("\n[%1 source byte(s) omitted]")
+                           .arg(static_cast<qulonglong>(record->omitted_bytes));
+        }
+        return tooltip;
     }
     return QVariant();
 }
