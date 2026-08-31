@@ -30,7 +30,7 @@
 
 | 프로젝트 | 현재 형태 | 실측 | 제품 상태 |
 |---|---|---|---|
-| loglens | C++17, Qt, CMake | L2 bounded/background slice · PR #25 CI green · local Qt5/Qt6 12 CTest targets · 1 GiB benchmark PR #26 remote verified · squash merge pending | Tail N/From start와 worker UX, benchmark/default 8192 완료 |
+| loglens | C++17, Qt, CMake | L2 bounded/background slice · PR #25 CI green · local Qt5/Qt6 12 CTest targets · 1 GiB benchmark PR #26 merged · main Qt5/Qt6 sweep green | Tail N/From start와 worker UX, benchmark/default 8192 완료 |
 | diskmap | C++17, Qt, qmake | D1 Slice 2 merged · PR #23 · CI green · TEM 4.90 | treemap viewer, cleanup UX는 D2~D6에서 확장 |
 | ici/viewer | Qt-free core + Qt6 GUI | 3 tests, TEM 4.94 | core 중심, 셸과 report workflow 부족 |
 
@@ -256,7 +256,7 @@ Pages의 `diskmap/pr/22/`는 HTTP 200·161211 bytes·external refs 0개,
 
 ### L2. bounded storage와 큰 파일 UX
 
-**브랜치:** `feat/loglens-bounded-model` (foundation), `feat/loglens-background-loader` (current slice), `feat/loglens-large-file-benchmark` (benchmark candidate)
+**브랜치:** `feat/loglens-bounded-model` (foundation), `feat/loglens-background-loader` (current slice), `feat/loglens-large-file-benchmark` (PR #26 merged)
 
 - [x] 기존 RingBuffer를 GUI/CLI 실제 record store에 연결한다.
 - [x] capacity, dropped record count와 oldest/newest line을 노출한다.
@@ -298,23 +298,24 @@ capacity 8192의 median은 다음과 같다.
 
 | Qt | component | first result | first paint | load | throughput | records/s | peak RSS |
 |---|---|---:|---:|---:|---:|---:|---:|
-| 5 | core | 2.931 ms | — | 1212.313 ms | 844.666 MiB/s | 824869.622 | 25.699 MiB |
-| 5 | GUI | 20.099 ms | 20.668 ms | 13374.639 ms | 76.563 MiB/s | 74768.375 | 55.848 MiB |
-| 6 | core | 3.352 ms | — | 1349.536 ms | 758.779 MiB/s | 740995.486 | 25.719 MiB |
-| 6 | GUI | 21.982 ms | 22.426 ms | 17949.170 ms | 57.050 MiB/s | 55712.882 | 58.648 MiB |
+| 5 | core | 3.041 ms | — | 1510.632 ms | 677.862 MiB/s | 661974.809 | 24.465 MiB |
+| 5 | GUI | 18.031 ms | 19.616 ms | 17717.171 ms | 57.797 MiB/s | 56442.421 | 53.336 MiB |
+| 6 | core | 3.049 ms | — | 1480.219 ms | 691.790 MiB/s | 675575.761 | 24.469 MiB |
+| 6 | GUI | 18.055 ms | 18.843 ms | 18490.615 ms | 55.379 MiB/s | 54081.488 | 55.980 MiB |
 
 runner는 input의 정확한 크기·record 수·SHA-256을 확인하고 raw sample을 집계한다. benchmark
 target은 기본 빌드에 포함하지 않으며, local runner는 README의 [재현 명령](../../../README.md#1-gib-benchmark-재현-opt-in)으로
 실행한다. artifact에는 `summary.json`, `summary.md`, `toolchain.json`, `toolchain.txt`,
 `samples/*.json`만 남기고 1 GiB input과 process log는 scratch에 둔다. workflow는
 `workflow_dispatch`와 주간 schedule의 Qt5/Qt6 matrix이며 일반 PR/merge gate가 아니다.
-이 결과의 원격 검증은 [PR #26](https://github.com/jihoon22-lee/toy-projects/pull/26)의
-verified head `564b782b93cfabed14db31f92e47619d5c17df2c`에서 완료됐다. [green workflow run](https://github.com/jihoon22-lee/toy-projects/actions/runs/33354504610)은
-benchmark smoke 42초를 포함한 모든 checks가 SUCCESS였고, [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/26#issuecomment-5473343910)는
+PR #26은 `c45176ce25f2efd66ea9b0ed9b48690e34cc8679`로 squash merge됐다. 최종 PR gate인
+[workflow run `33355058919`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33355058919)은
+모든 checks가 green이었고, 기존 [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/26#issuecomment-5473343910)는
 `diskmap: PASS · TEM 4.90`, `loglens: PASS · TEM 4.80`, warn 0과 HTML 링크를 포함한다.
 Pages `diskmap/pr/26/`와 `loglens/pr/26/`는 각각 HTTP 200·`text/html`·external refs 0개
-(180160/334215 bytes)였다. PR26은 아직 병합 전이며 현재 상태는 remote verified, squash
-merge pending이다.
+(180160/334215 bytes)였다. 병합된 main의 [대용량 workflow run `33355312096`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33355312096)은
+Qt5/Qt6 benchmark, combine, verdict를 모두 green으로 완료했고, combined summary SHA-256은
+`5e3292950958a4c678a0c54bf75e7b2546ad1528f43529b6cce1c3dff4e150a8`이다.
 
 background/Tail N 변경은 최신 구현 head `ce2a7cd91ff0a47c4f153b60f7fb7984de406ce9`로
 [PR #25](https://github.com/jihoon22-lee/toy-projects/pull/25)의
@@ -323,7 +324,7 @@ background/Tail N 변경은 최신 구현 head `ce2a7cd91ff0a47c4f153b60f7fb7984
 병합됐다. [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/25#issuecomment-5472960253)는
 두 프로젝트 PASS와 HTML 링크를 포함하며, Pages `diskmap/pr/25/`와 `loglens/pr/25/`는 각각
 HTTP 200·`text/html`·external refs 0개(180160/327074 bytes)였다. 이 원격 evidence는
-background/Tail N 변경에 대한 것이고 1 GiB benchmark candidate와는 별개다.
+background/Tail N 변경에 대한 것이고 1 GiB benchmark와는 별개다.
 
 일반 PR의 `.github/workflows/ci.yml`에는 1 MiB/1,000 records, capacity `64,256`, 1회,
 30초 timeout, budget skip의 `benchmark-smoke`가 있으며, `Merge Gate`가 이 harness correctness
@@ -331,7 +332,7 @@ run의 성공을 required check로 요구한다. full 1 GiB budget sweep은 비�
 `workflow_dispatch`/주간 schedule workflow로만 실행한다.
 
 Qt 5.15과 Qt 6.10의 전체 CTest는 각각 12/12였고 Qt6 strict benchmark build도 PASS였다.
-현재 benchmark candidate의 ici 0.6.0 deep no-cache는 Suite PASS, 12/12 tests, TEM 4.83,
+현재 L2 benchmark의 ici 0.6.0 deep no-cache는 Suite PASS, 12/12 tests, TEM 4.83,
 line/function/branch 93.6%/96.6%/81.8%, maximum complexity 15(0 issues), duplication 1.71%,
 sanitizer PASS, HTML 433,351 bytes·external refs 0개였다. 이전 bounded foundation의 ici
 0.6.0 local verify는 Suite PASS, 10 pass / 0 warn / 0 fail / 0 error / 2 skip, TEM 4.85,
@@ -345,12 +346,12 @@ head `fa4fd1a`의 PR
 두 프로젝트 PASS와 HTML 링크를 포함하며, Pages `diskmap/pr/24/`와 `loglens/pr/24/`는 각각
 HTTP 200·`text/html`·180,160/279,484 bytes·외부 참조 0개였다. 위 원격 수치는 background
 loader/Tail N 변경 이전 bounded foundation에 대한 historical evidence다. background/Tail N
-현재 원격 evidence는 위 PR #25 기록이며, benchmark candidate의 local ici/대용량 결과는
-별도로 관리한다.
+현재 원격 evidence는 위 PR #25 기록이며, L2 benchmark의 merged-main evidence는 위에
+정리했다.
 
 L2 bounded/background 구현과 1 GiB benchmark, 성능 budget/default capacity 결정은 완료됐다.
-PR26의 원격 CI·ici·sticky report·Pages 검증도 완료됐지만 아직 병합하지 않았다. 다음 단계는
-PR26을 squash merge하는 것이다.
+PR26의 원격 CI·ici·sticky report·Pages 검증과 main Qt5/Qt6 full sweep도 완료됐다. 다음
+단계는 D2 cancellable scan과 stale-result generation guard다.
 L3 parser/filter와 L6 release 완료 조건은 이 결정으로 닫히지 않으며 체크리스트를 유지한다.
 
 ### L3. parser와 filter 완성도
@@ -988,7 +989,7 @@ ici와 toy-projects가 함께 바뀌는 기능은 다음 순서를 따른다.
 1. 이 마스터 계획과 ici 마스터 계획을 문서 PR로 보존한다.
 2. T0에서 기존 Qt shell 계획을 stateful log parsing과 정확한 failure-state 테스트로 보정해 실행한다.
 3. L1과 D1로 기존 앱의 신뢰성 기반을 만든다.
-4. PR26 green 검증을 확인한 뒤 benchmark candidate를 squash merge하고, D2 cancellable scan과 stale-result generation guard를 구현한다.
+4. 완료된 L2 benchmark 증거를 기준으로 D2 cancellable scan과 stale-result generation guard를 구현한다.
 5. ici finding v3와 맞춰 Q0 runner를 만든다.
 6. ici compile context I3와 함께 B0/B1 buildscope를 시작한다.
 7. ici Python compatibility I5와 함께 E0/E1 envlens를 시작한다.

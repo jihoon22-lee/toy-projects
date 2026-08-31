@@ -11,7 +11,7 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 | 이름 | 설명 | 상태 |
 |---|---|---|
 | [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · identity-safe scan · 9 tests |
-| [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · 1 GiB benchmark PR #26 remote verified · squash merge pending |
+| [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · L2 1 GiB benchmark merged in PR #26 · default capacity 8192 |
 
 ## 공통 구조 규칙
 
@@ -246,7 +246,10 @@ GUI thread에서 안전하게 바꿀 수 있으며, timeline 갱신은 debounce�
 SHA-256 `11186d3021e558c8ed5e33473198a6f9f281ca0605ae79739a928a87156435bb`)의 전체 sweep을
 완료했다. capacity `8192, 16384, 32768, 65536, 131072, 262144`를 각 3회, process timeout
 180초로 실행했으며, 두 Qt major에서 `8192..65536`이 모든 correctness·성능·RSS budget을
-만족했다. `131072`은 core RSS, `262144`는 core와 GUI RSS budget을 넘겼다.
+만족했다. `131072`은 core RSS, `262144`는 core와 GUI RSS budget을 넘겼다. PR #26은
+`c45176ce25f2efd66ea9b0ed9b48690e34cc8679`로 squash merge됐고, [main 대용량 workflow
+run](https://github.com/jihoon22-lee/toy-projects/actions/runs/33355312096)의 Qt5/Qt6
+benchmark·combine·verdict가 모두 green이었다.
 
 고정한 budget은 first result `≤ 5000 ms`, first paint `≤ 5000 ms`, 전체 load `≤ 60000 ms`,
 throughput `≥ 25 MiB/s`, records `≥ 25000 records/s`, core peak RSS `≤ 256 MiB`, GUI peak
@@ -256,10 +259,10 @@ median은 다음과 같다.
 
 | Qt | component | first result | first paint | load | throughput | records/s | peak RSS |
 |---|---|---:|---:|---:|---:|---:|---:|
-| 5 | core | 2.931 ms | — | 1212.313 ms | 844.666 MiB/s | 824869.622 | 25.699 MiB |
-| 5 | GUI | 20.099 ms | 20.668 ms | 13374.639 ms | 76.563 MiB/s | 74768.375 | 55.848 MiB |
-| 6 | core | 3.352 ms | — | 1349.536 ms | 758.779 MiB/s | 740995.486 | 25.719 MiB |
-| 6 | GUI | 21.982 ms | 22.426 ms | 17949.170 ms | 57.050 MiB/s | 55712.882 | 58.648 MiB |
+| 5 | core | 3.041 ms | — | 1510.632 ms | 677.862 MiB/s | 661974.809 | 24.465 MiB |
+| 5 | GUI | 18.031 ms | 19.616 ms | 17717.171 ms | 57.797 MiB/s | 56442.421 | 53.336 MiB |
+| 6 | core | 3.049 ms | — | 1480.219 ms | 691.790 MiB/s | 675575.761 | 24.469 MiB |
+| 6 | GUI | 18.055 ms | 18.843 ms | 18490.615 ms | 55.379 MiB/s | 54081.488 | 55.980 MiB |
 
 #### 1 GiB benchmark 재현 (opt-in)
 
@@ -287,14 +290,15 @@ Qt 5는 `build/benchmark-qt5`를 사용하고 `CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON
 검증한 뒤 core/GUI raw sample을 집계한다. `summary.json`, `summary.md`, `toolchain.json`,
 `toolchain.txt`, `samples/*.json`만 artifact로 남기며 1 GiB input과 process log는 scratch에
 둔다. `.github/workflows/loglens-benchmark.yml`의 Qt5/Qt6 matrix는 `workflow_dispatch`와
-주간 schedule에서만 실행되고 일반 PR/merge gate에는 포함하지 않는다. 이 benchmark
-candidate의 원격 검증은 [PR #26](https://github.com/jihoon22-lee/toy-projects/pull/26)의 verified head
-`564b782b93cfabed14db31f92e47619d5c17df2c`에서 완료됐다. [green workflow run](https://github.com/jihoon22-lee/toy-projects/actions/runs/33354504610)은
-benchmark smoke 42초를 포함한 모든 checks가 SUCCESS였고, [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/26#issuecomment-5473343910)는
-`diskmap: PASS · TEM 4.90`, `loglens: PASS · TEM 4.80`, warn 0과 HTML 링크를 담았다.
+주간 schedule에서만 실행되고 일반 PR/merge gate에는 포함하지 않는다. 이 benchmark는
+[PR #26](https://github.com/jihoon22-lee/toy-projects/pull/26)으로
+`c45176ce25f2efd66ea9b0ed9b48690e34cc8679`에 squash merge됐다. 최종 PR gate인
+[workflow run `33355058919`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33355058919)은
+모든 checks가 green이었고, 기존 [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/26#issuecomment-5473343910)는
+`diskmap: PASS · TEM 4.90`, `loglens: PASS · TEM 4.80`, warn 0과 HTML 링크를 유지한다.
 Pages `diskmap/pr/26/`와 `loglens/pr/26/`는 각각 HTTP 200·`text/html`·external refs 0개
-(180160/334215 bytes)였다. PR26은 아직 병합하지 않았으며 현재 상태는 remote verified,
-squash merge pending이다.
+(180160/334215 bytes)였다. main 대용량 workflow의 combined summary SHA-256은
+`5e3292950958a4c678a0c54bf75e7b2546ad1528f43529b6cce1c3dff4e150a8`이다.
 
 일반 PR에는 별도로 `.github/workflows/ci.yml`의 `benchmark-smoke`가 포함된다. 이것은
 1 MiB/1,000 records, capacity `64,256`, 1회, 30초 timeout의 Qt6 harness correctness run이며
@@ -320,9 +324,8 @@ error / 2 skip, TEM 4.83, line/function/branch 93.4%/96.6%/81.6%, maximum comple
 `69db15966ca0c032026aeb7b742c4eed6335910d`다. [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/25#issuecomment-5472960253)는
 두 프로젝트 PASS와 HTML 링크를 담았고, Pages `diskmap/pr/25/`와 `loglens/pr/25/`는 각각
 HTTP 200·`text/html`·external refs 0개(180160/327074 bytes)였다. 이 원격 증거는
-background/Tail N 변경에 대한 것이며, 1 GiB benchmark candidate는 PR26 원격 검증까지
-완료됐다. PR26의 squash merge만 남아 있고, 병합 전에는 benchmark 결과를 main의 release
-evidence로 표현하지 않는다.
+background/Tail N 변경에 대한 것이며, 1 GiB benchmark는 PR26 병합과 main workflow
+검증까지 완료됐다. L2 이후의 parser/filter와 release 조건은 별도 stream으로 유지한다.
 
 ### Qt 셸 테스트 현황
 
@@ -349,13 +352,13 @@ L1 Slice 2의 GUI 회귀 테스트는 `QTemporaryDir`로 실제 파일을 만들
 `QMetaObject::invokeMethod(..., Qt::DirectConnection)`으로 poll 경계를 결정적으로 구동한다.
 `test_main_window`는 retryable missing 상태에서 기존 행을 보존하는지, 동일 경로의 replacement를
 새 generation으로 재개하는지, 사용자의 Follow 중지/재개와 fatal unsupported source를 각각
-확인한다. 현재 benchmark candidate의 native CMake/CTest는 Qt 6과 Qt 5 각각 12/12 PASS이고,
+확인한다. 현재 L2 benchmark의 native CMake/CTest는 Qt 6과 Qt 5 각각 12/12 PASS이고,
 Qt 6 strict `-Wall -Wextra -Wpedantic -Werror` benchmark build도 통과했다. ici 0.6.0 deep
 no-cache는 Suite PASS, 12/12 tests, TEM 4.83, line/function/branch
 93.6%/96.6%/81.8%, maximum complexity 15, duplication 1.71%, sanitizer PASS였으며 HTML은
 433,351 bytes·external refs 0개였다. background/Tail N의 원격 검증은 PR #25에서
-완료됐고, benchmark candidate도 PR #26의 verified head와 green run, sticky comment, Pages
-검증을 완료했다. PR26은 아직 병합 전이며 squash merge가 남아 있다.
+완료됐고, L2 benchmark도 PR #26의 squash merge, green PR gate, sticky comment, Pages와
+main Qt5/Qt6 full sweep 검증을 완료했다.
 
 ## CI 리포트
 
