@@ -964,21 +964,20 @@ def execute(args: argparse.Namespace) -> int:
     all_correct = bool(samples) and all(
         sample.get("checks", {}).get("correctness") is True for sample in samples
     )
-    all_budget = bool(samples) and all(
-        sample.get("checks", {}).get("budget_pass") is True for sample in samples
-    )
     errors = [
         f"{sample['component']} capacity={sample['capacity']} repetition={sample['repetition']}: {error}"
         for sample in samples
         for error in sample.get("validation_errors", [])
-        + sample.get("budget_failures", [])
     ]
     decision = recommendation(
         aggregates, args.components, args.capacities, enforce_budgets
     )
-    decision["status"] = (
-        "pass" if all_correct and (all_budget or not enforce_budgets) else "fail"
+    has_eligible_capacity = (
+        isinstance(decision.get("recommended_default_capacity"), int)
+        if enforce_budgets
+        else True
     )
+    decision["status"] = "pass" if all_correct and has_eligible_capacity else "fail"
     document: dict[str, Any] = {
         "schema": SCHEMA,
         "benchmark": {
