@@ -13,7 +13,9 @@
 #include "diskmap/fs_node.hpp"
 #include "diskmap/treemap.hpp"
 
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 using diskmap::FsNode;
@@ -160,8 +162,37 @@ int main() {
             const std::vector<Tile> tiles = diskmap::squarify(root, bounds, -1);
             CHECK_EQ(tiles.size(), static_cast<std::size_t>(3));
             for (const Tile& t : tiles) {
+                CHECK(std::isfinite(t.rect.x));
+                CHECK(std::isfinite(t.rect.y));
+                CHECK(std::isfinite(t.rect.w));
+                CHECK(std::isfinite(t.rect.h));
+                CHECK(t.rect.w >= 0.0);
+                CHECK(t.rect.h >= 0.0);
                 CHECK_NEAR(area(t.rect), 0.0, kEps);
+                CHECK_NEAR(t.rect.x, bounds.x, kEps);
+                CHECK_NEAR(t.rect.y, bounds.y, kEps);
             }
+        }
+    }
+
+    // --- uint64 weights: summing children must not wrap before converting to
+    // layout units.  The max-sized child should therefore own essentially all
+    // of the bounds, while the one-byte child remains a degenerate sliver.
+    {
+        constexpr std::uint64_t maximum = std::numeric_limits<std::uint64_t>::max();
+        const FsNode root = makeDir("root", {makeFile("maximum", maximum), makeFile("one", 1)});
+        const Rect bounds{0, 0, 100, 10};
+        const std::vector<Tile> tiles = diskmap::squarify(root, bounds, -1);
+        CHECK_EQ(tiles.size(), static_cast<std::size_t>(2));
+        const Tile* maximumTile = findTileFor(tiles, &root.children[0]);
+        const Tile* oneTile = findTileFor(tiles, &root.children[1]);
+        CHECK(maximumTile != nullptr);
+        CHECK(oneTile != nullptr);
+        if (maximumTile && oneTile) {
+            CHECK_NEAR(area(maximumTile->rect), area(bounds), kEps);
+            CHECK(area(oneTile->rect) >= 0.0);
+            CHECK(area(oneTile->rect) <= kEps);
+            checkPartition(tiles, root, bounds);
         }
     }
 

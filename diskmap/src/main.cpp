@@ -4,9 +4,13 @@
 #include "diskmap/scanner.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <cstdio>
+#include <cstdint>
 #include <iostream>
+#include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -14,35 +18,56 @@ namespace {
 struct CliOptions {
     std::string path;
     int depth = -1;
+    int max_depth = -1;
     std::size_t top = 10;
+    std::uint64_t min_size = 0;
     bool json = false;
+    bool follow_symlinks = false;
+    bool one_file_system = false;
+    std::vector<std::string> exclude_patterns;
     bool help = false;
     bool valid = true;
+    std::string error;
 };
 
 void printUsage(std::ostream& out) {
-    out << "Usage: diskmap <path> [--depth N] [--top N] [--json] [--help]\n"
-        << "  --depth N  limit printed tree depth (the scan always covers the full tree)\n"
-        << "  --top N    show the N largest files (default 10)\n"
-        << "  --json     emit the tree as JSON instead of text\n";
+    out << "Usage: diskmap <path> [options]\n"
+        << "  --max-depth N       limit scan traversal depth\n"
+        << "  --follow-symlinks   follow symlinked directories\n"
+        << "  --min-size BYTES    skip files smaller than BYTES\n"
+        << "  --one-file-system   do not cross filesystem boundaries\n"
+        << "  --exclude GLOB      skip matching entries (repeatable)\n"
+        << "  --depth N           limit printed tree depth\n"
+        << "  --top N             show the N largest files (default 10)\n"
+        << "  --json              emit the tree as JSON instead of text\n"
+        << "  --help              show this message\n";
 }
 
 bool parseNonNegativeInt(const std::string& value, int& out) {
     if (value.empty()) {
         return false;
     }
-    std::size_t consumed = 0;
-    int parsed = 0;
-    try {
-        parsed = std::stoi(value, &consumed);
-    } catch (const std::exception&) {
+    const char* first = value.data();
+    const char* last = first + value.size();
+    const std::from_chars_result parsed = std::from_chars(first, last, out);
+    return parsed.ec == std::errc() && parsed.ptr == last && out >= 0;
+}
+
+bool parseNonNegativeUint64(const std::string& value, std::uint64_t& out) {
+    if (value.empty()) {
         return false;
     }
-    if (consumed != value.size() || parsed < 0) {
-        return false;
+    const char* first = value.data();
+    const char* last = first + value.size();
+    const std::from_chars_result parsed = std::from_chars(first, last, out);
+    return parsed.ec == std::errc() && parsed.ptr == last;
+}
+
+void markInvalid(CliOptions& options, const std::string& message) {
+    options.valid = false;
+    if (options.error.empty()) {
+        options.error = message;
     }
-    out = parsed;
-    return true;
 }
 
 // Consumes the option's value (if present) and reports whether it parsed.
@@ -52,6 +77,27 @@ bool takeIntOption(const std::vector<std::string>& args, std::size_t& index, int
     }
     ++index;
     return parseNonNegativeInt(args[index], out);
+}
+
+bool takeUint64Option(const std::vector<std::string>& args,
+                      std::size_t& index,
+                      std::uint64_t& out) {
+    if (index + 1 >= args.size()) {
+        return false;
+    }
+    ++index;
+    return parseNonNegativeUint64(args[index], out);
+}
+
+bool takeStringOption(const std::vector<std::string>& args,
+                      std::size_t& index,
+                      std::string& out) {
+    if (index + 1 >= args.size()) {
+        return false;
+    }
+    ++index;
+    out = args[index];
+    return !out.empty() && out.rfind("--", 0) != 0;
 }
 
 // Handles a valueless flag. Returns false when arg is not one.
@@ -64,6 +110,14 @@ bool applyFlag(const std::string& arg, CliOptions& options) {
         options.json = true;
         return true;
     }
+    if (arg == "--follow-symlinks") {
+        options.follow_symlinks = true;
+        return true;
+    }
+    if (arg == "--one-file-system") {
+        options.one_file_system = true;
+        return true;
+    }
     return false;
 }
 
@@ -73,25 +127,66 @@ bool applyValueOption(const std::vector<std::string>& args,
                       std::size_t& index,
                       const std::string& arg,
                       CliOptions& options) {
-    if (arg == "--depth") {
-        options.valid = takeIntOption(args, index, options.depth) && options.valid;
+    if (arg == "--depth" || arg == "--max-depth") {
+        int parsedValue = 0;
+        if (!takeIntOption(args, index, parsedValue)) {
+            markInvalid(options, arg + " expects a non-negative integer");
+            return true;
+        }
+        if (arg == "--depth") {
+            options.depth = parsedValue;
+        } else {
+            options.max_depth = parsedValue;
+        }
         return true;
     }
-    if (arg != "--top") {
+    if (arg == "--top") {
+        std::uint64_t parsedValue = 0;
+        if (!takeUint64Option(args, index, parsedValue)
+            || parsedValue > std::numeric_limits<std::size_t>::max()) {
+            markInvalid(options, "--top expects a non-negative integer");
+            return true;
+        }
+        options.top = static_cast<std::size_t>(parsedValue);
+        return true;
+    }
+    if (arg != "--min-size") {
         return false;
     }
-    int parsedValue = 0;
-    const bool parsed = takeIntOption(args, index, parsedValue);
-    options.valid = parsed && options.valid;
-    options.top = parsed ? static_cast<std::size_t>(parsedValue) : options.top;
+    std::uint64_t parsedValue = 0;
+    if (!takeUint64Option(args, index, parsedValue)) {
+        markInvalid(options, "--min-size expects a non-negative integer");
+        return true;
+    }
+    options.min_size = parsedValue;
+    return true;
+}
+
+bool applyStringOption(const std::vector<std::string>& args,
+                       std::size_t& index,
+                       const std::string& arg,
+                       CliOptions& options) {
+    if (arg != "--exclude") {
+        return false;
+    }
+    std::string pattern;
+    if (!takeStringOption(args, index, pattern)) {
+        markInvalid(options, "--exclude expects a non-empty glob");
+        return true;
+    }
+    options.exclude_patterns.push_back(std::move(pattern));
     return true;
 }
 
 // Handles a non-option argument: the first one is the path, a second is an error.
 void applyPositional(const std::string& arg, CliOptions& options) {
     const bool looksLikeOption = !arg.empty() && arg[0] == '-';
-    if (looksLikeOption || !options.path.empty()) {
-        options.valid = false;
+    if (looksLikeOption) {
+        markInvalid(options, "unknown option: " + arg);
+        return;
+    }
+    if (!options.path.empty()) {
+        markInvalid(options, "only one path may be provided");
         return;
     }
     options.path = arg;
@@ -106,7 +201,8 @@ CliOptions parseArgs(int argc, char** argv) {
         if (applyFlag(arg, options)) {
             continue;
         }
-        if (applyValueOption(args, i, arg, options)) {
+        if (applyValueOption(args, i, arg, options)
+            || applyStringOption(args, i, arg, options)) {
             continue;
         }
         applyPositional(arg, options);
@@ -208,25 +304,29 @@ void printScanErrors(const std::vector<std::string>& errors) {
 }
 
 bool scanFailedFatally(const diskmap::ScanResult& result) {
-    return result.dirs_scanned == 0 && !result.errors.empty();
+    return !result.fatal_error.empty();
 }
 
 int runDiskmap(const CliOptions& options) {
     diskmap::RealFsSource source;
-    // Always scan the full tree: --depth caps how much is PRINTED, the way
-    // du --max-depth does. Limiting the scan instead would make the reported
-    // totals shrink with --depth, which is exactly the number a disk-usage
-    // tool must get right.
-    const diskmap::ScanOptions scanOptions;
+    // --depth caps how much is printed. --max-depth is a scanner bound and is
+    // intentionally passed through so callers can trade complete totals for
+    // bounded traversal when they need to.
+    diskmap::ScanOptions scanOptions;
+    scanOptions.max_depth = options.max_depth;
+    scanOptions.follow_symlinks = options.follow_symlinks;
+    scanOptions.min_size = options.min_size;
+    scanOptions.one_file_system = options.one_file_system;
+    scanOptions.exclude_patterns = options.exclude_patterns;
 
     diskmap::ScanResult result = diskmap::scan(source, options.path, scanOptions);
-    diskmap::sortBySizeDesc(result.root);
-    printScanErrors(result.errors);
-
     if (scanFailedFatally(result)) {
-        std::cerr << "fatal: unable to scan '" << options.path << "'\n";
+        std::cerr << "fatal: " << result.fatal_error << "\n";
         return 1;
     }
+
+    diskmap::sortBySizeDesc(result.root);
+    printScanErrors(result.errors);
 
     const int depthCap = effectiveDepthCap(options.depth);
     if (options.json) {
@@ -248,6 +348,9 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (!options.valid || options.path.empty()) {
+        if (!options.error.empty()) {
+            std::cerr << "error: " << options.error << "\n";
+        }
         printUsage(std::cerr);
         return 1;
     }

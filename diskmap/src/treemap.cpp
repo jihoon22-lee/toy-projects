@@ -1,14 +1,13 @@
 #include "diskmap/treemap.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 
 namespace diskmap {
 
 namespace {
-
-constexpr int kHardDepthCap = 1000;
 
 struct RowLayout {
     std::vector<Rect> rects;
@@ -125,10 +124,10 @@ std::vector<const FsNode*> sortedChildPointers(const FsNode& node) {
 // (nothing to weight by), the bounds area is split evenly instead so the
 // partition still holds exactly.
 std::vector<double> computeChildAreas(const std::vector<const FsNode*>& children,
-                                        double boundsArea) {
-    std::uint64_t totalSize = 0;
+                                      double boundsArea) {
+    long double totalSize = 0.0L;
     for (const FsNode* child : children) {
-        totalSize += child->size;
+        totalSize += static_cast<long double>(child->size);
     }
 
     std::vector<double> areas(children.size());
@@ -138,28 +137,50 @@ std::vector<double> computeChildAreas(const std::vector<const FsNode*>& children
         return areas;
     }
     for (std::size_t i = 0; i < children.size(); ++i) {
-        areas[i] = boundsArea * (static_cast<double>(children[i]->size) / static_cast<double>(totalSize));
+        const long double share = static_cast<long double>(children[i]->size) / totalSize;
+        areas[i] = boundsArea * static_cast<double>(share);
     }
     return areas;
 }
 
-void layoutNode(const FsNode& node, const Rect& rect, int depth, int maxDepth,
-                  std::vector<Tile>& tiles) {
+struct LayoutFrame {
+    std::vector<const FsNode*> children;
+    std::vector<Rect> rects;
+    std::size_t next_child = 0;
+    int depth = 0;
+};
+
+LayoutFrame makeLayoutFrame(const FsNode& node, const Rect& rect, int depth) {
+    LayoutFrame frame;
+    frame.children = sortedChildPointers(node);
+    const std::vector<double> areas = computeChildAreas(frame.children, rect.w * rect.h);
+    frame.rects = squarifyAreas(areas, rect);
+    frame.depth = depth;
+    return frame;
+}
+
+void layoutNode(const FsNode& node,
+                const Rect& rect,
+                int maxDepth,
+                std::vector<Tile>& tiles) {
     if (node.children.empty()) {
         return;
     }
 
-    const std::vector<const FsNode*> children = sortedChildPointers(node);
-    const std::vector<double> areas = computeChildAreas(children, rect.w * rect.h);
-    const std::vector<Rect> rects = squarifyAreas(areas, rect);
-
-    const int effectiveMax = maxDepth < 0 ? kHardDepthCap : maxDepth;
-    const bool canRecurse = depth < effectiveMax;
-
-    for (std::size_t i = 0; i < children.size(); ++i) {
-        tiles.push_back(Tile{children[i], rects[i], depth});
-        if (canRecurse) {
-            layoutNode(*children[i], rects[i], depth + 1, maxDepth, tiles);
+    std::vector<LayoutFrame> stack;
+    stack.push_back(makeLayoutFrame(node, rect, 0));
+    while (!stack.empty()) {
+        LayoutFrame& frame = stack.back();
+        if (frame.next_child >= frame.children.size()) {
+            stack.pop_back();
+            continue;
+        }
+        const std::size_t index = frame.next_child++;
+        const FsNode* child = frame.children[index];
+        const Rect childRect = frame.rects[index];
+        tiles.push_back(Tile{child, childRect, frame.depth});
+        if (!child->children.empty() && (maxDepth < 0 || frame.depth < maxDepth)) {
+            stack.push_back(makeLayoutFrame(*child, childRect, frame.depth + 1));
         }
     }
 }
@@ -168,7 +189,14 @@ void layoutNode(const FsNode& node, const Rect& rect, int depth, int maxDepth,
 
 std::vector<Tile> squarify(const FsNode& root, const Rect& bounds, int maxDepth) {
     std::vector<Tile> tiles;
-    layoutNode(root, bounds, 0, maxDepth, tiles);
+    Rect safeBounds = bounds;
+    if (!std::isfinite(safeBounds.w) || safeBounds.w < 0.0) {
+        safeBounds.w = 0.0;
+    }
+    if (!std::isfinite(safeBounds.h) || safeBounds.h < 0.0) {
+        safeBounds.h = 0.0;
+    }
+    layoutNode(root, safeBounds, maxDepth, tiles);
     return tiles;
 }
 

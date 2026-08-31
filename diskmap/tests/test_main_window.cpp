@@ -1,9 +1,16 @@
 #include <QLabel>
+#include <QDir>
+#include <QFile>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QPushButton>
 #include <QTemporaryDir>
-#include <QFile>
-#include <QDir>
+#include <QWaitCondition>
 #include <QtTest>
+
+#include <filesystem>
+#include <memory>
+#include <utility>
 
 #include "diskmap/gui/main_window.hpp"
 #include "diskmap/gui/treemap_widget.hpp"
@@ -13,6 +20,10 @@ class TestMainWindow : public QObject {
 
 private slots:
     void scanningDisplaysTheRootResult();
+    void rescanCannotDisplayAnOlderGeneration();
+    void rescanCancelsPreviousToken();
+    void progressAppearsWhileRunnerIsBlocked();
+    void cancelDiscardsPartialResultAndPreservesVisibleResult();
     void activatingADirectoryDescendsAndUpdatesBreadcrumb();
     void goingUpReturnsToTheRootAndStopsThere();
     void activatingALeafDoesNothing();
@@ -26,6 +37,10 @@ QLabel* breadcrumb(MainWindow& window) {
 
 QLabel* status(MainWindow& window) {
     return window.findChild<QLabel*>(QStringLiteral("status"));
+}
+
+QPushButton* cancelButton(MainWindow& window) {
+    return window.findChild<QPushButton*>(QStringLiteral("cancelScanButton"));
 }
 
 QPushButton* upButton(MainWindow& window) {
@@ -54,6 +69,166 @@ bool makeTree(QTemporaryDir& directory) {
     return true;
 }
 
+diskmap::ScanResult fakeResult(const QString& path, const diskmap::ScanOptions& options) {
+    diskmap::ScanResult result;
+    result.generation = options.generation;
+    result.dirs_scanned = 1;
+    result.files_scanned = 1;
+    result.root.name = path.toStdString();
+    result.root.path = std::filesystem::path(path.toStdString());
+    result.root.is_dir = true;
+    result.root.complete = true;
+    result.root.scan_generation = options.generation;
+
+    diskmap::FsNode child;
+    child.name = "entry-" + path.toStdString();
+    child.path = result.root.path / child.name;
+    child.size = 4096;
+    child.scan_generation = options.generation;
+    result.root.children.push_back(std::move(child));
+    result.root.size = 4096;
+    return result;
+}
+
+// The production runner is intentionally asynchronous, so these tests use a
+// shared, thread-safe probe to hold a worker at an observable point. This
+// makes ordering and cancellation assertions independent of scheduler timing.
+struct ScanProbe {
+    mutable QMutex mutex;
+    QWaitCondition condition;
+    bool oldStarted = false;
+    bool oldReleased = false;
+    bool oldFinished = false;
+    bool progressStarted = false;
+    bool progressReleased = false;
+    bool progressFinished = false;
+    bool partialStarted = false;
+    bool partialReleased = false;
+    bool partialFinished = false;
+    std::shared_ptr<diskmap::ScanCancellationToken> oldToken;
+    std::shared_ptr<diskmap::ScanCancellationToken> progressToken;
+    std::shared_ptr<diskmap::ScanCancellationToken> partialToken;
+
+    diskmap::ScanResult run(const QString& path,
+                            const diskmap::ScanOptions& options,
+                            const std::shared_ptr<diskmap::ScanCancellationToken>& token,
+                            const diskmap::ProgressFn& progress) {
+        diskmap::ScanResult result = fakeResult(path, options);
+        if (path == QStringLiteral("A")) {
+            {
+                QMutexLocker locker(&mutex);
+                oldToken = token;
+                oldStarted = true;
+                condition.wakeAll();
+                while (!oldReleased) {
+                    condition.wait(&mutex);
+                }
+                oldFinished = true;
+                condition.wakeAll();
+            }
+        } else if (path == QStringLiteral("progress")) {
+            {
+                QMutexLocker locker(&mutex);
+                progressToken = token;
+                progressStarted = true;
+                condition.wakeAll();
+            }
+            if (progress) {
+                progress(3, 7);
+            }
+            QMutexLocker locker(&mutex);
+            while (!progressReleased) {
+                condition.wait(&mutex);
+            }
+            progressFinished = true;
+            condition.wakeAll();
+        } else if (path == QStringLiteral("partial")) {
+            {
+                QMutexLocker locker(&mutex);
+                partialToken = token;
+                partialStarted = true;
+                condition.wakeAll();
+            }
+            QMutexLocker locker(&mutex);
+            while (!partialReleased) {
+                condition.wait(&mutex);
+            }
+            partialFinished = true;
+            condition.wakeAll();
+            result.root.complete = false;
+            result.cancelled = token->isCancelled();
+        }
+        return result;
+    }
+
+    bool isOldStarted() const {
+        QMutexLocker locker(&mutex);
+        return oldStarted;
+    }
+
+    bool isOldFinished() const {
+        QMutexLocker locker(&mutex);
+        return oldFinished;
+    }
+
+    bool isOldCancelled() const {
+        QMutexLocker locker(&mutex);
+        return oldToken != nullptr && oldToken->isCancelled();
+    }
+
+    void releaseOld() {
+        QMutexLocker locker(&mutex);
+        oldReleased = true;
+        condition.wakeAll();
+    }
+
+    bool isProgressStarted() const {
+        QMutexLocker locker(&mutex);
+        return progressStarted;
+    }
+
+    bool isProgressFinished() const {
+        QMutexLocker locker(&mutex);
+        return progressFinished;
+    }
+
+    void releaseProgress() {
+        QMutexLocker locker(&mutex);
+        progressReleased = true;
+        condition.wakeAll();
+    }
+
+    bool isPartialStarted() const {
+        QMutexLocker locker(&mutex);
+        return partialStarted;
+    }
+
+    bool isPartialFinished() const {
+        QMutexLocker locker(&mutex);
+        return partialFinished;
+    }
+
+    bool isPartialCancelled() const {
+        QMutexLocker locker(&mutex);
+        return partialToken != nullptr && partialToken->isCancelled();
+    }
+
+    void releasePartial() {
+        QMutexLocker locker(&mutex);
+        partialReleased = true;
+        condition.wakeAll();
+    }
+};
+
+MainWindow::ScanRunner runnerFor(const std::shared_ptr<ScanProbe>& probe) {
+    return [probe](const QString& path,
+                   const diskmap::ScanOptions& options,
+                   const std::shared_ptr<diskmap::ScanCancellationToken>& token,
+                   const diskmap::ProgressFn& progress) {
+        return probe->run(path, options, token, progress);
+    };
+}
+
 void waitForScan(MainWindow& window) {
     // scanPath() deliberately uses the production QFutureWatcher path. This
     // waits for the observable result instead of sleeping for an arbitrary
@@ -79,6 +254,97 @@ void TestMainWindow::scanningDisplaysTheRootResult() {
     QVERIFY(status(window)->text().contains(QStringLiteral("dirs")));
     QVERIFY(upButton(window) != nullptr);
     QVERIFY(!upButton(window)->isEnabled());
+}
+
+void TestMainWindow::rescanCannotDisplayAnOlderGeneration() {
+    const auto probe = std::make_shared<ScanProbe>();
+    MainWindow window(nullptr, runnerFor(probe));
+
+    window.scanPath(QStringLiteral("A"));
+    QTRY_VERIFY(probe->isOldStarted());
+
+    window.scanPath(QStringLiteral("B"));
+    QTRY_VERIFY(treemap(window)->currentNode() != nullptr);
+    QCOMPARE(QString::fromStdString(treemap(window)->currentNode()->name), QStringLiteral("B"));
+    QCOMPARE(treemap(window)->currentNode()->scan_generation, std::uint64_t(2));
+
+    // Starting B cancels A, but A is still allowed to finish later. Its
+    // completion must not replace the already visible newer result.
+    QTRY_VERIFY(probe->isOldCancelled());
+    probe->releaseOld();
+    QTRY_VERIFY(probe->isOldFinished());
+    QTRY_VERIFY(treemap(window)->currentNode() != nullptr);
+    QCOMPARE(QString::fromStdString(treemap(window)->currentNode()->name), QStringLiteral("B"));
+    QCOMPARE(treemap(window)->currentNode()->scan_generation, std::uint64_t(2));
+    QVERIFY(!cancelButton(window)->isEnabled());
+}
+
+void TestMainWindow::rescanCancelsPreviousToken() {
+    const auto probe = std::make_shared<ScanProbe>();
+    MainWindow window(nullptr, runnerFor(probe));
+
+    window.scanPath(QStringLiteral("A"));
+    QTRY_VERIFY(probe->isOldStarted());
+    QVERIFY(!probe->isOldCancelled());
+
+    window.scanPath(QStringLiteral("B"));
+    QTRY_VERIFY(probe->isOldCancelled());
+    QTRY_VERIFY(treemap(window)->currentNode() != nullptr);
+    QCOMPARE(QString::fromStdString(treemap(window)->currentNode()->name), QStringLiteral("B"));
+
+    probe->releaseOld();
+    QTRY_VERIFY(probe->isOldFinished());
+    QTRY_VERIFY(!cancelButton(window)->isEnabled());
+}
+
+void TestMainWindow::progressAppearsWhileRunnerIsBlocked() {
+    const auto probe = std::make_shared<ScanProbe>();
+    MainWindow window(nullptr, runnerFor(probe));
+    QPushButton* cancel = cancelButton(window);
+    QVERIFY(cancel != nullptr);
+    QVERIFY(!cancel->isEnabled());
+
+    window.scanPath(QStringLiteral("progress"));
+    QTRY_VERIFY(probe->isProgressStarted());
+    QVERIFY(cancel->isEnabled());
+    QTRY_VERIFY(status(window)->text().contains(QStringLiteral("3 dirs, 7 files")));
+
+    probe->releaseProgress();
+    QTRY_VERIFY(probe->isProgressFinished());
+    QTRY_VERIFY(treemap(window)->currentNode() != nullptr);
+    QTRY_VERIFY(!cancel->isEnabled());
+    QVERIFY(status(window)->text().contains(QStringLiteral("1 dirs, 1 files")));
+}
+
+void TestMainWindow::cancelDiscardsPartialResultAndPreservesVisibleResult() {
+    const auto probe = std::make_shared<ScanProbe>();
+    MainWindow window(nullptr, runnerFor(probe));
+    QPushButton* cancel = cancelButton(window);
+    QVERIFY(cancel != nullptr);
+    QVERIFY(!cancel->isEnabled());
+
+    window.scanPath(QStringLiteral("prior"));
+    QTRY_VERIFY(treemap(window)->currentNode() != nullptr);
+    const diskmap::FsNode* prior = treemap(window)->currentNode();
+    QCOMPARE(QString::fromStdString(prior->name), QStringLiteral("prior"));
+    QVERIFY(!cancel->isEnabled());
+
+    window.scanPath(QStringLiteral("partial"));
+    QTRY_VERIFY(probe->isPartialStarted());
+    QVERIFY(cancel->isEnabled());
+    QCOMPARE(treemap(window)->currentNode(), prior);
+
+    cancel->click();
+    QVERIFY(!cancel->isEnabled());
+    QVERIFY(status(window)->text().contains(QStringLiteral("Cancelling scan")));
+    QTRY_VERIFY(probe->isPartialCancelled());
+    probe->releasePartial();
+
+    QTRY_VERIFY(probe->isPartialFinished());
+    QTRY_VERIFY(status(window)->text().contains(QStringLiteral("partial result discarded")));
+    QTRY_VERIFY(!cancel->isEnabled());
+    QCOMPARE(treemap(window)->currentNode(), prior);
+    QCOMPARE(QString::fromStdString(treemap(window)->currentNode()->name), QStringLiteral("prior"));
 }
 
 void TestMainWindow::activatingADirectoryDescendsAndUpdatesBreadcrumb() {

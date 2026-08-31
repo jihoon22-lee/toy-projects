@@ -30,6 +30,12 @@ struct StorageFacts {
     bool complete = true;
 };
 
+struct StorageFrame {
+    FsNode* node;
+    std::size_t next_child = 0;
+    StorageFacts facts;
+};
+
 bool addSize(std::uint64_t& total, std::uint64_t value) {
     if (value > std::numeric_limits<std::uint64_t>::max() - total) {
         total = std::numeric_limits<std::uint64_t>::max();
@@ -164,46 +170,6 @@ void assignStorage(FsNode& node, const StorageFacts& facts) {
     }
 }
 
-StorageFacts aggregateStorageAt(FsNode& node, int depth) {
-    StorageFacts facts;
-    facts.complete = node.complete;
-    if (!node.is_dir) {
-        const FsMetadata& metadata = effectiveMetadata(node);
-        facts.complete = facts.complete && metadata.complete;
-        if (metadata.identity.valid) {
-            observeIdentity(facts.identities[{metadata.identity.device, metadata.identity.file}],
-                            node, metadata);
-        } else {
-            addUnidentified(facts, node, metadata);
-        }
-        assignStorage(node, facts);
-        return facts;
-    }
-
-    if (depth >= kMaxTreeDepth) {
-        facts.complete = false;
-        assignStorage(node, facts);
-        return facts;
-    }
-    for (FsNode& child : node.children) {
-        mergeFacts(facts, aggregateStorageAt(child, depth + 1));
-    }
-    assignStorage(node, facts);
-    return facts;
-}
-
-std::uint64_t aggregateSizesAt(FsNode& node, int depth) {
-    if (!node.is_dir || depth >= kMaxTreeDepth) {
-        return node.size;
-    }
-    std::uint64_t total = 0;
-    for (FsNode& child : node.children) {
-        addSize(total, aggregateSizesAt(child, depth + 1));
-    }
-    node.size = total;
-    return total;
-}
-
 bool byDescendingSizeThenName(const FsNode& a, const FsNode& b) {
     if (a.size != b.size) {
         return a.size > b.size;
@@ -211,56 +177,104 @@ bool byDescendingSizeThenName(const FsNode& a, const FsNode& b) {
     return a.name < b.name;
 }
 
-void sortBySizeDescAt(FsNode& node, int depth) {
-    if (depth >= kMaxTreeDepth) {
-        return;
-    }
-    std::stable_sort(node.children.begin(), node.children.end(), byDescendingSizeThenName);
-    for (FsNode& child : node.children) {
-        sortBySizeDescAt(child, depth + 1);
-    }
-}
-
-std::size_t countNodesAt(const FsNode& node, int depth) {
-    std::size_t count = 1;
-    if (depth >= kMaxTreeDepth) {
-        return count;
-    }
-    for (const FsNode& child : node.children) {
-        count += countNodesAt(child, depth + 1);
-    }
-    return count;
-}
-
-void collectFilesAt(const FsNode& node, int depth, std::vector<const FsNode*>& out) {
-    if (!node.is_dir) {
-        out.push_back(&node);
-        return;
-    }
-    if (depth >= kMaxTreeDepth) {
-        return;
-    }
-    for (const FsNode& child : node.children) {
-        collectFilesAt(child, depth + 1, out);
-    }
-}
-
 bool byDescendingFileSize(const FsNode* a, const FsNode* b) {
     return a->size > b->size;
+}
+
+StorageFrame makeStorageFrame(FsNode* node) {
+    StorageFrame frame{node, 0, StorageFacts{}};
+    frame.facts.complete = node->complete;
+    return frame;
+}
+
+bool descendStorageTree(StorageFrame& frame, std::vector<StorageFrame>& stack) {
+    if (!frame.node->is_dir || frame.next_child >= frame.node->children.size()) {
+        return false;
+    }
+    FsNode* child = &frame.node->children[frame.next_child++];
+    stack.push_back(makeStorageFrame(child));
+    return true;
+}
+
+void observeLeafStorage(StorageFrame& frame) {
+    if (frame.node->is_dir) {
+        return;
+    }
+    const FsMetadata& metadata = effectiveMetadata(*frame.node);
+    frame.facts.complete = frame.facts.complete && metadata.complete;
+    if (metadata.identity.valid) {
+        observeIdentity(frame.facts.identities[{metadata.identity.device, metadata.identity.file}],
+                        *frame.node, metadata);
+        return;
+    }
+    addUnidentified(frame.facts, *frame.node, metadata);
+}
+
+void finishStorageFrame(std::vector<StorageFrame>& stack) {
+    StorageFrame& frame = stack.back();
+    observeLeafStorage(frame);
+    assignStorage(*frame.node, frame.facts);
+    StorageFacts completed = std::move(frame.facts);
+    stack.pop_back();
+    if (!stack.empty()) {
+        mergeFacts(stack.back().facts, std::move(completed));
+    }
 }
 
 } // namespace
 
 std::uint64_t aggregateSizes(FsNode& node) {
-    return aggregateSizesAt(node, 0);
+    struct Frame {
+        FsNode* node;
+        std::size_t next_child = 0;
+        std::uint64_t total = 0;
+    };
+
+    std::vector<Frame> stack;
+    stack.push_back(Frame{&node});
+    while (!stack.empty()) {
+        Frame& frame = stack.back();
+        if (frame.node->is_dir && frame.next_child < frame.node->children.size()) {
+            FsNode* child = &frame.node->children[frame.next_child++];
+            stack.push_back(Frame{child});
+            continue;
+        }
+
+        const std::uint64_t subtotal = frame.node->is_dir ? frame.total : frame.node->size;
+        if (frame.node->is_dir) {
+            frame.node->size = subtotal;
+        }
+        stack.pop_back();
+        if (!stack.empty()) {
+            addSize(stack.back().total, subtotal);
+        }
+    }
+    return node.size;
 }
 
 void aggregateStorage(FsNode& node) {
-    aggregateStorageAt(node, 0);
+    std::vector<StorageFrame> stack{makeStorageFrame(&node)};
+    while (!stack.empty()) {
+        if (descendStorageTree(stack.back(), stack)) {
+            continue;
+        }
+        finishStorageFrame(stack);
+    }
 }
 
 void sortBySizeDesc(FsNode& node) {
-    sortBySizeDescAt(node, 0);
+    std::vector<FsNode*> stack{&node};
+    while (!stack.empty()) {
+        FsNode* current = stack.back();
+        stack.pop_back();
+        std::stable_sort(current->children.begin(), current->children.end(),
+                         byDescendingSizeThenName);
+        for (auto child = current->children.rbegin(); child != current->children.rend(); ++child) {
+            if (child->is_dir) {
+                stack.push_back(&*child);
+            }
+        }
+    }
 }
 
 const FsNode* findChild(const FsNode& node, const std::string& name) {
@@ -273,12 +287,33 @@ const FsNode* findChild(const FsNode& node, const std::string& name) {
 }
 
 std::size_t countNodes(const FsNode& node) {
-    return countNodesAt(node, 0);
+    std::size_t count = 0;
+    std::vector<const FsNode*> stack{&node};
+    while (!stack.empty()) {
+        const FsNode* current = stack.back();
+        stack.pop_back();
+        ++count;
+        for (auto child = current->children.rbegin(); child != current->children.rend(); ++child) {
+            stack.push_back(&*child);
+        }
+    }
+    return count;
 }
 
 std::vector<const FsNode*> topFiles(const FsNode& node, std::size_t n) {
     std::vector<const FsNode*> files;
-    collectFilesAt(node, 0, files);
+    std::vector<const FsNode*> stack{&node};
+    while (!stack.empty()) {
+        const FsNode* current = stack.back();
+        stack.pop_back();
+        if (!current->is_dir) {
+            files.push_back(current);
+            continue;
+        }
+        for (auto child = current->children.rbegin(); child != current->children.rend(); ++child) {
+            stack.push_back(&*child);
+        }
+    }
     std::stable_sort(files.begin(), files.end(), byDescendingFileSize);
     if (files.size() > n) {
         files.resize(n);

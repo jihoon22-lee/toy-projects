@@ -26,6 +26,8 @@ using diskmap::ScanOptions;
 using diskmap::ScanResult;
 using diskmap::scan;
 using diskmap_test::FakeFsSource;
+using diskmap_test::makeDirEntry;
+using diskmap_test::makeFileEntry;
 
 class InspectingFakeFsSource : public FakeFsSource {
 public:
@@ -44,8 +46,50 @@ public:
         return diskmap::FsSource::inspect(path, follow);
     }
 
+    std::vector<DirEntry> list(const std::filesystem::path& path,
+                               std::string& error,
+                               const diskmap::CancellationCheck& cancelled = {}) const override {
+        listedPaths.push_back(path);
+        return FakeFsSource::list(path, error, cancelled);
+    }
+
+    mutable std::vector<std::filesystem::path> listedPaths;
+
 private:
     std::map<std::pair<std::filesystem::path, bool>, diskmap::FsMetadata> inspections_;
+};
+
+class PartialListingFsSource : public InspectingFakeFsSource {
+public:
+    void addPartialListing(const std::filesystem::path& path,
+                           std::vector<DirEntry> entries,
+                           std::string error) {
+        partialListings_[path] = PartialListing{std::move(entries), std::move(error)};
+    }
+
+    std::vector<DirEntry> list(const std::filesystem::path& path,
+                               std::string& error,
+                               const diskmap::CancellationCheck& cancelled = {}) const override {
+        listedPaths.push_back(path);
+        if (cancelled && cancelled()) {
+            error.clear();
+            return {};
+        }
+        const auto it = partialListings_.find(path);
+        if (it != partialListings_.end()) {
+            error = it->second.error;
+            return it->second.entries;
+        }
+        return FakeFsSource::list(path, error, cancelled);
+    }
+
+private:
+    struct PartialListing {
+        std::vector<DirEntry> entries;
+        std::string error;
+    };
+
+    std::map<std::filesystem::path, PartialListing> partialListings_;
 };
 
 FileIdentity identity(std::uint64_t device, std::uint64_t file) {
@@ -128,6 +172,13 @@ const FsNode* child(const FsNode& node, const std::string& name) {
     return diskmap::findChild(node, name);
 }
 
+void checkGeneration(const FsNode& node, std::uint64_t generation) {
+    CHECK_EQ(node.scan_generation, generation);
+    for (const FsNode& childNode : node.children) {
+        checkGeneration(childNode, generation);
+    }
+}
+
 } // namespace
 
 int main() {
@@ -191,6 +242,28 @@ int main() {
             }
         }
         CHECK_EQ(result.dirs_scanned, static_cast<std::size_t>(2));
+        CHECK(result.errors.empty());
+    }
+
+    // --- an unfollowed directory symlink remains visible as a leaf instead
+    // of disappearing from the result tree ---
+    {
+        FakeFsSource fs;
+        fs.addListing("/visible-link/root", {
+            directorySymlink("directory-alias", identity(8, 80)),
+        });
+
+        const ScanResult result = scan(fs, "/visible-link/root", ScanOptions{});
+        const FsNode* alias = child(result.root, "directory-alias");
+        CHECK(alias != nullptr);
+        if (alias != nullptr) {
+            CHECK(!alias->is_dir);
+            CHECK(!alias->followed);
+            CHECK(alias->complete);
+            CHECK(alias->children.empty());
+        }
+        CHECK_EQ(result.dirs_scanned, static_cast<std::size_t>(1));
+        CHECK_EQ(result.files_scanned, static_cast<std::size_t>(1));
         CHECK(result.errors.empty());
     }
 
@@ -321,6 +394,131 @@ int main() {
         CHECK(!result.root.allocated_size_known);
         CHECK(!result.root.reclaimable_size_known);
         CHECK_EQ(result.errors.size(), static_cast<std::size_t>(1));
+    }
+
+    // --- a partial listing error retains the entries returned before the
+    // failure and continues walking retained directories ---
+    {
+        PartialListingFsSource fs;
+        const std::filesystem::path root = "/partial/root";
+        fs.addPartialListing(root,
+                             {physicalFile("visible.bin", 5, identity(15, 150), 512, 1),
+                              physicalDirectory("nested", identity(15, 151))},
+                             "directory changed during enumeration");
+        fs.addListing(root / "nested",
+                      {physicalFile("nested.bin", 7, identity(15, 152), 512, 1)});
+
+        const ScanResult result = scan(fs, root, ScanOptions{});
+        const FsNode* visible = child(result.root, "visible.bin");
+        const FsNode* nested = child(result.root, "nested");
+        CHECK(visible != nullptr);
+        CHECK(nested != nullptr);
+        CHECK(!result.root.complete);
+        CHECK_EQ(result.root.error, std::string("directory changed during enumeration"));
+        CHECK_EQ(result.errors.size(), static_cast<std::size_t>(1));
+        CHECK_EQ(result.errors[0], std::string("directory changed during enumeration"));
+        CHECK_EQ(result.files_scanned, static_cast<std::size_t>(2));
+        if (nested != nullptr) {
+            CHECK(nested->complete);
+            CHECK(child(*nested, "nested.bin") != nullptr);
+        }
+        CHECK_EQ(fs.listedPaths.size(), static_cast<std::size_t>(2));
+        if (fs.listedPaths.size() == 2) {
+            CHECK_EQ(fs.listedPaths[0], root);
+            CHECK_EQ(fs.listedPaths[1], root / "nested");
+        }
+    }
+
+    // --- one_file_system retains a different-device directory but never
+    // descends into it ---
+    {
+        InspectingFakeFsSource fs;
+        const std::filesystem::path root = "/mount/root";
+        diskmap::FsMetadata rootMetadata;
+        rootMetadata.kind = FsKind::Directory;
+        rootMetadata.identity = identity(20, 200);
+        rootMetadata.complete = true;
+        fs.addInspection(root, false, rootMetadata);
+        fs.addListing(root,
+                      {physicalDirectory("same-device", identity(20, 201)),
+                       physicalDirectory("other-device", identity(21, 202))});
+        fs.addListing(root / "same-device",
+                      {physicalFile("inside.bin", 3, identity(20, 203), 512, 1)});
+        fs.addListing(root / "other-device",
+                      {physicalFile("must-not-be-read.bin", 99, identity(21, 204), 512, 1)});
+
+        ScanOptions options;
+        options.one_file_system = true;
+        const ScanResult result = scan(fs, root, options);
+        const FsNode* same = child(result.root, "same-device");
+        const FsNode* other = child(result.root, "other-device");
+        CHECK(same != nullptr);
+        CHECK(other != nullptr);
+        CHECK_EQ(result.mount_boundaries_skipped, static_cast<std::size_t>(1));
+        CHECK(result.errors.empty());
+        CHECK_EQ(result.dirs_scanned, static_cast<std::size_t>(2));
+        CHECK_EQ(result.files_scanned, static_cast<std::size_t>(1));
+        if (same != nullptr) {
+            CHECK(child(*same, "inside.bin") != nullptr);
+        }
+        if (other != nullptr) {
+            CHECK(!other->complete);
+            CHECK(other->mount_boundary_skipped);
+            CHECK(other->children.empty());
+            CHECK_EQ(other->error, std::string("mount boundary excluded"));
+        }
+        CHECK_EQ(fs.listedPaths.size(), static_cast<std::size_t>(2));
+        if (fs.listedPaths.size() == 2) {
+            CHECK_EQ(fs.listedPaths[0], root);
+            CHECK_EQ(fs.listedPaths[1], root / "same-device");
+        }
+    }
+
+    // --- one_file_system fails safe when a directory identity is unknown ---
+    {
+        InspectingFakeFsSource fs;
+        const std::filesystem::path root = "/mount/unknown";
+        diskmap::FsMetadata rootMetadata;
+        rootMetadata.kind = FsKind::Directory;
+        rootMetadata.identity = identity(22, 220);
+        rootMetadata.complete = true;
+        fs.addInspection(root, false, rootMetadata);
+        fs.addListing(root, {physicalDirectory("unknown-device", FileIdentity{})});
+        fs.addListing(root / "unknown-device",
+                      {physicalFile("must-not-be-read.bin", 99, identity(22, 221), 512, 1)});
+
+        ScanOptions options;
+        options.one_file_system = true;
+        const ScanResult result = scan(fs, root, options);
+        const FsNode* unknown = child(result.root, "unknown-device");
+        CHECK(unknown != nullptr);
+        CHECK_EQ(result.mount_boundaries_skipped, static_cast<std::size_t>(0));
+        CHECK_EQ(result.errors.size(), static_cast<std::size_t>(1));
+        CHECK_EQ(result.dirs_scanned, static_cast<std::size_t>(1));
+        CHECK_EQ(result.files_scanned, static_cast<std::size_t>(0));
+        if (unknown != nullptr) {
+            CHECK(!unknown->complete);
+            CHECK(!unknown->mount_boundary_skipped);
+            CHECK(unknown->children.empty());
+            CHECK(unknown->error.find("cannot verify mount boundary") != std::string::npos);
+        }
+        CHECK_EQ(fs.listedPaths.size(), static_cast<std::size_t>(1));
+        if (!fs.listedPaths.empty()) {
+            CHECK_EQ(fs.listedPaths.front(), root);
+        }
+    }
+
+    // --- generation identifies every retained node in a result ---
+    {
+        FakeFsSource fs;
+        fs.addListing("/generation/root", {makeDirEntry("nested"), makeFileEntry("root.bin", 2)});
+        fs.addListing("/generation/root/nested", {makeFileEntry("nested.bin", 3)});
+
+        ScanOptions options;
+        options.generation = 987654321;
+        const ScanResult result = scan(fs, "/generation/root", options);
+        CHECK_EQ(result.generation, static_cast<std::uint64_t>(987654321));
+        checkGeneration(result.root, 987654321);
     }
 
     // --- duplicate physical directories are retained as visible aliases but
@@ -528,10 +726,47 @@ int main() {
 
         const ScanResult result = scan(fs, root, ScanOptions{});
         CHECK(!result.root.complete);
-        CHECK(result.root.error.find("no listing registered") != std::string::npos);
-        CHECK_EQ(result.errors.size(), static_cast<std::size_t>(2));
+        CHECK_EQ(result.root.error, std::string("root metadata unavailable"));
+        CHECK_EQ(result.fatal_error, std::string("root metadata unavailable"));
+        CHECK_EQ(result.errors.size(), static_cast<std::size_t>(1));
         CHECK_EQ(result.errors[0], std::string("root metadata unavailable"));
-        CHECK(result.errors[1].find("no listing registered") != std::string::npos);
+        CHECK(fs.listedPaths.empty());
+    }
+
+    {
+        InspectingFakeFsSource fs;
+        const std::filesystem::path root = "/unreadable-root";
+        diskmap::FsMetadata metadata;
+        metadata.kind = FsKind::Directory;
+        metadata.identity = identity(15, 151);
+        metadata.complete = true;
+        fs.addInspection(root, false, metadata);
+        fs.addError(root, "permission denied: root");
+
+        const ScanResult result = scan(fs, root, ScanOptions{});
+        CHECK(!result.root.complete);
+        CHECK_EQ(result.fatal_error, std::string("permission denied: root"));
+        CHECK_EQ(result.error_count, static_cast<std::size_t>(1));
+        CHECK_EQ(result.errors.size(), static_cast<std::size_t>(1));
+        CHECK_EQ(result.dirs_scanned, static_cast<std::size_t>(0));
+    }
+
+    {
+        PartialListingFsSource fs;
+        const std::filesystem::path root = "/partial-root";
+        diskmap::FsMetadata metadata;
+        metadata.kind = FsKind::Directory;
+        metadata.identity = identity(16, 161);
+        metadata.complete = true;
+        fs.addInspection(root, false, metadata);
+        fs.addPartialListing(root, {makeFileEntry("kept.bin", 17)},
+                             "directory changed during enumeration");
+
+        const ScanResult result = scan(fs, root, ScanOptions{});
+        CHECK(!result.root.complete);
+        CHECK(result.fatal_error.empty());
+        CHECK_EQ(result.files_scanned, static_cast<std::size_t>(1));
+        CHECK(diskmap::findChild(result.root, "kept.bin") != nullptr);
     }
 
     // The root fallback in lastPathComponent is observable only for a path

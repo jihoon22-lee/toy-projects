@@ -49,7 +49,7 @@ gate에서는 아래 네 leg가 같은 계약을 다시 실행한다.
 | 프로젝트 | 빌드 | 검증 | Qt 테스트 |
 |---|---|---|---|
 | `loglens` | CMake · Qt5/Qt6 | L2 benchmark PR #26 merged · main Qt5/Qt6 sweep green · default 8192 | `QAbstractItemModelTester` + MainWindow QtTest |
-| `diskmap` | qmake · Qt5/Qt6 | D1 Slice 2 merged · PR #23 · TEM 4.90 | `QSignalSpy` + 9 native tests + MainWindow QtTest |
+| `diskmap` | qmake · Qt5/Qt6 | D1 Slice 2 merged · D2 local candidate complete · remote gate pending | `QSignalSpy` + 9 native test targets + MainWindow QtTest |
 | `ici/viewer` | CMake · Qt5/Qt6 | PASS · TEM 4.86 | MainWindow QtTest 4/4 |
 
 T0-5의 `discover`는 GUI 프로젝트 한 항목을 Qt5·Qt6 두 항목으로 확장한다. 따라서 현재
@@ -137,6 +137,34 @@ source 및 실제 POSIX filesystem으로 확인한다. Qt5/qmake와 Qt6/qmake6 �
 `make check` 9/9, GUI offscreen smoke 8초 생존을 통과했으며 public ici 0.6.0 verify는 TEM
 4.90, line/function/branch 96.9%/97.9%/85.2%였다. PR #23의 전체 CI와 sticky report
 comment, Pages HTML 응답까지 확인한 뒤 `039052f9`로 병합됐다.
+
+**diskmap D2 local candidate (2026-08-31).** cooperative cancellation과 progress callback을
+GUI에 연결하고, rescan마다 generation을 증가시켜 최신 scan만 treemap/breadcrumb에 반영한다.
+늦게 끝난 이전 worker와 그 progress는 무시하며, 취소된 partial result는 폐기하고 기존에
+보이던 결과를 유지한다. root metadata/listing의 fatal 오류와 중간 subtree의 partial/non-fatal
+오류를 구분하고, mount boundary·exclude glob·min size·max depth 옵션을 추가했다. CLI에서는
+실제 traversal bound인 `--max-depth`와 legacy 출력 전용 `--depth`, repeatable `--exclude`를
+구분한다. scanner와 aggregate/sort/count/top-files/layout은 iterative helper를 사용하며,
+effective structural depth는 `kMaxTreeDepth=512`에서 안전하게 clamp한다.
+
+로컬에서는 Qt 5.15.18(`/usr/bin/qmake`)과 Qt 6.10.2(`/usr/bin/qmake6`)의 full build 및
+`make check`가 각각 PASS했고, `test_main_window`는 두 major에서 각각 10/10 PASS를 기록했다.
+CLI integration smoke도 PASS했으며, 1,000,000-entry full correctness는 4820.934 ms,
+207428.692 entries/s, peak RSS 1063.496 MiB를 기록했다. 10,000/1,000,000 cancellation은
+2.676 ms였고 local summary JSON SHA-256은
+`743d5c5409101cfd9ef889da2da421e94cc205f585770ab19bb611472926246d`다. ici complexity-only
+gate의 최초 scan complexity/nesting FAIL은 `b7218c6` refactor로 해소되어 maximum cyclomatic
+14 (limit 15), 129 functions, 0 issues로 PASS했다. benchmark command/workflow와 budget은
+[README의 DiskMap benchmark 절](README.md#diskmap-generated-source-benchmark-opt-innightly)에
+기록했다. current ici main commit `6a0eadb`의 candidate pyz SHA256
+`8cd2d4b128ab2d181e708660c4c4f38bcc9d50f9ad91e3aa5670f557e6077fed`로 수행한 full
+post-refactor local `ici verify`는 `Suite PASS`, 10 pass / 0 warn / 0 fail / 0 error /
+2 skip, test 9/9, TEM 4.92, line95.7% / function98.5% / branch84.4%, complexity max14
+across129 functions / 0 issues, dup3.11%, sanitize clean, 30 tools/21 ready/0 incomplete/
+9 unavailable, total82.29s, cache hits0이었다. HTML은 299034 bytes, SHA256
+`cf75f9d6f28179d95645d0e1582022008804078d5e3844de503a8c1a130c64a0`, external resource tags0이다.
+이 local evidence는 candidate에 한정되며 toy remote PR/CI, sticky comment/Pages evidence는
+아직 pending이다.
 
 loglens L2의 첫 slice는 GUI/CLI에 absolute-ID bounded store를 연결하고 source polling과
 pathological record 크기를 제한했다. 이어진 background/Tail N slice는 Qt5·Qt6 및 엄격 경고

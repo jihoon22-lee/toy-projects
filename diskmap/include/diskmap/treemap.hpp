@@ -22,7 +22,7 @@ struct Tile {
 // Builds a squarified treemap (Bruls/Huizing/van Wijk) of root's descendants.
 // Tiles of a node's children exactly partition that node's rect (no gaps,
 // no overlap, area-preserving). depth 0 tiles are root's direct children;
-// recursion stops once depth would exceed maxDepth (negative = unlimited).
+// descendants stop once depth would exceed maxDepth (negative = unlimited).
 std::vector<Tile> squarify(const FsNode& root, const Rect& bounds, int maxDepth);
 
 } // namespace diskmap

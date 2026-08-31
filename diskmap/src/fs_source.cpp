@@ -192,7 +192,8 @@ FsMetadata RealFsSource::inspect(const std::filesystem::path& path, bool follow)
 }
 
 std::vector<DirEntry> RealFsSource::list(const std::filesystem::path& path,
-                                         std::string& error) const {
+                                         std::string& error,
+                                         const CancellationCheck& cancelled) const {
     error.clear();
     std::vector<DirEntry> entries;
 
@@ -206,6 +207,9 @@ std::vector<DirEntry> RealFsSource::list(const std::filesystem::path& path,
     try {
         const fs::directory_iterator end;
         while (iterator != end) {
+            if (cancelled && cancelled()) {
+                break;
+            }
             entries.push_back(makeDirEntry(*iterator));
             std::error_code stepError;
             iterator.increment(stepError);

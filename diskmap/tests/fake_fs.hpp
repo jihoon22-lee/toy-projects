@@ -30,8 +30,13 @@ public:
     }
 
     std::vector<diskmap::DirEntry> list(const std::filesystem::path& path,
-                                        std::string& error) const override {
+                                        std::string& error,
+                                        const diskmap::CancellationCheck& cancelled = {}) const override {
         error.clear();
+
+        if (cancelled && cancelled()) {
+            return {};
+        }
 
         const auto errIt = errors_.find(path);
         if (errIt != errors_.end()) {

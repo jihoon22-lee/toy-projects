@@ -31,7 +31,7 @@
 | 프로젝트 | 현재 형태 | 실측 | 제품 상태 |
 |---|---|---|---|
 | loglens | C++17, Qt, CMake | L2 bounded/background slice · PR #25 CI green · local Qt5/Qt6 12 CTest targets · 1 GiB benchmark PR #26 merged · main Qt5/Qt6 sweep green | Tail N/From start와 worker UX, benchmark/default 8192 완료 |
-| diskmap | C++17, Qt, qmake | D1 Slice 2 merged · PR #23 · CI green · TEM 4.90 | treemap viewer, cleanup UX는 D2~D6에서 확장 |
+| diskmap | C++17, Qt, qmake | D1 Slice 2 merged · D2 local candidate · ici local verify PASS | D2 local/native/ici complete; remote PR/CI·sticky·Pages pending; treemap/cleanup UX는 D3~D6에서 확장 |
 | ici/viewer | Qt-free core + Qt6 GUI | 3 tests, TEM 4.94 | core 중심, 셸과 report workflow 부족 |
 
 현재 공백:
@@ -350,8 +350,9 @@ loader/Tail N 변경 이전 bounded foundation에 대한 historical evidence다.
 정리했다.
 
 L2 bounded/background 구현과 1 GiB benchmark, 성능 budget/default capacity 결정은 완료됐다.
-PR26의 원격 CI·ici·sticky report·Pages 검증과 main Qt5/Qt6 full sweep도 완료됐다. 다음
-단계는 D2 cancellable scan과 stale-result generation guard다.
+PR26의 원격 CI·ici·sticky report·Pages 검증과 main Qt5/Qt6 full sweep도 완료됐다. D2
+cancellable scan local candidate와 current ici main의 full local verify도 닫혔으며, 다음 gate는
+D2 remote PR/CI·sticky·Pages evidence다.
 L3 parser/filter와 L6 release 완료 조건은 이 결정으로 닫히지 않으며 체크리스트를 유지한다.
 
 ### L3. parser와 filter 완성도
@@ -501,13 +502,13 @@ fresh full build와 `make check` 9/9가 각각 통과했다. 두 GUI는
 이후 `6861b7a`/`2f56caf`에서 regular-file root의 실제 CLI 경로와 root symlink semantics를
 추가했다. 실제 file-root smoke는 JSON에서 `name=main.cpp`, `is_dir=false`, `size`가 source
 metadata와 일치하는 one-node 결과를 냈다(파일 크기는 source 변경에 따라 고정하지 않는다).
-이 후속 커밋 이후 최신 로컬 native 확인은 Qt 5.15.18(`/usr/bin/qmake`)과
+이 후속 커밋 이후 D1 Slice 2의 최신 로컬 native 확인은 Qt 5.15.18(`/usr/bin/qmake`)과
 Qt 6.10.2(`/usr/bin/qmake6`)에서 각각 full build target과 `make check` 9/9 PASS였다.
 Qt5/Qt6 GUI offscreen smoke도 각각 8초 생존 후 기대된 timeout exit 124로 확인했다.
 `31d8b48`의 root inspection stage 분리 후 public ici complexity-only 검증은 PASS,
 maximum cyclomatic 14 across 101 functions, 0 issues였다.
 
-**최종 local candidate ici qmake-clean 검증:** `Suite PASS`, 10 pass / 0 warn / 0 fail /
+**D1 Slice 2 최종 local candidate ici qmake-clean 검증:** `Suite PASS`, 10 pass / 0 warn / 0 fail /
 0 error / 2 skip, 9/9 tests, line 96.6% / function 98.0% / branch 85.0%, TEM 4.90,
 complexity 14 across 101 functions / 0 issues, duplication 2.0, sanitizer clean,
 duration 85.96초였다. capability inventory는 30 tools / 21 ready / 0 incomplete /
@@ -528,13 +529,42 @@ green이었다. [sticky comment](https://github.com/jihoon22-lee/toy-projects/pu
 
 **브랜치:** `feat/diskmap-cancellable-scan`
 
-- [ ] progress callback을 GUI에 실제 연결한다.
-- [ ] atomic/token 기반 cancellation과 cooperative checkpoint를 제공한다.
-- [ ] scan generation id가 이전 worker 결과로 새 UI를 덮지 못하게 한다.
-- [ ] mount boundary, exclude pattern, min size, max depth 옵션을 제공한다.
-- [ ] aggregate/sort/count의 deep tree recursion을 iterative 또는 안전한 bound로 바꾼다.
-- [ ] cancellation 후 partial result를 보여줄지 폐기할지 명확히 한다.
-- [ ] 100만 entry fake source benchmark로 throughput과 memory를 측정한다.
+- [x] progress callback을 GUI에 실제 연결한다.
+- [x] atomic/token 기반 cancellation과 cooperative checkpoint를 제공한다.
+- [x] scan generation id가 이전 worker 결과로 새 UI를 덮지 못하게 한다.
+- [x] mount boundary, exclude pattern, min size, max depth 옵션을 제공한다.
+- [x] aggregate/sort/count의 deep tree recursion을 iterative 또는 안전한 bound로 바꾼다.
+- [x] cancellation 후 partial result를 보여줄지 폐기할지 명확히 한다.
+- [x] 100만 entry fake source benchmark로 throughput과 memory를 측정한다.
+
+2026-08-31 local candidate에서 cancellation은 atomic token과 cooperative checkpoint로
+동작하고, GUI는 최신 generation만 progress/result에 반영한다. 취소된 partial result는
+`Scan cancelled — partial result discarded`로 폐기하며 기존 표시 tree를 보존한다. root
+metadata/open 및 empty-root listing failure는 fatal, child listing/stat/iterator failure는
+불완전 subtree를 보존하는 partial/non-fatal 오류다. CLI는 `--max-depth`,
+`--follow-symlinks`, `--min-size`, `--one-file-system`, repeatable `--exclude`를 legacy
+출력 전용 `--depth`와 함께 제공한다. scanner와 집계/layout은 iterative이며 structural
+depth는 `kMaxTreeDepth=512`로 제한된다. benchmark runner 기본 budget은 1,000,000 entries,
+cancel-after 10,000, 60초 timeout, 최소 100,000 entries/s, 최대 1,536 MiB RSS, 최대
+30,000 ms full/2,000 ms cancellation이다.
+
+로컬 native 증거는 Qt 5.15.18(`/usr/bin/qmake`)와 Qt 6.10.2(`/usr/bin/qmake6`)에서 full
+build 및 `make check` PASS, 각 `test_main_window` 10/10 PASS, CLI integration smoke PASS다.
+full benchmark는 4,820.934 ms, 207,428.692 entries/s, 1,063.496 MiB RSS이며 cancellation은
+2.676 ms다. summary SHA-256은
+`743d5c5409101cfd9ef889da2da421e94cc205f585770ab19bb611472926246d`다. 초기 ici
+complexity-only FAIL(scan complexity/nesting)은 `b7218c6`의 상태 전이 분리 refactor 뒤
+maximum cyclomatic 14/limit 15, 129 functions, 0 issues로 PASS했다. ici main commit
+`6a0eadb`의 candidate `dist/ici.pyz` SHA-256
+`8cd2d4b128ab2d181e708660c4c4f38bcc9d50f9ad91e3aa5670f557e6077fed`로 수행한 full
+post-refactor local `ici verify`는 `Suite PASS`, 10 pass / 0 warn / 0 fail / 0 error /
+2 skip, tests 9/9, TEM 4.92초, line 95.7% / function 98.5% / branch 84.4%, complexity
+max14 across 129 functions / 0 issues, sanitizer clean, duplication 3.11%, tools 30 discovered /
+21 ready / 0 incomplete / 9 unavailable, cache hits 0, total 82.29초였다. HTML
+`/tmp/tmp.RFA39KzhyH.html`은 299034 bytes, SHA-256
+`cf75f9d6f28179d95645d0e1582022008804078d5e3844de503a8c1a130c64a0`이며 external
+script/link/img/iframe resource tags는 0개였다. D2 local verification은 완료됐고, 남은 gate는
+toy remote PR/CI, sticky comment, Pages evidence뿐이다.
 
 ### D3. 탐색과 설명 UX
 
@@ -989,7 +1019,7 @@ ici와 toy-projects가 함께 바뀌는 기능은 다음 순서를 따른다.
 1. 이 마스터 계획과 ici 마스터 계획을 문서 PR로 보존한다.
 2. T0에서 기존 Qt shell 계획을 stateful log parsing과 정확한 failure-state 테스트로 보정해 실행한다.
 3. L1과 D1로 기존 앱의 신뢰성 기반을 만든다.
-4. 완료된 L2 benchmark 증거를 기준으로 D2 cancellable scan과 stale-result generation guard를 구현한다.
+4. D2 local candidate의 benchmark/native/full ici 증거를 기준으로 remote PR/CI·sticky·Pages gate를 닫고, 이후 D3 explorer UX로 진행한다.
 5. ici finding v3와 맞춰 Q0 runner를 만든다.
 6. ici compile context I3와 함께 B0/B1 buildscope를 시작한다.
 7. ici Python compatibility I5와 함께 E0/E1 envlens를 시작한다.
