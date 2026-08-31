@@ -10,6 +10,16 @@ bin/
 *.gcda
 *.gcno
 *.gcov
+.coverage
+coverage.xml
+htmlcov/
+
+# Python tooling and packaging
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+dist/
+*.egg-info/
 
 # ici reports
 verify_report.html

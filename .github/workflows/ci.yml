@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 env:
-  ICI_VERSION: v0.6.0
+  ICI_VERSION: v0.7.1
 
 jobs:
   # ci/projects.json is the only project list. Both verification and GUI jobs
@@ -66,16 +66,28 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
 
-      - name: Install measured Python lint
+      # BuildScope's Python checks and ici's subprocess engines must use the
+      # same interpreter. An isolated runner-temp environment avoids relying
+      # on whichever modules happen to exist in the hosted tool cache.
+      - name: Install pinned Python analysis and test tools
         run: |
           set -euo pipefail
-          uv tool install ruff==0.16.5
-          ruff_bin="$(uv tool dir --bin)"
-          echo "$ruff_bin" >> "$GITHUB_PATH"
-          export PATH="$ruff_bin:$PATH"
-          ruff --version
+          python_bin="$(python -c 'import sys; print(sys.executable)')"
+          tool_env="$RUNNER_TEMP/ici-python-tools"
+          uv venv --python "$python_bin" "$tool_env"
+          uv pip install --python "$tool_env/bin/python" \
+            ruff==0.16.5 \
+            pytest==9.1.1 \
+            coverage==7.15.4 \
+            mypy==2.3.1
+          echo "ICI_PYTHON=$tool_env/bin/python" >> "$GITHUB_ENV"
+          echo "$tool_env/bin" >> "$GITHUB_PATH"
+          "$tool_env/bin/ruff" --version
+          "$tool_env/bin/python" -m pytest --version
+          "$tool_env/bin/python" -m coverage --version
+          "$tool_env/bin/python" -m mypy --version
 
-      # Both projects are driven by their own build systems now. The Qt
+      # Every GUI project is driven by its own build system. The Qt
       # headers are needed by ici lint as well as by the build adapters.
       - name: Install the Qt6 build toolchain
         run: |
@@ -88,12 +100,7 @@ jobs:
           base="https://github.com/jihoon22-lee/ici/releases/download/${ICI_VERSION}"
           curl -fsSL --retry 3 -o ici.pyz "${base}/ici.pyz"
           curl -fsSL --retry 3 -o ici.pyz.sha256 "${base}/ici.pyz.sha256"
-          expected="$(awk 'NR == 1 {print $1; exit}' ici.pyz.sha256)"
-          actual="$(sha256sum ici.pyz | awk '{print $1}')"
-          if [ "$expected" != "$actual" ]; then
-            echo "::error::ici.pyz 체크섬 불일치 (expected=$expected actual=$actual)"
-            exit 1
-          fi
+          sha256sum --check ici.pyz.sha256
           chmod +x ici.pyz
 
       - name: Report toolchain
@@ -516,9 +523,7 @@ jobs:
           base="https://github.com/jihoon22-lee/ici/releases/download/${ICI_VERSION}"
           curl -fsSL --retry 3 -o ici.pyz "${base}/ici.pyz"
           curl -fsSL --retry 3 -o ici.pyz.sha256 "${base}/ici.pyz.sha256"
-          expected="$(awk 'NR == 1 {print $1; exit}' ici.pyz.sha256)"
-          actual="$(sha256sum ici.pyz | awk '{print $1}')"
-          test "$expected" = "$actual"
+          sha256sum --check ici.pyz.sha256
           chmod +x ici.pyz
 
       - name: Download all project reports
