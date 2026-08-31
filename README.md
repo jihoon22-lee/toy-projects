@@ -224,6 +224,13 @@ source read는 한 poll당 기본 1 MiB(최대 16 MiB)로 제한된다. GUI는 �
 단계다. Tail N/index 선택, worker-thread parsing과 1 GiB·100만 record benchmark는 아직
 완료되지 않았으며 마스터 계획의 다음 L2 작업이다.
 
+PR [#24](https://github.com/jihoon22-lee/toy-projects/pull/24)의 구현 head `fa4fd1a`는
+workflow [`33348597272`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33348597272)에서
+공개 ici 검증, 두 프로젝트 Qt5·Qt6 GUI, report publish와 Merge Gate를 모두 통과했다.
+[sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/24#issuecomment-5472700934)에
+두 PASS 결과와 HTML 링크가 게시됐고, 두 Pages 문서는 HTTP 200·`text/html`·외부 참조 0개로
+직접 확인했다.
+
 ### Qt 셸 테스트 현황
 
 GUI는 헤드리스 QtTest와 실제 fixture 파일을 사용해 상태 전이를 검증한다. `loglens`는

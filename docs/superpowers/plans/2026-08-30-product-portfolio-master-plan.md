@@ -30,7 +30,7 @@
 
 | 프로젝트 | 현재 형태 | 실측 | 제품 상태 |
 |---|---|---|---|
-| loglens | C++17, Qt, CMake | L2 bounded foundation local PASS · 10 tests · TEM 4.85 | bounded 기반 완료, 대용량 UX는 남은 L2~L6에서 확장 |
+| loglens | C++17, Qt, CMake | L2 bounded foundation · PR #24 CI green · 10 tests | bounded 기반 완료, 대용량 UX는 남은 L2~L6에서 확장 |
 | diskmap | C++17, Qt, qmake | D1 Slice 2 merged · PR #23 · CI green · TEM 4.90 | treemap viewer, cleanup UX는 D2~D6에서 확장 |
 | ici/viewer | Qt-free core + Qt6 GUI | 3 tests, TEM 4.94 | core 중심, 셸과 report workflow 부족 |
 
@@ -278,9 +278,15 @@ Qt 5.15과 Qt 6.10의 전체 CTest는 각각 10/10, `-Wall -Wextra -Wpedantic -W
 build/CTest도 10/10 PASS였다. ici 0.6.0 최종 local verify는 Suite PASS, 10 pass / 0 warn /
 0 fail / 0 error / 2 skip, TEM 4.85, line/function/branch 93.9%/96.9%/83.1%, maximum
 complexity 15(0 issues), duplication 1.43%, sanitizer clean이었다. HTML은 283,077 bytes이며
-외부 script/link/image 참조가 0개다. PR CI·sticky comment·Pages는 아직 원격 검증 전이다.
-Tail N/index 선택, 실제 background parsing, 1 GiB·100만 record benchmark와 실측 기반 기본값은
-의도적으로 다음 L2 slice로 남긴다.
+외부 script/link/image 참조가 0개다. 구현·local evidence head `fa4fd1a`의 PR
+[#24](https://github.com/jihoon22-lee/toy-projects/pull/24) workflow
+[`33348597272`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33348597272)는 manifest,
+두 프로젝트의 `ici verify`, Qt5·Qt6 GUI, report publish와 Merge Gate를 모두 통과했다.
+[sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/24#issuecomment-5472700934)는
+두 프로젝트 PASS와 HTML 링크를 포함하며, Pages `diskmap/pr/24/`와 `loglens/pr/24/`는 각각
+HTTP 200·`text/html`·180,160/279,484 bytes·외부 참조 0개였다. Tail N/index 선택, 실제
+background parsing, 1 GiB·100만 record benchmark와 실측 기반 기본값은 의도적으로 다음 L2
+slice로 남긴다.
 
 ### L3. parser와 filter 완성도
 

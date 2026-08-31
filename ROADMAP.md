@@ -48,7 +48,7 @@ gate에서는 아래 네 leg가 같은 계약을 다시 실행한다.
 
 | 프로젝트 | 빌드 | 검증 | Qt 테스트 |
 |---|---|---|---|
-| `loglens` | CMake · Qt5/Qt6 | L2 bounded foundation local PASS · TEM 4.85 | `QAbstractItemModelTester` + MainWindow QtTest |
+| `loglens` | CMake · Qt5/Qt6 | L2 bounded foundation · PR #24 CI green | `QAbstractItemModelTester` + MainWindow QtTest |
 | `diskmap` | qmake · Qt5/Qt6 | D1 Slice 2 merged · PR #23 · TEM 4.90 | `QSignalSpy` + 9 native tests + MainWindow QtTest |
 | `ici/viewer` | CMake · Qt5/Qt6 | PASS · TEM 4.86 | MainWindow QtTest 4/4 |
 
@@ -141,7 +141,8 @@ comment, Pages HTML 응답까지 확인한 뒤 `039052f9`로 병합됐다.
 loglens L2의 첫 slice는 GUI/CLI에 absolute-ID bounded store를 연결하고 source polling과
 pathological record 크기를 제한했다. Qt5·Qt6 및 엄격 경고 build의 CTest 10/10, ici Suite
 PASS(TEM 4.85)를 확인했다. Tail N/index 선택, worker-thread parsing과 규모 benchmark는 다음
-L2 slice에 남아 있다.
+L2 slice에 남아 있다. 구현 head `fa4fd1a`의 PR #24도 ici, Qt5·Qt6, sticky report/Pages와
+Merge Gate를 모두 통과했다.
 
 ### 4단계 — 여유가 되면
 

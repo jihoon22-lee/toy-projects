@@ -65,5 +65,19 @@ HTML 283,077 bytes, external script/link/image references 0
 
 이 결과는 bounded foundation만 완료한다. 초기 Tail N/streaming index 선택, 실제 background
 worker parsing 중 filter/search 안전성, 1 GiB·100만 record benchmark와 first-paint/throughput/
-peak RSS 측정, 실측 기반 default/budget 확정은 다음 slice이며 완료로 표시하지 않았다. PR의
-GitHub CI, sticky comment, Pages HTML 응답 역시 원격 검증 뒤 이 문서와 handover에 추가한다.
+peak RSS 측정, 실측 기반 default/budget 확정은 다음 slice이며 완료로 표시하지 않았다.
+
+## Remote PR evidence
+
+구현과 local evidence를 담은 head `fa4fd1a`의 PR
+[#24](https://github.com/jihoon22-lee/toy-projects/pull/24)는 workflow
+[`33348597272`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33348597272)에서
+manifest, diskmap/loglens `ici verify`, 두 프로젝트의 Qt5·Qt6 GUI, `Publish Reports & Sticky
+Comment`, `Merge Gate`를 모두 통과했다. 원격 loglens 결과는 10/10 tests, TEM 4.82,
+line/function/branch 93.5%/96.3%/83.4%, complexity 15/0 issues였다.
+
+[sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/24#issuecomment-5472700934)는
+diskmap/loglens PASS와 두 HTML 링크를 포함한다. 직접 내려받은 `diskmap/pr/24/`는 HTTP 200,
+`text/html`, 180,160 bytes, external refs 0개였고 `loglens/pr/24/`는 HTTP 200, `text/html`,
+279,484 bytes, external refs 0개였다. 이 수치는 앞 절의 local candidate와 구분한 원격
+evidence다.
