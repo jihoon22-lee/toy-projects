@@ -48,7 +48,7 @@ gate에서는 아래 네 leg가 같은 계약을 다시 실행한다.
 
 | 프로젝트 | 빌드 | 검증 | Qt 테스트 |
 |---|---|---|---|
-| `loglens` | CMake · Qt5/Qt6 | L2 benchmark PR #26 remote verified · default 8192 · squash merge pending | `QAbstractItemModelTester` + MainWindow QtTest |
+| `loglens` | CMake · Qt5/Qt6 | L2 benchmark PR #26 merged · main Qt5/Qt6 sweep green · default 8192 | `QAbstractItemModelTester` + MainWindow QtTest |
 | `diskmap` | qmake · Qt5/Qt6 | D1 Slice 2 merged · PR #23 · TEM 4.90 | `QSignalSpy` + 9 native tests + MainWindow QtTest |
 | `ici/viewer` | CMake · Qt5/Qt6 | PASS · TEM 4.86 | MainWindow QtTest 4/4 |
 
@@ -150,7 +150,7 @@ background/Tail N 최신 구현 head `ce2a7cd91ff0a47c4f153b60f7fb7984de406ce9`�
 병합됐다. [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/25#issuecomment-5472960253)는
 두 프로젝트 PASS와 HTML 링크를 포함하며, Pages `diskmap/pr/25/`와 `loglens/pr/25/`는 각각
 HTTP 200·`text/html`·external refs 0개(180160/327074 bytes)였다. 이 원격 증거는
-background/Tail N 변경에 대한 것이고 1 GiB benchmark candidate의 원격 검증과 혼동하지 않는다.
+background/Tail N 변경에 대한 것이고 1 GiB benchmark의 원격 검증과 혼동하지 않는다.
 
 #### L2 대용량 benchmark 결정 (2026-08-31)
 
@@ -161,20 +161,21 @@ canonical 1 GiB input(정확히 1,073,741,824 bytes, 1,000,000 records, SHA-256
 core RSS, `262144`는 core와 GUI RSS budget에서 탈락했다. budget은 first result/paint
 각 `≤ 5000 ms`, load `≤ 60000 ms`, throughput `≥ 25 MiB/s`, records `≥ 25000/s`,
 core RSS `≤ 256 MiB`, GUI RSS `≤ 512 MiB`다. best median load time 대비 10% 이내의 가장
-작은 적격 capacity를 고르는 규칙으로 기본값을 `8192`로 고정했다.
+작은 적격 capacity를 고르는 규칙으로 기본값을 `8192`로 고정했다. PR #26은
+`c45176ce25f2efd66ea9b0ed9b48690e34cc8679`로 squash merge됐다.
 
 runner 재현 명령, Qt5/Qt6 guard, opt-in/nightly workflow와 `summary.json`·`summary.md`·
 `toolchain.*`·`samples/*.json` artifact allowlist는 [README의 benchmark 절](README.md#1-gib-benchmark-재현-opt-in)에 기록했다. 일반 PR에는 `.github/workflows/ci.yml`의
 1 MiB/1,000-record `benchmark-smoke`(capacity `64,256`, 1회, 30초, budget skip)가
-`Merge Gate` required check로 포함된다. 1 GiB benchmark candidate의 원격 검증은
-[PR #26](https://github.com/jihoon22-lee/toy-projects/pull/26)의 verified head
-`564b782b93cfabed14db31f92e47619d5c17df2c`에서 완료됐다. [green workflow run](https://github.com/jihoon22-lee/toy-projects/actions/runs/33354504610)은
-benchmark smoke 42초를 포함한 모든 checks가 SUCCESS였고, [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/26#issuecomment-5473343910)는
+`Merge Gate` required check로 포함된다. 최종 PR gate인
+[workflow run `33355058919`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33355058919)은
+모든 checks가 green이었고, 기존 [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/26#issuecomment-5473343910)는
 `diskmap: PASS · TEM 4.90`, `loglens: PASS · TEM 4.80`, warn 0과 HTML 링크를 포함한다.
 Pages `diskmap/pr/26/`와 `loglens/pr/26/`는 각각 HTTP 200·`text/html`·external refs 0개
-(180160/334215 bytes)였다. PR26은 아직 병합 전이며 현재 상태는 remote verified, squash
-merge pending이다.
-candidate의 ici 0.6.0 deep no-cache도 12/12 tests, TEM 4.83,
+(180160/334215 bytes)였다. 병합된 main의 [대용량 workflow run `33355312096`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33355312096)은
+Qt5/Qt6 benchmark, combine, verdict를 모두 green으로 완료했고, combined summary SHA-256은
+`5e3292950958a4c678a0c54bf75e7b2546ad1528f43529b6cce1c3dff4e150a8`이다.
+병합 후 main의 ici 0.6.0 deep no-cache도 12/12 tests, TEM 4.83,
 line/function/branch 93.6%/96.6%/81.8%, sanitizer PASS, HTML 433,351 bytes·external refs
 0개로 통과했다.
 

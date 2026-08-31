@@ -106,26 +106,29 @@ QT_QPA_PLATFORM=offscreen python3.10 benchmarks/run_benchmark.py \
 
 | Qt | component | first result | first paint | load | throughput | records/s | peak RSS |
 |---|---|---:|---:|---:|---:|---:|---:|
-| 5 | core | 2.931 ms | — | 1212.313 ms | 844.666 MiB/s | 824869.622 | 25.699 MiB |
-| 5 | GUI | 20.099 ms | 20.668 ms | 13374.639 ms | 76.563 MiB/s | 74768.375 | 55.848 MiB |
-| 6 | core | 3.352 ms | — | 1349.536 ms | 758.779 MiB/s | 740995.486 | 25.719 MiB |
-| 6 | GUI | 21.982 ms | 22.426 ms | 17949.170 ms | 57.050 MiB/s | 55712.882 | 58.648 MiB |
+| 5 | core | 3.041 ms | — | 1510.632 ms | 677.862 MiB/s | 661974.809 | 24.465 MiB |
+| 5 | GUI | 18.031 ms | 19.616 ms | 17717.171 ms | 57.797 MiB/s | 56442.421 | 53.336 MiB |
+| 6 | core | 3.049 ms | — | 1480.219 ms | 691.790 MiB/s | 675575.761 | 24.469 MiB |
+| 6 | GUI | 18.055 ms | 18.843 ms | 18490.615 ms | 55.379 MiB/s | 54081.488 | 55.980 MiB |
 
 `8192`는 두 Qt 결과에서 best median load time 대비 10% 이내인 가장 작은 적격 capacity이므로
-GUI/CLI의 추천 및 기본값으로 고정했다. 이 수치는 benchmark candidate의 local evidence이며,
-원격 PR 검증 결과는 다음 절에 기록한다.
+GUI/CLI의 추천 및 기본값으로 고정했다. 위 수치는 병합된 main workflow의 combined summary에서
+집계한 최종 remote evidence다.
 
 ## Remote PR Evidence
 
-benchmark candidate의 [PR #26](https://github.com/jihoon22-lee/toy-projects/pull/26)은 verified
-head `564b782b93cfabed14db31f92e47619d5c17df2c`에서 검증됐다. [green workflow run](https://github.com/jihoon22-lee/toy-projects/actions/runs/33354504610)은
-benchmark smoke 42초를 포함한 모든 checks가 SUCCESS였다. [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/26#issuecomment-5473343910)는
+최종 PR gate인 [workflow run `33355058919`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33355058919)은
+모든 checks가 green이었고, 기존 [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/26#issuecomment-5473343910)는
 `diskmap: PASS · TEM 4.90`, `loglens: PASS · TEM 4.80`, warn 0과 HTML 링크를 담았다.
 Pages `diskmap/pr/26/`와 `loglens/pr/26/`는 각각 HTTP 200·`text/html`·external refs 0개
-(180160/334215 bytes)였다. PR26은 아직 병합하지 않았고, 현재 상태는 remote verified,
-squash merge pending이다.
+(180160/334215 bytes)였다. PR26은
+`c45176ce25f2efd66ea9b0ed9b48690e34cc8679`로 squash merge됐다. 병합된 main의 [대용량
+workflow run `33355312096`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33355312096)은
+Qt5/Qt6 benchmark, combine, verdict를 모두 green으로 완료했고, combined summary SHA-256은
+`5e3292950958a4c678a0c54bf75e7b2546ad1528f43529b6cce1c3dff4e150a8`이다.
 
 ## Next Steps
 
-- PR26의 green run과 sticky/Pages evidence 확인은 완료됐으므로, 아직 병합 전인 PR26을 squash
-  merge한다.
+- L2 benchmark 증거가 PR26 병합과 main Qt5/Qt6 full sweep까지 닫혔으므로 D2 cancellable scan과
+  stale-result generation guard로 이어간다.
+- L3 parser/filter와 L6 release 조건은 이 benchmark 결과만으로 완료되지 않는다.
