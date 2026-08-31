@@ -7,7 +7,7 @@
 
 namespace loglens {
 
-constexpr std::size_t kDefaultRecordCapacity = 32768;
+constexpr std::size_t kDefaultRecordCapacity = 8192;
 constexpr std::size_t kMaxRecordCapacity = 1'000'000;
 
 // Fixed-capacity FIFO of records. Oldest entries are evicted once full, which

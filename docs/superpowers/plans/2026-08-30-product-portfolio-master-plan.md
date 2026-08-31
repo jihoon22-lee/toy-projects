@@ -30,7 +30,7 @@
 
 | 프로젝트 | 현재 형태 | 실측 | 제품 상태 |
 |---|---|---|---|
-| loglens | C++17, Qt, CMake | L2 bounded/background slice · local Qt5/Qt6 12 CTest targets | Tail N/From start와 worker UX 완료, benchmark/default capacity는 남은 L2 작업 |
+| loglens | C++17, Qt, CMake | L2 bounded/background slice · PR #25 CI green · local Qt5/Qt6 12 CTest targets · 1 GiB benchmark PR #26 remote verified · squash merge pending | Tail N/From start와 worker UX, benchmark/default 8192 완료 |
 | diskmap | C++17, Qt, qmake | D1 Slice 2 merged · PR #23 · CI green · TEM 4.90 | treemap viewer, cleanup UX는 D2~D6에서 확장 |
 | ici/viewer | Qt-free core + Qt6 GUI | 3 tests, TEM 4.94 | core 중심, 셸과 report workflow 부족 |
 
@@ -256,18 +256,18 @@ Pages의 `diskmap/pr/22/`는 HTTP 200·161211 bytes·external refs 0개,
 
 ### L2. bounded storage와 큰 파일 UX
 
-**브랜치:** `feat/loglens-bounded-model` (foundation), `feat/loglens-background-loader` (current slice)
+**브랜치:** `feat/loglens-bounded-model` (foundation), `feat/loglens-background-loader` (current slice), `feat/loglens-large-file-benchmark` (benchmark candidate)
 
 - [x] 기존 RingBuffer를 GUI/CLI 실제 record store에 연결한다.
 - [x] capacity, dropped record count와 oldest/newest line을 노출한다.
 - [x] model reset 대신 incremental insert/remove contract를 테스트한다.
 - [x] 초기 open은 `Latest records`(Tail N) 또는 `From start` 중 사용자 선택을 제공한다.
 - [x] background parsing 중 UI가 filter/search를 안전하게 처리한다.
-- [ ] 1 GiB synthetic log와 100만 record benchmark를 만들고 first-paint, throughput, peak RSS를 기록한다.
-- [ ] 실측 후 default capacity와 성능 budget을 고정한다.
+- [x] 1 GiB synthetic log와 100만 record benchmark를 만들고 first-paint, throughput, peak RSS를 기록한다.
+- [x] 실측 후 default capacity와 성능 budget을 고정한다.
 
 **L2 bounded foundation 로컬 증거 (2026-08-31):** GUI와 CLI는 absolute record ID를
-유지하는 같은 `RingBuffer` 계약을 사용한다. 기본 보존량은 32,768 records, 허용 상한은
+유지하는 같은 `RingBuffer` 계약을 사용한다. 기본 보존량은 8,192 records, 허용 상한은
 1,000,000이며 eviction 때 visible model은 contiguous remove/insert signal을 낸다. source
 poll은 기본 1 MiB·상한 16 MiB chunk로 제한되고, GUI는 Follow가 꺼져도 초기 backlog를
 zero-delay event로 협력적으로 소진한다. one-shot CLI는 첫 file-size snapshot까지만 읽으므로
@@ -284,11 +284,56 @@ physical line number를 보존한다. From start와 Tail N 모두 source identit
 Follow 중지/취소는 pending poll을 버린다. structured filter와 대소문자 구분 없는 search는
 background load 중에도 GUI thread에서 즉시 변경할 수 있고 timeline 갱신은 debounce된다.
 
-Qt 5.15과 Qt 6.10의 전체 CTest는 각각 12/12, `-Wall -Wextra -Wpedantic -Werror` Qt6
-build/CTest도 12/12 PASS였다. 현재 background loader 구현 head `e19fea9`에 대한 ici deep
-no-cache local verify는 Suite PASS, 11 pass / 0 warn / 0 fail / 0 error / 2 skip, TEM 4.83,
-line/function/branch 93.4%/96.6%/81.6%, maximum complexity 15(0 issues), duplication 1.72%,
-sanitizer PASS, HTML 428,025 bytes·external refs 0개였다. 이전 bounded foundation의 ici
+**L2 대용량 benchmark 결정 (2026-08-31):** canonical input은 정확히 1,073,741,824 bytes,
+1,000,000 records이며 SHA-256은
+`11186d3021e558c8ed5e33473198a6f9f281ca0605ae79739a928a87156435bb`다. capacity
+`8192, 16384, 32768, 65536, 131072, 262144`를 각 3회, process timeout 180초로 실행했다.
+두 Qt major에서 `8192..65536`이 correctness·성능·RSS budget을 만족했고, `131072`은 core
+RSS, `262144`는 core와 GUI RSS budget을 초과했다. budget은 first result `≤ 5000 ms`, first
+paint `≤ 5000 ms`, load `≤ 60000 ms`, throughput `≥ 25 MiB/s`, records `≥ 25000/s`,
+core peak RSS `≤ 256 MiB`, GUI peak RSS `≤ 512 MiB`다. best median load time 대비 10% 이내의
+가장 작은 적격 capacity를 고르는 규칙으로 GUI/CLI 기본 capacity를 `8192`로 결정했다.
+
+capacity 8192의 median은 다음과 같다.
+
+| Qt | component | first result | first paint | load | throughput | records/s | peak RSS |
+|---|---|---:|---:|---:|---:|---:|---:|
+| 5 | core | 2.931 ms | — | 1212.313 ms | 844.666 MiB/s | 824869.622 | 25.699 MiB |
+| 5 | GUI | 20.099 ms | 20.668 ms | 13374.639 ms | 76.563 MiB/s | 74768.375 | 55.848 MiB |
+| 6 | core | 3.352 ms | — | 1349.536 ms | 758.779 MiB/s | 740995.486 | 25.719 MiB |
+| 6 | GUI | 21.982 ms | 22.426 ms | 17949.170 ms | 57.050 MiB/s | 55712.882 | 58.648 MiB |
+
+runner는 input의 정확한 크기·record 수·SHA-256을 확인하고 raw sample을 집계한다. benchmark
+target은 기본 빌드에 포함하지 않으며, local runner는 README의 [재현 명령](../../../README.md#1-gib-benchmark-재현-opt-in)으로
+실행한다. artifact에는 `summary.json`, `summary.md`, `toolchain.json`, `toolchain.txt`,
+`samples/*.json`만 남기고 1 GiB input과 process log는 scratch에 둔다. workflow는
+`workflow_dispatch`와 주간 schedule의 Qt5/Qt6 matrix이며 일반 PR/merge gate가 아니다.
+이 결과의 원격 검증은 [PR #26](https://github.com/jihoon22-lee/toy-projects/pull/26)의
+verified head `564b782b93cfabed14db31f92e47619d5c17df2c`에서 완료됐다. [green workflow run](https://github.com/jihoon22-lee/toy-projects/actions/runs/33354504610)은
+benchmark smoke 42초를 포함한 모든 checks가 SUCCESS였고, [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/26#issuecomment-5473343910)는
+`diskmap: PASS · TEM 4.90`, `loglens: PASS · TEM 4.80`, warn 0과 HTML 링크를 포함한다.
+Pages `diskmap/pr/26/`와 `loglens/pr/26/`는 각각 HTTP 200·`text/html`·external refs 0개
+(180160/334215 bytes)였다. PR26은 아직 병합 전이며 현재 상태는 remote verified, squash
+merge pending이다.
+
+background/Tail N 변경은 최신 구현 head `ce2a7cd91ff0a47c4f153b60f7fb7984de406ce9`로
+[PR #25](https://github.com/jihoon22-lee/toy-projects/pull/25)의
+[workflow `33351033448`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33351033448)에서
+모든 checks를 통과했고 merge commit `69db15966ca0c032026aeb7b742c4eed6335910d`로
+병합됐다. [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/25#issuecomment-5472960253)는
+두 프로젝트 PASS와 HTML 링크를 포함하며, Pages `diskmap/pr/25/`와 `loglens/pr/25/`는 각각
+HTTP 200·`text/html`·external refs 0개(180160/327074 bytes)였다. 이 원격 evidence는
+background/Tail N 변경에 대한 것이고 1 GiB benchmark candidate와는 별개다.
+
+일반 PR의 `.github/workflows/ci.yml`에는 1 MiB/1,000 records, capacity `64,256`, 1회,
+30초 timeout, budget skip의 `benchmark-smoke`가 있으며, `Merge Gate`가 이 harness correctness
+run의 성공을 required check로 요구한다. full 1 GiB budget sweep은 비용 때문에
+`workflow_dispatch`/주간 schedule workflow로만 실행한다.
+
+Qt 5.15과 Qt 6.10의 전체 CTest는 각각 12/12였고 Qt6 strict benchmark build도 PASS였다.
+현재 benchmark candidate의 ici 0.6.0 deep no-cache는 Suite PASS, 12/12 tests, TEM 4.83,
+line/function/branch 93.6%/96.6%/81.8%, maximum complexity 15(0 issues), duplication 1.71%,
+sanitizer PASS, HTML 433,351 bytes·external refs 0개였다. 이전 bounded foundation의 ici
 0.6.0 local verify는 Suite PASS, 10 pass / 0 warn / 0 fail / 0 error / 2 skip, TEM 4.85,
 line/function/branch 93.9%/96.9%/83.1%, maximum complexity 15(0 issues), duplication 1.43%,
 sanitizer clean, HTML 283,077 bytes·외부 script/link/image 참조 0개였다. 구현·local evidence
@@ -299,14 +344,14 @@ head `fa4fd1a`의 PR
 [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/24#issuecomment-5472700934)는
 두 프로젝트 PASS와 HTML 링크를 포함하며, Pages `diskmap/pr/24/`와 `loglens/pr/24/`는 각각
 HTTP 200·`text/html`·180,160/279,484 bytes·외부 참조 0개였다. 위 원격 수치는 background
-loader/Tail N 변경 이전 bounded foundation에 대한 기록이다. 현재 변경의 local ici 수치는
-위에 적은 deep no-cache 실행으로 별도 관리하며, 새 원격 PR·sticky comment·Pages 링크는
-아직 만들지 않았다.
+loader/Tail N 변경 이전 bounded foundation에 대한 historical evidence다. background/Tail N
+현재 원격 evidence는 위 PR #25 기록이며, benchmark candidate의 local ici/대용량 결과는
+별도로 관리한다.
 
-현재 L2에서 남은 것은 1 GiB synthetic log·100만 record benchmark, first-paint/throughput/
-peak RSS 측정, 그리고 그 결과에 따른 성능 budget과 default capacity 결정이다. benchmark
-전까지 기본 capacity 32,768은 provisional 값으로 유지하며, 이 미완료 항목을 닫기 전에는
-L2 전체를 완료로 표시하지 않는다.
+L2 bounded/background 구현과 1 GiB benchmark, 성능 budget/default capacity 결정은 완료됐다.
+PR26의 원격 CI·ici·sticky report·Pages 검증도 완료됐지만 아직 병합하지 않았다. 다음 단계는
+PR26을 squash merge하는 것이다.
+L3 parser/filter와 L6 release 완료 조건은 이 결정으로 닫히지 않으며 체크리스트를 유지한다.
 
 ### L3. parser와 filter 완성도
 
@@ -943,7 +988,7 @@ ici와 toy-projects가 함께 바뀌는 기능은 다음 순서를 따른다.
 1. 이 마스터 계획과 ici 마스터 계획을 문서 PR로 보존한다.
 2. T0에서 기존 Qt shell 계획을 stateful log parsing과 정확한 failure-state 테스트로 보정해 실행한다.
 3. L1과 D1로 기존 앱의 신뢰성 기반을 만든다.
-4. L2의 1 GiB/100만 record benchmark와 측정 기반 capacity 결정을 먼저 닫는다.
+4. PR26 green 검증을 확인한 뒤 benchmark candidate를 squash merge하고, D2 cancellable scan과 stale-result generation guard를 구현한다.
 5. ici finding v3와 맞춰 Q0 runner를 만든다.
 6. ici compile context I3와 함께 B0/B1 buildscope를 시작한다.
 7. ici Python compatibility I5와 함께 E0/E1 envlens를 시작한다.

@@ -11,7 +11,7 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 | 이름 | 설명 | 상태 |
 |---|---|---|
 | [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · identity-safe scan · 9 tests |
-| [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · 12 CTest targets |
+| [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · 1 GiB benchmark PR #26 remote verified · squash merge pending |
 
 ## 공통 구조 규칙
 
@@ -211,7 +211,7 @@ follow 모드에서는 보류하며, one-shot CLI의 명시적 EOF `flush()`에�
 
 ### loglens bounded storage
 
-GUI와 CLI는 기본 32,768개(최대 1,000,000개)의 같은 bounded record store를 사용한다.
+GUI와 CLI는 기본 8,192개(최대 1,000,000개)의 같은 bounded record store를 사용한다.
 GUI status는 visible/retained/seen/dropped, oldest-newest physical line과 capacity를 표시하고,
 CLI는 `--capacity N`으로 보존량을 정하며 일반 출력과 `--stats` 모두 같은 요약을 출력한다.
 오래된 record가 제거돼도 assembler의 absolute ID는 바뀌지 않아 continuation update가 다른
@@ -242,9 +242,65 @@ batch를 읽거나 발행하지 않는다. 새 파일을 열면 thread-safe job 
 구조화된 filter와 대소문자 구분 없는 raw-text search는 worker가 계속 batch를 보내는 중에도
 GUI thread에서 안전하게 바꿀 수 있으며, timeline 갱신은 debounce된다.
 
-이 background/Tail N slice에서 아직 완료하지 않은 것은 1 GiB synthetic log·100만 record
-benchmark와 그 결과에 따른 성능 budget/default capacity 결정이다. 따라서 32,768이라는
-기본 capacity는 현재의 보수적인 provisional 값이며, benchmark 전에는 변경하지 않는다.
+2026-08-31에 canonical 1 GiB synthetic log(정확히 1,073,741,824 bytes, 1,000,000 records,
+SHA-256 `11186d3021e558c8ed5e33473198a6f9f281ca0605ae79739a928a87156435bb`)의 전체 sweep을
+완료했다. capacity `8192, 16384, 32768, 65536, 131072, 262144`를 각 3회, process timeout
+180초로 실행했으며, 두 Qt major에서 `8192..65536`이 모든 correctness·성능·RSS budget을
+만족했다. `131072`은 core RSS, `262144`는 core와 GUI RSS budget을 넘겼다.
+
+고정한 budget은 first result `≤ 5000 ms`, first paint `≤ 5000 ms`, 전체 load `≤ 60000 ms`,
+throughput `≥ 25 MiB/s`, records `≥ 25000 records/s`, core peak RSS `≤ 256 MiB`, GUI peak
+RSS `≤ 512 MiB`다. 두 Qt 결과에서 best median load time 대비 10% 이내인 가장 작은 적격
+capacity를 선택하는 규칙으로 기본 capacity를 `8192`로 결정했다. 대표적인 capacity 8192
+median은 다음과 같다.
+
+| Qt | component | first result | first paint | load | throughput | records/s | peak RSS |
+|---|---|---:|---:|---:|---:|---:|---:|
+| 5 | core | 2.931 ms | — | 1212.313 ms | 844.666 MiB/s | 824869.622 | 25.699 MiB |
+| 5 | GUI | 20.099 ms | 20.668 ms | 13374.639 ms | 76.563 MiB/s | 74768.375 | 55.848 MiB |
+| 6 | core | 3.352 ms | — | 1349.536 ms | 758.779 MiB/s | 740995.486 | 25.719 MiB |
+| 6 | GUI | 21.982 ms | 22.426 ms | 17949.170 ms | 57.050 MiB/s | 55712.882 | 58.648 MiB |
+
+#### 1 GiB benchmark 재현 (opt-in)
+
+benchmark target은 기본 빌드에 포함하지 않는다. Qt 6의 local 실행은 다음과 같다.
+
+```bash
+cd loglens
+cmake -S . -B build/benchmark-qt6 -DCMAKE_BUILD_TYPE=Release \
+  -DLOGLENS_BUILD_BENCHMARKS=ON \
+  -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON
+cmake --build build/benchmark-qt6 --parallel \
+  --target loglens-bench-generate loglens-bench-core loglens-bench-gui
+QT_QPA_PLATFORM=offscreen python3.10 benchmarks/run_benchmark.py \
+  --build-dir build/benchmark-qt6 \
+  --scratch /tmp/loglens-benchmark-qt6 \
+  --artifact-dir /tmp/loglens-benchmark-artifacts/qt6 \
+  --qt-major 6 \
+  --bytes 1073741824 --records 1000000 \
+  --capacities 8192,16384,32768,65536,131072,262144 \
+  --repetitions 3 --timeout-seconds 180
+```
+
+Qt 5는 `build/benchmark-qt5`를 사용하고 `CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON`,
+`--qt-major 5`로 바꾼다. runner는 generator 결과의 정확한 byte/record 수와 SHA-256을
+검증한 뒤 core/GUI raw sample을 집계한다. `summary.json`, `summary.md`, `toolchain.json`,
+`toolchain.txt`, `samples/*.json`만 artifact로 남기며 1 GiB input과 process log는 scratch에
+둔다. `.github/workflows/loglens-benchmark.yml`의 Qt5/Qt6 matrix는 `workflow_dispatch`와
+주간 schedule에서만 실행되고 일반 PR/merge gate에는 포함하지 않는다. 이 benchmark
+candidate의 원격 검증은 [PR #26](https://github.com/jihoon22-lee/toy-projects/pull/26)의 verified head
+`564b782b93cfabed14db31f92e47619d5c17df2c`에서 완료됐다. [green workflow run](https://github.com/jihoon22-lee/toy-projects/actions/runs/33354504610)은
+benchmark smoke 42초를 포함한 모든 checks가 SUCCESS였고, [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/26#issuecomment-5473343910)는
+`diskmap: PASS · TEM 4.90`, `loglens: PASS · TEM 4.80`, warn 0과 HTML 링크를 담았다.
+Pages `diskmap/pr/26/`와 `loglens/pr/26/`는 각각 HTTP 200·`text/html`·external refs 0개
+(180160/334215 bytes)였다. PR26은 아직 병합하지 않았으며 현재 상태는 remote verified,
+squash merge pending이다.
+
+일반 PR에는 별도로 `.github/workflows/ci.yml`의 `benchmark-smoke`가 포함된다. 이것은
+1 MiB/1,000 records, capacity `64,256`, 1회, 30초 timeout의 Qt6 harness correctness run이며
+budget을 건너뛰고 결과 artifact만 업로드한다. `Merge Gate`가 이 smoke 성공을 required check로
+요구하므로 benchmark harness 자체의 회귀는 PR에서 막지만, 비용이 큰 1 GiB budget sweep은
+opt-in/nightly workflow에 남긴다.
 
 PR [#24](https://github.com/jihoon22-lee/toy-projects/pull/24)의 구현 head `fa4fd1a`는
 workflow [`33348597272`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33348597272)에서
@@ -253,12 +309,20 @@ workflow [`33348597272`](https://github.com/jihoon22-lee/toy-projects/actions/ru
 두 PASS 결과와 HTML 링크가 게시됐고, 두 Pages 문서는 HTTP 200·`text/html`·외부 참조 0개로
 직접 확인했다.
 
-위 원격 기록은 bounded foundation에 대한 과거 증거다. 현재 background loader/Tail N 변경의
-로컬 ici deep no-cache 결과는 구현 head `e19fea9`에서 Suite PASS, 11 pass / 0 warn / 0 fail /
-0 error / 2 skip, TEM 4.83, line/function/branch 93.4%/96.6%/81.6%, maximum complexity
+위 원격 기록은 bounded foundation에 대한 과거 증거다. background/Tail N 변경의 이전 local
+ici deep no-cache 결과는 구현 head `e19fea9`에서 Suite PASS, 11 pass / 0 warn / 0 fail / 0
+error / 2 skip, TEM 4.83, line/function/branch 93.4%/96.6%/81.6%, maximum complexity
 15(0 issues), duplication 1.72%, sanitizer PASS, HTML 428,025 bytes·external refs 0개였다.
-이 변경에 대한 새 원격 PR·sticky comment·Pages 링크는 아직 만들지 않았고, CI와 publish 검증은
-slice를 PR로 올린 뒤 수집한다.
+최신 background/Tail N 구현 head `ce2a7cd91ff0a47c4f153b60f7fb7984de406ce9`는
+[PR #25](https://github.com/jihoon22-lee/toy-projects/pull/25)에서
+[workflow `33351033448`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33351033448)의
+모든 checks를 통과했고 merge commit은
+`69db15966ca0c032026aeb7b742c4eed6335910d`다. [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/25#issuecomment-5472960253)는
+두 프로젝트 PASS와 HTML 링크를 담았고, Pages `diskmap/pr/25/`와 `loglens/pr/25/`는 각각
+HTTP 200·`text/html`·external refs 0개(180160/327074 bytes)였다. 이 원격 증거는
+background/Tail N 변경에 대한 것이며, 1 GiB benchmark candidate는 PR26 원격 검증까지
+완료됐다. PR26의 squash merge만 남아 있고, 병합 전에는 benchmark 결과를 main의 release
+evidence로 표현하지 않는다.
 
 ### Qt 셸 테스트 현황
 
@@ -285,10 +349,13 @@ L1 Slice 2의 GUI 회귀 테스트는 `QTemporaryDir`로 실제 파일을 만들
 `QMetaObject::invokeMethod(..., Qt::DirectConnection)`으로 poll 경계를 결정적으로 구동한다.
 `test_main_window`는 retryable missing 상태에서 기존 행을 보존하는지, 동일 경로의 replacement를
 새 generation으로 재개하는지, 사용자의 Follow 중지/재개와 fatal unsupported source를 각각
-확인한다. 이 background slice에서 기록된 native CMake/CTest 결과는 Qt 6과 Qt 5 각각
-12/12 PASS이고, Qt 6 strict `-Wall -Wextra -Wpedantic -Werror` 빌드와 CTest도 12/12
-PASS다. 위 local ici deep no-cache 결과는 이 코드에 대한 분석 증거이며, 새 변경의 CI
-report-pr/sticky HTML와 원격 Pages 링크는 아직 만들지 않았다.
+확인한다. 현재 benchmark candidate의 native CMake/CTest는 Qt 6과 Qt 5 각각 12/12 PASS이고,
+Qt 6 strict `-Wall -Wextra -Wpedantic -Werror` benchmark build도 통과했다. ici 0.6.0 deep
+no-cache는 Suite PASS, 12/12 tests, TEM 4.83, line/function/branch
+93.6%/96.6%/81.8%, maximum complexity 15, duplication 1.71%, sanitizer PASS였으며 HTML은
+433,351 bytes·external refs 0개였다. background/Tail N의 원격 검증은 PR #25에서
+완료됐고, benchmark candidate도 PR #26의 verified head와 green run, sticky comment, Pages
+검증을 완료했다. PR26은 아직 병합 전이며 squash merge가 남아 있다.
 
 ## CI 리포트
 

@@ -43,6 +43,8 @@ signals:
     void startLoadRequested(loglens::LoadRequest request);
     void pollRequested(quint64 jobId);
     void acknowledgeRequested(quint64 jobId, quint64 sequence);
+    void loadProgress(qulonglong seen, qulonglong retained, bool initialComplete,
+                      QString error);
 
 private slots:
     void chooseFile();

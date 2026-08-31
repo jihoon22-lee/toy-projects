@@ -35,7 +35,7 @@ void printUsage(std::ostream& out) {
         << "  --stats         print level histogram and top patterns\n"
         << "  --bucket MS     histogram bucket size (default 60000)\n"
         << "  --top N         number of patterns to show (default 10)\n"
-        << "  --capacity N    retained record limit (default 32768)\n"
+        << "  --capacity N    retained record limit (default 8192)\n"
         << "  --help          show this message\n";
 }
 
