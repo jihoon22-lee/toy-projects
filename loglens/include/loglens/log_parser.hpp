@@ -10,6 +10,9 @@
 
 namespace loglens {
 
+constexpr std::size_t kDefaultMaxRecordBytes = 64 * 1024;
+constexpr std::size_t kMaxRecordBytes = 1024 * 1024;
+
 enum class Format {
     Auto,
     PlainIso, // 2026-08-26T04:15:22.123Z INFO  [component] message
@@ -25,8 +28,8 @@ enum class EncodingErrorPolicy { PreserveBytes };
 
 Format detectFormat(const std::string& line);
 
-// Never throws and never drops input: an unparseable line still comes back
-// with raw set, level Unknown, and message holding the whole line.
+// Never throws: an unparseable line still comes back with raw set, level
+// Unknown, and message holding the whole supplied line.
 LogRecord parseLine(const std::string& line, Format format, std::size_t lineNumber);
 
 // True for stack-trace style continuations that belong to the previous record.
@@ -59,7 +62,8 @@ class RecordAssembler {
 public:
     explicit RecordAssembler(
         Format format = Format::Auto,
-        EncodingErrorPolicy encodingPolicy = EncodingErrorPolicy::PreserveBytes);
+        EncodingErrorPolicy encodingPolicy = EncodingErrorPolicy::PreserveBytes,
+        std::size_t maxRecordBytes = kDefaultMaxRecordBytes);
 
     std::vector<RecordDelta> consumeBytes(std::string_view bytes);
     std::vector<RecordDelta> consumeLine(const std::string& line);
@@ -79,6 +83,8 @@ public:
     std::uint64_t generation() const;
     std::size_t nextLineNumber() const;
     std::size_t recordCount() const;
+    std::size_t maxRecordBytes() const;
+    std::size_t partialBytes() const;
 
 private:
     Format format_ = Format::Auto;
@@ -87,11 +93,14 @@ private:
     std::size_t next_line_number_ = 1;
     std::size_t record_count_ = 0;
     std::string partial_;
+    std::size_t partial_omitted_bytes_ = 0;
     LogRecord pending_record_;
     std::size_t pending_index_ = 0;
     bool has_pending_ = false;
+    std::size_t max_record_bytes_ = kDefaultMaxRecordBytes;
 
-    std::vector<RecordDelta> consumeCompleteLine(const std::string& line);
+    std::vector<RecordDelta> consumeCompleteLine(const std::string& line,
+                                                 std::size_t omittedBytes = 0);
 };
 
 } // namespace loglens
