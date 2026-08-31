@@ -278,6 +278,90 @@ jobs:
           fi
           echo "GUI stayed up through a scan"
 
+  # The large-file benchmark is opt-in for local builds, but this small
+  # deterministic run keeps the benchmark harness itself inside the PR gate.
+  # Its input and reports live below RUNNER_TEMP so a generated log can never
+  # be mistaken for an artifact to publish or upload.
+  benchmark-smoke:
+    name: LogLens benchmark smoke
+    needs: discover
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+
+      - name: Install Qt6
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qt6-base-dev qmake6 pkg-config
+
+      - name: Build and run benchmark smoke
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set -euo pipefail
+          benchmark_root="$RUNNER_TEMP/loglens-benchmark"
+          scratch_dir="$benchmark_root/scratch"
+          artifact_dir="$benchmark_root/artifact"
+          build_dir="$benchmark_root/build"
+          mkdir -p "$scratch_dir" "$artifact_dir" "$build_dir"
+
+          cmake -S loglens -B "$build_dir" -DCMAKE_BUILD_TYPE=Release \
+            -DLOGLENS_BUILD_BENCHMARKS=ON \
+            -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON
+          cmake --build "$build_dir" --parallel \
+            --target loglens-bench-generate loglens-bench-core loglens-bench-gui
+
+          python3 loglens/benchmarks/run_benchmark.py \
+            --build-dir "$build_dir" \
+            --scratch "$scratch_dir" \
+            --artifact-dir "$artifact_dir" \
+            --qt-major 6 \
+            --generator "$build_dir/benchmarks/loglens-bench-generate" \
+            --core "$build_dir/benchmarks/loglens-bench-core" \
+            --gui "$build_dir/benchmarks/loglens-bench-gui" \
+            --bytes 1048576 \
+            --records 1000 \
+            --capacities 64,256 \
+            --repetitions 1 \
+            --timeout-seconds 30 \
+            --skip-budgets \
+            --commit "$GITHUB_SHA"
+
+          test -s "$artifact_dir/summary.json"
+          python3 - "$artifact_dir/summary.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          summary = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          if summary.get("decision", {}).get("status") != "pass":
+              raise SystemExit("benchmark smoke did not report a correctness PASS")
+          if not summary.get("samples") or not all(
+              sample.get("checks", {}).get("correctness") is True
+              for sample in summary["samples"]
+          ):
+              raise SystemExit("benchmark smoke contains a failed correctness sample")
+          PY
+
+      - name: Upload benchmark smoke report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: loglens-benchmark-smoke
+          path: ${{ runner.temp }}/loglens-benchmark/artifact
+          if-no-files-found: warn
+          retention-days: 14
+
   # One comment for the whole run, not one per project. It always starts after
   # both matrices have reached a terminal result, including failures, so a PR
   # never loses the report job behind a skipped dependency.
@@ -488,7 +572,7 @@ jobs:
   merge-gate:
     name: Merge Gate
     if: ${{ always() }}
-    needs: [discover, verify, gui-build, report-pr]
+    needs: [discover, verify, gui-build, benchmark-smoke, report-pr]
     runs-on: ubuntu-latest
     steps:
       - name: Require every quality job
@@ -497,12 +581,14 @@ jobs:
           DISCOVER_RESULT: ${{ needs.discover.result }}
           VERIFY_RESULT: ${{ needs.verify.result }}
           GUI_RESULT: ${{ needs.gui-build.result }}
+          BENCHMARK_SMOKE_RESULT: ${{ needs.benchmark-smoke.result }}
           GUI_COUNT: ${{ needs.discover.outputs.gui_count }}
           REPORT_RESULT: ${{ needs.report-pr.result }}
         run: |
           set -euo pipefail
           test "$DISCOVER_RESULT" = success
           test "$VERIFY_RESULT" = success
+          test "$BENCHMARK_SMOKE_RESULT" = success
           if [ "$GUI_RESULT" != success ]; then
             test "$GUI_COUNT" = 0
             test "$GUI_RESULT" = skipped
