@@ -63,6 +63,18 @@ jobs:
         with:
           python-version: "3.10"
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
+      - name: Install measured Python lint
+        run: |
+          set -euo pipefail
+          uv tool install ruff==0.16.5
+          ruff_bin="$(uv tool dir --bin)"
+          echo "$ruff_bin" >> "$GITHUB_PATH"
+          export PATH="$ruff_bin:$PATH"
+          ruff --version
+
       # Both projects are driven by their own build systems now. The Qt
       # headers are needed by ici lint as well as by the build adapters.
       - name: Install the Qt6 build toolchain
