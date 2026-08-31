@@ -18,6 +18,7 @@
 #include "loglens/gui/main_window.hpp"
 #include "loglens/gui/log_model.hpp"
 #include "loglens/gui/timeline_widget.hpp"
+#include "loglens/filter_expr.hpp"
 #include "loglens/log_stats.hpp"
 
 class TestMainWindow : public QObject {
@@ -36,6 +37,7 @@ private slots:
     void timelineRendersEmptyAndPopulatedStates();
     void boundedStorageEvictsOldRowsAndReportsWindow();
     void drainsBacklogWithFollowDisabled();
+    void searchAndFilterCanChangeDuringBackgroundLoading();
 };
 
 namespace {
@@ -78,6 +80,11 @@ QByteArray line(const char* level, int number) {
     return QByteArray("2026-08-26T04:15:2") + QByteArray::number(number % 10)
            + QByteArray(".000Z ") + level + QByteArray("  [api] request ")
            + QByteArray::number(number) + '\n';
+}
+
+QByteArray lineWithMessage(const char* level, int number, const char* message) {
+    return QByteArray("2026-08-26T04:15:2") + QByteArray::number(number % 10)
+           + QByteArray(".000Z ") + level + QByteArray("  [api] ") + message + '\n';
 }
 
 void writeFile(const QString& path, const QByteArray& bytes, bool append = false) {
@@ -492,6 +499,51 @@ void TestMainWindow::drainsBacklogWithFollowDisabled() {
     QCOMPARE(cell(window, 0, LogModel::ColumnLine), QStringLiteral("1"));
     QCOMPARE(cell(window, lineCount - 1, LogModel::ColumnLine),
              QString::number(lineCount));
+}
+
+void TestMainWindow::searchAndFilterCanChangeDuringBackgroundLoading() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("search.log"));
+    QByteArray contents;
+    contents += lineWithMessage("INFO", 1, "NEEDLE bootstrap");
+    contents += lineWithMessage("ERROR", 2, "needle second");
+    contents += lineWithMessage("WARN", 3, "NEEDLE warning");
+    contents += lineWithMessage("FATAL", 4, "needle fatal");
+    contents += lineWithMessage("ERROR", 5, "ordinary error");
+    contents += lineWithMessage("ERROR", 6, "NEEDLE final");
+    writeFile(path, contents);
+
+    MainWindow window(nullptr, 64, 5);
+    auto* model = qobject_cast<LogModel*>(tableModel(window));
+    QVERIFY(model != nullptr);
+    loglens::ParseError parseError;
+    const auto parsed = loglens::Filter::parse("level >= error", parseError);
+    QVERIFY(parsed.has_value());
+    const loglens::Filter structuredFilter = *parsed;
+
+    bool changedDuringLoad = false;
+    QObject::connect(&window, &MainWindow::acknowledgeRequested, &window,
+                     [&](quint64, quint64) {
+                         if (changedDuringLoad) {
+                             return;
+                         }
+                         changedDuringLoad = true;
+                         model->setSearch(QStringLiteral("NeEdLe"));
+                         model->setFilter(&structuredFilter);
+                     });
+
+    // The tiny source chunks force multiple worker batches. The first direct
+    // acknowledgement changes both predicates while the worker is paused on
+    // its bounded backpressure gate, before the remaining records arrive.
+    window.openPath(path, loglens::InitialLoadMode::FromStart, 64);
+
+    QTRY_VERIFY_WITH_TIMEOUT(changedDuringLoad, 2500);
+    QTRY_COMPARE_WITH_TIMEOUT(rowCount(window), 3, 2500);
+    QTRY_COMPARE(cell(window, 0, LogModel::ColumnLine), QStringLiteral("2"));
+    QTRY_COMPARE(cell(window, 1, LogModel::ColumnLine), QStringLiteral("4"));
+    QTRY_COMPARE(cell(window, 2, LogModel::ColumnLine), QStringLiteral("6"));
+    QTRY_COMPARE(status(window)->text(), statusText(3, 6, 6, 0, 1, 6, 64));
 }
 
 QTEST_MAIN(TestMainWindow)
