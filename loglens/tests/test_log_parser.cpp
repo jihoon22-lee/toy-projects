@@ -2,6 +2,8 @@
 
 #include "loglens/log_parser.hpp"
 
+#include <stdexcept>
+
 using loglens::detectFormat;
 using loglens::EncodingErrorPolicy;
 using loglens::Format;
@@ -188,6 +190,105 @@ void testAssemblerBuffersPartialBytesUntilNewline() {
     CHECK_EQ(eof.recordCount(), static_cast<std::size_t>(1));
 }
 
+void testAssemblerBoundsUnterminatedInputAcrossChunks() {
+    constexpr std::size_t kLimit = 8;
+    RecordAssembler assembler(Format::Auto, EncodingErrorPolicy::PreserveBytes, kLimit);
+
+    CHECK(assembler.consumeBytes("1234").empty());
+    CHECK_EQ(assembler.partialBytes(), static_cast<std::size_t>(4));
+    CHECK(assembler.consumeBytes("56789").empty());
+    CHECK_EQ(assembler.partialBytes(), kLimit);
+    CHECK(assembler.consumeBytes("XYZ").empty());
+    CHECK_EQ(assembler.partialBytes(), kLimit);
+
+    const std::vector<RecordDelta> flushed = assembler.flush();
+    CHECK_EQ(flushed.size(), static_cast<std::size_t>(1));
+    CHECK_EQ(flushed[0].record.raw, std::string("12345678"));
+    CHECK_EQ(flushed[0].record.input_bytes, static_cast<std::size_t>(12));
+    CHECK_EQ(flushed[0].record.omitted_bytes, static_cast<std::size_t>(4));
+    CHECK_EQ(flushed[0].record.input_bytes,
+             flushed[0].record.raw.size() + flushed[0].record.omitted_bytes);
+    CHECK_EQ(assembler.partialBytes(), static_cast<std::size_t>(0));
+}
+
+void testAssemblerBoundsOversizedNewlineTerminatedRoot() {
+    constexpr std::size_t kLimit = 8;
+    const std::string source = "0123456789ABC";
+    RecordAssembler assembler(Format::Auto, EncodingErrorPolicy::PreserveBytes, kLimit);
+
+    const std::vector<RecordDelta> deltas = assembler.consumeBytes(source + "\n");
+    CHECK_EQ(deltas.size(), static_cast<std::size_t>(1));
+    CHECK(deltas[0].kind == RecordDelta::Kind::Append);
+    CHECK_EQ(deltas[0].record.raw, source.substr(0, kLimit));
+    CHECK_EQ(deltas[0].record.input_bytes, source.size());
+    CHECK_EQ(deltas[0].record.omitted_bytes, source.size() - kLimit);
+    CHECK_EQ(assembler.partialBytes(), static_cast<std::size_t>(0));
+}
+
+void testAssemblerBoundsRepeatedOversizedContinuations() {
+    constexpr std::size_t kLimit = 16;
+    const std::string firstContinuation = "    " + std::string(40, 'a');
+    const std::string secondContinuation = "\t" + std::string(40, 'b');
+    RecordAssembler assembler(Format::Auto, EncodingErrorPolicy::PreserveBytes, kLimit);
+
+    const std::vector<RecordDelta> deltas = assembler.consumeBytes(
+        "root\n" + firstContinuation + "\n" + secondContinuation + "\n");
+    CHECK_EQ(deltas.size(), static_cast<std::size_t>(3));
+    CHECK(deltas[0].kind == RecordDelta::Kind::Append);
+    CHECK(deltas[1].kind == RecordDelta::Kind::Extend);
+    CHECK(deltas[2].kind == RecordDelta::Kind::Extend);
+    CHECK_EQ(deltas[1].record_index, static_cast<std::size_t>(0));
+    CHECK_EQ(deltas[2].record_index, static_cast<std::size_t>(0));
+
+    const std::size_t afterFirstInput = 4 + 1 + firstContinuation.size();
+    const std::size_t afterSecondInput = afterFirstInput + 1 + secondContinuation.size();
+    CHECK_EQ(deltas[1].record.raw.size(), kLimit);
+    CHECK_EQ(deltas[1].record.input_bytes, afterFirstInput);
+    CHECK_EQ(deltas[1].record.omitted_bytes, afterFirstInput - kLimit);
+    CHECK_EQ(deltas[2].record.raw.size(), kLimit);
+    CHECK_EQ(deltas[2].record.input_bytes, afterSecondInput);
+    CHECK_EQ(deltas[2].record.omitted_bytes, afterSecondInput - kLimit);
+    CHECK(deltas[2].record.omitted_bytes > deltas[1].record.omitted_bytes);
+    CHECK_EQ(assembler.partialBytes(), static_cast<std::size_t>(0));
+}
+
+void testAssemblerResetClearsPartialOmission() {
+    constexpr std::size_t kLimit = 8;
+    RecordAssembler assembler(Format::Auto, EncodingErrorPolicy::PreserveBytes, kLimit);
+
+    CHECK(assembler.consumeBytes("0123456789").empty());
+    CHECK_EQ(assembler.partialBytes(), kLimit);
+    assembler.reset(42);
+    CHECK_EQ(assembler.partialBytes(), static_cast<std::size_t>(0));
+    CHECK_EQ(assembler.nextLineNumber(), static_cast<std::size_t>(1));
+    CHECK_EQ(assembler.recordCount(), static_cast<std::size_t>(0));
+    CHECK(assembler.flush().empty());
+
+    const std::vector<RecordDelta> fresh = assembler.consumeBytes("fresh\n");
+    CHECK_EQ(fresh.size(), static_cast<std::size_t>(1));
+    CHECK_EQ(fresh[0].generation, static_cast<std::uint64_t>(42));
+    CHECK_EQ(fresh[0].record.raw, std::string("fresh"));
+    CHECK_EQ(fresh[0].record.input_bytes, static_cast<std::size_t>(5));
+    CHECK_EQ(fresh[0].record.omitted_bytes, static_cast<std::size_t>(0));
+}
+
+void testAssemblerRejectsInvalidRecordByteLimits() {
+    const auto throwsInvalidArgument = [](std::size_t limit) {
+        try {
+            RecordAssembler assembler(Format::Auto, EncodingErrorPolicy::PreserveBytes, limit);
+            (void)assembler;
+        } catch (const std::invalid_argument&) {
+            return true;
+        } catch (...) {
+            return false;
+        }
+        return false;
+    };
+
+    CHECK(throwsInvalidArgument(0));
+    CHECK(throwsInvalidArgument(loglens::kMaxRecordBytes + 1));
+}
+
 void testAssemblerResetDropsOldGenerationState() {
     RecordAssembler assembler;
     CHECK(assembler.consumeBytes("2026-08-26T04:15:22Z INFO stale").empty());
@@ -232,6 +333,11 @@ int main() {
     testAssemblerExtendsPreviousRecordAcrossPolls();
     testAssemblerDoesNotDropLeadingContinuation();
     testAssemblerBuffersPartialBytesUntilNewline();
+    testAssemblerBoundsUnterminatedInputAcrossChunks();
+    testAssemblerBoundsOversizedNewlineTerminatedRoot();
+    testAssemblerBoundsRepeatedOversizedContinuations();
+    testAssemblerResetClearsPartialOmission();
+    testAssemblerRejectsInvalidRecordByteLimits();
     testAssemblerResetDropsOldGenerationState();
     testAssemblerMakesTheBytePreservingErrorPolicyExplicit();
     return checkSummary();

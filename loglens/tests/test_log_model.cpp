@@ -2,6 +2,8 @@
 #include <QSignalSpy>
 #include <QtTest>
 
+#include <cstddef>
+#include <cstdint>
 #include <initializer_list>
 #include <optional>
 #include <vector>
@@ -29,6 +31,12 @@ loglens::Filter errorsOnly() {
     return *filter;
 }
 
+loglens::LogRecord numberedRecord(Level level, std::size_t line, const char* message) {
+    loglens::LogRecord record = makeRecord(level, "svc", message);
+    record.line_number = line;
+    return record;
+}
+
 } // namespace
 
 class TestLogModel : public QObject {
@@ -42,6 +50,14 @@ private slots:
     void resetClearsEverything();
     void updateVisibleRecordEmitsDataChanged();
     void updateRespectsFilterMembership();
+    void boundedAppendEmitsRemovalAndInsertionForRepeatedEviction();
+    void appendBatchCrossingFullCapacityEmitsContiguousRanges();
+    void filteredEvictionRemovesVisibleRowsForNonMatchingArrivals();
+    void oversizedBatchRetainsOnlyItsSuffix();
+    void staleGenerationOrIndexAppendIsIgnored();
+    void evictedExtensionIsIgnored();
+    void retainedUpdatesRespectFilterAfterWrap();
+    void omittedBytesAreVisibleInMessageAndTooltip();
 };
 
 // QAbstractItemModelTester asserts the whole QAbstractItemModel contract on
@@ -180,6 +196,262 @@ void TestLogModel::updateRespectsFilterMembership() {
     QCOMPARE(model.rowCount(), 1);
     QCOMPARE(removed.count(), 1);
     QCOMPARE(model.recordAt(0)->message, std::string("now visible"));
+}
+
+void TestLogModel::boundedAppendEmitsRemovalAndInsertionForRepeatedEviction() {
+    LogModel model(nullptr, 2);
+    QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::Fatal);
+    model.resetRecords(7);
+
+    model.appendRecords(
+        {numberedRecord(Level::Info, 1, "one"), numberedRecord(Level::Info, 2, "two")}, 0, 7);
+    QCOMPARE(model.rowCount(), 2);
+    QCOMPARE(model.totalSeen(), static_cast<std::size_t>(2));
+    QCOMPARE(model.droppedCount(), static_cast<std::size_t>(0));
+    QVERIFY(model.oldestLine().has_value());
+    QVERIFY(model.newestLine().has_value());
+    QCOMPARE(*model.oldestLine(), static_cast<std::size_t>(1));
+    QCOMPARE(*model.newestLine(), static_cast<std::size_t>(2));
+
+    QSignalSpy removed(&model, &QAbstractItemModel::rowsRemoved);
+    QSignalSpy inserted(&model, &QAbstractItemModel::rowsInserted);
+
+    model.appendRecords({numberedRecord(Level::Info, 3, "three")}, 2, 7);
+    QCOMPARE(removed.count(), 1);
+    QCOMPARE(inserted.count(), 1);
+    QCOMPARE(removed.at(0).at(1).toInt(), 0);
+    QCOMPARE(removed.at(0).at(2).toInt(), 0);
+    QCOMPARE(inserted.at(0).at(1).toInt(), 1);
+    QCOMPARE(inserted.at(0).at(2).toInt(), 1);
+    QCOMPARE(model.recordAt(0)->line_number, static_cast<std::size_t>(2));
+    QCOMPARE(model.recordAt(1)->line_number, static_cast<std::size_t>(3));
+    QCOMPARE(model.totalSeen(), static_cast<std::size_t>(3));
+    QCOMPARE(model.droppedCount(), static_cast<std::size_t>(1));
+    QCOMPARE(*model.oldestLine(), static_cast<std::size_t>(2));
+    QCOMPARE(*model.newestLine(), static_cast<std::size_t>(3));
+
+    model.appendRecords({numberedRecord(Level::Info, 4, "four")}, 3, 7);
+    QCOMPARE(removed.count(), 2);
+    QCOMPARE(inserted.count(), 2);
+    QCOMPARE(model.recordAt(0)->line_number, static_cast<std::size_t>(3));
+    QCOMPARE(model.recordAt(1)->line_number, static_cast<std::size_t>(4));
+    QCOMPARE(model.totalSeen(), static_cast<std::size_t>(4));
+    QCOMPARE(model.droppedCount(), static_cast<std::size_t>(2));
+    QCOMPARE(*model.oldestLine(), static_cast<std::size_t>(3));
+    QCOMPARE(*model.newestLine(), static_cast<std::size_t>(4));
+    QCOMPARE(model.generation(), static_cast<std::uint64_t>(7));
+}
+
+void TestLogModel::appendBatchCrossingFullCapacityEmitsContiguousRanges() {
+    LogModel model(nullptr, 3);
+    QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::Fatal);
+    model.resetRecords(17);
+
+    model.appendRecords(
+        {numberedRecord(Level::Info, 1, "one"), numberedRecord(Level::Info, 2, "two"),
+         numberedRecord(Level::Info, 3, "three")},
+        0, 17);
+    QCOMPARE(model.rowCount(), 3);
+    QCOMPARE(model.totalSeen(), static_cast<std::size_t>(3));
+    QCOMPARE(model.droppedCount(), static_cast<std::size_t>(0));
+
+    QSignalSpy removed(&model, &QAbstractItemModel::rowsRemoved);
+    QSignalSpy inserted(&model, &QAbstractItemModel::rowsInserted);
+    model.appendRecords(
+        {numberedRecord(Level::Info, 4, "four"), numberedRecord(Level::Info, 5, "five")},
+        3, 17);
+
+    // A single batch evicts the first two visible rows and appends both new
+    // records. Each change must be announced as one contiguous range.
+    QCOMPARE(removed.count(), 1);
+    QCOMPARE(removed.at(0).at(1).toInt(), 0);
+    QCOMPARE(removed.at(0).at(2).toInt(), 1);
+    QCOMPARE(inserted.count(), 1);
+    QCOMPARE(inserted.at(0).at(1).toInt(), 1);
+    QCOMPARE(inserted.at(0).at(2).toInt(), 2);
+
+    QCOMPARE(model.rowCount(), 3);
+    QCOMPARE(model.recordAt(0)->line_number, static_cast<std::size_t>(3));
+    QCOMPARE(model.recordAt(1)->line_number, static_cast<std::size_t>(4));
+    QCOMPARE(model.recordAt(2)->line_number, static_cast<std::size_t>(5));
+    QCOMPARE(model.totalSeen(), static_cast<std::size_t>(5));
+    QCOMPARE(model.droppedCount(), static_cast<std::size_t>(2));
+}
+
+void TestLogModel::filteredEvictionRemovesVisibleRowsForNonMatchingArrivals() {
+    LogModel model(nullptr, 2);
+    QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::Fatal);
+    model.resetRecords(3);
+    const loglens::Filter filter = errorsOnly();
+    model.setFilter(&filter);
+
+    model.appendRecords(
+        {numberedRecord(Level::Error, 1, "one"), numberedRecord(Level::Error, 2, "two")}, 0, 3);
+    QCOMPARE(model.rowCount(), 2);
+
+    QSignalSpy removed(&model, &QAbstractItemModel::rowsRemoved);
+    QSignalSpy inserted(&model, &QAbstractItemModel::rowsInserted);
+    model.appendRecords({numberedRecord(Level::Info, 3, "not visible")}, 2, 3);
+
+    // The arriving record does not match, but line 1 was evicted and must still
+    // be removed from the visible index vector.
+    QCOMPARE(removed.count(), 1);
+    QCOMPARE(inserted.count(), 0);
+    QCOMPARE(removed.at(0).at(1).toInt(), 0);
+    QCOMPARE(removed.at(0).at(2).toInt(), 0);
+    QCOMPARE(model.rowCount(), 1);
+    QCOMPARE(model.recordAt(0)->line_number, static_cast<std::size_t>(2));
+    QCOMPARE(model.totalSeen(), static_cast<std::size_t>(3));
+    QCOMPARE(model.droppedCount(), static_cast<std::size_t>(1));
+
+    model.appendRecords({numberedRecord(Level::Info, 4, "also hidden")}, 3, 3);
+    QCOMPARE(removed.count(), 2);
+    QCOMPARE(inserted.count(), 0);
+    QCOMPARE(model.rowCount(), 0);
+    QCOMPARE(model.totalSeen(), static_cast<std::size_t>(4));
+    QCOMPARE(model.droppedCount(), static_cast<std::size_t>(2));
+}
+
+void TestLogModel::oversizedBatchRetainsOnlyItsSuffix() {
+    LogModel model(nullptr, 2);
+    QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::Fatal);
+    model.resetRecords(11);
+
+    QSignalSpy removed(&model, &QAbstractItemModel::rowsRemoved);
+    QSignalSpy inserted(&model, &QAbstractItemModel::rowsInserted);
+    model.appendRecords(
+        {numberedRecord(Level::Info, 1, "one"), numberedRecord(Level::Info, 2, "two"),
+         numberedRecord(Level::Info, 3, "three"), numberedRecord(Level::Info, 4, "four"),
+         numberedRecord(Level::Info, 5, "five")},
+        0, 11);
+
+    QCOMPARE(removed.count(), 0);
+    QCOMPARE(inserted.count(), 1);
+    QCOMPARE(inserted.at(0).at(1).toInt(), 0);
+    QCOMPARE(inserted.at(0).at(2).toInt(), 1);
+    QCOMPARE(model.capacity(), static_cast<std::size_t>(2));
+    QCOMPARE(model.rowCount(), 2);
+    QCOMPARE(model.totalCount(), 2);
+    QCOMPARE(model.totalSeen(), static_cast<std::size_t>(5));
+    QCOMPARE(model.droppedCount(), static_cast<std::size_t>(3));
+    QCOMPARE(*model.oldestLine(), static_cast<std::size_t>(4));
+    QCOMPARE(*model.newestLine(), static_cast<std::size_t>(5));
+    QCOMPARE(model.recordAt(0)->line_number, static_cast<std::size_t>(4));
+    QCOMPARE(model.recordAt(1)->line_number, static_cast<std::size_t>(5));
+    QCOMPARE(model.generation(), static_cast<std::uint64_t>(11));
+}
+
+void TestLogModel::staleGenerationOrIndexAppendIsIgnored() {
+    LogModel model(nullptr, 2);
+    QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::Fatal);
+    model.resetRecords(5);
+
+    model.appendRecords({numberedRecord(Level::Info, 1, "one")}, 0, 5);
+    QSignalSpy removed(&model, &QAbstractItemModel::rowsRemoved);
+    QSignalSpy inserted(&model, &QAbstractItemModel::rowsInserted);
+
+    model.appendRecords({numberedRecord(Level::Info, 2, "wrong index")}, 0, 5);
+    model.appendRecords({numberedRecord(Level::Info, 2, "wrong generation")}, 1, 6);
+    QCOMPARE(removed.count(), 0);
+    QCOMPARE(inserted.count(), 0);
+    QCOMPARE(model.rowCount(), 1);
+    QCOMPARE(model.totalSeen(), static_cast<std::size_t>(1));
+    QCOMPARE(model.droppedCount(), static_cast<std::size_t>(0));
+    QCOMPARE(model.generation(), static_cast<std::uint64_t>(5));
+    QCOMPARE(model.recordAt(0)->message, std::string("one"));
+
+    model.appendRecords({numberedRecord(Level::Info, 2, "accepted")}, 1, 5);
+    QCOMPARE(inserted.count(), 1);
+    QCOMPARE(model.rowCount(), 2);
+    QCOMPARE(model.totalSeen(), static_cast<std::size_t>(2));
+    QCOMPARE(model.recordAt(1)->message, std::string("accepted"));
+}
+
+void TestLogModel::evictedExtensionIsIgnored() {
+    LogModel model(nullptr, 2);
+    QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::Fatal);
+    model.resetRecords(9);
+
+    model.appendRecords(
+        {numberedRecord(Level::Error, 1, "first"), numberedRecord(Level::Info, 2, "second")},
+        0, 9);
+    model.appendRecords({numberedRecord(Level::Info, 3, "third")}, 2, 9);
+    QCOMPARE(model.totalSeen(), static_cast<std::size_t>(3));
+    QCOMPARE(model.droppedCount(), static_cast<std::size_t>(1));
+
+    QSignalSpy changed(&model, &QAbstractItemModel::dataChanged);
+    QSignalSpy removed(&model, &QAbstractItemModel::rowsRemoved);
+    QSignalSpy inserted(&model, &QAbstractItemModel::rowsInserted);
+    model.updateRecord(0, numberedRecord(Level::Fatal, 1, "evicted extension"), 9);
+
+    QCOMPARE(changed.count(), 0);
+    QCOMPARE(removed.count(), 0);
+    QCOMPARE(inserted.count(), 0);
+    QCOMPARE(model.rowCount(), 2);
+    QCOMPARE(model.recordAt(0)->message, std::string("second"));
+    QCOMPARE(model.recordAt(1)->message, std::string("third"));
+}
+
+void TestLogModel::retainedUpdatesRespectFilterAfterWrap() {
+    LogModel model(nullptr, 2);
+    QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::Fatal);
+    model.resetRecords(13);
+    const loglens::Filter filter = errorsOnly();
+
+    model.appendRecords(
+        {numberedRecord(Level::Error, 1, "evicted"), numberedRecord(Level::Info, 2, "hidden"),
+         numberedRecord(Level::Error, 3, "visible")},
+        0, 13);
+    model.setFilter(&filter);
+    QCOMPARE(model.rowCount(), 1);
+    QCOMPARE(model.recordAt(0)->line_number, static_cast<std::size_t>(3));
+
+    QSignalSpy inserted(&model, &QAbstractItemModel::rowsInserted);
+    QSignalSpy removed(&model, &QAbstractItemModel::rowsRemoved);
+    QSignalSpy changed(&model, &QAbstractItemModel::dataChanged);
+
+    // Absolute index 1 is retained but initially filtered out, so it enters at
+    // the front of the visible set before absolute index 2.
+    model.updateRecord(1, numberedRecord(Level::Error, 2, "now visible"), 13);
+    QCOMPARE(inserted.count(), 1);
+    QCOMPARE(inserted.at(0).at(1).toInt(), 0);
+    QCOMPARE(inserted.at(0).at(2).toInt(), 0);
+    QCOMPARE(model.rowCount(), 2);
+    QCOMPARE(model.recordAt(0)->line_number, static_cast<std::size_t>(2));
+    QCOMPARE(model.recordAt(1)->line_number, static_cast<std::size_t>(3));
+
+    // The other retained record leaves the filter and is removed from row 1.
+    model.updateRecord(2, numberedRecord(Level::Info, 3, "now hidden"), 13);
+    QCOMPARE(removed.count(), 1);
+    QCOMPARE(removed.at(0).at(1).toInt(), 1);
+    QCOMPARE(removed.at(0).at(2).toInt(), 1);
+    QCOMPARE(model.rowCount(), 1);
+    QCOMPARE(model.recordAt(0)->line_number, static_cast<std::size_t>(2));
+
+    // A retained visible update changes data without changing membership.
+    model.updateRecord(1, numberedRecord(Level::Fatal, 2, "still visible"), 13);
+    QCOMPARE(changed.count(), 1);
+    QCOMPARE(model.recordAt(0)->level, Level::Fatal);
+    QCOMPARE(model.recordAt(0)->message, std::string("still visible"));
+    QCOMPARE(model.totalSeen(), static_cast<std::size_t>(3));
+    QCOMPARE(model.droppedCount(), static_cast<std::size_t>(1));
+    QCOMPARE(*model.oldestLine(), static_cast<std::size_t>(2));
+    QCOMPARE(*model.newestLine(), static_cast<std::size_t>(3));
+}
+
+void TestLogModel::omittedBytesAreVisibleInMessageAndTooltip() {
+    LogModel model;
+    loglens::LogRecord record = numberedRecord(Level::Warn, 8, "retained prefix");
+    record.raw = "raw retained prefix";
+    record.input_bytes = record.raw.size() + 17;
+    record.omitted_bytes = 17;
+    model.setRecords({record});
+
+    const QModelIndex message = model.index(0, LogModel::ColumnMessage);
+    QCOMPARE(model.data(message, Qt::DisplayRole).toString(),
+             QStringLiteral("retained prefix  [17 source byte(s) omitted]"));
+    QCOMPARE(model.data(message, Qt::ToolTipRole).toString(),
+             QStringLiteral("raw retained prefix\n[17 source byte(s) omitted]"));
 }
 
 QTEST_MAIN(TestLogModel)

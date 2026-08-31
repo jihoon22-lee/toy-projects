@@ -1,8 +1,11 @@
 #include "loglens/log_parser.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <ctime>
+#include <limits>
+#include <stdexcept>
 #include <utility>
 
 namespace loglens {
@@ -10,6 +13,11 @@ namespace loglens {
 namespace {
 
 bool isDigit(char c) { return c >= '0' && c <= '9'; }
+
+std::size_t saturatingAdd(std::size_t left, std::size_t right) {
+    const std::size_t maximum = std::numeric_limits<std::size_t>::max();
+    return right > maximum - left ? maximum : left + right;
+}
 
 // Maps a backslash escape to its character. A lookup keeps each mapping on one
 // line rather than repeating a case/append/break block per escape.
@@ -255,16 +263,24 @@ LogRecord parseLine(const std::string& line, Format format, std::size_t lineNumb
     }
     record.raw = line;
     record.line_number = lineNumber;
+    record.input_bytes = line.size();
     if (record.message.empty() && resolved != Format::JsonLine) {
         record.message = line;
     }
     return record;
 }
 
-RecordAssembler::RecordAssembler(Format format, EncodingErrorPolicy encodingPolicy)
-    : format_(format), encoding_error_policy_(encodingPolicy) {}
+RecordAssembler::RecordAssembler(Format format, EncodingErrorPolicy encodingPolicy,
+                                 std::size_t maxRecordBytes)
+    : format_(format), encoding_error_policy_(encodingPolicy),
+      max_record_bytes_(maxRecordBytes) {
+    if (maxRecordBytes == 0 || maxRecordBytes > kMaxRecordBytes) {
+        throw std::invalid_argument("record byte limit is outside the supported range");
+    }
+}
 
-std::vector<RecordDelta> RecordAssembler::consumeCompleteLine(const std::string& input) {
+std::vector<RecordDelta> RecordAssembler::consumeCompleteLine(const std::string& input,
+                                                              std::size_t omittedBytes) {
     // std::getline() removes LF but leaves CR when a Windows-written file is
     // read in binary mode. Treat CRLF as one newline while keeping raw useful
     // to callers instead of leaking a carriage return into the table/filter.
@@ -276,14 +292,28 @@ std::vector<RecordDelta> RecordAssembler::consumeCompleteLine(const std::string&
     const std::size_t physicalLine = next_line_number_++;
     std::vector<RecordDelta> deltas;
     if (isContinuation(line) && has_pending_) {
-        pending_record_.message += "\n" + line;
-        pending_record_.raw += "\n" + line;
+        const std::size_t incomingBytes = saturatingAdd(1, saturatingAdd(line.size(), omittedBytes));
+        pending_record_.input_bytes =
+            saturatingAdd(pending_record_.input_bytes, incomingBytes);
+        const std::size_t room = max_record_bytes_ - pending_record_.raw.size();
+        if (room > 0) {
+            pending_record_.message.push_back('\n');
+            pending_record_.raw.push_back('\n');
+            const std::size_t lineBytes = std::min(line.size(), room - 1);
+            pending_record_.message.append(line.data(), lineBytes);
+            pending_record_.raw.append(line.data(), lineBytes);
+        }
+        pending_record_.omitted_bytes =
+            pending_record_.input_bytes - pending_record_.raw.size();
         deltas.push_back(RecordDelta{RecordDelta::Kind::Extend, pending_index_, physicalLine,
                                      generation_, pending_record_});
         return deltas;
     }
 
     pending_record_ = parseLine(line, format_, physicalLine);
+    pending_record_.input_bytes = saturatingAdd(line.size(), omittedBytes);
+    pending_record_.omitted_bytes =
+        pending_record_.input_bytes - pending_record_.raw.size();
     pending_index_ = record_count_++;
     has_pending_ = true;
     deltas.push_back(RecordDelta{RecordDelta::Kind::Append, pending_index_, physicalLine,
@@ -292,24 +322,27 @@ std::vector<RecordDelta> RecordAssembler::consumeCompleteLine(const std::string&
 }
 
 std::vector<RecordDelta> RecordAssembler::consumeBytes(std::string_view bytes) {
-    if (!bytes.empty()) {
-        partial_.append(bytes.data(), bytes.size());
-    }
-
     std::vector<RecordDelta> deltas;
     std::size_t start = 0;
-    while (true) {
-        const std::size_t newline = partial_.find('\n', start);
-        if (newline == std::string::npos) {
+    while (start < bytes.size()) {
+        const std::size_t newline = bytes.find('\n', start);
+        const std::size_t end = newline == std::string_view::npos ? bytes.size() : newline;
+        const std::size_t segmentBytes = end - start;
+        const std::size_t room = max_record_bytes_ - partial_.size();
+        const std::size_t retained = std::min(room, segmentBytes);
+        partial_.append(bytes.data() + start, retained);
+        partial_omitted_bytes_ =
+            saturatingAdd(partial_omitted_bytes_, segmentBytes - retained);
+
+        if (newline == std::string_view::npos) {
             break;
         }
         std::vector<RecordDelta> lineDeltas =
-            consumeCompleteLine(partial_.substr(start, newline - start));
+            consumeCompleteLine(partial_, partial_omitted_bytes_);
         deltas.insert(deltas.end(), lineDeltas.begin(), lineDeltas.end());
+        partial_.clear();
+        partial_omitted_bytes_ = 0;
         start = newline + 1;
-    }
-    if (start != 0) {
-        partial_.erase(0, start);
     }
     return deltas;
 }
@@ -318,9 +351,10 @@ std::vector<RecordDelta> RecordAssembler::consumeLine(const std::string& line) {
     // Line-oriented callers still participate in the same partial-byte state:
     // a line obtained after a previous byte chunk completes that chunk rather
     // than creating a second record.
-    std::string framed = line;
-    framed.push_back('\n');
-    return consumeBytes(framed);
+    std::vector<RecordDelta> deltas = consumeBytes(line);
+    std::vector<RecordDelta> completed = consumeBytes("\n");
+    deltas.insert(deltas.end(), completed.begin(), completed.end());
+    return deltas;
 }
 
 std::vector<RecordDelta> RecordAssembler::consumeLines(const std::vector<std::string>& lines) {
@@ -338,7 +372,9 @@ std::vector<RecordDelta> RecordAssembler::flush() {
     }
     std::string line = std::move(partial_);
     partial_.clear();
-    return consumeCompleteLine(line);
+    const std::size_t omittedBytes = partial_omitted_bytes_;
+    partial_omitted_bytes_ = 0;
+    return consumeCompleteLine(line, omittedBytes);
 }
 
 void RecordAssembler::reset(std::uint64_t generation) {
@@ -346,6 +382,7 @@ void RecordAssembler::reset(std::uint64_t generation) {
     next_line_number_ = 1;
     record_count_ = 0;
     partial_.clear();
+    partial_omitted_bytes_ = 0;
     pending_record_ = LogRecord{};
     pending_index_ = 0;
     has_pending_ = false;
@@ -364,5 +401,9 @@ std::uint64_t RecordAssembler::generation() const { return generation_; }
 std::size_t RecordAssembler::nextLineNumber() const { return next_line_number_; }
 
 std::size_t RecordAssembler::recordCount() const { return record_count_; }
+
+std::size_t RecordAssembler::maxRecordBytes() const { return max_record_bytes_; }
+
+std::size_t RecordAssembler::partialBytes() const { return partial_.size(); }
 
 } // namespace loglens

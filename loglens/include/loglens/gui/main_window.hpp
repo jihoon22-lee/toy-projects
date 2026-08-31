@@ -2,13 +2,16 @@
 
 #include <QMainWindow>
 
+#include <cstddef>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "loglens/filter_expr.hpp"
 #include "loglens/log_parser.hpp"
 #include "loglens/log_source.hpp"
+#include "loglens/ring_buffer.hpp"
 
 class LogModel;
 class QCheckBox;
@@ -23,7 +26,9 @@ class MainWindow : public QMainWindow {
     Q_OBJECT
 
 public:
-    explicit MainWindow(QWidget* parent = nullptr);
+    explicit MainWindow(QWidget* parent = nullptr,
+                        std::size_t recordCapacity = loglens::kDefaultRecordCapacity,
+                        std::size_t sourceChunkBytes = loglens::kDefaultSourceChunkBytes);
 
     // Opens a file without the dialog, so `loglens-gui <path>` works and the
     // load path can be exercised headlessly.
@@ -55,8 +60,13 @@ private:
     FollowState followState_ = FollowState::Stopped;
     std::size_t retryAttempts_ = 0;
     bool autoScroll_ = true;
+    bool backlog_pending_ = false;
+    std::size_t source_chunk_bytes_ = loglens::kDefaultSourceChunkBytes;
 
     void refreshTimeline();
     void updateStatus(const QString& extra);
     void applyDeltas(const std::vector<loglens::RecordDelta>& deltas);
+    void handleSourceError(const loglens::SourceChunk& chunk, const std::string& error);
+    void applySourceChunk(const loglens::SourceChunk& chunk, std::size_t restartsBefore);
+    void scheduleBacklogPoll();
 };

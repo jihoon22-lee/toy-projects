@@ -17,8 +17,12 @@ struct LogRecord {
     Level level = Level::Unknown;
     std::string source;             // logger or component name, may be empty
     std::string message;
-    std::string raw;                // the original line, always preserved
+    // Retained source bytes. RecordAssembler caps pathological records and
+    // reports the exact omitted byte count instead of growing without bound.
+    std::string raw;
     std::size_t line_number = 0;
+    std::size_t input_bytes = 0;
+    std::size_t omitted_bytes = 0;
 };
 
 // Case-insensitive. Accepts the common spellings: WARN/WARNING, ERR/ERROR,

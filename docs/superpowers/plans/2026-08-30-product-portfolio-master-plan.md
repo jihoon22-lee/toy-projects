@@ -30,8 +30,8 @@
 
 | 프로젝트 | 현재 형태 | 실측 | 제품 상태 |
 |---|---|---|---|
-| loglens | C++17, Qt, CMake | 8 tests, TEM 4.08 | 유용한 골격, streaming 신뢰성과 대용량 UX 부족 |
-| diskmap | C++17, Qt, qmake | D1 Slice 2 candidate ici PASS · remote pending · TEM 4.90 | treemap viewer, cleanup UX는 D2~D6에서 확장 |
+| loglens | C++17, Qt, CMake | L2 bounded foundation · PR #24 CI green · 10 tests | bounded 기반 완료, 대용량 UX는 남은 L2~L6에서 확장 |
+| diskmap | C++17, Qt, qmake | D1 Slice 2 merged · PR #23 · CI green · TEM 4.90 | treemap viewer, cleanup UX는 D2~D6에서 확장 |
 | ici/viewer | Qt-free core + Qt6 GUI | 3 tests, TEM 4.94 | core 중심, 셸과 report workflow 부족 |
 
 현재 공백:
@@ -217,12 +217,12 @@ smoke를 실행한다. discovery 자동 확장은 `ci/test_check_manifest.py` st
 - [x] Slice 2 — follow recovery GUI state: missing/reappear retry, stopped/follow resume와
   그 상태를 표시하는 사용자 경험.
 
-- [ ] POSIX에서는 device/inode, 다른 platform에서는 사용 가능한 file identity abstraction을 도입한다.
-- [ ] 더 크거나 같은 새 파일로 교체돼도 rotation을 탐지한다.
-- [ ] truncate, replace, permission loss, file disappear/reappear를 구분한다.
-- [ ] poll 결과를 `records`, `generation_changed`, `error`, `position` 구조로 만든다.
+- [x] POSIX에서는 device/inode, 다른 platform에서는 사용 가능한 file identity abstraction을 도입한다.
+- [x] 더 크거나 같은 새 파일로 교체돼도 rotation을 탐지한다.
+- [x] truncate, replace, permission loss, file disappear/reappear를 구분한다.
+- [x] poll 결과를 `records`, `generation_changed`, `error`, `position` 구조로 만든다.
 - [x] stopped/retryable/fatal 상태와 사용자의 resume 동작을 정의한다.
-- [ ] real filesystem integration test와 fake source deterministic test를 함께 둔다.
+- [x] real filesystem integration test와 fake source deterministic test를 함께 둔다.
 
 **Slice 2 구현·검증 증거 (2026-08-31):** `FollowState`를 `Stopped`, `Following`,
 `WaitingRetry`로 분리했다. retryable missing/permission/open/stat/read 오류에서는 기존
@@ -258,13 +258,35 @@ Pages의 `diskmap/pr/22/`는 HTTP 200·161211 bytes·external refs 0개,
 
 **브랜치:** `feat/loglens-bounded-model`
 
-- [ ] 기존 RingBuffer를 GUI/CLI 실제 record store에 연결한다.
-- [ ] capacity, dropped record count와 oldest/newest line을 노출한다.
-- [ ] model reset 대신 incremental insert/remove contract를 테스트한다.
+- [x] 기존 RingBuffer를 GUI/CLI 실제 record store에 연결한다.
+- [x] capacity, dropped record count와 oldest/newest line을 노출한다.
+- [x] model reset 대신 incremental insert/remove contract를 테스트한다.
 - [ ] 초기 open은 tail N 또는 streaming index mode 중 사용자 선택을 제공한다.
 - [ ] background parsing 중 UI가 filter/search를 안전하게 처리한다.
 - [ ] 1 GiB synthetic log와 100만 record benchmark를 만들고 first-paint, throughput, peak RSS를 기록한다.
 - [ ] 실측 후 default capacity와 성능 budget을 고정한다.
+
+**L2 bounded foundation 로컬 증거 (2026-08-31):** GUI와 CLI는 absolute record ID를
+유지하는 같은 `RingBuffer` 계약을 사용한다. 기본 보존량은 32,768 records, 허용 상한은
+1,000,000이며 eviction 때 visible model은 contiguous remove/insert signal을 낸다. source
+poll은 기본 1 MiB·상한 16 MiB chunk로 제한되고, GUI는 Follow가 꺼져도 초기 backlog를
+zero-delay event로 협력적으로 소진한다. one-shot CLI는 첫 file-size snapshot까지만 읽으므로
+동시 append를 무한 추격하지 않는다. pathological physical/logical record는 기본 64 KiB·상한
+1 MiB로 제한하고 `input_bytes`/`omitted_bytes`로 손실을 명시한다.
+
+Qt 5.15과 Qt 6.10의 전체 CTest는 각각 10/10, `-Wall -Wextra -Wpedantic -Werror` Qt6
+build/CTest도 10/10 PASS였다. ici 0.6.0 최종 local verify는 Suite PASS, 10 pass / 0 warn /
+0 fail / 0 error / 2 skip, TEM 4.85, line/function/branch 93.9%/96.9%/83.1%, maximum
+complexity 15(0 issues), duplication 1.43%, sanitizer clean이었다. HTML은 283,077 bytes이며
+외부 script/link/image 참조가 0개다. 구현·local evidence head `fa4fd1a`의 PR
+[#24](https://github.com/jihoon22-lee/toy-projects/pull/24) workflow
+[`33348597272`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33348597272)는 manifest,
+두 프로젝트의 `ici verify`, Qt5·Qt6 GUI, report publish와 Merge Gate를 모두 통과했다.
+[sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/24#issuecomment-5472700934)는
+두 프로젝트 PASS와 HTML 링크를 포함하며, Pages `diskmap/pr/24/`와 `loglens/pr/24/`는 각각
+HTTP 200·`text/html`·180,160/279,484 bytes·외부 참조 0개였다. Tail N/index 선택, 실제
+background parsing, 1 GiB·100만 record benchmark와 실측 기반 기본값은 의도적으로 다음 L2
+slice로 남긴다.
 
 ### L3. parser와 filter 완성도
 
@@ -407,8 +429,8 @@ fresh full build와 `make check` 9/9가 각각 통과했다. 두 GUI는
 결과를 얻었다. 이후 `5ceb059`/`ebe3d86`에서 finite `max_depth`로 잘린 directory를
 `complete=false` 및 `scan depth limit reached`로 표시하고, logical size 합산을
 `uint64_t` 최댓값에서 포화하도록 보수적 truncation semantics를 추가했다. 이 후속 커밋
-직후의 최종 full native/ici 검증과 원격 PR CI, sticky HTML comment 및 Pages 응답 검증은
-아직 pending이었다. 이후 candidate qmake-clean 검증으로 local ici를 다시 확인했다.
+직후의 최종 full native/ici 검증은 이후 candidate qmake-clean 검증으로 local ici를 다시
+확인했다. 원격 PR CI·sticky HTML comment·Pages 응답은 아래 원격 완료 증거로 확인했다.
 
 이후 `6861b7a`/`2f56caf`에서 regular-file root의 실제 CLI 경로와 root symlink semantics를
 추가했다. 실제 file-root smoke는 JSON에서 `name=main.cpp`, `is_dir=false`, `size`가 source
@@ -427,7 +449,14 @@ duration 85.96초였다. capability inventory는 30 tools / 21 ready / 0 incompl
 각각의 성공한 `/usr/bin/make clean` evidence가 포함됐고, tool snapshot도 렌더링됐다.
 HTML은 281,264 bytes이며 외부 `src`/`href` 참조가 0개다. 이 결과는 이전 public ici
 0.6.0 complexity WARN-era 결과를 대체하고 새 freshness guard를 확인한다. 최종 local ici
-검증은 완료됐으며 toy remote PR CI·sticky HTML comment·Pages 응답 검증은 아직 pending이다.
+검증은 완료됐으며 toy remote PR CI·sticky HTML comment·Pages 응답도 아래와 같이 확인했다.
+
+**D1 Slice 2 원격 완료 증거 (2026-08-31):** [PR #23](https://github.com/jihoon22-lee/toy-projects/pull/23)이
+merge commit `039052f9f30e355e12f3c812065657e3be4576f2`로 병합됐다. CI run
+[`33338809225`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33338809225)은
+green이었다. [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/23#issuecomment-5471613383)가
+게시됐고, Pages의 `diskmap/pr/23/`와 `loglens/pr/23/`는 모두 HTTP 200 `text/html`이며
+외부 참조가 0개였다.
 
 ### D2. cancellable scanner와 stale result 방지
 

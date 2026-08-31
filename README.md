@@ -11,7 +11,7 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 | 이름 | 설명 | 상태 |
 |---|---|---|
 | [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · identity-safe scan · 9 tests |
-| [loglens](loglens/) | 로그 뷰어 / 분석기 | CMake + Qt5/Qt6 GUI · 라이브 팔로우 · 10 tests |
+| [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded 라이브 팔로우 · 10 tests |
 
 ## 공통 구조 규칙
 
@@ -95,41 +95,14 @@ alias, identity 없는 followed directory, allocation/link-count unknown 및 agg
 `PRE_TARGETDEPS`를 연결해 테스트가 최신 archive를 다시 링크하도록 했고, stale `.gcda`/`.gcno`
 혼입으로 coverage가 낮게 보이는 재현도 제거했다.
 
-2026-08-31 보수적 truncation 후속 커밋 전 로컬 실측은 Qt 5.15.18(`/usr/bin/qmake`)과
-Qt 6.10.2(`/usr/bin/qmake6`)에서
-전체 빌드와 `make check` 9/9가 각각 통과했다. 두 GUI headless smoke는 8초 동안 살아 있었고
-timeout 종료 코드 124는 의도한 확인 결과다. ici 0.6.0 release asset으로 실행한 verify는
-`Suite PASS`, 10 pass / 0 warn / 0 fail / 0 error / 2 skip, TEM 4.90,
-line 96.9% / function 97.9% / branch 85.2%, maximum complexity 14, duplication 2.1,
-duration 24.24초였다. 생성한 HTML은 180,624 bytes이며 외부 `src`/`href` 참조가 0개다.
-이후 `5ceb059`/`ebe3d86`에서 finite-depth truncation과 saturating logical aggregation을
-추가했다. 아래 candidate qmake-clean 검증이 이 커밋들 이후의 최신 ici 결과이며, 원격 PR
-CI·sticky HTML comment·Pages 응답은 아직 대기 중이다. PR에서 최신 결과를 재확인한 뒤에만
-병합한다.
-
-`6861b7a`/`2f56caf`에서는 regular-file root, root symlink dereference와 broken-target error
-전파를 추가했다. 이 커밋들 이후의 candidate qmake-clean verification은 아래에 기록했으며,
-remote verification은 대기 중이다.
-
-root semantics 후속 반영 뒤 최신 로컬 native 확인은 Qt 5.15.18(`/usr/bin/qmake`)과 Qt 6.10.2
-(`/usr/bin/qmake6`)에서 각각 full build target 및 `make check` 9/9 PASS였다. Qt5/Qt6 GUI
-offscreen smoke도 각각 8초 생존 후 기대된 timeout exit 124로 확인했다. 최종 full ici
-candidate는 아래와 같이 PASS했고, 원격 PR CI·sticky HTML comment·Pages 응답 검증은 아직 pending이다.
-
-`31d8b48`의 root inspection stage 분리 후 public ici complexity-only 검증도 PASS했으며,
-maximum cyclomatic 14 across 101 functions, 0 issues를 기록했다. 이는 아래 candidate
-qmake-clean 검증으로 대체되는 중간 확인이다.
-
-최종 local candidate ici qmake-clean branch는 `Suite PASS`, 10 pass / 0 warn / 0 fail /
-0 error / 2 skip, 9/9 tests, line 96.6% / function 98.0% / branch 85.0%, TEM 4.90,
-complexity 14 across 101 functions / 0 issues, duplication 2.0, sanitizer clean,
-duration 85.96초를 기록했다. capability inventory는 30 tools / 21 ready / 0 incomplete /
-9 unavailable, required `g++` ready, health `READY`였다. candidate JSON에는 test와 sanitize
-각각의 성공한 `/usr/bin/make clean` evidence가 포함됐고, tool snapshot도 렌더링됐다.
-HTML은 281,264 bytes이며 외부 `src`/`href` 참조가 0개다. 이 결과가 즉시 이전 public
-ici 0.6.0 complexity WARN-era 결과를 대체하며 새 ici freshness guard를 확인한다. 최종
-full ici local 검증은 완료됐고, toy remote PR CI·sticky HTML comment·Pages 응답 검증만
-아직 pending이다.
+최종 D1 Slice 2는 Qt5·Qt6 qmake `make check` 9/9와 8초 headless smoke를 통과했고,
+ici 0.6.0 qmake-clean 검증은 Suite PASS, TEM 4.90, line/function/branch
+96.6%/98.0%/85.0%, complexity 14, duplication 2.0, sanitizer clean이었다. PR
+[#23](https://github.com/jihoon22-lee/toy-projects/pull/23)의 workflow
+[`33338809225`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33338809225)는 모든
+checks를 통과했고 merge commit `039052f9f30e355e12f3c812065657e3be4576f2`로 병합됐다.
+[sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/23#issuecomment-5471613383)와
+Pages HTML도 HTTP 200·`text/html`·외부 참조 0개로 확인했다.
 
 ### GUI 는 빌드되고 테스트된다
 
@@ -236,6 +209,28 @@ checkbox와 poll timer를 켠 채 `Follow waiting (attempt N)` 상태를 표시�
 이미 표시한 행을 갱신하고 CLI는 같은 결과 벡터를 갱신한다. newline 없는 마지막 조각은
 follow 모드에서는 보류하며, one-shot CLI의 명시적 EOF `flush()`에서만 record가 된다.
 
+### loglens bounded storage
+
+GUI와 CLI는 기본 32,768개(최대 1,000,000개)의 같은 bounded record store를 사용한다.
+GUI status는 visible/retained/seen/dropped, oldest-newest physical line과 capacity를 표시하고,
+CLI는 `--capacity N`으로 보존량을 정하며 일반 출력과 `--stats` 모두 같은 요약을 출력한다.
+오래된 record가 제거돼도 assembler의 absolute ID는 바뀌지 않아 continuation update가 다른
+행에 적용되지 않는다.
+
+source read는 한 poll당 기본 1 MiB(최대 16 MiB)로 제한된다. GUI는 초기 backlog를 이벤트
+루프에 나눠 처리하고, one-shot CLI는 최초 file-size snapshot까지만 읽는다. newline 없는
+거대한 line이나 continuation은 기본 64 KiB(최대 1 MiB)에서 잘리며, UI/CLI에 정확한
+`omitted_bytes`가 표시된다. 이 slice는 이벤트 루프를 독점하는 전체 파일 read를 없앤 기반
+단계다. Tail N/index 선택, worker-thread parsing과 1 GiB·100만 record benchmark는 아직
+완료되지 않았으며 마스터 계획의 다음 L2 작업이다.
+
+PR [#24](https://github.com/jihoon22-lee/toy-projects/pull/24)의 구현 head `fa4fd1a`는
+workflow [`33348597272`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33348597272)에서
+공개 ici 검증, 두 프로젝트 Qt5·Qt6 GUI, report publish와 Merge Gate를 모두 통과했다.
+[sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/24#issuecomment-5472700934)에
+두 PASS 결과와 HTML 링크가 게시됐고, 두 Pages 문서는 HTTP 200·`text/html`·외부 참조 0개로
+직접 확인했다.
+
 ### Qt 셸 테스트 현황
 
 GUI는 헤드리스 QtTest와 실제 fixture 파일을 사용해 상태 전이를 검증한다. `loglens`는
@@ -251,7 +246,8 @@ headless smoke까지 실행한다.
 | `loglens/src/gui/timeline_widget.cpp` | `test_main_window` — empty/populated paint branch |
 | `diskmap/src/gui/main_window.cpp` | `test_main_window` — scan, breadcrumb, descend/up, leaf no-op |
 
-`loglens`의 ici 0.6.0 실측은 line 93.2% / function 96.9% / branch 81.8% / TEM 4.84이다.
+`loglens` bounded foundation의 ici 0.6.0 실측은 line 93.9% / function 96.9% /
+branch 83.1% / TEM 4.85이다.
 `loglens/ici.toml`은 이 실측 아래에 slack을 둔 branch 75.0 / function 92.0을 게이트로
 사용한다. QPainter/Qt 내부 예외 경로와 C++ type-check 미지원은 남은 명시적 한계다.
 

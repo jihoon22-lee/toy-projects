@@ -1,10 +1,15 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace loglens {
+
+constexpr std::size_t kDefaultSourceChunkBytes = 1024 * 1024;
+constexpr std::size_t kMaxSourceChunkBytes = 16 * 1024 * 1024;
 
 struct FileIdentity {
     std::uint64_t device = 0;
@@ -52,6 +57,13 @@ struct SourceChunk {
     bool generation_changed = false;
     std::uint64_t generation = 0;
     std::uint64_t position = 0;
+    // Size observed from the opened file handle before this read. A one-shot
+    // consumer can retain this boundary and avoid chasing concurrent appends.
+    std::uint64_t snapshot_end = 0;
+    // True when the same source generation had unread bytes at this poll's
+    // snapshot. Consumers can schedule another bounded poll without waiting for
+    // the normal follow interval.
+    bool more_available = false;
     SourceChange change = SourceChange::None;
     FileIdentity identity;
     SourceError error;
@@ -66,7 +78,8 @@ struct SourceChunk {
 // retain the size-based fallback until a native identity adapter is available.
 class FileTailer : public LogSource {
 public:
-    explicit FileTailer(std::string path);
+    explicit FileTailer(std::string path,
+                        std::size_t maxChunkBytes = kDefaultSourceChunkBytes);
 
     bool poll(std::vector<std::string>& out, std::string& error) override;
 
@@ -75,6 +88,10 @@ public:
     // RecordAssembler to carry across polls.
     bool pollChunk(SourceChunk& out, std::string& error);
     SourceChunk pollChunk();
+    // Reads no farther than maxPosition even if the file grows after an
+    // earlier snapshot. Restart detection and generation reporting are still
+    // applied normally.
+    SourceChunk pollChunk(std::uint64_t maxPosition);
 
     std::uint64_t offset() const;
     std::size_t restarts() const;
@@ -90,12 +107,13 @@ private:
     // generation even if the filesystem immediately reuses the old inode.
     bool recovery_pending_ = false;
     bool recovery_restart_started_ = false;
+    std::size_t max_chunk_bytes_ = kDefaultSourceChunkBytes;
 
     SourceChunk initialChunk() const;
 #ifndef _WIN32
-    SourceChunk pollPosixChunk();
+    SourceChunk pollPosixChunk(std::optional<std::uint64_t> maxPosition);
 #else
-    SourceChunk pollPortableChunk();
+    SourceChunk pollPortableChunk(std::optional<std::uint64_t> maxPosition);
 #endif
     SourceChange detectRestart(const FileIdentity& identity, std::uint64_t size);
 };

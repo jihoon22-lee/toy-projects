@@ -48,8 +48,8 @@ gate에서는 아래 네 leg가 같은 계약을 다시 실행한다.
 
 | 프로젝트 | 빌드 | 검증 | Qt 테스트 |
 |---|---|---|---|
-| `loglens` | CMake · Qt5/Qt6 | PASS · TEM 4.84 | `QAbstractItemModelTester` + MainWindow QtTest |
-| `diskmap` | qmake · Qt5/Qt6 | D1 Slice 2 local PASS · TEM 4.90 | `QSignalSpy` + 9 native tests + MainWindow QtTest |
+| `loglens` | CMake · Qt5/Qt6 | L2 bounded foundation · PR #24 CI green | `QAbstractItemModelTester` + MainWindow QtTest |
+| `diskmap` | qmake · Qt5/Qt6 | D1 Slice 2 merged · PR #23 · TEM 4.90 | `QSignalSpy` + 9 native tests + MainWindow QtTest |
 | `ici/viewer` | CMake · Qt5/Qt6 | PASS · TEM 4.86 | MainWindow QtTest 4/4 |
 
 T0-5의 `discover`는 GUI 프로젝트 한 항목을 Qt5·Qt6 두 항목으로 확장한다. 따라서 현재
@@ -135,8 +135,14 @@ D1 Slice 2에서는 이 셸 검증에 identity-safe scanner 계약을 추가했�
 symlink alias 비소유, identityless target의 incomplete 전파와 aggregate overflow를 fake
 source 및 실제 POSIX filesystem으로 확인한다. Qt5/qmake와 Qt6/qmake6 모두 fresh full build와
 `make check` 9/9, GUI offscreen smoke 8초 생존을 통과했으며 public ici 0.6.0 verify는 TEM
-4.90, line/function/branch 96.9%/97.9%/85.2%였다. 원격 PR CI와 report comment/Pages 증거는
-해당 Slice 2 PR에서 추가한다.
+4.90, line/function/branch 96.9%/97.9%/85.2%였다. PR #23의 전체 CI와 sticky report
+comment, Pages HTML 응답까지 확인한 뒤 `039052f9`로 병합됐다.
+
+loglens L2의 첫 slice는 GUI/CLI에 absolute-ID bounded store를 연결하고 source polling과
+pathological record 크기를 제한했다. Qt5·Qt6 및 엄격 경고 build의 CTest 10/10, ici Suite
+PASS(TEM 4.85)를 확인했다. Tail N/index 선택, worker-thread parsing과 규모 benchmark는 다음
+L2 slice에 남아 있다. 구현 head `fa4fd1a`의 PR #24도 ici, Qt5·Qt6, sticky report/Pages와
+Merge Gate를 모두 통과했다.
 
 ### 4단계 — 여유가 되면
 
