@@ -377,9 +377,12 @@ std::vector<RecordDelta> RecordAssembler::flush() {
     return consumeCompleteLine(line, omittedBytes);
 }
 
-void RecordAssembler::reset(std::uint64_t generation) {
+void RecordAssembler::reset(std::uint64_t generation, std::size_t firstLineNumber) {
+    if (firstLineNumber == 0) {
+        throw std::invalid_argument("first physical line number must be positive");
+    }
     generation_ = generation;
-    next_line_number_ = 1;
+    next_line_number_ = firstLineNumber;
     record_count_ = 0;
     partial_.clear();
     partial_omitted_bytes_ = 0;
