@@ -48,7 +48,7 @@ gate에서는 아래 네 leg가 같은 계약을 다시 실행한다.
 
 | 프로젝트 | 빌드 | 검증 | Qt 테스트 |
 |---|---|---|---|
-| `loglens` | CMake · Qt5/Qt6 | L2 benchmark local candidate · default 8192 · background PR #25 CI green | `QAbstractItemModelTester` + MainWindow QtTest |
+| `loglens` | CMake · Qt5/Qt6 | L2 benchmark PR #26 remote verified · default 8192 · squash merge pending | `QAbstractItemModelTester` + MainWindow QtTest |
 | `diskmap` | qmake · Qt5/Qt6 | D1 Slice 2 merged · PR #23 · TEM 4.90 | `QSignalSpy` + 9 native tests + MainWindow QtTest |
 | `ici/viewer` | CMake · Qt5/Qt6 | PASS · TEM 4.86 | MainWindow QtTest 4/4 |
 
@@ -166,8 +166,14 @@ core RSS `≤ 256 MiB`, GUI RSS `≤ 512 MiB`다. best median load time 대비 1
 runner 재현 명령, Qt5/Qt6 guard, opt-in/nightly workflow와 `summary.json`·`summary.md`·
 `toolchain.*`·`samples/*.json` artifact allowlist는 [README의 benchmark 절](README.md#1-gib-benchmark-재현-opt-in)에 기록했다. 일반 PR에는 `.github/workflows/ci.yml`의
 1 MiB/1,000-record `benchmark-smoke`(capacity `64,256`, 1회, 30초, budget skip)가
-`Merge Gate` required check로 포함된다. 이 수치는 pending local candidate의 local evidence이며,
-1 GiB candidate의 원격 PR·Actions workflow 실행·sticky comment·Pages HTML은 아직 생성 전이다.
+`Merge Gate` required check로 포함된다. 1 GiB benchmark candidate의 원격 검증은
+[PR #26](https://github.com/jihoon22-lee/toy-projects/pull/26)의 verified head
+`564b782b93cfabed14db31f92e47619d5c17df2c`에서 완료됐다. [green workflow run](https://github.com/jihoon22-lee/toy-projects/actions/runs/33354504610)은
+benchmark smoke 42초를 포함한 모든 checks가 SUCCESS였고, [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/26#issuecomment-5473343910)는
+`diskmap: PASS · TEM 4.90`, `loglens: PASS · TEM 4.80`, warn 0과 HTML 링크를 포함한다.
+Pages `diskmap/pr/26/`와 `loglens/pr/26/`는 각각 HTTP 200·`text/html`·external refs 0개
+(180160/334215 bytes)였다. PR26은 아직 병합 전이며 현재 상태는 remote verified, squash
+merge pending이다.
 candidate의 ici 0.6.0 deep no-cache도 12/12 tests, TEM 4.83,
 line/function/branch 93.6%/96.6%/81.8%, sanitizer PASS, HTML 433,351 bytes·external refs
 0개로 통과했다.

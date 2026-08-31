@@ -30,7 +30,7 @@
 
 | 프로젝트 | 현재 형태 | 실측 | 제품 상태 |
 |---|---|---|---|
-| loglens | C++17, Qt, CMake | L2 bounded/background slice · PR #25 CI green · local Qt5/Qt6 12 CTest targets · 1 GiB benchmark local candidate | Tail N/From start와 worker UX, benchmark/default 8192 완료 |
+| loglens | C++17, Qt, CMake | L2 bounded/background slice · PR #25 CI green · local Qt5/Qt6 12 CTest targets · 1 GiB benchmark PR #26 remote verified · squash merge pending | Tail N/From start와 worker UX, benchmark/default 8192 완료 |
 | diskmap | C++17, Qt, qmake | D1 Slice 2 merged · PR #23 · CI green · TEM 4.90 | treemap viewer, cleanup UX는 D2~D6에서 확장 |
 | ici/viewer | Qt-free core + Qt6 GUI | 3 tests, TEM 4.94 | core 중심, 셸과 report workflow 부족 |
 
@@ -308,8 +308,13 @@ target은 기본 빌드에 포함하지 않으며, local runner는 README의 [�
 실행한다. artifact에는 `summary.json`, `summary.md`, `toolchain.json`, `toolchain.txt`,
 `samples/*.json`만 남기고 1 GiB input과 process log는 scratch에 둔다. workflow는
 `workflow_dispatch`와 주간 schedule의 Qt5/Qt6 matrix이며 일반 PR/merge gate가 아니다.
-이 결과는 pending local candidate의 local evidence이고, 해당 candidate의 원격 PR·Actions
-workflow 실행·sticky comment·Pages HTML은 아직 생성 전이다.
+이 결과의 원격 검증은 [PR #26](https://github.com/jihoon22-lee/toy-projects/pull/26)의
+verified head `564b782b93cfabed14db31f92e47619d5c17df2c`에서 완료됐다. [green workflow run](https://github.com/jihoon22-lee/toy-projects/actions/runs/33354504610)은
+benchmark smoke 42초를 포함한 모든 checks가 SUCCESS였고, [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/26#issuecomment-5473343910)는
+`diskmap: PASS · TEM 4.90`, `loglens: PASS · TEM 4.80`, warn 0과 HTML 링크를 포함한다.
+Pages `diskmap/pr/26/`와 `loglens/pr/26/`는 각각 HTTP 200·`text/html`·external refs 0개
+(180160/334215 bytes)였다. PR26은 아직 병합 전이며 현재 상태는 remote verified, squash
+merge pending이다.
 
 background/Tail N 변경은 최신 구현 head `ce2a7cd91ff0a47c4f153b60f7fb7984de406ce9`로
 [PR #25](https://github.com/jihoon22-lee/toy-projects/pull/25)의
@@ -344,7 +349,8 @@ loader/Tail N 변경 이전 bounded foundation에 대한 historical evidence다.
 별도로 관리한다.
 
 L2 bounded/background 구현과 1 GiB benchmark, 성능 budget/default capacity 결정은 완료됐다.
-원격 PR·Actions workflow·sticky report·Pages HTML은 candidate를 올린 뒤 별도로 검증한다.
+PR26의 원격 CI·ici·sticky report·Pages 검증도 완료됐지만 아직 병합하지 않았다. 다음 단계는
+PR26을 squash merge하는 것이다.
 L3 parser/filter와 L6 release 완료 조건은 이 결정으로 닫히지 않으며 체크리스트를 유지한다.
 
 ### L3. parser와 filter 완성도
@@ -982,7 +988,7 @@ ici와 toy-projects가 함께 바뀌는 기능은 다음 순서를 따른다.
 1. 이 마스터 계획과 ici 마스터 계획을 문서 PR로 보존한다.
 2. T0에서 기존 Qt shell 계획을 stateful log parsing과 정확한 failure-state 테스트로 보정해 실행한다.
 3. L1과 D1로 기존 앱의 신뢰성 기반을 만든다.
-4. loglens benchmark candidate를 원격 PR로 검증한 뒤 D2 cancellable scan과 stale-result generation guard를 구현한다.
+4. PR26 green 검증을 확인한 뒤 benchmark candidate를 squash merge하고, D2 cancellable scan과 stale-result generation guard를 구현한다.
 5. ici finding v3와 맞춰 Q0 runner를 만든다.
 6. ici compile context I3와 함께 B0/B1 buildscope를 시작한다.
 7. ici Python compatibility I5와 함께 E0/E1 envlens를 시작한다.

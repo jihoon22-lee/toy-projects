@@ -112,15 +112,20 @@ QT_QPA_PLATFORM=offscreen python3.10 benchmarks/run_benchmark.py \
 | 6 | GUI | 21.982 ms | 22.426 ms | 17949.170 ms | 57.050 MiB/s | 55712.882 | 58.648 MiB |
 
 `8192`는 두 Qt 결과에서 best median load time 대비 10% 이내인 가장 작은 적격 capacity이므로
-GUI/CLI의 추천 및 기본값으로 고정했다. 이 수치는 pending local candidate의 local evidence다.
-benchmark candidate의 원격 PR, Actions workflow 실행, ici 결과, sticky comment와 Pages HTML은
-아직 생성 전이며 원격 검증 대기 상태다.
+GUI/CLI의 추천 및 기본값으로 고정했다. 이 수치는 benchmark candidate의 local evidence이며,
+원격 PR 검증 결과는 다음 절에 기록한다.
+
+## Remote PR Evidence
+
+benchmark candidate의 [PR #26](https://github.com/jihoon22-lee/toy-projects/pull/26)은 verified
+head `564b782b93cfabed14db31f92e47619d5c17df2c`에서 검증됐다. [green workflow run](https://github.com/jihoon22-lee/toy-projects/actions/runs/33354504610)은
+benchmark smoke 42초를 포함한 모든 checks가 SUCCESS였다. [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/26#issuecomment-5473343910)는
+`diskmap: PASS · TEM 4.90`, `loglens: PASS · TEM 4.80`, warn 0과 HTML 링크를 담았다.
+Pages `diskmap/pr/26/`와 `loglens/pr/26/`는 각각 HTTP 200·`text/html`·external refs 0개
+(180160/334215 bytes)였다. PR26은 아직 병합하지 않았고, 현재 상태는 remote verified,
+squash merge pending이다.
 
 ## Next Steps
 
-- benchmark candidate를 원격 PR로 올리고 Qt5/Qt6 native CI, ici verify, report-pr의 sticky
-  HTML 링크와 Pages 응답을 확인한다.
-- benchmark workflow는 대용량 비용 때문에 opt-in/nightly 정책을 유지하고 ordinary merge
-  gate에는 추가하지 않는다.
-- 원격 증거까지 닫은 뒤 diskmap D2의 cancellable scan과 stale-result generation guard를
-  구현한다.
+- PR26의 green run과 sticky/Pages evidence 확인은 완료됐으므로, 아직 병합 전인 PR26을 squash
+  merge한다.

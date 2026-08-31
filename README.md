@@ -11,7 +11,7 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 | 이름 | 설명 | 상태 |
 |---|---|---|
 | [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · identity-safe scan · 9 tests |
-| [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · 12 CTest targets · 1 GiB benchmark local candidate |
+| [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · 1 GiB benchmark PR #26 remote verified · squash merge pending |
 
 ## 공통 구조 규칙
 
@@ -287,9 +287,14 @@ Qt 5는 `build/benchmark-qt5`를 사용하고 `CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON
 검증한 뒤 core/GUI raw sample을 집계한다. `summary.json`, `summary.md`, `toolchain.json`,
 `toolchain.txt`, `samples/*.json`만 artifact로 남기며 1 GiB input과 process log는 scratch에
 둔다. `.github/workflows/loglens-benchmark.yml`의 Qt5/Qt6 matrix는 `workflow_dispatch`와
-주간 schedule에서만 실행되고 일반 PR/merge gate에는 포함하지 않는다. 이 결과는 pending
-local candidate의 local evidence이며, 해당 candidate의 원격 PR·Actions workflow 실행·sticky
-comment·Pages HTML은 아직 생성하지 않아 원격 검증 대기 상태다.
+주간 schedule에서만 실행되고 일반 PR/merge gate에는 포함하지 않는다. 이 benchmark
+candidate의 원격 검증은 [PR #26](https://github.com/jihoon22-lee/toy-projects/pull/26)의 verified head
+`564b782b93cfabed14db31f92e47619d5c17df2c`에서 완료됐다. [green workflow run](https://github.com/jihoon22-lee/toy-projects/actions/runs/33354504610)은
+benchmark smoke 42초를 포함한 모든 checks가 SUCCESS였고, [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/26#issuecomment-5473343910)는
+`diskmap: PASS · TEM 4.90`, `loglens: PASS · TEM 4.80`, warn 0과 HTML 링크를 담았다.
+Pages `diskmap/pr/26/`와 `loglens/pr/26/`는 각각 HTTP 200·`text/html`·external refs 0개
+(180160/334215 bytes)였다. PR26은 아직 병합하지 않았으며 현재 상태는 remote verified,
+squash merge pending이다.
 
 일반 PR에는 별도로 `.github/workflows/ci.yml`의 `benchmark-smoke`가 포함된다. 이것은
 1 MiB/1,000 records, capacity `64,256`, 1회, 30초 timeout의 Qt6 harness correctness run이며
@@ -315,8 +320,9 @@ error / 2 skip, TEM 4.83, line/function/branch 93.4%/96.6%/81.6%, maximum comple
 `69db15966ca0c032026aeb7b742c4eed6335910d`다. [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/25#issuecomment-5472960253)는
 두 프로젝트 PASS와 HTML 링크를 담았고, Pages `diskmap/pr/25/`와 `loglens/pr/25/`는 각각
 HTTP 200·`text/html`·external refs 0개(180160/327074 bytes)였다. 이 원격 증거는
-background/Tail N 변경에 대한 것이며, 위 1 GiB benchmark candidate의 원격 PR·workflow run·
-sticky comment·Pages 검증은 여전히 pending이다.
+background/Tail N 변경에 대한 것이며, 1 GiB benchmark candidate는 PR26 원격 검증까지
+완료됐다. PR26의 squash merge만 남아 있고, 병합 전에는 benchmark 결과를 main의 release
+evidence로 표현하지 않는다.
 
 ### Qt 셸 테스트 현황
 
@@ -347,8 +353,9 @@ L1 Slice 2의 GUI 회귀 테스트는 `QTemporaryDir`로 실제 파일을 만들
 Qt 6 strict `-Wall -Wextra -Wpedantic -Werror` benchmark build도 통과했다. ici 0.6.0 deep
 no-cache는 Suite PASS, 12/12 tests, TEM 4.83, line/function/branch
 93.6%/96.6%/81.8%, maximum complexity 15, duplication 1.71%, sanitizer PASS였으며 HTML은
-433,351 bytes·external refs 0개였다. background/Tail N의 원격 검증은 위 PR #25에서
-완료됐고, benchmark candidate의 원격 증거만 PR 생성 뒤 수집한다.
+433,351 bytes·external refs 0개였다. background/Tail N의 원격 검증은 PR #25에서
+완료됐고, benchmark candidate도 PR #26의 verified head와 green run, sticky comment, Pages
+검증을 완료했다. PR26은 아직 병합 전이며 squash merge가 남아 있다.
 
 ## CI 리포트
 
