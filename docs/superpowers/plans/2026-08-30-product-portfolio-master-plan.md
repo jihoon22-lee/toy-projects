@@ -325,11 +325,10 @@ background/Tail N 변경에 대한 것이고 1 GiB benchmark candidate와는 별
 run의 성공을 required check로 요구한다. full 1 GiB budget sweep은 비용 때문에
 `workflow_dispatch`/주간 schedule workflow로만 실행한다.
 
-Qt 5.15과 Qt 6.10의 전체 CTest는 각각 12/12, `-Wall -Wextra -Wpedantic -Werror` Qt6
-build/CTest도 12/12 PASS였다. 현재 background loader 구현 head `e19fea9`에 대한 ici deep
-no-cache local verify는 Suite PASS, 11 pass / 0 warn / 0 fail / 0 error / 2 skip, TEM 4.83,
-line/function/branch 93.4%/96.6%/81.6%, maximum complexity 15(0 issues), duplication 1.72%,
-sanitizer PASS, HTML 428,025 bytes·external refs 0개였다. 이전 bounded foundation의 ici
+Qt 5.15과 Qt 6.10의 전체 CTest는 각각 12/12였고 Qt6 strict benchmark build도 PASS였다.
+현재 benchmark candidate의 ici 0.6.0 deep no-cache는 Suite PASS, 12/12 tests, TEM 4.83,
+line/function/branch 93.6%/96.6%/81.8%, maximum complexity 15(0 issues), duplication 1.71%,
+sanitizer PASS, HTML 433,351 bytes·external refs 0개였다. 이전 bounded foundation의 ici
 0.6.0 local verify는 Suite PASS, 10 pass / 0 warn / 0 fail / 0 error / 2 skip, TEM 4.85,
 line/function/branch 93.9%/96.9%/83.1%, maximum complexity 15(0 issues), duplication 1.43%,
 sanitizer clean, HTML 283,077 bytes·외부 script/link/image 참조 0개였다. 구현·local evidence

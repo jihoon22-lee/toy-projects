@@ -168,6 +168,9 @@ runner 재현 명령, Qt5/Qt6 guard, opt-in/nightly workflow와 `summary.json`·
 1 MiB/1,000-record `benchmark-smoke`(capacity `64,256`, 1회, 30초, budget skip)가
 `Merge Gate` required check로 포함된다. 이 수치는 pending local candidate의 local evidence이며,
 1 GiB candidate의 원격 PR·Actions workflow 실행·sticky comment·Pages HTML은 아직 생성 전이다.
+candidate의 ici 0.6.0 deep no-cache도 12/12 tests, TEM 4.83,
+line/function/branch 93.6%/96.6%/81.8%, sanitizer PASS, HTML 433,351 bytes·external refs
+0개로 통과했다.
 
 ### 4단계 — 여유가 되면
 

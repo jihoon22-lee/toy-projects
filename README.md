@@ -343,10 +343,12 @@ L1 Slice 2의 GUI 회귀 테스트는 `QTemporaryDir`로 실제 파일을 만들
 `QMetaObject::invokeMethod(..., Qt::DirectConnection)`으로 poll 경계를 결정적으로 구동한다.
 `test_main_window`는 retryable missing 상태에서 기존 행을 보존하는지, 동일 경로의 replacement를
 새 generation으로 재개하는지, 사용자의 Follow 중지/재개와 fatal unsupported source를 각각
-확인한다. 이 background slice에서 기록된 native CMake/CTest 결과는 Qt 6과 Qt 5 각각
-12/12 PASS이고, Qt 6 strict `-Wall -Wextra -Wpedantic -Werror` 빌드와 CTest도 12/12
-PASS다. 위 local ici deep no-cache 결과는 이 코드에 대한 분석 증거이며, 새 변경의 CI
-report-pr/sticky HTML와 원격 Pages 링크는 아직 만들지 않았다.
+확인한다. 현재 benchmark candidate의 native CMake/CTest는 Qt 6과 Qt 5 각각 12/12 PASS이고,
+Qt 6 strict `-Wall -Wextra -Wpedantic -Werror` benchmark build도 통과했다. ici 0.6.0 deep
+no-cache는 Suite PASS, 12/12 tests, TEM 4.83, line/function/branch
+93.6%/96.6%/81.8%, maximum complexity 15, duplication 1.71%, sanitizer PASS였으며 HTML은
+433,351 bytes·external refs 0개였다. background/Tail N의 원격 검증은 위 PR #25에서
+완료됐고, benchmark candidate의 원격 증거만 PR 생성 뒤 수집한다.
 
 ## CI 리포트
 

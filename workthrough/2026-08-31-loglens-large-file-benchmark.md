@@ -96,6 +96,9 @@ QT_QPA_PLATFORM=offscreen python3.10 benchmarks/run_benchmark.py \
   180-second per-process timeout
 - both Qt majors: capacities `8192..65536` eligible under the correctness/performance/RSS policy
 - `131072` core and `262144` core+GUI fail their component RSS budgets; no threshold was lowered
+- ici 0.6.0 deep/no-cache: Suite PASS, 12/12 tests, TEM 4.83,
+  line/function/branch 93.6%/96.6%/81.8%, maximum complexity 15, duplication 1.71%,
+  sanitizer PASS, HTML 433,351 bytes with zero external references
 - background/Tail N parent slice는 구현 head `ce2a7cd91ff0a47c4f153b60f7fb7984de406ce9`의
   PR #25, workflow `33351033448`, sticky comment와 Pages HTML까지 원격 검증·병합됐다.
 
