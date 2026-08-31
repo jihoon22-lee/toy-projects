@@ -25,6 +25,7 @@ message(STATUS "loglens: using Qt${QT_VERSION_MAJOR} ${QT_VERSION}")
 add_library(loglens_core STATIC
     src/filter_expr.cpp
     src/highlight_rules.cpp
+    src/initial_load.cpp
     src/log_parser.cpp
     src/log_record.cpp
     src/log_source.cpp
@@ -49,7 +50,7 @@ add_test(
 )
 
 foreach(name IN ITEMS
-        filter_expr highlight_rules log_parser log_record log_source log_stats ring_buffer)
+        filter_expr highlight_rules initial_load log_parser log_record log_source log_stats ring_buffer)
     add_executable(test_${name} tests/test_${name}.cpp)
     target_link_libraries(test_${name} PRIVATE loglens_core)
     target_include_directories(test_${name} PRIVATE tests)
