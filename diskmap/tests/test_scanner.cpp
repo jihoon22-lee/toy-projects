@@ -8,16 +8,54 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <vector>
 
 using diskmap::FsNode;
+using diskmap::DirEntry;
 using diskmap::ScanOptions;
+using diskmap::ScanCancellationToken;
 using diskmap::ScanResult;
 using diskmap::scan;
 using diskmap_test::FakeFsSource;
 using diskmap_test::makeDirEntry;
 using diskmap_test::makeFileEntry;
+
+namespace {
+
+class CountingFsSource : public FakeFsSource {
+public:
+    std::vector<DirEntry> list(const std::filesystem::path& path,
+                               std::string& error,
+                               const diskmap::CancellationCheck& cancelled = {}) const override {
+        listedPaths.push_back(path);
+        return FakeFsSource::list(path, error, cancelled);
+    }
+
+    mutable std::vector<std::filesystem::path> listedPaths;
+};
+
+void checkProgressContract(const std::vector<std::pair<std::size_t, std::size_t>>& calls,
+                           const ScanResult& result) {
+    for (std::size_t index = 1; index < calls.size(); ++index) {
+        CHECK(calls[index].first >= calls[index - 1].first);
+        CHECK(calls[index].second >= calls[index - 1].second);
+    }
+    if (!calls.empty()) {
+        CHECK_EQ(calls.back().first, result.dirs_scanned);
+        CHECK_EQ(calls.back().second, result.files_scanned);
+    }
+}
+
+void checkGeneration(const FsNode& node, std::uint64_t generation) {
+    CHECK_EQ(node.scan_generation, generation);
+    for (const FsNode& child : node.children) {
+        checkGeneration(child, generation);
+    }
+}
+
+} // namespace
 
 int main() {
     // --- basic walk: nested dirs, min_size filtering, error collection ---
@@ -38,6 +76,7 @@ int main() {
 
         ScanOptions options;
         options.min_size = 10;
+        options.generation = 42;
         std::vector<std::pair<std::size_t, std::size_t>> progressCalls;
         const ScanResult result = scan(fs, "/fake/root", options,
                                         [&](std::size_t dirs, std::size_t files) {
@@ -51,8 +90,12 @@ int main() {
         // dirB errored before listing, so it never got expanded/counted;
         // dirA and root both listed successfully.
         CHECK_EQ(result.dirs_scanned, static_cast<std::size_t>(2));
-        // files_scanned: file1.txt + fileA1 + fileA2 (file2.txt filtered, symlink skipped)
-        CHECK_EQ(result.files_scanned, static_cast<std::size_t>(3));
+        // files_scanned: file1.txt + fileA1 + fileA2 + symlinkFile.  The
+        // undersized regular file is filtered, while an unfollowed symlink is
+        // retained as an explainable leaf.
+        CHECK_EQ(result.files_scanned, static_cast<std::size_t>(4));
+        CHECK_EQ(result.generation, static_cast<std::uint64_t>(42));
+        checkGeneration(result.root, 42);
 
         CHECK_EQ(result.errors.size(), static_cast<std::size_t>(1));
         if (!result.errors.empty()) {
@@ -66,7 +109,13 @@ int main() {
         CHECK(dirB != nullptr);
         CHECK(file1 != nullptr);
         CHECK(diskmap::findChild(result.root, "file2.txt") == nullptr);   // filtered by min_size
-        CHECK(diskmap::findChild(result.root, "symlinkFile") == nullptr); // symlink, not followed
+        const FsNode* symlink = diskmap::findChild(result.root, "symlinkFile");
+        CHECK(symlink != nullptr); // unfollowed symlink remains a visible leaf
+        if (symlink != nullptr) {
+            CHECK(!symlink->is_dir);
+            CHECK(!symlink->followed);
+            CHECK_EQ(symlink->size, static_cast<std::uint64_t>(999));
+        }
 
         if (dirA) {
             CHECK_EQ(dirA->path, std::string("/fake/root/dirA"));
@@ -86,25 +135,28 @@ int main() {
             CHECK_EQ(file1->size, static_cast<std::uint64_t>(50));
             CHECK_EQ(file1->metadata.logical_size, static_cast<std::uint64_t>(50));
         }
-        CHECK_EQ(result.root.size, static_cast<std::uint64_t>(160)); // 50 + 110
+        CHECK_EQ(result.root.size, static_cast<std::uint64_t>(1159)); // 50 + 110 + 999
 
         // top files across the whole tree, largest first.
         const std::vector<const FsNode*> top = diskmap::topFiles(result.root, 10);
-        CHECK_EQ(top.size(), static_cast<std::size_t>(3));
-        CHECK_EQ(top[0]->name, std::string("fileA1")); // 100
-        CHECK_EQ(top[1]->name, std::string("file1.txt")); // 50
-        CHECK_EQ(top[2]->name, std::string("fileA2")); // 10
+        CHECK_EQ(top.size(), static_cast<std::size_t>(4));
+        CHECK_EQ(top[0]->name, std::string("symlinkFile")); // 999
+        CHECK_EQ(top[1]->name, std::string("fileA1")); // 100
+        CHECK_EQ(top[2]->name, std::string("file1.txt")); // 50
+        CHECK_EQ(top[3]->name, std::string("fileA2")); // 10
 
         // progress is reported once per directory actually listed (root, dirA),
         // and the last call reflects the final totals.
         CHECK_EQ(progressCalls.size(), static_cast<std::size_t>(2));
         if (progressCalls.size() == 2) {
             CHECK_EQ(progressCalls.back().first, static_cast<std::size_t>(2));
-            CHECK_EQ(progressCalls.back().second, static_cast<std::size_t>(3));
+            CHECK_EQ(progressCalls.back().second, static_cast<std::size_t>(4));
         }
+        checkProgressContract(progressCalls, result);
     }
 
-    // --- follow_symlinks toggles whether symlinked entries are kept ---
+    // --- follow_symlinks toggles whether symlinked entries are expanded; an
+    // unfollowed link remains visible as a leaf either way ---
     {
         FakeFsSource fs;
         fs.addListing("/sym/root", {
@@ -114,9 +166,14 @@ int main() {
 
         ScanOptions withoutFollow;
         const ScanResult skipped = scan(fs, "/sym/root", withoutFollow);
-        CHECK(diskmap::findChild(skipped.root, "linked.txt") == nullptr);
+        const FsNode* unfollowed = diskmap::findChild(skipped.root, "linked.txt");
+        CHECK(unfollowed != nullptr);
+        if (unfollowed != nullptr) {
+            CHECK(!unfollowed->is_dir);
+            CHECK(!unfollowed->followed);
+        }
         CHECK(diskmap::findChild(skipped.root, "plain.txt") != nullptr);
-        CHECK_EQ(skipped.files_scanned, static_cast<std::size_t>(1));
+        CHECK_EQ(skipped.files_scanned, static_cast<std::size_t>(2));
 
         ScanOptions withFollow;
         withFollow.follow_symlinks = true;
@@ -127,6 +184,112 @@ int main() {
             CHECK_EQ(linked->size, static_cast<std::uint64_t>(7));
         }
         CHECK_EQ(followed.files_scanned, static_cast<std::size_t>(2));
+    }
+
+    // --- exclude patterns are matched against basenames and root-relative
+    // paths, while min_size contributes to the same filtered-entry counter ---
+    {
+        FakeFsSource fs;
+        fs.addListing("/filter/root", {
+            makeFileEntry("keep.bin", 20),
+            makeFileEntry("too-small.bin", 5),
+            makeFileEntry("remove.tmp", 20),
+            makeDirEntry("skip-dir"),
+            makeDirEntry("generated"),
+        });
+        fs.addListing("/filter/root/generated", {
+            makeFileEntry("large.bin", 100),
+            makeFileEntry("small.bin", 1),
+        });
+
+        ScanOptions options;
+        options.min_size = 10;
+        options.exclude_patterns = {"*.tmp", "skip-*", "generated/*"};
+        const ScanResult result = scan(fs, "/filter/root", options);
+
+        CHECK(result.totals_filtered);
+        CHECK_EQ(result.entries_filtered, static_cast<std::size_t>(5));
+        CHECK_EQ(result.files_scanned, static_cast<std::size_t>(1));
+        CHECK_EQ(result.dirs_scanned, static_cast<std::size_t>(2));
+        CHECK(diskmap::findChild(result.root, "keep.bin") != nullptr);
+        CHECK(diskmap::findChild(result.root, "too-small.bin") == nullptr);
+        CHECK(diskmap::findChild(result.root, "remove.tmp") == nullptr);
+        CHECK(diskmap::findChild(result.root, "skip-dir") == nullptr);
+        const FsNode* generated = diskmap::findChild(result.root, "generated");
+        CHECK(generated != nullptr);
+        if (generated != nullptr) {
+            CHECK(generated->children.empty()); // generated/* filtered both entries
+        }
+        CHECK_EQ(result.root.size, static_cast<std::uint64_t>(20));
+    }
+
+    // --- cancellation before traversal does not list the root, marks the
+    // partial result, and still emits a final progress snapshot ---
+    {
+        CountingFsSource fs;
+        fs.addListing("/cancel/before", {makeFileEntry("never-read", 1)});
+        ScanCancellationToken cancellation;
+        cancellation.cancel();
+        std::vector<std::pair<std::size_t, std::size_t>> progressCalls;
+        const ScanResult result = scan(fs, "/cancel/before", ScanOptions{},
+                                       [&](std::size_t dirs, std::size_t files) {
+                                           progressCalls.emplace_back(dirs, files);
+                                       },
+                                       &cancellation);
+
+        CHECK(result.cancelled);
+        CHECK(!result.root.complete);
+        CHECK(result.root.error.find("cancelled") != std::string::npos);
+        CHECK(fs.listedPaths.empty());
+        CHECK_EQ(result.dirs_scanned, static_cast<std::size_t>(0));
+        CHECK_EQ(result.files_scanned, static_cast<std::size_t>(0));
+        CHECK_EQ(progressCalls.size(), static_cast<std::size_t>(1));
+        checkProgressContract(progressCalls, result);
+    }
+
+    // --- cancellation requested by a progress consumer stops before the next
+    // directory and preserves all nodes already discovered ---
+    {
+        CountingFsSource fs;
+        fs.addListing("/cancel/during", {
+            makeDirEntry("first"),
+            makeDirEntry("second"),
+            makeFileEntry("root.bin", 4),
+        });
+        fs.addListing("/cancel/during/first", {makeFileEntry("first.bin", 10)});
+        fs.addListing("/cancel/during/second", {makeFileEntry("second.bin", 20)});
+
+        ScanCancellationToken cancellation;
+        std::vector<std::pair<std::size_t, std::size_t>> progressCalls;
+        const ScanResult result = scan(fs, "/cancel/during", ScanOptions{},
+                                       [&](std::size_t dirs, std::size_t files) {
+                                           progressCalls.emplace_back(dirs, files);
+                                           if (dirs >= 1) {
+                                               cancellation.cancel();
+                                           }
+                                       },
+                                       &cancellation);
+
+        CHECK(result.cancelled);
+        CHECK(!result.root.complete);
+        CHECK_EQ(result.dirs_scanned, static_cast<std::size_t>(1));
+        CHECK_EQ(result.files_scanned, static_cast<std::size_t>(1));
+        CHECK_EQ(fs.listedPaths.size(), static_cast<std::size_t>(1));
+        if (!fs.listedPaths.empty()) {
+            CHECK_EQ(fs.listedPaths.front(), std::filesystem::path("/cancel/during"));
+        }
+        CHECK(diskmap::findChild(result.root, "first") != nullptr);
+        CHECK(diskmap::findChild(result.root, "second") != nullptr);
+        CHECK(diskmap::findChild(result.root, "root.bin") != nullptr);
+        const FsNode* first = diskmap::findChild(result.root, "first");
+        const FsNode* second = diskmap::findChild(result.root, "second");
+        if (first != nullptr) {
+            CHECK(!first->complete);
+        }
+        if (second != nullptr) {
+            CHECK(!second->complete);
+        }
+        checkProgressContract(progressCalls, result);
     }
 
     // --- root.name derives from the last path component, trailing slash included ---
