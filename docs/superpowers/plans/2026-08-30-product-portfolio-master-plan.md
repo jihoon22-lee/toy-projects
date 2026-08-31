@@ -31,7 +31,7 @@
 | 프로젝트 | 현재 형태 | 실측 | 제품 상태 |
 |---|---|---|---|
 | loglens | C++17, Qt, CMake | L2 bounded/background slice · PR #25 CI green · local Qt5/Qt6 12 CTest targets · 1 GiB benchmark PR #26 merged · main Qt5/Qt6 sweep green | Tail N/From start와 worker UX, benchmark/default 8192 완료 |
-| diskmap | C++17, Qt, qmake | D1 Slice 2 merged · PR #23 · CI green · TEM 4.90 | treemap viewer, cleanup UX는 D2~D6에서 확장 |
+| diskmap | C++17, Qt, qmake | D1 Slice 2 merged · D2 local candidate · ici local verify PASS | D2 local/native/ici complete; remote PR/CI·sticky·Pages pending; treemap/cleanup UX는 D3~D6에서 확장 |
 | ici/viewer | Qt-free core + Qt6 GUI | 3 tests, TEM 4.94 | core 중심, 셸과 report workflow 부족 |
 
 현재 공백:
@@ -351,8 +351,8 @@ loader/Tail N 변경 이전 bounded foundation에 대한 historical evidence다.
 
 L2 bounded/background 구현과 1 GiB benchmark, 성능 budget/default capacity 결정은 완료됐다.
 PR26의 원격 CI·ici·sticky report·Pages 검증과 main Qt5/Qt6 full sweep도 완료됐다. D2
-cancellable scan local candidate도 닫혔으며, 다음 gate는 D2 remote PR/CI·full ici·sticky
-evidence다.
+cancellable scan local candidate와 current ici main의 full local verify도 닫혔으며, 다음 gate는
+D2 remote PR/CI·sticky·Pages evidence다.
 L3 parser/filter와 L6 release 완료 조건은 이 결정으로 닫히지 않으며 체크리스트를 유지한다.
 
 ### L3. parser와 filter 완성도
@@ -554,8 +554,17 @@ full benchmark는 4,820.934 ms, 207,428.692 entries/s, 1,063.496 MiB RSS이며 c
 2.676 ms다. summary SHA-256은
 `743d5c5409101cfd9ef889da2da421e94cc205f585770ab19bb611472926246d`다. 초기 ici
 complexity-only FAIL(scan complexity/nesting)은 `b7218c6`의 상태 전이 분리 refactor 뒤
-maximum cyclomatic 14/limit 15, 129 functions, 0 issues로 PASS했다. full post-refactor ici
-verify와 remote PR/CI·sticky·Pages evidence는 아직 pending이다.
+maximum cyclomatic 14/limit 15, 129 functions, 0 issues로 PASS했다. ici main commit
+`6a0eadb`의 candidate `dist/ici.pyz` SHA-256
+`8cd2d4b128ab2d181e708660c4c4f38bcc9d50f9ad91e3aa5670f557e6077fed`로 수행한 full
+post-refactor local `ici verify`는 `Suite PASS`, 10 pass / 0 warn / 0 fail / 0 error /
+2 skip, tests 9/9, TEM 4.92초, line 95.7% / function 98.5% / branch 84.4%, complexity
+max14 across 129 functions / 0 issues, sanitizer clean, duplication 3.11%, tools 30 discovered /
+21 ready / 0 incomplete / 9 unavailable, cache hits 0, total 82.29초였다. HTML
+`/tmp/tmp.RFA39KzhyH.html`은 299034 bytes, SHA-256
+`cf75f9d6f28179d95645d0e1582022008804078d5e3844de503a8c1a130c64a0`이며 external
+script/link/img/iframe resource tags는 0개였다. D2 local verification은 완료됐고, 남은 gate는
+toy remote PR/CI, sticky comment, Pages evidence뿐이다.
 
 ### D3. 탐색과 설명 UX
 
@@ -1010,7 +1019,7 @@ ici와 toy-projects가 함께 바뀌는 기능은 다음 순서를 따른다.
 1. 이 마스터 계획과 ici 마스터 계획을 문서 PR로 보존한다.
 2. T0에서 기존 Qt shell 계획을 stateful log parsing과 정확한 failure-state 테스트로 보정해 실행한다.
 3. L1과 D1로 기존 앱의 신뢰성 기반을 만든다.
-4. D2 local candidate의 benchmark/native 증거를 기준으로 remote PR/CI·full ici·sticky gate를 닫고, 이후 D3 explorer UX로 진행한다.
+4. D2 local candidate의 benchmark/native/full ici 증거를 기준으로 remote PR/CI·sticky·Pages gate를 닫고, 이후 D3 explorer UX로 진행한다.
 5. ici finding v3와 맞춰 Q0 runner를 만든다.
 6. ici compile context I3와 함께 B0/B1 buildscope를 시작한다.
 7. ici Python compatibility I5와 함께 E0/E1 envlens를 시작한다.

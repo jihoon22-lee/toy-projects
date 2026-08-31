@@ -10,9 +10,9 @@ now exposes the scan filters and traversal controls needed by the same core
 contract, while the scanner and analysis/layout helpers remain safe for deep
 trees.
 
-This is local candidate evidence only. The toy remote PR/CI, full post-refactor
-`ici verify`, and sticky comment/Pages evidence are still pending and are not
-claimed as complete here.
+The local candidate implementation, native/benchmark checks, and full post-refactor
+`ici verify` are complete. Only the toy remote PR/CI, sticky comment, and Pages
+evidence remain pending; this document does not claim those remote gates are complete.
 
 ## Context
 
@@ -198,15 +198,29 @@ correctness checks. The local `summary.json` SHA-256 is
 An initial candidate `ici complexity` run failed on scan complexity/nesting.
 The behavior-preserving `b7218c6` scan-state refactor split those transitions;
 the follow-up complexity-only result is PASS with maximum cyclomatic 14 against
-the limit 15, 129 functions, and 0 issues. Full post-refactor `ici verify` has
-not yet been run, so no suite, coverage, sanitizer, remote PR/CI, sticky, or
-Pages result is claimed for this D2 candidate.
+the limit 15, 129 functions, and 0 issues. The current ici main commit `6a0eadb`
+and candidate `dist/ici.pyz` SHA-256
+`8cd2d4b128ab2d181e708660c4c4f38bcc9d50f9ad91e3aa5670f557e6077fed` were used for
+the full post-refactor local `ici verify`, which reported:
+
+```text
+Suite PASS · 10 pass · 0 warn · 0 fail · 0 error · 2 skip
+tests 9/9 · TEM 4.92s · line 95.7% · function 98.5% · branch 84.4%
+complexity max14 across129 functions · 0 issues · sanitizer clean
+duplication 3.11% · tools 30 discovered/21 ready/0 incomplete/9 unavailable
+cache hits 0 · total 82.29s
+```
+
+The HTML report is `/tmp/tmp.RFA39KzhyH.html`, 299034 bytes, SHA-256
+`cf75f9d6f28179d95645d0e1582022008804078d5e3844de503a8c1a130c64a0`, with zero
+external `script`/`link`/`img`/`iframe` resource tags. D2 local verification is
+complete; only toy remote PR/CI, sticky comment, and Pages evidence remain pending.
 
 ## Next Steps
 
 - Open the candidate PR only after the local docs/evidence commit is reviewed;
   wait for the toy PR/CI and `Merge Gate` result.
-- Run and record full post-refactor `ici verify`, then verify the sticky comment
-  and linked Pages HTML before calling D2 remotely complete.
+- Open the candidate PR, then verify the toy PR/CI, sticky comment, and linked
+  Pages HTML before calling D2 remotely complete.
 - Keep the cancelled-result discard and fatal/partial error policy stable as
   D3 explorer UX adds refresh and selection behavior.

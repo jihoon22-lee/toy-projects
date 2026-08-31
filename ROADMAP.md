@@ -156,8 +156,15 @@ CLI integration smoke도 PASS했으며, 1,000,000-entry full correctness는 4820
 gate의 최초 scan complexity/nesting FAIL은 `b7218c6` refactor로 해소되어 maximum cyclomatic
 14 (limit 15), 129 functions, 0 issues로 PASS했다. benchmark command/workflow와 budget은
 [README의 DiskMap benchmark 절](README.md#diskmap-generated-source-benchmark-opt-innightly)에
-기록했다. 이 상태는 local candidate 완료이며 toy remote PR/CI, full ici verify, sticky
-comment/Pages evidence는 아직 pending이다.
+기록했다. current ici main commit `6a0eadb`의 candidate pyz SHA256
+`8cd2d4b128ab2d181e708660c4c4f38bcc9d50f9ad91e3aa5670f557e6077fed`로 수행한 full
+post-refactor local `ici verify`는 `Suite PASS`, 10 pass / 0 warn / 0 fail / 0 error /
+2 skip, test 9/9, TEM 4.92, line95.7% / function98.5% / branch84.4%, complexity max14
+across129 functions / 0 issues, dup3.11%, sanitize clean, 30 tools/21 ready/0 incomplete/
+9 unavailable, total82.29s, cache hits0이었다. HTML은 299034 bytes, SHA256
+`cf75f9d6f28179d95645d0e1582022008804078d5e3844de503a8c1a130c64a0`, external resource tags0이다.
+이 local evidence는 candidate에 한정되며 toy remote PR/CI, sticky comment/Pages evidence는
+아직 pending이다.
 
 loglens L2의 첫 slice는 GUI/CLI에 absolute-ID bounded store를 연결하고 source polling과
 pathological record 크기를 제한했다. 이어진 background/Tail N slice는 Qt5·Qt6 및 엄격 경고
