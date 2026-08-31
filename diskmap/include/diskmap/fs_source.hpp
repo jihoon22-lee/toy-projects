@@ -2,12 +2,15 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
 #include "diskmap/fs_metadata.hpp"
 
 namespace diskmap {
+
+using CancellationCheck = std::function<bool()>;
 
 struct DirEntry {
     std::string name;
@@ -27,9 +30,11 @@ public:
     virtual ~FsSource();
 
     // Lists the direct children of path. On failure returns an empty
-    // vector and sets error to a human-readable message; never throws.
+    // vector and sets error to a human-readable message; never throws. Long
+    // real-filesystem listings cooperatively stop when cancelled returns true.
     virtual std::vector<DirEntry> list(const std::filesystem::path& path,
-                                       std::string& error) const = 0;
+                                       std::string& error,
+                                       const CancellationCheck& cancelled = {}) const = 0;
 
     // Reads metadata for the path itself or its target. The default keeps
     // scripted sources source-compatible; real filesystems override it so the
@@ -40,7 +45,8 @@ public:
 class RealFsSource : public FsSource {
 public:
     std::vector<DirEntry> list(const std::filesystem::path& path,
-                               std::string& error) const override;
+                               std::string& error,
+                               const CancellationCheck& cancelled = {}) const override;
     FsMetadata inspect(const std::filesystem::path& path, bool follow) const override;
 };
 

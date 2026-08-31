@@ -16,6 +16,15 @@ struct WorkItem {
 
 using IdentityKey = std::pair<std::uint64_t, std::uint64_t>;
 
+void recordError(ScanResult& result, const ScanOptions& options, std::string message) {
+    ++result.error_count;
+    if (result.errors.size() < options.max_errors) {
+        result.errors.push_back(std::move(message));
+    } else {
+        result.errors_truncated = true;
+    }
+}
+
 std::string lastPathComponent(const std::filesystem::path& path) {
     const std::filesystem::path normalized = path.lexically_normal();
     if (normalized.empty()) {
@@ -36,11 +45,65 @@ bool depthIsExpandable(int depth, int maxDepth) {
     return maxDepth < 0 || depth <= maxDepth;
 }
 
-bool entrySkipped(const DirEntry& entry, const ScanOptions& options) {
-    if (entry.is_symlink && !options.follow_symlinks) {
+bool wildcardMatches(const std::string& pattern, const std::string& value) {
+    std::size_t patternIndex = 0;
+    std::size_t valueIndex = 0;
+    std::size_t starIndex = std::string::npos;
+    std::size_t starValueIndex = 0;
+
+    while (valueIndex < value.size()) {
+        if (patternIndex < pattern.size()
+            && (pattern[patternIndex] == '?' || pattern[patternIndex] == value[valueIndex])) {
+            ++patternIndex;
+            ++valueIndex;
+            continue;
+        }
+        if (patternIndex < pattern.size() && pattern[patternIndex] == '*') {
+            starIndex = patternIndex++;
+            starValueIndex = valueIndex;
+            continue;
+        }
+        if (starIndex != std::string::npos) {
+            patternIndex = starIndex + 1;
+            valueIndex = ++starValueIndex;
+            continue;
+        }
+        return false;
+    }
+    while (patternIndex < pattern.size() && pattern[patternIndex] == '*') {
+        ++patternIndex;
+    }
+    return patternIndex == pattern.size();
+}
+
+std::filesystem::path entryPath(const DirEntry& entry,
+                                const std::filesystem::path& parentPath) {
+    return entry.path.empty() ? parentPath / std::filesystem::path(entry.name) : entry.path;
+}
+
+bool excludedByPattern(const DirEntry& entry,
+                       const std::filesystem::path& parentPath,
+                       const std::filesystem::path& rootPath,
+                       const ScanOptions& options) {
+    const std::filesystem::path path = entryPath(entry, parentPath).lexically_normal();
+    const std::string relative = path.lexically_relative(rootPath.lexically_normal()).generic_string();
+    for (const std::string& pattern : options.exclude_patterns) {
+        if (wildcardMatches(pattern, entry.name)
+            || (!relative.empty() && wildcardMatches(pattern, relative))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool entrySkipped(const DirEntry& entry,
+                  const std::filesystem::path& parentPath,
+                  const std::filesystem::path& rootPath,
+                  const ScanOptions& options) {
+    if (!entry.is_dir && !entry.is_symlink && entry.size < options.min_size) {
         return true;
     }
-    return !entry.is_dir && entry.size < options.min_size;
+    return excludedByPattern(entry, parentPath, rootPath, options);
 }
 
 const FsMetadata& effectiveMetadata(const FsNode& node) {
@@ -49,6 +112,7 @@ const FsMetadata& effectiveMetadata(const FsNode& node) {
 
 void inspectRootSymlink(const FsSource& source,
                         const std::filesystem::path& rootPath,
+                        const ScanOptions& options,
                         ScanResult& result) {
     result.root.followed = true;
     result.root.target_metadata = source.inspect(rootPath, true);
@@ -63,25 +127,26 @@ void inspectRootSymlink(const FsSource& source,
     if (result.root.error.empty()) {
         result.root.error = "cannot inspect symlink target '" + rootPath.string() + "'";
     }
-    result.errors.push_back(result.root.error);
+    recordError(result, options, result.root.error);
 }
 
 bool inspectRoot(const FsSource& source,
                  const std::filesystem::path& rootPath,
+                 const ScanOptions& options,
                  ScanResult& result) {
     const FsMetadata metadata = source.inspect(rootPath, false);
     if (metadata.complete) {
         result.root.metadata = metadata;
         result.root.is_dir = metadata.kind == FsKind::Directory;
         if (metadata.kind == FsKind::Symlink) {
-            inspectRootSymlink(source, rootPath, result);
+            inspectRootSymlink(source, rootPath, options, result);
         }
         return true;
     }
     if (!metadata.error.empty()) {
         result.root.complete = false;
         result.root.error = metadata.error;
-        result.errors.push_back(metadata.error);
+        recordError(result, options, metadata.error);
     }
     return false;
 }
@@ -99,21 +164,27 @@ void finalizeLeafRoot(ScanResult& result, const ProgressFn& progress) {
     }
 }
 
-FsNode makeChildNode(const DirEntry& entry, const std::filesystem::path& parentPath) {
+FsNode makeChildNode(const DirEntry& entry,
+                     const std::filesystem::path& parentPath,
+                     const ScanOptions& options) {
     FsNode child;
     child.name = entry.name;
-    child.path = entry.path.empty() ? parentPath / std::filesystem::path(entry.name) : entry.path;
-    child.is_dir = entry.is_dir;
-    child.size = entry.is_dir ? 0 : entry.size;
+    child.path = entryPath(entry, parentPath);
+    child.followed = entry.is_symlink && options.follow_symlinks;
+    child.is_dir = child.followed ? entry.is_dir : entry.is_dir && !entry.is_symlink;
+    child.size = child.is_dir
+                     ? 0
+                     : entry.is_symlink && !child.followed ? entry.metadata.logical_size
+                                                           : entry.size;
     child.metadata = entry.metadata;
     child.has_target_metadata = entry.has_target_metadata;
     child.target_metadata = entry.target_metadata;
-    child.followed = entry.is_symlink;
+    child.scan_generation = options.generation;
     child.complete = entry.metadata.complete
-                     && (!entry.is_symlink
+                     && (!child.followed
                          || (entry.has_target_metadata && entry.target_metadata.complete));
     child.error = entry.metadata.error;
-    if (entry.is_symlink && !entry.has_target_metadata) {
+    if (child.followed && !entry.has_target_metadata) {
         child.complete = false;
         child.error = entry.target_metadata.error;
     }
@@ -122,13 +193,14 @@ FsNode makeChildNode(const DirEntry& entry, const std::filesystem::path& parentP
 
 bool rememberDirectoryIdentity(FsNode& child,
                                std::set<IdentityKey>& visited,
+                               const ScanOptions& options,
                                ScanResult& result) {
     const FileIdentity& identity = effectiveMetadata(child).identity;
     if (child.followed && !identity.valid) {
         child.complete = false;
         child.error = "cannot safely follow directory symlink '" + child.path.string()
                       + "': target identity is unavailable";
-        result.errors.push_back(child.error);
+        recordError(result, options, child.error);
         return false;
     }
     if (!identity.valid) {
@@ -145,6 +217,8 @@ bool rememberDirectoryIdentity(FsNode& child,
 void scheduleDirectoryPass(std::vector<FsNode>& children,
                            bool followedPass,
                            int childDepth,
+                           const ScanOptions& options,
+                           const FileIdentity& rootIdentity,
                            ScanResult& result,
                            std::vector<WorkItem>& stack,
                            std::set<IdentityKey>& visited) {
@@ -152,7 +226,24 @@ void scheduleDirectoryPass(std::vector<FsNode>& children,
         if (!child.is_dir || child.followed != followedPass) {
             continue;
         }
-        if (rememberDirectoryIdentity(child, visited, result)) {
+        const FileIdentity& identity = effectiveMetadata(child).identity;
+        if (options.one_file_system
+            && (!rootIdentity.valid || !identity.valid
+                || identity.device != rootIdentity.device)) {
+            child.complete = false;
+            child.mount_boundary_skipped = identity.valid && rootIdentity.valid;
+            child.error = child.mount_boundary_skipped
+                              ? "mount boundary excluded"
+                              : "cannot verify mount boundary: directory identity is unavailable";
+            if (child.mount_boundary_skipped) {
+                ++result.mount_boundaries_skipped;
+            } else {
+                recordError(result, options,
+                            child.error + " ('" + child.path.string() + "')");
+            }
+            continue;
+        }
+        if (rememberDirectoryIdentity(child, visited, options, result)) {
             stack.push_back(WorkItem{child.path, childDepth, &child});
         }
     }
@@ -164,25 +255,54 @@ void scheduleDirectoryPass(std::vector<FsNode>& children,
 // is taken, so the pointers handed to later work items stay valid.
 void expandDirectory(WorkItem& item,
                       const std::vector<DirEntry>& entries,
+                      const std::filesystem::path& rootPath,
                       const ScanOptions& options,
+                      const FileIdentity& rootIdentity,
                       ScanResult& result,
                       std::vector<WorkItem>& stack,
-                      std::set<IdentityKey>& visited) {
+                      std::set<IdentityKey>& visited,
+                      const ScanCancellationToken* cancellation) {
     item.node->children.reserve(entries.size());
     for (const DirEntry& entry : entries) {
-        if (entrySkipped(entry, options)) {
+        if (cancellation != nullptr && cancellation->isCancelled()) {
+            break;
+        }
+        if (entrySkipped(entry, item.path, rootPath, options)) {
+            ++result.entries_filtered;
+            result.totals_filtered = true;
             continue;
         }
-        item.node->children.push_back(makeChildNode(entry, item.path));
-        if (!entry.is_dir) {
+        FsNode child = makeChildNode(entry, item.path, options);
+        if (!child.complete && !child.error.empty()) {
+            recordError(result, options,
+                        child.error + " ('" + child.path.string() + "')");
+        }
+        item.node->children.push_back(std::move(child));
+        if (!item.node->children.back().is_dir) {
             ++result.files_scanned;
         }
     }
     // Prefer real directory entries to symlink aliases. This makes the stable
     // lexical source order choose the canonical entry before an alias that
     // resolves to the same identity.
-    scheduleDirectoryPass(item.node->children, false, item.depth + 1, result, stack, visited);
-    scheduleDirectoryPass(item.node->children, true, item.depth + 1, result, stack, visited);
+    scheduleDirectoryPass(item.node->children, false, item.depth + 1, options, rootIdentity,
+                          result, stack, visited);
+    scheduleDirectoryPass(item.node->children, true, item.depth + 1, options, rootIdentity,
+                          result, stack, visited);
+}
+
+void markCancelled(ScanResult& result, std::vector<WorkItem>& stack) {
+    result.cancelled = true;
+    result.root.complete = false;
+    if (result.root.error.empty()) {
+        result.root.error = "scan cancelled before completion";
+    }
+    for (WorkItem& pending : stack) {
+        pending.node->complete = false;
+        if (pending.node->error.empty()) {
+            pending.node->error = "scan cancelled before directory was visited";
+        }
+    }
 }
 
 } // namespace
@@ -190,16 +310,25 @@ void expandDirectory(WorkItem& item,
 ScanResult scan(const FsSource& source,
                  const std::filesystem::path& rootPath,
                  const ScanOptions& options,
-                 const ProgressFn& progress) {
+                 const ProgressFn& progress,
+                 const ScanCancellationToken* cancellation) {
     ScanResult result;
+    result.generation = options.generation;
     result.root.name = lastPathComponent(rootPath);
     result.root.path = rootPath;
     result.root.is_dir = true;
+    result.root.scan_generation = options.generation;
     result.root.metadata.kind = FsKind::Directory;
     result.root.metadata.complete = true;
 
-    const bool rootKindResolved = inspectRoot(source, rootPath, result);
+    const bool rootKindResolved = inspectRoot(source, rootPath, options, result);
     if (rootKindResolved && !result.root.is_dir) {
+        if (cancellation != nullptr && cancellation->isCancelled()) {
+            result.cancelled = true;
+            result.root.complete = false;
+            result.root.error = "scan cancelled before completion";
+            return result;
+        }
         finalizeLeafRoot(result, progress);
         return result;
     }
@@ -214,6 +343,10 @@ ScanResult scan(const FsSource& source,
     stack.push_back(WorkItem{rootPath, 0, &result.root});
 
     while (!stack.empty()) {
+        if (cancellation != nullptr && cancellation->isCancelled()) {
+            markCancelled(result, stack);
+            break;
+        }
         WorkItem item = std::move(stack.back());
         stack.pop_back();
 
@@ -224,22 +357,44 @@ ScanResult scan(const FsSource& source,
         }
 
         std::string error;
-        std::vector<DirEntry> entries = source.list(item.path, error);
+        const CancellationCheck cancelled = cancellation == nullptr
+                                                ? CancellationCheck()
+                                                : [cancellation]() {
+                                                      return cancellation->isCancelled();
+                                                  };
+        std::vector<DirEntry> entries = source.list(item.path, error, cancelled);
+        if (cancellation != nullptr && cancellation->isCancelled()) {
+            stack.push_back(std::move(item));
+            markCancelled(result, stack);
+            break;
+        }
         if (!error.empty()) {
             item.node->complete = false;
             item.node->error = error;
-            result.errors.push_back(error);
-            continue;
+            recordError(result, options, error);
+        } else {
+            ++result.dirs_scanned;
         }
-        ++result.dirs_scanned;
 
-        expandDirectory(item, entries, options, result, stack, visited);
+        expandDirectory(item, entries, rootPath, options, rootIdentity, result, stack, visited,
+                        cancellation);
 
-        if (progress) {
+        if (cancellation != nullptr && cancellation->isCancelled()) {
+            markCancelled(result, stack);
+            break;
+        }
+
+        if (progress && (error.empty() || !entries.empty())) {
             progress(result.dirs_scanned, result.files_scanned);
         }
     }
 
+    if (result.cancelled) {
+        if (progress) {
+            progress(result.dirs_scanned, result.files_scanned);
+        }
+        return result;
+    }
     aggregateSizes(result.root);
     aggregateStorage(result.root);
     return result;

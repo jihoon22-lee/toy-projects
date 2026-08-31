@@ -34,10 +34,16 @@ struct FsNode {
     // The entry remains visible, but its directory target was already visited
     // by physical identity and was deliberately not expanded again.
     bool cycle_skipped = false;
+    // The directory is visible, but its descendants were intentionally left
+    // out because one-file-system mode found another device.
+    bool mount_boundary_skipped = false;
     // Scan completeness is separate from metadata completeness: a directory
     // can have a valid stat record while listing its children fails.
     bool complete = true;
     std::string error;
+    // Identifies the scan that produced this node. UI consumers use this with
+    // their active generation guard; it is not a filesystem identity.
+    std::uint64_t scan_generation = 0;
     std::vector<FsNode> children;
 };
 
