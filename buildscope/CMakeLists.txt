@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(buildscope VERSION 0.1.0 LANGUAGES CXX)
+project(buildscope VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -30,6 +30,11 @@ message(STATUS "buildscope: using Qt${QT_VERSION_MAJOR} ${QT_VERSION}")
 
 add_library(buildscope_contract STATIC
     src/core/contract.cpp
+    src/core/contract_json_guard.hpp
+    src/core/contract_json_guard.cpp
+    src/core/contract_parser.hpp
+    src/core/contract_parser.cpp
+    src/core/contract_parser_v2.cpp
     include/buildscope/contract.hpp
 )
 target_include_directories(buildscope_contract PUBLIC include)

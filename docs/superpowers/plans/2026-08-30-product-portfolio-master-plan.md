@@ -690,11 +690,11 @@ buildscope/
 - CMake `AUTOMOC`, `AUTOUIC`, `AUTORCC`를 모두 사용한다.
 - `ici.toml type = "hybrid"`로 양 언어의 test coverage를 요구한다.
 
-- [x] minimal Python CLI와 Qt window가 각각 독립 실행된다. (local + remote evidence complete)
-- [x] Python output을 C++ CLI 또는 GUI model이 소비하는 E2E test가 있다. (local + remote evidence complete)
-- [x] Qt5/Qt6와 Python 3.10에서 skeleton build/test가 통과한다. (local + remote evidence complete)
+- [x] minimal Python CLI와 Qt window가 각각 독립 실행된다. (local/public and PR #31 remote evidence)
+- [x] Python output을 C++ CLI 또는 GUI model이 소비하는 E2E test가 있다. (local/public and PR #31 remote evidence)
+- [x] Qt5/Qt6와 Python 3.10에서 skeleton build/test가 통과한다. (local/public and PR #31 remote evidence)
 
-**B0 검증 및 원격 완료 증거 (2026-09-01):** Python 3.10 backend는
+**B0 당시 과거 pre-hardening local baseline (2026-09-01; 현재 B1 결과 및 PR/remote evidence 아님; superseded):** Python 3.10 backend는
 `compile_commands.json`을 shell 실행 없이 64 MiB/100,000-entry bound 안에서 읽어
 deterministic `buildscope.snapshot/v1`을 만든다. C++20/Qt CLI·GUI consumer와
 `AUTOMOC`·`AUTOUIC`·`AUTORCC`를 사용하는 CMake skeleton은 Qt 5.15.18과 Qt 6.10.2에서
@@ -704,32 +704,116 @@ mypy 실제 argv는 C++ roots를 제외한 `python` root만 받아 rc0이었다.
 `ICI_PYTHON`으로 지정한 공개 ici v0.7.1 release asset의 cold isolated verify는 suite WARN,
 `12 PASS / 1 WARN / 0 FAIL / 0 ERROR / 0 SKIP`, `9/9` tests, TEM 5.00,
 line/function/branch 96.3%/100.0%/86.8%, complexity 14 PASS, compile DB 4/4 production
-units·13 configurations, 총 63.37초였다. WARN은 C++ type 미지원 하나뿐이며 D11/I5
-interpreter/tool capability gap은 v0.7.1 release에서 재검증되어 고정됐다. ici
-[PR #109](https://github.com/jihoon22-lee/ici/pull/109)의 sticky report와 두 Pages 검증,
-exact `main` `b87afba`의 [CI run `33419851128`](https://github.com/jihoon22-lee/ici/actions/runs/33419851128),
-[v0.7.1 release run `33420348698`](https://github.com/jihoon22-lee/ici/actions/runs/33420348698)이
-성공했다. [공개 v0.7.1 release](https://github.com/jihoon22-lee/ici/releases/tag/v0.7.1)는 9개
-asset을 제공하며 `sha256sum --check ici.pyz.sha256`가 통과했다. B1 normalization과 ici I3
-target comparison은 여전히 완료되지 않았다.
+units·13 configurations, 총 63.37초였다. 당시 기록은 C++ type 미지원 WARN 하나를 남겼다.
+이 수치는 hardening 이전의 역사 기록으로 현재 최종 결과가 아니며, BuildScope PR/remote
+CI/sticky report/Pages 완료를 주장하지 않는다.
 
 ### B1. compile database Python core
 
 **브랜치:** `feat/buildscope-compile-db`
 
-- [ ] `arguments`와 `command` entry, directory/file/output을 읽는다.
-- [ ] shell 실행 없이 command를 token화하고 원문도 보존한다.
-- [ ] compiler, language, standard, defines, include paths, sysroot, target hint를 정규화한다.
-- [ ] duplicate/stale/missing file과 여러 configuration을 보존한다.
-- [ ] project root 밖 system/vendor path를 분류한다.
-- [ ] versioned JSON schema와 deterministic ordering을 제공한다.
-- [ ] malformed/huge DB와 path separator fixture를 테스트한다.
+- [x] `arguments`와 `command` entry, directory/file/output을 읽는다.
+- [x] shell 실행 없이 command를 token화하고 원문도 보존한다.
+- [x] compiler, language, standard, defines, include paths, sysroot, target hint를 정규화한다.
+- [x] duplicate/stale/missing file과 여러 configuration을 보존한다.
+- [x] project root 밖 system/vendor path를 분류한다.
+- [x] versioned JSON schema와 deterministic ordering을 제공한다.
+- [x] malformed/huge DB rejection과 POSIX/Windows path-separator handling을 구현한다.
+- [x] Python 입력 DB 64 MiB/100,000-entry bound와 serialized snapshot/native reader 256 MiB
+  bound를 구분해 적용한다.
+- [x] lstat/descriptor identity·ctime hardening, alias 보호, POSIX no-follow parent-fd anchored
+  atomic output와 portable fallback을 구현한다.
+- [x] `--schema-version v1|v2`, `--` output stop, separated POSIX `-o`, Windows `/Fo`, Windows
+  GCC path detection을 명시한다.
+
+**B1 구현 기준 (2026-09-01):** BuildScope Python package/version metadata는 `0.2.0`이며,
+producer는 additive `buildscope.snapshot/v2`를 출력한다. Python 입력 compile DB는 64 MiB/
+100,000-entry, serialized snapshot과 native reader 입력은 각각 256 MiB bound다. v2는 B0 raw
+fields를 보존하고 `normalized` argv/command-style/invocation-source plus compiler/language/
+standard/defines/includes/sysroot/target/path/configuration, `state`, `diagnostics`를 추가한다.
+`arguments`가 `command`보다 우선하고, command-only 입력은 shell 없이 POSIX 또는 Windows argv로
+token화한다. 환경·glob·command substitution과 response-file expansion은 하지 않는다.
+`--project-root`로 project/vendor/system scope를 정하고, native host에서만 exists/mtime을
+확인하므로 foreign-platform 상태는 unknown일 수 있다. foreign Windows `project_root`는 host
+filesystem을 probe하지 않고 lexical Windows form을 보존해 scope를 분류하며, dedicated scope
+test가 이 경계를 검증한다.
+
+입력은 final-name `lstat`와 지원 플랫폼의 no-follow descriptor identity를 size/mtime/ctime과
+함께 read 전후 검사하고 final symlink를 거부한다. `--output`은 DB self/hardlink/symlink alias를 거부한다.
+POSIX output은 no-follow parent fd에 anchored한 exclusive mode-0600 temp, flush/fsync,
+fd-relative rename으로 atomic race 경계를 제공한다. portable fallback은 resolved real parent를
+pin한 채 temp/cleanup/replace와 parent identity/alias 검사를 수행한다. 생성한 temp는 교체 전에
+`lstat`로 생성 당시 identity와 regular-file을 재검증하고 symlink resolve를 하지 않는다. POSIX
+dir-fd 경로와 같은 atomic race guarantee를 주장하지 않는다.
+
+CLI는 `--schema-version v1|v2`를 명시적으로 지원하고 v1은 raw compatibility projection이다.
+metadata/output scan은 `--`에서 중단되며 POSIX `-o`는 separated form만, Windows `/Fo`는
+separated/joined form을 지원한다. MSVC option matching은 case-sensitive하며 `/Fo`와 `/Fo:`의
+separated/joined form만 인식해 유사 switch false positive를 막는다. drive/UNC/backslash
+compiler path도 Windows로 판정해 `C:\\MinGW\\bin\\g++.exe` 같은 GCC path를 인식한다. 중복은 source+configuration 범위이고
+`source_configuration_count`는 source별 unique configuration 수다. configuration digest는
+동일 source의 recorded invocation identity이지 relocation-stable semantic diff가 아니며,
+semantic comparison은 B4 소유다. Source aggregation key는 `command_style`+normalized path로
+Python과 C++ native reader가 일치한다.
+
+v1 raw keys를 유지해 additive-field를 허용하는 v1 consumer는 계속 사용할 수 있다. B1 native
+contract reader에서 “strict”는 legacy v1 core validation과 v2 bounded/core/cross-entry
+validation을 뜻한다. v1은 exactly-one invocation, legacy empty argv compatibility, extension-key
+tolerance를 유지하고, v2는 duplicate JSON key rejection, required/unknown fields, field/item
+bounds, enum/core shapes, invocation-source/argv, include order, `entry_index`/duplicate/
+source-configuration-count cross-entry consistency를 검증한다. command-only normalized argv를
+raw command와 재토큰화해 full semantic attestation하지는 않는다. native reader는 snapshot final
+symlink도 읽기 전에 거부한다. 공개 Draft 2020-12
+`buildscope-snapshot-v1.schema.json` 및 `buildscope-snapshot-v2.schema.json`은 source tree와
+pure wheel에 함께 포함된다. v2 `producer.version`의 schema `maxLength` 1 MiB와 native reader
+문자열 bound도 일치한다. v2 normalized model/UI 전환은 B2 범위다. B1 구현과 PR #31
+remote integration evidence는 complete이며, B2~B5와 ici I3
+비교는 미완료다.
+
+**B1 final local/public evidence (2026-09-01):** public
+`ici v0.7.1` cold verification은 표준 `sha256sum --check ici.pyz.sha256`가 통과했고 suite
+`WARN`을 기록했다. `13 engines = 11 PASS / 2 WARN / 0 FAIL / 0 ERROR / 0 SKIP`, total
+`71.09s` (raw `71.08794903755188s`), tests `45/45`, line/function/branch
+`95.2% / 100.0% / 84.3%`, TEM `5.00`이었다.
+`compile_db`는 `7/7` production units·`16` configurations·`0` failures/warnings, complexity는
+max `13`/`140` functions·`0` issues, exception은 `PASS`·`0`이었다. Duplication은 `WARN`
+`8.8%` (raw `8.77914951989026`)/`25` groups/`56` findings였고, type WARN은 unsupported
+analysis인 `7` C++ sources뿐이며
+external dependencies는 `0`이다. HTML은 `489,978` bytes, SHA-256
+`538bdde8fae8cc769d212799e80ffeae1e39069662b214b19efb3d35a66f3257`, title은
+`ici Verification Report — buildscope`였다. Line inventory는 `2,798` total, `2,453` code,
+`345` blank lines across `19` files다. 현재 source line counts는 `contract.cpp` 111,
+`contract_json_guard.cpp` 125, `contract_parser.cpp` 382, `contract_parser_v2.cpp` 333이고,
+Python tests는 `41` (CTest aggregate `45`)이다. Local cold HTML은 `489,978` bytes,
+SHA-256 `538bdde8fae8cc769d212799e80ffeae1e39069662b214b19efb3d35a66f3257`이며 hosted HTML과
+별개다.
+
+**B1 PR #31 remote integration evidence:** [PR #31](https://github.com/jihoon22-lee/toy-projects/pull/31)의
+initial implementation/docs head는 `1ff08fe5d2accddc0e9107113eb83dd86bd6d50a`이고,
+[workflow run 33439733990](https://github.com/jihoon22-lee/toy-projects/actions/runs/33439733990)의
+동적 matrix 15 checks가 모두 SUCCESS였다: 3 ici verify, Qt5/Qt6 GUI 6, manifest, benchmark
+smoke 3, `Publish Reports & Sticky Comment`, `Merge Gate`. [Sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/31#issuecomment-5484640868)는
+marker 1개와 정확히 3개 project link를 포함하고 BuildScope `11 PASS / 2 WARN`, TEM `5.00`,
+`45/45`, `7/7`, `16` configurations, complexity max `13`/`140`을 기록했다.
+
+독립 Pages audit는 세 hosted report 모두 HTTP 200, `text/html`, external dependency `0`을
+확인했다.
+
+| Project | URL | Bytes | SHA-256 | Title |
+|---|---|---:|---|---|
+| BuildScope | [buildscope/pr/31](https://jihoon22-lee.github.io/toy-projects/buildscope/pr/31/) | 493,453 | `643a3e9e5c45a1512244cc90940146192399471621eac1a2dcb581cc534089c2` | `ici Verification Report — buildscope` |
+| diskmap | [diskmap/pr/31](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/31/) | 311,846 | `a8806808638c584312943d2551c1668a407c45830311de07cb0eed30d15e6924` | `ici Verification Report — diskmap` |
+| loglens | [loglens/pr/31](https://jihoon22-lee.github.io/toy-projects/loglens/pr/31/) | 446,796 | `56f3b2d54ed2a05ebf100313b4d9447553e9c6fb9c85f7e7adce8eccc838dc4f` | `ici Verification Report — loglens` |
+
+B1 implementation과 PR #31 remote integration evidence는 complete다. B2/B3/B4/B5와 ici I3
+target-by-target comparison은 아직 pending이다.
 
 ### B2. C++ model과 Qt UI
 
 **브랜치:** `feat/buildscope-qt-explorer`
 
-- [ ] JSON schema parser와 validation error location을 구현한다.
+- [ ] B1 legacy-v1/core 및 v2 bounded/core/cross-entry reader가 수락한 결과와 validation error location을 normalized
+  C++ model/UI에 연결한다.
 - [ ] source/target tree, command detail, define/include tables를 제공한다.
 - [ ] filter/search와 missing/stale entry 표시를 제공한다.
 - [ ] `.ui`로 MainWindow layout, `.qrc`로 local icons/theme asset을 사용한다.
