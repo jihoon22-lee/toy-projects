@@ -8,12 +8,15 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QSignalSpy>
 #include <QSpinBox>
 #include <QTableView>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QThread>
 #include <QtTest>
+
+#include <algorithm>
 
 #include "loglens/gui/main_window.hpp"
 #include "loglens/gui/log_model.hpp"
@@ -39,6 +42,8 @@ private slots:
     void boundedStorageEvictsOldRowsAndReportsWindow();
     void drainsBacklogWithFollowDisabled();
     void searchAndFilterCanChangeDuringBackgroundLoading();
+    void loadProgressReportsFinalFromStartState();
+    void loadProgressReportsInitialOpenError();
 };
 
 namespace {
@@ -582,6 +587,71 @@ void TestMainWindow::searchAndFilterCanChangeDuringBackgroundLoading() {
     QTRY_COMPARE(cell(window, 1, LogModel::ColumnLine), QStringLiteral("4"));
     QTRY_COMPARE(cell(window, 2, LogModel::ColumnLine), QStringLiteral("6"));
     QTRY_COMPARE(status(window)->text(), statusText(3, 6, 6, 0, 1, 6, 64));
+}
+
+void TestMainWindow::loadProgressReportsFinalFromStartState() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("progress.log"));
+    const QByteArray contents = line("INFO", 1) + line("WARN", 2) + line("ERROR", 3);
+    writeFile(path, contents);
+
+    MainWindow window(nullptr, 64, 5);
+    QSignalSpy progress(&window, &MainWindow::loadProgress);
+    window.openPath(path, loglens::InitialLoadMode::FromStart, 64);
+
+    // The source is intentionally split into tiny chunks. QTRY services the
+    // real queued worker-to-GUI delivery without making the test depend on a
+    // fixed sleep or on how many intermediate progress signals are emitted.
+    QTRY_VERIFY_WITH_TIMEOUT(
+        std::any_of(progress.cbegin(), progress.cend(), [](const QList<QVariant>& arguments) {
+            return arguments.size() == 4 && arguments.at(2).toBool();
+        }),
+        2500);
+
+    int finalIndex = -1;
+    for (int index = 0; index < progress.count(); ++index) {
+        const QList<QVariant> arguments = progress.at(index);
+        if (arguments.size() == 4 && arguments.at(2).toBool()) {
+            finalIndex = index;
+        }
+    }
+    QVERIFY(finalIndex >= 0);
+    const QList<QVariant> final = progress.at(finalIndex);
+    QCOMPARE(final.at(0).toULongLong(), static_cast<qulonglong>(3));
+    QCOMPARE(final.at(1).toULongLong(), static_cast<qulonglong>(3));
+    QVERIFY(final.at(2).toBool());
+    QVERIFY(final.at(3).toString().isEmpty());
+}
+
+void TestMainWindow::loadProgressReportsInitialOpenError() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString missing = dir.filePath(QStringLiteral("missing.log"));
+
+    MainWindow window(nullptr, 64, 5);
+    QSignalSpy progress(&window, &MainWindow::loadProgress);
+    window.openPath(missing, loglens::InitialLoadMode::FromStart, 64);
+
+    QTRY_VERIFY_WITH_TIMEOUT(
+        std::any_of(progress.cbegin(), progress.cend(), [](const QList<QVariant>& arguments) {
+            return arguments.size() == 4 && !arguments.at(3).toString().isEmpty();
+        }),
+        2500);
+
+    int errorIndex = -1;
+    for (int index = 0; index < progress.count(); ++index) {
+        const QList<QVariant> arguments = progress.at(index);
+        if (arguments.size() == 4 && !arguments.at(3).toString().isEmpty()) {
+            errorIndex = index;
+        }
+    }
+    QVERIFY(errorIndex >= 0);
+    const QList<QVariant> error = progress.at(errorIndex);
+    QCOMPARE(error.at(0).toULongLong(), static_cast<qulonglong>(0));
+    QCOMPARE(error.at(1).toULongLong(), static_cast<qulonglong>(0));
+    QVERIFY(!error.at(2).toBool());
+    QVERIFY(error.at(3).toString().contains(QStringLiteral("cannot stat")));
 }
 
 QTEST_MAIN(TestMainWindow)
