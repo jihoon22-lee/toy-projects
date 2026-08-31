@@ -199,10 +199,7 @@ void LogLoadWorker::acceptChunk(const SourceChunk& chunk, bool initialPhase) {
     }
     if (!initialPhase && (chunk.generation_changed
                           || chunk.generation != assembler_.generation())) {
-        assembler_.reset(chunk.generation);
-        pending_deltas_.clear();
-        pending_cursor_ = 0;
-        reset_pending_ = true;
+        resetForFollowGeneration(chunk);
     }
 
     pending_deltas_ = assembler_.consumeBytes(chunk.bytes);
@@ -210,7 +207,17 @@ void LogLoadWorker::acceptChunk(const SourceChunk& chunk, bool initialPhase) {
     if (initialPhase) {
         initial_loading_ = chunk.position < *initial_snapshot_end_;
     }
+    continueAfterChunk(initialPhase);
+}
 
+void LogLoadWorker::resetForFollowGeneration(const SourceChunk& chunk) {
+    assembler_.reset(chunk.generation);
+    pending_deltas_.clear();
+    pending_cursor_ = 0;
+    reset_pending_ = true;
+}
+
+void LogLoadWorker::continueAfterChunk(bool initialPhase) {
     if (!pending_deltas_.empty() || reset_pending_) {
         publishBatch(!initial_loading_ && !initial_completion_announced_);
         return;

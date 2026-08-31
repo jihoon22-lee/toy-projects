@@ -91,6 +91,8 @@ private:
     void processInitialChunk();
     void processFollowChunk();
     void acceptChunk(const SourceChunk& chunk, bool initialPhase);
+    void resetForFollowGeneration(const SourceChunk& chunk);
+    void continueAfterChunk(bool initialPhase);
     void publishBatch(bool initialComplete = false);
     void publishError(const SourceError& error, bool initialPhase);
 };

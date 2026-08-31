@@ -199,6 +199,32 @@ void testMissingAndUnsupportedSourcesExposeDeterministicErrors() {
     CHECK(!directoryWindow.error.message.empty());
 }
 
+void testReplacementDuringScanIsRejected() {
+    TempDirectory directory;
+    const fs::path path = directory.path() / "changing.log";
+    const fs::path replacement = directory.path() / "replacement.log";
+    writeFile(path, "root-one\nroot-two\nroot-three\n");
+    writeFile(replacement, "replacement\n");
+
+    std::size_t callbackCalls = 0;
+    const loglens::InitialLoadWindow window = loglens::locateTailWindow(
+        path.string(), 2, 4, [&] {
+            ++callbackCalls;
+            if (callbackCalls == 3) {
+                std::error_code error;
+                fs::rename(replacement, path, error);
+                CHECK(!error);
+            }
+            return false;
+        });
+
+    CHECK(!window.ok());
+    CHECK(!window.cancelled);
+    CHECK_EQ(window.error.kind, loglens::SourceErrorKind::ReadFailed);
+    CHECK(window.error.retryable);
+    CHECK(window.error.message.find("source changed") != std::string::npos);
+}
+
 void testRejectsZeroTailSize() {
     bool threw = false;
     try {
@@ -220,6 +246,7 @@ int main() {
     testCancellationStopsBeforeOpeningTheSource();
     testCancellationDuringScanIsReportedWithoutSourceError();
     testMissingAndUnsupportedSourcesExposeDeterministicErrors();
+    testReplacementDuringScanIsRejected();
     testRejectsZeroTailSize();
     return checkSummary();
 }
