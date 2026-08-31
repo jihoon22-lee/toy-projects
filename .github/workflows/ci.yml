@@ -374,6 +374,119 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  # Keep the deterministic DiskMap benchmark harness on the ordinary quality
+  # path without pulling the full million-entry run into every PR.  The core
+  # library is Qt-free, but build the benchmark once through each supported
+  # qmake major so the matrix remains aligned with the GUI coverage above.
+  diskmap-benchmark-smoke:
+    name: DiskMap benchmark smoke (Qt${{ matrix.qt_major }})
+    needs: discover
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        qt_major: [5, 6]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+
+      - name: Install Qt${{ matrix.qt_major }} toolchain
+        env:
+          QT_MAJOR: ${{ matrix.qt_major }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          if [ "$QT_MAJOR" = 5 ]; then
+            sudo apt-get install -y --no-install-recommends qtbase5-dev qt5-qmake pkg-config
+          elif [ "$QT_MAJOR" = 6 ]; then
+            sudo apt-get install -y --no-install-recommends qt6-base-dev qmake6 pkg-config
+          else
+            echo "::error::unsupported Qt major: $QT_MAJOR"
+            exit 1
+          fi
+
+      - name: Build and run benchmark smoke
+        env:
+          QT_MAJOR: ${{ matrix.qt_major }}
+        run: |
+          set -euo pipefail
+          benchmark_root="$RUNNER_TEMP/diskmap-benchmark"
+          build_dir="$benchmark_root/build"
+          artifact_dir="$benchmark_root/artifact"
+          mkdir -p "$build_dir/src" "$build_dir/benchmarks" "$artifact_dir"
+
+          if [ "$QT_MAJOR" = 5 ]; then
+            qmake=qmake
+          elif [ "$QT_MAJOR" = 6 ]; then
+            qmake=qmake6
+          else
+            echo "::error::unsupported Qt major: $QT_MAJOR"
+            exit 1
+          fi
+          qmake_version="$($qmake -query QT_VERSION)"
+          echo "$qmake QT_VERSION=$qmake_version"
+          case "$qmake_version" in
+            "$QT_MAJOR".*) ;;
+            *)
+              echo "::error::$qmake selected Qt $qmake_version, expected Qt $QT_MAJOR"
+              exit 1
+              ;;
+          esac
+
+          (
+            cd "$build_dir/src"
+            "$qmake" "$GITHUB_WORKSPACE/diskmap/src/src.pro"
+            make -j"$(nproc)"
+          )
+          (
+            cd "$build_dir/benchmarks"
+            "$qmake" "$GITHUB_WORKSPACE/diskmap/benchmarks/scan_benchmark.pro"
+            make -j"$(nproc)"
+          )
+
+          python3 diskmap/benchmarks/run_benchmark.py \
+            --binary "$build_dir/benchmarks/diskmap-scan-benchmark" \
+            --entries 10000 \
+            --cancel-after 1000 \
+            --timeout-seconds 30 \
+            --skip-budgets \
+            --output-dir "$artifact_dir"
+
+          test -s "$artifact_dir/summary.json"
+          python3 - "$artifact_dir/summary.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          summary = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          if summary.get("status") != "pass":
+              raise SystemExit("DiskMap benchmark smoke did not report PASS")
+          samples = summary.get("samples", {})
+          if not all(
+              samples.get(name, {}).get("correctness") is True
+              for name in ("full", "cancelled")
+          ):
+              raise SystemExit("DiskMap benchmark smoke contains a failed correctness sample")
+          PY
+
+      - name: Upload DiskMap benchmark smoke report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: diskmap-benchmark-smoke-qt${{ matrix.qt_major }}
+          path: ${{ runner.temp }}/diskmap-benchmark/artifact
+          if-no-files-found: warn
+          retention-days: 14
+
   # One comment for the whole run, not one per project. It always starts after
   # both matrices have reached a terminal result, including failures, so a PR
   # never loses the report job behind a skipped dependency.
@@ -584,7 +697,7 @@ jobs:
   merge-gate:
     name: Merge Gate
     if: ${{ always() }}
-    needs: [discover, verify, gui-build, benchmark-smoke, report-pr]
+    needs: [discover, verify, gui-build, benchmark-smoke, diskmap-benchmark-smoke, report-pr]
     runs-on: ubuntu-latest
     steps:
       - name: Require every quality job
@@ -594,6 +707,7 @@ jobs:
           VERIFY_RESULT: ${{ needs.verify.result }}
           GUI_RESULT: ${{ needs.gui-build.result }}
           BENCHMARK_SMOKE_RESULT: ${{ needs.benchmark-smoke.result }}
+          DISKMAP_BENCHMARK_SMOKE_RESULT: ${{ needs.diskmap-benchmark-smoke.result }}
           GUI_COUNT: ${{ needs.discover.outputs.gui_count }}
           REPORT_RESULT: ${{ needs.report-pr.result }}
         run: |
@@ -601,6 +715,7 @@ jobs:
           test "$DISCOVER_RESULT" = success
           test "$VERIFY_RESULT" = success
           test "$BENCHMARK_SMOKE_RESULT" = success
+          test "$DISKMAP_BENCHMARK_SMOKE_RESULT" = success
           if [ "$GUI_RESULT" != success ]; then
             test "$GUI_COUNT" = 0
             test "$GUI_RESULT" = skipped

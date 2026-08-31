@@ -1,0 +1,352 @@
+name: DiskMap generated-source benchmark
+
+# This is intentionally opt-in/nightly only.  The full million-entry run is
+# useful for capacity and performance evidence, but it does not belong on the
+# ordinary pull-request or merge-gate path.
+on:
+  workflow_dispatch:
+    inputs:
+      entries:
+        description: "Generated entries (default: 1000000)"
+        required: false
+        default: "1000000"
+        type: string
+      cancel_after:
+        description: "Cancellation point (default: 10000)"
+        required: false
+        default: "10000"
+        type: string
+      timeout_seconds:
+        description: "Hard timeout for each benchmark process (default: 60)"
+        required: false
+        default: "60"
+        type: string
+  schedule:
+    - cron: "37 3 * * 0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: diskmap-generated-source-benchmark-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # These values intentionally mirror diskmap/benchmarks/run_benchmark.py's
+  # defaults.  No workflow-specific performance thresholds are invented until
+  # a baseline supports a project-specific policy.
+  BENCHMARK_ENTRIES: ${{ inputs.entries || '1000000' }}
+  BENCHMARK_CANCEL_AFTER: ${{ inputs.cancel_after || '10000' }}
+  BENCHMARK_TIMEOUT_SECONDS: ${{ inputs.timeout_seconds || '60' }}
+
+jobs:
+  benchmark:
+    name: Qt${{ matrix.qt_major }} generated-source benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        qt_major: [5, 6]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+
+      - name: Install Qt${{ matrix.qt_major }} toolchain
+        env:
+          QT_MAJOR: ${{ matrix.qt_major }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          if [ "$QT_MAJOR" = 5 ]; then
+            sudo apt-get install -y --no-install-recommends qtbase5-dev qt5-qmake pkg-config
+          elif [ "$QT_MAJOR" = 6 ]; then
+            sudo apt-get install -y --no-install-recommends qt6-base-dev qmake6 pkg-config
+          else
+            echo "::error::unsupported Qt major: $QT_MAJOR"
+            exit 1
+          fi
+
+      - name: Configure and build benchmark
+        env:
+          QT_MAJOR: ${{ matrix.qt_major }}
+        run: |
+          set -euo pipefail
+          benchmark_root="$RUNNER_TEMP/diskmap-benchmark"
+          build_dir="$benchmark_root/build"
+          mkdir -p "$build_dir/src" "$build_dir/benchmarks"
+
+          if [ "$QT_MAJOR" = 5 ]; then
+            qmake=qmake
+          elif [ "$QT_MAJOR" = 6 ]; then
+            qmake=qmake6
+          else
+            echo "::error::unsupported Qt major: $QT_MAJOR"
+            exit 1
+          fi
+          qmake_version="$($qmake -query QT_VERSION)"
+          echo "$qmake QT_VERSION=$qmake_version"
+          case "$qmake_version" in
+            "$QT_MAJOR".*) ;;
+            *)
+              echo "::error::$qmake selected Qt $qmake_version, expected Qt $QT_MAJOR"
+              exit 1
+              ;;
+          esac
+
+          (
+            cd "$build_dir/src"
+            "$qmake" "$GITHUB_WORKSPACE/diskmap/src/src.pro"
+            make -j"$(nproc)"
+          )
+          (
+            cd "$build_dir/benchmarks"
+            "$qmake" "$GITHUB_WORKSPACE/diskmap/benchmarks/scan_benchmark.pro"
+            make -j"$(nproc)"
+          )
+
+      - name: Run full benchmark
+        env:
+          QT_MAJOR: ${{ matrix.qt_major }}
+        run: |
+          set -euo pipefail
+          artifact_dir="$GITHUB_WORKSPACE/benchmark-artifacts/qt${QT_MAJOR}"
+          mkdir -p "$artifact_dir"
+
+          # The runner's built-in defaults are the only enforced budget policy
+          # for now; update this comment when measured baselines justify new
+          # workflow arguments rather than guessing at thresholds here.
+          python3 diskmap/benchmarks/run_benchmark.py \
+            --binary "$RUNNER_TEMP/diskmap-benchmark/build/benchmarks/diskmap-scan-benchmark" \
+            --entries "$BENCHMARK_ENTRIES" \
+            --cancel-after "$BENCHMARK_CANCEL_AFTER" \
+            --timeout-seconds "$BENCHMARK_TIMEOUT_SECONDS" \
+            --output-dir "$artifact_dir"
+
+      - name: Validate artifact allowlist
+        if: always()
+        env:
+          QT_MAJOR: ${{ matrix.qt_major }}
+        run: |
+          set -euo pipefail
+          artifact="benchmark-artifacts/qt${QT_MAJOR}"
+          test -d "$artifact"
+          test -s "$artifact/summary.json"
+          bad="$(find "$artifact" -type f ! \( -name '*.json' -o -name '*.md' -o -name '*.txt' \) -print -quit)"
+          if [ -n "$bad" ]; then
+            echo "::error::artifact contains a non-report file: $bad"
+            exit 1
+          fi
+          oversized="$(find "$artifact" -type f -size +1G -print -quit)"
+          if [ -n "$oversized" ]; then
+            echo "::error::artifact contains an unexpectedly large file: $oversized"
+            exit 1
+          fi
+          find "$artifact" -type f -print | sort
+
+      - name: Upload Qt benchmark artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: diskmap-benchmark-qt${{ matrix.qt_major }}
+          path: benchmark-artifacts/qt${{ matrix.qt_major }}
+          if-no-files-found: error
+          retention-days: 30
+
+  aggregate:
+    name: Combine Qt benchmark summaries
+    if: always()
+    needs: benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Set up Python 3.10
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+
+      - name: Download benchmark artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: diskmap-benchmark-qt*
+          path: benchmark-artifacts
+
+      - name: Validate downloaded artifacts contain reports only
+        run: |
+          set -euo pipefail
+          test -d benchmark-artifacts
+          log_file="$(find benchmark-artifacts -type f \( -iname '*.log' -o -iname '*.scan' \) -print -quit)"
+          if [ -n "$log_file" ]; then
+            echo "::error::benchmark input or log leaked into an artifact: $log_file"
+            exit 1
+          fi
+          bad="$(find benchmark-artifacts -type f ! \( -name '*.json' -o -name '*.md' -o -name '*.txt' \) -print -quit)"
+          if [ -n "$bad" ]; then
+            echo "::error::artifact contains a non-report file: $bad"
+            exit 1
+          fi
+
+      - name: Publish combined summary
+        env:
+          MATRIX_RESULT: ${{ needs.benchmark.result }}
+        run: |
+          set -euo pipefail
+          mkdir -p combined-benchmark
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          expected_qt = {5, 6}
+          entries = []
+          for path in sorted(Path("benchmark-artifacts").glob("**/summary.json")):
+              qt_parts = [
+                  part
+                  for part in path.parts
+                  if re.fullmatch(r"(?:diskmap-benchmark-)?qt[56]", part)
+              ]
+              if not qt_parts:
+                  raise SystemExit(f"unexpected benchmark artifact path: {path}")
+              match = re.fullmatch(
+                  r"(?:diskmap-benchmark-)?qt([56])",
+                  qt_parts[-1],
+              )
+              if match is None:
+                  raise SystemExit(f"unexpected benchmark artifact path: {path}")
+              qt_major = int(match.group(1))
+              if any(item["qt_major"] == qt_major for item in entries):
+                  raise SystemExit(f"duplicate Qt {qt_major} benchmark summary")
+              try:
+                  summary = json.loads(path.read_text(encoding="utf-8"))
+              except (OSError, ValueError) as error:
+                  raise SystemExit(f"cannot read {path}: {error}") from error
+              if summary.get("schema") != "diskmap-scan-benchmark-summary/v1":
+                  raise SystemExit(f"unsupported DiskMap summary schema in {path}")
+              entries.append({"qt_major": qt_major, "summary": summary})
+
+          actual_qt = {item["qt_major"] for item in entries}
+          missing_qt = sorted(expected_qt - actual_qt)
+          if not entries:
+              raise SystemExit("no Qt benchmark summaries were downloaded")
+
+          status = "pass" if (
+              os.environ.get("MATRIX_RESULT") == "success"
+              and actual_qt == expected_qt
+              and all(item["summary"].get("status") == "pass" for item in entries)
+          ) else "fail"
+          combined = {
+              "schema": "diskmap-scan-benchmark-matrix/v1",
+              "configuration": {
+                  "entries": int(os.environ["BENCHMARK_ENTRIES"]),
+                  "cancel_after": int(os.environ["BENCHMARK_CANCEL_AFTER"]),
+                  "timeout_seconds": int(os.environ["BENCHMARK_TIMEOUT_SECONDS"]),
+              },
+              "qt_summaries": entries,
+              "missing_qt_majors": missing_qt,
+              "workflow_matrix_result": os.environ.get("MATRIX_RESULT"),
+              "status": status,
+              "policy_note": (
+                  "Per-Qt budgets come from diskmap/benchmarks/run_benchmark.py "
+                  "defaults; no workflow-specific thresholds are applied."
+              ),
+          }
+          Path("combined-benchmark/summary.json").write_text(
+              json.dumps(combined, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+
+          def sample_value(sample, key):
+              value = sample.get(key)
+              return "—" if value is None else str(value)
+
+          lines = [
+              "# DiskMap generated-source benchmark — Qt matrix",
+              "",
+              f"**Status:** `{status.upper()}`",
+              "",
+              "| Qt | Status | Full entries/s | Full peak RSS MiB | Cancel elapsed ms |",
+              "|---:|:---:|---:|---:|---:|",
+          ]
+          for item in entries:
+              summary = item["summary"]
+              samples = summary.get("samples", {})
+              full = samples.get("full", {})
+              cancelled = samples.get("cancelled", {})
+              lines.append(
+                  f"| {item['qt_major']} | {summary.get('status', 'fail').upper()} | "
+                  f"{sample_value(full, 'entries_per_s')} | "
+                  f"{sample_value(full, 'peak_rss_mib')} | "
+                  f"{sample_value(cancelled, 'elapsed_ms')} |"
+              )
+          if missing_qt:
+              lines.extend(["", f"Missing Qt summaries: `{missing_qt}`"])
+          lines.extend(
+              [
+                  "",
+                  "Per-Qt details are in the corresponding artifacts.",
+                  "Budgets are the runner defaults; no workflow-specific thresholds were added.",
+              ]
+          )
+          Path("combined-benchmark/summary.md").write_text(
+              "\n".join(lines) + "\n", encoding="utf-8"
+          )
+          PY
+
+      - name: Upload combined summary
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: diskmap-benchmark-combined
+          path: combined-benchmark
+          if-no-files-found: error
+          retention-days: 30
+
+  verdict:
+    name: Benchmark verdict
+    if: always()
+    needs: [benchmark, aggregate]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Python 3.10
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+
+      - name: Download combined summary
+        if: always()
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: diskmap-benchmark-combined
+          path: combined-benchmark
+
+      - name: Require complete benchmark result
+        env:
+          BENCHMARK_RESULT: ${{ needs.benchmark.result }}
+          AGGREGATE_RESULT: ${{ needs.aggregate.result }}
+        run: |
+          set -euo pipefail
+          test "$BENCHMARK_RESULT" = success
+          test "$AGGREGATE_RESULT" = success
+          test -s combined-benchmark/summary.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          summary = json.loads(
+              Path("combined-benchmark/summary.json").read_text(encoding="utf-8")
+          )
+          if summary.get("status") != "pass":
+              raise SystemExit("combined DiskMap benchmark verdict is not PASS")
+          if summary.get("missing_qt_majors"):
+              raise SystemExit("combined DiskMap benchmark is missing a Qt summary")
+          PY
