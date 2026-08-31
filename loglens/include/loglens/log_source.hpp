@@ -79,7 +79,8 @@ struct SourceChunk {
 class FileTailer : public LogSource {
 public:
     explicit FileTailer(std::string path,
-                        std::size_t maxChunkBytes = kDefaultSourceChunkBytes);
+                        std::size_t maxChunkBytes = kDefaultSourceChunkBytes,
+                        std::uint64_t initialOffset = 0);
 
     bool poll(std::vector<std::string>& out, std::string& error) override;
 

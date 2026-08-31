@@ -328,6 +328,19 @@ void testTailerHonoursAnEarlierSnapshotBoundary() {
     CHECK(appended.more_available);
 }
 
+void testTailerCanStartAtAValidatedCallerOffset() {
+    TempDirectory directory;
+    const fs::path path = directory.path() / "offset.log";
+    CHECK(writeFile(path, "skip\nkeep\n"));
+
+    FileTailer tailer(path.string(), loglens::kDefaultSourceChunkBytes, 5);
+    const SourceChunk chunk = tailer.pollChunk();
+    checkSuccessfulChunk(chunk);
+    CHECK_EQ(chunk.bytes, std::string("keep\n"));
+    CHECK_EQ(chunk.position, static_cast<std::uint64_t>(10));
+    CHECK(!chunk.more_available);
+}
+
 void testTailerLineAdapterJoinsChunkAndCrLfBoundaries() {
     TempDirectory directory;
     const fs::path path = directory.path() / "line_boundaries.log";
@@ -531,6 +544,7 @@ int main() {
     testTailerBoolChunkAdapterPreservesPartialBytes();
     testTailerBoundsEachChunkAndReportsBacklog();
     testTailerHonoursAnEarlierSnapshotBoundary();
+    testTailerCanStartAtAValidatedCallerOffset();
     testTailerLineAdapterJoinsChunkAndCrLfBoundaries();
     testTailerRejectsUnsafeChunkSizes();
     testTailerDetectsInPlaceTruncation();
