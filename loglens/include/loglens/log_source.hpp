@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -56,6 +57,9 @@ struct SourceChunk {
     bool generation_changed = false;
     std::uint64_t generation = 0;
     std::uint64_t position = 0;
+    // Size observed from the opened file handle before this read. A one-shot
+    // consumer can retain this boundary and avoid chasing concurrent appends.
+    std::uint64_t snapshot_end = 0;
     // True when the same source generation had unread bytes at this poll's
     // snapshot. Consumers can schedule another bounded poll without waiting for
     // the normal follow interval.
@@ -84,6 +88,10 @@ public:
     // RecordAssembler to carry across polls.
     bool pollChunk(SourceChunk& out, std::string& error);
     SourceChunk pollChunk();
+    // Reads no farther than maxPosition even if the file grows after an
+    // earlier snapshot. Restart detection and generation reporting are still
+    // applied normally.
+    SourceChunk pollChunk(std::uint64_t maxPosition);
 
     std::uint64_t offset() const;
     std::size_t restarts() const;
@@ -103,9 +111,9 @@ private:
 
     SourceChunk initialChunk() const;
 #ifndef _WIN32
-    SourceChunk pollPosixChunk();
+    SourceChunk pollPosixChunk(std::optional<std::uint64_t> maxPosition);
 #else
-    SourceChunk pollPortableChunk();
+    SourceChunk pollPortableChunk(std::optional<std::uint64_t> maxPosition);
 #endif
     SourceChange detectRestart(const FileIdentity& identity, std::uint64_t size);
 };

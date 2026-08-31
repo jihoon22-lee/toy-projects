@@ -302,6 +302,48 @@ void testTailerBoundsEachChunkAndReportsBacklog() {
     CHECK_EQ(third.position, static_cast<std::uint64_t>(13));
 }
 
+void testTailerHonoursAnEarlierSnapshotBoundary() {
+    TempDirectory directory;
+    const fs::path path = directory.path() / "snapshot.log";
+    CHECK(writeFile(path, "first"));
+
+    FileTailer tailer(path.string(), 3);
+    const SourceChunk first = tailer.pollChunk();
+    checkSuccessfulChunk(first);
+    CHECK_EQ(first.bytes, std::string("fir"));
+    CHECK_EQ(first.snapshot_end, static_cast<std::uint64_t>(5));
+    CHECK(first.more_available);
+
+    CHECK(appendFile(path, "-later"));
+    const SourceChunk second = tailer.pollChunk(first.snapshot_end);
+    checkSuccessfulChunk(second);
+    CHECK_EQ(second.bytes, std::string("st"));
+    CHECK_EQ(second.position, first.snapshot_end);
+    CHECK_EQ(second.snapshot_end, static_cast<std::uint64_t>(11));
+    CHECK(!second.more_available);
+
+    const SourceChunk appended = tailer.pollChunk();
+    checkSuccessfulChunk(appended);
+    CHECK_EQ(appended.bytes, std::string("-la"));
+    CHECK(appended.more_available);
+}
+
+void testTailerLineAdapterJoinsChunkAndCrLfBoundaries() {
+    TempDirectory directory;
+    const fs::path path = directory.path() / "line_boundaries.log";
+    CHECK(writeFile(path, "first\r\nsecond-longer-than-a-chunk\n"));
+
+    FileTailer tailer(path.string(), 6);
+    std::vector<std::string> lines;
+    std::string error;
+    CHECK(tailer.poll(lines, error));
+    CHECK(error.empty());
+    CHECK_EQ(lines.size(), static_cast<std::size_t>(2));
+    CHECK_EQ(lines[0], std::string("first"));
+    CHECK_EQ(lines[1], std::string("second-longer-than-a-chunk"));
+    CHECK_EQ(tailer.offset(), static_cast<std::uint64_t>(fs::file_size(path)));
+}
+
 void testTailerRejectsUnsafeChunkSizes() {
     bool rejectedZero = false;
     bool rejectedHuge = false;
@@ -488,6 +530,8 @@ int main() {
     testTailerLineAdapterStillReadsAndResumes();
     testTailerBoolChunkAdapterPreservesPartialBytes();
     testTailerBoundsEachChunkAndReportsBacklog();
+    testTailerHonoursAnEarlierSnapshotBoundary();
+    testTailerLineAdapterJoinsChunkAndCrLfBoundaries();
     testTailerRejectsUnsafeChunkSizes();
     testTailerDetectsInPlaceTruncation();
     testTailerDetectsAtomicRenameAtEverySize();
