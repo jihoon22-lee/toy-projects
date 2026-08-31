@@ -70,17 +70,25 @@ void LogModel::setRecords(std::vector<loglens::LogRecord> records,
     for (const loglens::LogRecord& record : records) {
         records_.push(record);
     }
-    // Opening a new file drops the old filter. Leaving it would make
-    // appendRecords filter rows that rebuildVisible(nullptr) just let through.
+    // setRecords is the legacy replace-all API and deliberately starts with an
+    // unfiltered view. Streaming reloads use resetRecords(), which preserves
+    // the active filter/search while background batches arrive.
     filter_.reset();
-    rebuildVisible(nullptr);
+    rebuildVisible();
     endResetModel();
 }
 
 void LogModel::setFilter(const loglens::Filter* filter) {
     beginResetModel();
     filter_ = filter == nullptr ? std::nullopt : std::optional<loglens::Filter>(*filter);
-    rebuildVisible(filter);
+    rebuildVisible();
+    endResetModel();
+}
+
+void LogModel::setSearch(const QString& search) {
+    beginResetModel();
+    search_ = search.trimmed();
+    rebuildVisible();
     endResetModel();
 }
 
@@ -123,7 +131,7 @@ void LogModel::appendRecords(const std::vector<loglens::LogRecord>& records,
     for (std::size_t index = firstArriving; index < totalAfter; ++index) {
         const loglens::LogRecord& record =
             records[index - firstRecordIndex];
-        if (!filter_ || filter_->matches(record)) {
+        if (matches(record)) {
             arriving.push_back(index);
         }
     }
@@ -156,7 +164,7 @@ void LogModel::updateRecord(std::size_t index, const loglens::LogRecord& record,
         return;
     }
 
-    const bool isVisible = !filter_ || filter_->matches(record);
+    const bool isVisible = matches(record);
     auto position = std::lower_bound(visible_.begin(), visible_.end(), index);
     const bool wasVisible = position != visible_.end() && *position == index;
 
@@ -189,15 +197,26 @@ void LogModel::updateRecord(std::size_t index, const loglens::LogRecord& record,
     }
 }
 
-void LogModel::rebuildVisible(const loglens::Filter* filter) {
+void LogModel::rebuildVisible() {
     visible_.clear();
     visible_.reserve(records_.size());
     for (std::size_t i = 0; i < records_.size(); ++i) {
         const loglens::LogRecord& record = records_.at(i);
-        if (filter == nullptr || filter->matches(record)) {
+        if (matches(record)) {
             visible_.push_back(records_.firstIndex() + i);
         }
     }
+}
+
+bool LogModel::matches(const loglens::LogRecord& record) const {
+    if (filter_ && !filter_->matches(record)) {
+        return false;
+    }
+    if (search_.isEmpty()) {
+        return true;
+    }
+    const QString raw = QString::fromUtf8(record.raw.data(), static_cast<int>(record.raw.size()));
+    return raw.contains(search_, Qt::CaseInsensitive);
 }
 
 const loglens::LogRecord* LogModel::recordAt(int row) const {

@@ -1,6 +1,7 @@
 #include "loglens/gui/main_window.hpp"
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QFileDialog>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -8,17 +9,18 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QScrollBar>
+#include <QSpinBox>
 #include <QStatusBar>
 #include <QTableView>
 #include <QTimer>
+#include <QThread>
 #include <QVBoxLayout>
 
 #include <string>
 #include <vector>
 
 #include "loglens/gui/log_model.hpp"
-#include "loglens/log_parser.hpp"
-#include "loglens/log_source.hpp"
+#include "loglens/gui/log_load_worker.hpp"
 #include "loglens/log_stats.hpp"
 #include "loglens/gui/timeline_widget.hpp"
 
@@ -29,7 +31,8 @@ constexpr std::uint64_t kBucketMs = 60000;
 } // namespace
 
 MainWindow::MainWindow(QWidget* parent, std::size_t recordCapacity, std::size_t sourceChunkBytes)
-    : QMainWindow(parent), source_chunk_bytes_(sourceChunkBytes) {
+    : QMainWindow(parent), source_chunk_bytes_(sourceChunkBytes),
+      record_capacity_(recordCapacity) {
     auto* central = new QWidget(this);
     auto* layout = new QVBoxLayout(central);
 
@@ -45,8 +48,25 @@ MainWindow::MainWindow(QWidget* parent, std::size_t recordCapacity, std::size_t 
     applyButton->setObjectName(QStringLiteral("applyFilterButton"));
     applyButton->setAccessibleName(tr("Apply log filter"));
     bar->addWidget(openButton);
+    loadMode_ = new QComboBox(central);
+    loadMode_->setObjectName(QStringLiteral("loadModeComboBox"));
+    loadMode_->setAccessibleName(tr("Initial load mode"));
+    loadMode_->addItem(tr("Latest records"));
+    loadMode_->addItem(tr("From start"));
+    bar->addWidget(loadMode_);
+    tailRecords_ = new QSpinBox(central);
+    tailRecords_->setObjectName(QStringLiteral("tailRecordsSpinBox"));
+    tailRecords_->setAccessibleName(tr("Latest record count"));
+    tailRecords_->setRange(1, static_cast<int>(recordCapacity));
+    tailRecords_->setValue(static_cast<int>(recordCapacity));
+    bar->addWidget(tailRecords_);
     bar->addWidget(filterEdit_, 1);
     bar->addWidget(applyButton);
+    searchEdit_ = new QLineEdit(central);
+    searchEdit_->setObjectName(QStringLiteral("searchEdit"));
+    searchEdit_->setAccessibleName(tr("Search loaded log text"));
+    searchEdit_->setPlaceholderText(tr("Search text"));
+    bar->addWidget(searchEdit_);
     followBox_ = new QCheckBox(tr("Follow"), central);
     followBox_->setObjectName(QStringLiteral("followCheckBox"));
     followBox_->setAccessibleName(tr("Follow log file"));
@@ -83,6 +103,35 @@ MainWindow::MainWindow(QWidget* parent, std::size_t recordCapacity, std::size_t 
     pollTimer_->setInterval(500);
     connect(pollTimer_, &QTimer::timeout, this, &MainWindow::pollSource);
     connect(followBox_, &QCheckBox::toggled, this, &MainWindow::setFollowing);
+    connect(loadMode_, qOverload<int>(&QComboBox::currentIndexChanged), this,
+            [this](int index) { tailRecords_->setEnabled(index == 0); });
+    timelineTimer_ = new QTimer(this);
+    timelineTimer_->setObjectName(QStringLiteral("timelineRefreshTimer"));
+    timelineTimer_->setSingleShot(true);
+    timelineTimer_->setInterval(50);
+    connect(timelineTimer_, &QTimer::timeout, this, &MainWindow::refreshTimeline);
+    connect(searchEdit_, &QLineEdit::textChanged, this, [this](const QString& text) {
+        model_->setSearch(text);
+        scheduleTimelineRefresh();
+        updateStatus(QString());
+    });
+
+    qRegisterMetaType<loglens::LoadRequest>("loglens::LoadRequest");
+    qRegisterMetaType<loglens::LoadBatch>("loglens::LoadBatch");
+    loaderThread_ = new QThread(this);
+    loaderThread_->setObjectName(QStringLiteral("logLoadThread"));
+    loader_ = new loglens::LogLoadWorker();
+    loader_->moveToThread(loaderThread_);
+    connect(loaderThread_, &QThread::finished, loader_, &QObject::deleteLater);
+    connect(this, &MainWindow::startLoadRequested, loader_, &loglens::LogLoadWorker::startLoad,
+            Qt::QueuedConnection);
+    connect(this, &MainWindow::pollRequested, loader_, &loglens::LogLoadWorker::poll,
+            Qt::QueuedConnection);
+    connect(this, &MainWindow::acknowledgeRequested, loader_,
+            &loglens::LogLoadWorker::acknowledge, Qt::QueuedConnection);
+    connect(loader_, &loglens::LogLoadWorker::batchReady, this, &MainWindow::handleLoadBatch,
+            Qt::QueuedConnection);
+    loaderThread_->start();
 
     // Following the tail is only wanted while the view is already at the tail.
     // Scrolling up to read something is an explicit request to stay put, and
@@ -97,6 +146,13 @@ MainWindow::MainWindow(QWidget* parent, std::size_t recordCapacity, std::size_t 
 
     resize(1100, 700);
     setWindowTitle(tr("loglens"));
+}
+
+MainWindow::~MainWindow() {
+    ++active_job_;
+    loader_->selectJob(active_job_);
+    loaderThread_->quit();
+    loaderThread_->wait();
 }
 
 void MainWindow::applyDeltas(const std::vector<loglens::RecordDelta>& deltas) {
@@ -140,104 +196,86 @@ void MainWindow::chooseFile() {
 }
 
 void MainWindow::openPath(const QString& path) {
-    tailer_ = std::make_unique<loglens::FileTailer>(path.toStdString(), source_chunk_bytes_);
-    loglens::SourceChunk chunk;
-    std::string error;
-    if (!tailer_->pollChunk(chunk, error)) {
-        // Report it rather than showing an empty window with no explanation.
-        status_->setText(tr("Cannot read: %1").arg(QString::fromStdString(error)));
-        tailer_.reset();
-        backlog_pending_ = false;
-        assembler_.reset();
-        model_->resetRecords();
-        refreshTimeline();
-        setWindowTitle(tr("loglens"));
-        // A failed replacement must not leave the old source's timer spinning
-        // against an empty model. This also makes a failed open recoverable:
-        // the user can re-enable follow after a successful replacement open.
-        followBox_->setChecked(false);
-        return;
-    }
-    assembler_.reset(tailer_->generation());
-    backlog_pending_ = chunk.more_available;
-    model_->setRecords(std::vector<loglens::LogRecord>(), tailer_->generation());
-    applyDeltas(assembler_.consumeBytes(chunk.bytes));
-    applyFilter();
+    openPath(path, selectedLoadMode(), static_cast<std::size_t>(tailRecords_->value()));
+}
+
+void MainWindow::openPath(const QString& path, loglens::InitialLoadMode mode,
+                          std::size_t tailRecords) {
+    ++active_job_;
+    loader_->selectJob(active_job_);
+    expected_sequence_ = 0;
+    retryAttempts_ = 0;
+    backlog_pending_ = true;
+    model_->resetRecords();
+    refreshTimeline();
+    updateStatus(tr("loading…"));
     setWindowTitle(tr("loglens — %1").arg(path));
     setFollowing(followBox_->isChecked());
-    scheduleBacklogPoll();
+
+    loglens::LoadRequest request;
+    request.job_id = active_job_;
+    request.path = path;
+    request.mode = mode;
+    request.tail_records = std::max<std::size_t>(1, std::min(tailRecords, record_capacity_));
+    request.source_chunk_bytes = source_chunk_bytes_;
+    emit startLoadRequested(std::move(request));
 }
 
 void MainWindow::pollSource() {
-    if (!tailer_ || (followState_ == FollowState::Stopped && !backlog_pending_)) {
+    if (active_job_ == 0 || followState_ == FollowState::Stopped) {
         return;
     }
-    const std::size_t restartsBefore = tailer_->restarts();
-    loglens::SourceChunk chunk;
-    std::string error;
-    if (!tailer_->pollChunk(chunk, error)) {
-        handleSourceError(chunk, error);
-        return;
-    }
-
-    applySourceChunk(chunk, restartsBefore);
+    emit pollRequested(active_job_);
 }
 
-void MainWindow::handleSourceError(const loglens::SourceChunk& chunk,
-                                   const std::string& error) {
+void MainWindow::handleLoadError(const loglens::LoadBatch& batch) {
     backlog_pending_ = false;
-    if (chunk.error.retryable) {
+    if (batch.initial_phase) {
+        status_->setText(tr("Cannot read: %1").arg(batch.error));
+        setWindowTitle(tr("loglens"));
+        followBox_->setChecked(false);
+        return;
+    }
+    if (batch.retryable) {
         followState_ = FollowState::WaitingRetry;
         ++retryAttempts_;
         status_->setText(tr("Follow waiting (attempt %1): %2")
                              .arg(retryAttempts_)
-                             .arg(QString::fromStdString(error)));
+                             .arg(batch.error));
         return;
     }
 
-    status_->setText(tr("Follow stopped: %1").arg(QString::fromStdString(error)));
+    status_->setText(tr("Follow stopped: %1").arg(batch.error));
     followBox_->setChecked(false);
 }
 
-void MainWindow::applySourceChunk(const loglens::SourceChunk& chunk,
-                                  std::size_t restartsBefore) {
-    followState_ = followBox_->isChecked() ? FollowState::Following : FollowState::Stopped;
-    retryAttempts_ = 0;
-    backlog_pending_ = chunk.more_available;
-    // A truncated or replaced file makes every retained row stale, so the model
-    // starts over instead of appending new lines under old ones. Comparing the
-    // parser generation as well handles a replacement that was detected during
-    // a retryable read failure: the old rows remain visible while waiting, but
-    // are discarded before the first successful bytes from the new source.
-    if (tailer_->restarts() != restartsBefore || chunk.generation_changed
-        || chunk.generation != assembler_.generation()) {
-        assembler_.reset(tailer_->generation());
-        model_->resetRecords(tailer_->generation());
-    }
-    const std::vector<loglens::RecordDelta> deltas = assembler_.consumeBytes(chunk.bytes);
-    if (deltas.empty()) {
-        refreshTimeline();
-        updateStatus(backlog_pending_ ? tr("loading…") : QString());
-        scheduleBacklogPoll();
+void MainWindow::handleLoadBatch(loglens::LoadBatch batch) {
+    if (batch.job_id != active_job_ || batch.sequence != expected_sequence_) {
         return;
     }
-    applyDeltas(deltas);
-    refreshTimeline();
+    ++expected_sequence_;
+    followState_ = followBox_->isChecked() ? FollowState::Following : FollowState::Stopped;
+    backlog_pending_ = batch.backlog_pending;
+    if (!batch.error.isEmpty()) {
+        handleLoadError(batch);
+        emit acknowledgeRequested(batch.job_id, batch.sequence);
+        return;
+    }
+    retryAttempts_ = 0;
+    if (batch.reset_model) {
+        model_->resetRecords(batch.generation);
+    }
+    applyDeltas(batch.deltas);
+    scheduleTimelineRefresh();
     updateStatus(backlog_pending_ ? tr("loading…") : QString());
-    if (autoScroll_) {
+    if (autoScroll_ && !batch.deltas.empty()) {
         table_->scrollToBottom();
     }
-    scheduleBacklogPoll();
-}
-
-void MainWindow::scheduleBacklogPoll() {
-    if (backlog_pending_) {
-        QTimer::singleShot(0, this, &MainWindow::pollSource);
-    }
+    emit acknowledgeRequested(batch.job_id, batch.sequence);
 }
 
 void MainWindow::setFollowing(bool following) {
-    if (following && tailer_) {
+    if (following && active_job_ != 0) {
         followState_ = FollowState::Following;
         retryAttempts_ = 0;
         pollTimer_->start();
@@ -246,6 +284,11 @@ void MainWindow::setFollowing(bool following) {
     followState_ = FollowState::Stopped;
     retryAttempts_ = 0;
     pollTimer_->stop();
+}
+
+loglens::InitialLoadMode MainWindow::selectedLoadMode() const {
+    return loadMode_->currentIndex() == 0 ? loglens::InitialLoadMode::TailRecords
+                                          : loglens::InitialLoadMode::FromStart;
 }
 
 void MainWindow::applyFilter() {
@@ -280,6 +323,10 @@ void MainWindow::refreshTimeline() {
         }
     }
     timeline_->setBuckets(stats.buckets(kBucketMs));
+}
+
+void MainWindow::scheduleTimelineRefresh() {
+    timelineTimer_->start();
 }
 
 void MainWindow::updateStatus(const QString& extra) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QAbstractTableModel>
+#include <QString>
 
 #include <cstddef>
 #include <cstdint>
@@ -29,6 +30,8 @@ public:
                     std::uint64_t generation = 0);
     // Passing nullptr clears the filter and shows everything.
     void setFilter(const loglens::Filter* filter);
+    // Case-insensitive raw-text search composed with the structured filter.
+    void setSearch(const QString& search);
 
     // Appends records that arrived after the last poll. Rows that pass the
     // current filter are announced as one contiguous insert at the end, which
@@ -72,7 +75,9 @@ private:
     // and the caller's optional<Filter> may be reassigned before then. A Filter
     // is one shared_ptr, so copying it is cheap.
     std::optional<loglens::Filter> filter_;
+    QString search_;
     std::uint64_t generation_ = 0;
 
-    void rebuildVisible(const loglens::Filter* filter);
+    void rebuildVisible();
+    bool matches(const loglens::LogRecord& record) const;
 };
