@@ -49,7 +49,7 @@ gate에서는 아래 네 leg가 같은 계약을 다시 실행한다.
 | 프로젝트 | 빌드 | 검증 | Qt 테스트 |
 |---|---|---|---|
 | `loglens` | CMake · Qt5/Qt6 | L2 benchmark PR #26 merged · main Qt5/Qt6 sweep green · default 8192 | `QAbstractItemModelTester` + MainWindow QtTest |
-| `diskmap` | qmake · Qt5/Qt6 | D1 Slice 2 merged · D2 local candidate complete · remote gate pending | `QSignalSpy` + 9 native tests + MainWindow QtTest |
+| `diskmap` | qmake · Qt5/Qt6 | D1 Slice 2 merged · D2 local candidate complete · remote gate pending | `QSignalSpy` + 9 native test targets + MainWindow QtTest |
 | `ici/viewer` | CMake · Qt5/Qt6 | PASS · TEM 4.86 | MainWindow QtTest 4/4 |
 
 T0-5의 `discover`는 GUI 프로젝트 한 항목을 Qt5·Qt6 두 항목으로 확장한다. 따라서 현재

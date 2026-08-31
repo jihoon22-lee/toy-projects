@@ -162,22 +162,22 @@ project and `make check`:
 | 5.15.18 | `/usr/bin/qmake` | full build + `make check` PASS; `test_main_window` 10/10 PASS |
 | 6.10.2 | `/usr/bin/qmake6` | full build + `make check` PASS; `test_main_window` 10/10 PASS |
 
-The offscreen GUI launch survived the bounded smoke window in each build; its
-expected `timeout` exit is not a test failure.
-
 ### CLI integration smoke
 
-The local fixture smoke combined `--json`, `--max-depth 2`, legacy
-`--depth 2`, `--min-size 10`, and repeatable `--exclude '*.tmp'`
-and `--exclude 'skip-*'`. Its JSON assertions passed and reported:
+The local fixture smoke created `keep/nested`, `skipme`, an 8-byte root file,
+and 32/64/128-byte payloads. It combined `--json`, `--max-depth 1`, legacy
+`--depth 3`, `--min-size 16`, and `--exclude 'skip*'`. Its JSON assertions
+passed and reported:
 
 ```text
 CLI_INTEGRATION_SMOKE=PASS
 ```
 
-The assertion checked that the filtered/limited tree retained the expected
-directory, `keep.bin`, and `link-to-nested` entries and omitted the excluded or
-undersized file.
+The assertion checked that the filtered/limited tree retained `keep`, its
+32-byte `large.bin`, and the visible incomplete `nested` directory; omitted
+`small.bin` and `skipme`; and did not serialize descendants below the scanner
+depth bound. Separate parser wiring makes `--exclude` repeatable, while this
+integration smoke exercised one pattern.
 
 ### Generated-source benchmark
 

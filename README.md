@@ -10,7 +10,7 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 
 | 이름 | 설명 | 상태 |
 |---|---|---|
-| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D2 cancellable/latest-generation scan · identity-safe scan · 9 tests |
+| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D2 cancellable/latest-generation scan · identity-safe scan · 9 test targets |
 | [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · L2 1 GiB benchmark merged in PR #26 · default capacity 8192 |
 
 ## 공통 구조 규칙
@@ -111,7 +111,7 @@ core scanner는 `ScanCancellationToken`을 atomic flag로 공유하고 directory
 협력적으로 checkpoint를 둔다. GUI의 `ProgressFn`은 queued callback으로 상태 라벨에
 `dirs/files` 진행을 전달하며, 새 `scanPath()`는 이전 token을 취소하고 generation을 증가시킨다.
 진행·완료 callback의 generation이 현재 값과 다르면 stale result로 폐기하므로, A가 늦게 끝나도
-그 결과가 먼저 시작한 B의 treemap이나 breadcrumb를 덮지 않는다.
+그 결과가 나중에 시작한 B의 treemap이나 breadcrumb를 덮지 않는다.
 
 취소 정책은 명시적으로 **partial result를 폐기**하는 쪽이다. 취소된 `ScanResult`는
 `cancelled=true`와 incomplete root를 남기지만, GUI는 이를 `Scan cancelled — partial result
@@ -143,7 +143,7 @@ CLI는 다음 옵션을 제공한다.
 2026-08-31 local candidate에서는 `/usr/bin/qmake` Qt 5.15.18과 `/usr/bin/qmake6` Qt 6.10.2의
 full build 및 `make check`가 모두 통과했고, 두 `test_main_window`가 각각 `10/10 PASS`를
 보고했다. CLI integration smoke도 fixture에 `--max-depth`, legacy `--depth`, `--min-size`와
-반복 `--exclude`를 함께 적용한 JSON 검증으로 PASS했다. ici complexity-only gate에서 처음
+`--exclude`를 함께 적용한 JSON 검증으로 PASS했다. ici complexity-only gate에서 처음
 발견한 scan complexity/nesting FAIL은 `b7218c6`의 상태 전이 분리 refactor로 해소되어
 maximum cyclomatic 14 (limit 15), 129 functions, 0 issues로 PASS했다. 이 candidate의 toy
 remote PR/CI, full ici verify, sticky comment/Pages evidence는 아직 수집 전이며 이 문서는
