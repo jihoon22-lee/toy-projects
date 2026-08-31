@@ -1,20 +1,24 @@
 #include <QAbstractItemModel>
 #include <QCheckBox>
 #include <QColor>
+#include <QComboBox>
 #include <QDir>
 #include <QFile>
 #include <QImage>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QSpinBox>
 #include <QTableView>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QThread>
 #include <QtTest>
 
 #include "loglens/gui/main_window.hpp"
 #include "loglens/gui/log_model.hpp"
 #include "loglens/gui/timeline_widget.hpp"
+#include "loglens/filter_expr.hpp"
 #include "loglens/log_stats.hpp"
 
 class TestMainWindow : public QObject {
@@ -29,10 +33,12 @@ private slots:
     void disablingFollowWhileWaitingStopsPolling();
     void unsupportedSourceStopsFollowing();
     void failedOpenClearsThePreviousSourceState();
+    void loaderSequenceMismatchStopsFollowing();
     void controlsHaveStableNamesAndFollowIsSwitchable();
     void timelineRendersEmptyAndPopulatedStates();
     void boundedStorageEvictsOldRowsAndReportsWindow();
     void drainsBacklogWithFollowDisabled();
+    void searchAndFilterCanChangeDuringBackgroundLoading();
 };
 
 namespace {
@@ -75,6 +81,11 @@ QByteArray line(const char* level, int number) {
     return QByteArray("2026-08-26T04:15:2") + QByteArray::number(number % 10)
            + QByteArray(".000Z ") + level + QByteArray("  [api] request ")
            + QByteArray::number(number) + '\n';
+}
+
+QByteArray lineWithMessage(const char* level, int number, const char* message) {
+    return QByteArray("2026-08-26T04:15:2") + QByteArray::number(number % 10)
+           + QByteArray(".000Z ") + level + QByteArray("  [api] ") + message + '\n';
 }
 
 void writeFile(const QString& path, const QByteArray& bytes, bool append = false) {
@@ -124,15 +135,15 @@ void TestMainWindow::openingAFileFillsTheTable() {
     window.openPath(path);
 
     QTRY_COMPARE(rowCount(window), 2);
-    QCOMPARE(cell(window, 0, LogModel::ColumnLine), QStringLiteral("1"));
-    QCOMPARE(cell(window, 1, LogModel::ColumnLine), QStringLiteral("2"));
+    QTRY_COMPARE(cell(window, 0, LogModel::ColumnLine), QStringLiteral("1"));
+    QTRY_COMPARE(cell(window, 1, LogModel::ColumnLine), QStringLiteral("2"));
     auto* statusLabel = status(window);
     auto* follow = followBox(window);
     auto* timer = pollTimer(window);
     QVERIFY(statusLabel != nullptr);
     QVERIFY(follow != nullptr);
     QVERIFY(timer != nullptr);
-    QCOMPARE(statusLabel->text(), statusText(2, 2, 2, 0, 1, 2, 32768));
+    QTRY_COMPARE(statusLabel->text(), statusText(2, 2, 2, 0, 1, 2, 32768));
     QVERIFY(follow->isChecked());
     QVERIFY(timer->isActive());
 }
@@ -145,7 +156,7 @@ void TestMainWindow::growthIsObservedByTheFollowTimer() {
 
     MainWindow window;
     window.openPath(path);
-    QCOMPARE(rowCount(window), 1);
+    QTRY_COMPARE(rowCount(window), 1);
     auto* timer = pollTimer(window);
     QVERIFY(timer != nullptr);
     QVERIFY(timer->isActive());
@@ -156,10 +167,10 @@ void TestMainWindow::growthIsObservedByTheFollowTimer() {
     // exercises the same connection used by the application while remaining
     // tolerant of a busy CI event loop.
     QTRY_COMPARE_WITH_TIMEOUT(rowCount(window), 2, 2500);
-    QCOMPARE(cell(window, 1, LogModel::ColumnLine), QStringLiteral("2"));
+    QTRY_COMPARE(cell(window, 1, LogModel::ColumnLine), QStringLiteral("2"));
     auto* statusLabel = status(window);
     QVERIFY(statusLabel != nullptr);
-    QCOMPARE(statusLabel->text(), statusText(2, 2, 2, 0, 1, 2, 32768));
+    QTRY_COMPARE(statusLabel->text(), statusText(2, 2, 2, 0, 1, 2, 32768));
 }
 
 void TestMainWindow::truncationResetsStaleRows() {
@@ -170,17 +181,17 @@ void TestMainWindow::truncationResetsStaleRows() {
 
     MainWindow window;
     window.openPath(path);
-    QCOMPARE(rowCount(window), 2);
+    QTRY_COMPARE(rowCount(window), 2);
 
     writeFile(path, line("WARN", 9));
     pollNow(window);
 
     QTRY_COMPARE(rowCount(window), 1);
-    QCOMPARE(cell(window, 0, LogModel::ColumnLine), QStringLiteral("1"));
-    QCOMPARE(cell(window, 0, LogModel::ColumnLevel), QStringLiteral("WARN"));
+    QTRY_COMPARE(cell(window, 0, LogModel::ColumnLine), QStringLiteral("1"));
+    QTRY_COMPARE(cell(window, 0, LogModel::ColumnLevel), QStringLiteral("WARN"));
     auto* statusLabel = status(window);
     QVERIFY(statusLabel != nullptr);
-    QCOMPARE(statusLabel->text(), statusText(1, 1, 1, 0, 1, 1, 32768));
+    QTRY_COMPARE(statusLabel->text(), statusText(1, 1, 1, 0, 1, 1, 32768));
 }
 
 void TestMainWindow::retryableSourceErrorKeepsFollowingAndVisibleRows() {
@@ -191,30 +202,33 @@ void TestMainWindow::retryableSourceErrorKeepsFollowingAndVisibleRows() {
 
     MainWindow window;
     window.openPath(path);
+    QTRY_COMPARE(rowCount(window), 1);
     auto* follow = followBox(window);
     auto* timer = pollTimer(window);
+    auto* statusLabel = status(window);
     QVERIFY(follow != nullptr);
     QVERIFY(timer != nullptr);
+    QVERIFY(statusLabel != nullptr);
     QVERIFY(follow->isChecked());
     QVERIFY(timer->isActive());
 
     QVERIFY(QFile::remove(path));
     pollNow(window);
 
+    QTRY_VERIFY_WITH_TIMEOUT(statusLabel->text().contains(QStringLiteral("cannot stat")), 2500);
+
     // A missing pathname is a transient source failure. Follow remains armed
     // so a file restored by log rotation can be observed without reopening it.
     QVERIFY(follow->isChecked());
     QVERIFY(timer->isActive());
-    auto* statusLabel = status(window);
-    QVERIFY(statusLabel != nullptr);
     const QString statusText = statusLabel->text().toLower();
     QVERIFY(statusText.contains(QStringLiteral("wait"))
             || statusText.contains(QStringLiteral("retr")));
     QVERIFY(statusLabel->text().contains(QStringLiteral("cannot stat")));
     // A transient read error does not invent a new empty source; the last
     // successfully read record remains visible for recovery.
-    QCOMPARE(rowCount(window), 1);
-    QCOMPARE(cell(window, 0, LogModel::ColumnLine), QStringLiteral("1"));
+    QTRY_COMPARE(rowCount(window), 1);
+    QTRY_COMPARE(cell(window, 0, LogModel::ColumnLine), QStringLiteral("1"));
 }
 
 void TestMainWindow::sourceReplacementRecoversWithCleanRows() {
@@ -225,11 +239,12 @@ void TestMainWindow::sourceReplacementRecoversWithCleanRows() {
 
     MainWindow window;
     window.openPath(path);
-    QCOMPARE(rowCount(window), 2);
+    QTRY_COMPARE(rowCount(window), 2);
 
     QVERIFY(QFile::remove(path));
     pollNow(window);
-    QCOMPARE(rowCount(window), 2);
+    QTRY_VERIFY_WITH_TIMEOUT(status(window)->text().contains(QStringLiteral("cannot stat")), 2500);
+    QTRY_COMPARE(rowCount(window), 2);
     QVERIFY(followBox(window)->isChecked());
 
     // Atomic replacement gives the tailer a new identity even when the new
@@ -241,10 +256,10 @@ void TestMainWindow::sourceReplacementRecoversWithCleanRows() {
     QCOMPARE(restored.readAll(), replacement);
     pollNow(window);
 
-    QCOMPARE(rowCount(window), 1);
-    QCOMPARE(cell(window, 0, LogModel::ColumnLine), QStringLiteral("1"));
-    QCOMPARE(cell(window, 0, LogModel::ColumnLevel), QStringLiteral("WARN"));
-    QCOMPARE(status(window)->text(), statusText(1, 1, 1, 0, 1, 1, 32768));
+    QTRY_COMPARE_WITH_TIMEOUT(rowCount(window), 1, 2500);
+    QTRY_COMPARE(cell(window, 0, LogModel::ColumnLine), QStringLiteral("1"));
+    QTRY_COMPARE(cell(window, 0, LogModel::ColumnLevel), QStringLiteral("WARN"));
+    QTRY_COMPARE(status(window)->text(), statusText(1, 1, 1, 0, 1, 1, 32768));
     QVERIFY(followBox(window)->isChecked());
     QVERIFY(pollTimer(window)->isActive());
 }
@@ -257,10 +272,11 @@ void TestMainWindow::disablingFollowWhileWaitingStopsPolling() {
 
     MainWindow window;
     window.openPath(path);
-    QCOMPARE(rowCount(window), 1);
+    QTRY_COMPARE(rowCount(window), 1);
 
     QVERIFY(QFile::remove(path));
     pollNow(window);
+    QTRY_VERIFY_WITH_TIMEOUT(status(window)->text().contains(QStringLiteral("cannot stat")), 2500);
     QVERIFY(followBox(window)->isChecked());
     QVERIFY(pollTimer(window)->isActive());
 
@@ -280,9 +296,9 @@ void TestMainWindow::disablingFollowWhileWaitingStopsPolling() {
     followBox(window)->setChecked(true);
     QVERIFY(pollTimer(window)->isActive());
     pollNow(window);
-    QCOMPARE(rowCount(window), 1);
-    QCOMPARE(cell(window, 0, LogModel::ColumnLine), QStringLiteral("1"));
-    QCOMPARE(cell(window, 0, LogModel::ColumnLevel), QStringLiteral("ERROR"));
+    QTRY_COMPARE(rowCount(window), 1);
+    QTRY_COMPARE(cell(window, 0, LogModel::ColumnLine), QStringLiteral("1"));
+    QTRY_COMPARE(cell(window, 0, LogModel::ColumnLevel), QStringLiteral("ERROR"));
 }
 
 void TestMainWindow::unsupportedSourceStopsFollowing() {
@@ -293,13 +309,14 @@ void TestMainWindow::unsupportedSourceStopsFollowing() {
 
     MainWindow window;
     window.openPath(path);
-    QCOMPARE(rowCount(window), 1);
+    QTRY_COMPARE(rowCount(window), 1);
     QVERIFY(QFile::remove(path));
     QDir parent(dir.path());
     QVERIFY(parent.mkdir(QStringLiteral("app.log")));
 
     pollNow(window);
 
+    QTRY_VERIFY_WITH_TIMEOUT(status(window)->text().contains(QStringLiteral("cannot follow")), 2500);
     QVERIFY(!followBox(window)->isChecked());
     QVERIFY(!pollTimer(window)->isActive());
     QVERIFY(status(window)->text().contains(QStringLiteral("cannot follow")));
@@ -318,7 +335,7 @@ void TestMainWindow::failedOpenClearsThePreviousSourceState() {
 
     MainWindow window;
     window.openPath(goodPath);
-    QCOMPARE(rowCount(window), 1);
+    QTRY_COMPARE(rowCount(window), 1);
     auto* follow = followBox(window);
     auto* timer = pollTimer(window);
     QVERIFY(follow != nullptr);
@@ -327,13 +344,51 @@ void TestMainWindow::failedOpenClearsThePreviousSourceState() {
 
     window.openPath(missingPath);
 
+    QTRY_VERIFY_WITH_TIMEOUT(status(window)->text().startsWith(QStringLiteral("Cannot read:")), 2500);
     QCOMPARE(rowCount(window), 0);
     QVERIFY(!follow->isChecked());
     QVERIFY(!timer->isActive());
     QCOMPARE(window.windowTitle(), QStringLiteral("loglens"));
     auto* statusLabel = status(window);
     QVERIFY(statusLabel != nullptr);
-    QVERIFY(statusLabel->text().startsWith(QStringLiteral("Cannot read:")));
+    QVERIFY(!follow->isEnabled());
+    QTRY_VERIFY(statusLabel->text().startsWith(QStringLiteral("Cannot read:")));
+}
+
+void TestMainWindow::loaderSequenceMismatchStopsFollowing() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("app.log"));
+    writeFile(path, line("INFO", 1));
+
+    MainWindow window;
+    window.openPath(path);
+    QTRY_COMPARE(rowCount(window), 1);
+    QTRY_COMPARE(status(window)->text(), statusText(1, 1, 1, 0, 1, 1, 32768));
+
+    QCheckBox* follow = followBox(window);
+    QTimer* timer = pollTimer(window);
+    QLabel* statusLabel = status(window);
+    QVERIFY(follow != nullptr);
+    QVERIFY(timer != nullptr);
+    QVERIFY(statusLabel != nullptr);
+    QVERIFY(follow->isChecked());
+    QVERIFY(timer->isActive());
+
+    // The first open is job 1 and its first accepted batch has sequence 0.
+    // Injecting a later sequence directly exercises the GUI's protocol guard
+    // without depending on timing or a second source request.
+    loglens::LoadBatch malformed;
+    malformed.job_id = 1;
+    malformed.sequence = 99;
+    QVERIFY(QMetaObject::invokeMethod(&window, "handleLoadBatch", Qt::DirectConnection,
+                                      Q_ARG(loglens::LoadBatch, malformed)));
+
+    QTRY_VERIFY_WITH_TIMEOUT(statusLabel->text().contains(QStringLiteral("sequence mismatch")),
+                             2500);
+    QVERIFY(!follow->isChecked());
+    QVERIFY(!timer->isActive());
+    QCOMPARE(rowCount(window), 1);
 }
 
 void TestMainWindow::controlsHaveStableNamesAndFollowIsSwitchable() {
@@ -341,29 +396,51 @@ void TestMainWindow::controlsHaveStableNamesAndFollowIsSwitchable() {
     auto* openButton = window.findChild<QPushButton*>(QStringLiteral("openButton"));
     auto* filterEdit = window.findChild<QLineEdit*>(QStringLiteral("filterEdit"));
     auto* applyButton = window.findChild<QPushButton*>(QStringLiteral("applyFilterButton"));
+    auto* loadMode = window.findChild<QComboBox*>(QStringLiteral("loadModeComboBox"));
+    auto* tailRecords = window.findChild<QSpinBox*>(QStringLiteral("tailRecordsSpinBox"));
     auto* follow = followBox(window);
     auto* logTable = table(window);
     auto* timeline = window.findChild<QWidget*>(QStringLiteral("timelineWidget"));
     auto* statusLabel = status(window);
     auto* timer = pollTimer(window);
+    auto* loaderThread = window.findChild<QThread*>(QStringLiteral("logLoadThread"));
     QVERIFY(openButton != nullptr);
     QVERIFY(filterEdit != nullptr);
     QVERIFY(applyButton != nullptr);
+    QVERIFY(loadMode != nullptr);
+    QVERIFY(tailRecords != nullptr);
     QVERIFY(follow != nullptr);
     QVERIFY(logTable != nullptr);
     QVERIFY(timeline != nullptr);
     QVERIFY(statusLabel != nullptr);
     QVERIFY(timer != nullptr);
+    QVERIFY(loaderThread != nullptr);
     QCOMPARE(openButton->accessibleName(),
              QStringLiteral("Open log file"));
     QCOMPARE(filterEdit->accessibleName(), QStringLiteral("Log filter"));
     QCOMPARE(applyButton->accessibleName(),
              QStringLiteral("Apply log filter"));
+    QCOMPARE(loadMode->accessibleName(), QStringLiteral("Initial load mode"));
+    QCOMPARE(loadMode->count(), 2);
+    QCOMPARE(loadMode->currentIndex(), 0);
+    QCOMPARE(loadMode->currentText(), QStringLiteral("Latest records"));
+    QCOMPARE(tailRecords->accessibleName(), QStringLiteral("Latest record count"));
+    QCOMPARE(tailRecords->minimum(), 1);
+    QCOMPARE(tailRecords->maximum(), 32768);
+    QCOMPARE(tailRecords->value(), 32768);
+    QVERIFY(tailRecords->isEnabled());
     QCOMPARE(follow->accessibleName(), QStringLiteral("Follow log file"));
     QCOMPARE(logTable->accessibleName(), QStringLiteral("Log records"));
     QCOMPARE(timeline->accessibleName(), QStringLiteral("Log timeline"));
     QCOMPARE(statusLabel->accessibleName(), QStringLiteral("Log status"));
     QCOMPARE(timer->interval(), 500);
+    QTRY_VERIFY_WITH_TIMEOUT(loaderThread->isRunning(), 2500);
+
+    loadMode->setCurrentIndex(1);
+    QCOMPARE(loadMode->currentText(), QStringLiteral("From start"));
+    QVERIFY(!tailRecords->isEnabled());
+    loadMode->setCurrentIndex(0);
+    QVERIFY(tailRecords->isEnabled());
 
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
@@ -408,12 +485,12 @@ void TestMainWindow::boundedStorageEvictsOldRowsAndReportsWindow() {
                         + line("FATAL", 4));
 
     MainWindow window(nullptr, 2);
-    window.openPath(path);
+    window.openPath(path, loglens::InitialLoadMode::FromStart, 2);
 
-    QCOMPARE(rowCount(window), 2);
-    QCOMPARE(cell(window, 0, LogModel::ColumnLine), QStringLiteral("3"));
-    QCOMPARE(cell(window, 1, LogModel::ColumnLine), QStringLiteral("4"));
-    QCOMPARE(status(window)->text(), statusText(2, 2, 4, 2, 3, 4, 2));
+    QTRY_COMPARE(rowCount(window), 2);
+    QTRY_COMPARE(cell(window, 0, LogModel::ColumnLine), QStringLiteral("3"));
+    QTRY_COMPARE(cell(window, 1, LogModel::ColumnLine), QStringLiteral("4"));
+    QTRY_COMPARE(status(window)->text(), statusText(2, 2, 4, 2, 3, 4, 2));
 
     QLineEdit* filter = window.findChild<QLineEdit*>(QStringLiteral("filterEdit"));
     QVERIFY(filter != nullptr);
@@ -426,9 +503,9 @@ void TestMainWindow::boundedStorageEvictsOldRowsAndReportsWindow() {
 
     // The filtered ERROR row was evicted, the new INFO row stays hidden, and
     // the retained FATAL row keeps its stable logical identity after wrap.
-    QCOMPARE(rowCount(window), 1);
-    QCOMPARE(cell(window, 0, LogModel::ColumnLine), QStringLiteral("4"));
-    QCOMPARE(status(window)->text(), statusText(1, 2, 5, 3, 4, 5, 2));
+    QTRY_COMPARE(rowCount(window), 1);
+    QTRY_COMPARE(cell(window, 0, LogModel::ColumnLine), QStringLiteral("4"));
+    QTRY_COMPARE(status(window)->text(), statusText(1, 2, 5, 3, 4, 5, 2));
 }
 
 void TestMainWindow::drainsBacklogWithFollowDisabled() {
@@ -460,6 +537,51 @@ void TestMainWindow::drainsBacklogWithFollowDisabled() {
     QCOMPARE(cell(window, 0, LogModel::ColumnLine), QStringLiteral("1"));
     QCOMPARE(cell(window, lineCount - 1, LogModel::ColumnLine),
              QString::number(lineCount));
+}
+
+void TestMainWindow::searchAndFilterCanChangeDuringBackgroundLoading() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("search.log"));
+    QByteArray contents;
+    contents += lineWithMessage("INFO", 1, "NEEDLE bootstrap");
+    contents += lineWithMessage("ERROR", 2, "needle second");
+    contents += lineWithMessage("WARN", 3, "NEEDLE warning");
+    contents += lineWithMessage("FATAL", 4, "needle fatal");
+    contents += lineWithMessage("ERROR", 5, "ordinary error");
+    contents += lineWithMessage("ERROR", 6, "NEEDLE final");
+    writeFile(path, contents);
+
+    MainWindow window(nullptr, 64, 5);
+    auto* model = qobject_cast<LogModel*>(tableModel(window));
+    QVERIFY(model != nullptr);
+    loglens::ParseError parseError;
+    const auto parsed = loglens::Filter::parse("level >= error", parseError);
+    QVERIFY(parsed.has_value());
+    const loglens::Filter structuredFilter = *parsed;
+
+    bool changedDuringLoad = false;
+    QObject::connect(&window, &MainWindow::acknowledgeRequested, &window,
+                     [&](quint64, quint64) {
+                         if (changedDuringLoad) {
+                             return;
+                         }
+                         changedDuringLoad = true;
+                         model->setSearch(QStringLiteral("NeEdLe"));
+                         model->setFilter(&structuredFilter);
+                     });
+
+    // The tiny source chunks force multiple worker batches. The first direct
+    // acknowledgement changes both predicates while the worker is paused on
+    // its bounded backpressure gate, before the remaining records arrive.
+    window.openPath(path, loglens::InitialLoadMode::FromStart, 64);
+
+    QTRY_VERIFY_WITH_TIMEOUT(changedDuringLoad, 2500);
+    QTRY_COMPARE_WITH_TIMEOUT(rowCount(window), 3, 2500);
+    QTRY_COMPARE(cell(window, 0, LogModel::ColumnLine), QStringLiteral("2"));
+    QTRY_COMPARE(cell(window, 1, LogModel::ColumnLine), QStringLiteral("4"));
+    QTRY_COMPARE(cell(window, 2, LogModel::ColumnLine), QStringLiteral("6"));
+    QTRY_COMPARE(status(window)->text(), statusText(3, 6, 6, 0, 1, 6, 64));
 }
 
 QTEST_MAIN(TestMainWindow)

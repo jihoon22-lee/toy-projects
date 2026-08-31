@@ -75,7 +75,9 @@ public:
     std::vector<RecordDelta> flush();
 
     // Drops partial/continuation state and starts a new source generation.
-    void reset(std::uint64_t generation = 0);
+    // A tail-window loader can preserve the physical line number of its first
+    // selected byte instead of relabelling the retained suffix from line 1.
+    void reset(std::uint64_t generation = 0, std::size_t firstLineNumber = 1);
 
     void setFormat(Format format);
     Format format() const;

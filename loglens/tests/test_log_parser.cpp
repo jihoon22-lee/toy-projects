@@ -320,6 +320,31 @@ void testAssemblerMakesTheBytePreservingErrorPolicyExplicit() {
     CHECK_EQ(deltas[0].record.raw, invalid.substr(0, invalid.size() - 1));
 }
 
+void testAssemblerResetPreservesTailWindowLineNumbers() {
+    RecordAssembler assembler;
+    assembler.reset(23, 401);
+
+    const std::vector<RecordDelta> deltas = assembler.consumeBytes(
+        "2026-08-26T04:15:22.123Z ERROR [api] retained\n  detail\n");
+    CHECK_EQ(deltas.size(), static_cast<std::size_t>(2));
+    CHECK_EQ(deltas[0].generation, static_cast<std::uint64_t>(23));
+    CHECK_EQ(deltas[0].record.line_number, static_cast<std::size_t>(401));
+    CHECK_EQ(deltas[1].physical_line_number, static_cast<std::size_t>(402));
+    CHECK_EQ(deltas[1].record.line_number, static_cast<std::size_t>(401));
+    CHECK_EQ(assembler.nextLineNumber(), static_cast<std::size_t>(403));
+}
+
+void testAssemblerResetRejectsZeroLineNumber() {
+    RecordAssembler assembler;
+    bool threw = false;
+    try {
+        assembler.reset(0, 0);
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    CHECK(threw);
+}
+
 } // namespace
 
 int main() {
@@ -340,5 +365,7 @@ int main() {
     testAssemblerRejectsInvalidRecordByteLimits();
     testAssemblerResetDropsOldGenerationState();
     testAssemblerMakesTheBytePreservingErrorPolicyExplicit();
+    testAssemblerResetPreservesTailWindowLineNumbers();
+    testAssemblerResetRejectsZeroLineNumber();
     return checkSummary();
 }

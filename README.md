@@ -11,7 +11,7 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 | 이름 | 설명 | 상태 |
 |---|---|---|
 | [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · identity-safe scan · 9 tests |
-| [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded 라이브 팔로우 · 10 tests |
+| [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · 12 CTest targets |
 
 ## 공통 구조 규칙
 
@@ -221,8 +221,30 @@ source read는 한 poll당 기본 1 MiB(최대 16 MiB)로 제한된다. GUI는 �
 루프에 나눠 처리하고, one-shot CLI는 최초 file-size snapshot까지만 읽는다. newline 없는
 거대한 line이나 continuation은 기본 64 KiB(최대 1 MiB)에서 잘리며, UI/CLI에 정확한
 `omitted_bytes`가 표시된다. 이 slice는 이벤트 루프를 독점하는 전체 파일 read를 없앤 기반
-단계다. Tail N/index 선택, worker-thread parsing과 1 GiB·100만 record benchmark는 아직
-완료되지 않았으며 마스터 계획의 다음 L2 작업이다.
+단계다.
+
+초기 GUI 로드는 `Latest records`(Tail N)와 `From start` 중에서 선택한다. Tail N은
+continuation line을 포함한 logical record의 시작 offset을 bounded byte scan으로 찾고,
+선택된 suffix를 실제 `FileTailer`와 `RecordAssembler`로 읽어 원래 physical line number를
+유지한다. From start는 첫 poll의 file-size snapshot까지만 읽는다. 두 경로 모두 source
+identity를 다시 확인해 선택 시점과 로드 시점이 다른 파일이면 섞어 표시하지 않고 retryable
+오류로 끝낸다.
+
+초기 I/O와 parsing은 `LogLoadWorker`가 전용 `QThread`에서 소유하고, `LogModel`과 모든
+위젯 변경은 GUI thread에서만 수행한다. worker는 한 번에 최대 512개의 `RecordDelta`만
+`LoadBatch`로 발행하며, GUI가 같은 `job_id`와 `sequence`를 acknowledge하기 전에는 다음
+batch를 읽거나 발행하지 않는다. 새 파일을 열면 thread-safe job selector가 이전 작업을
+취소하고, GUI는 stale job 또는 sequence가 어긋난 batch를 적용하지 않는다. 따라서 느린
+파일 I/O가 event loop를 막지 않으면서도 queued signal이 무한히 쌓이지 않는다.
+
+`Follow`는 초기 backlog가 drain되는 동안에도 명시적으로 켜고 끌 수 있다. 취소 또는 Follow
+중지는 pending follow poll을 버리고, 재개할 때 현재 source generation부터 다시 읽는다.
+구조화된 filter와 대소문자 구분 없는 raw-text search는 worker가 계속 batch를 보내는 중에도
+GUI thread에서 안전하게 바꿀 수 있으며, timeline 갱신은 debounce된다.
+
+이 background/Tail N slice에서 아직 완료하지 않은 것은 1 GiB synthetic log·100만 record
+benchmark와 그 결과에 따른 성능 budget/default capacity 결정이다. 따라서 32,768이라는
+기본 capacity는 현재의 보수적인 provisional 값이며, benchmark 전에는 변경하지 않는다.
 
 PR [#24](https://github.com/jihoon22-lee/toy-projects/pull/24)의 구현 head `fa4fd1a`는
 workflow [`33348597272`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33348597272)에서
@@ -231,18 +253,26 @@ workflow [`33348597272`](https://github.com/jihoon22-lee/toy-projects/actions/ru
 두 PASS 결과와 HTML 링크가 게시됐고, 두 Pages 문서는 HTTP 200·`text/html`·외부 참조 0개로
 직접 확인했다.
 
+위 원격 기록은 bounded foundation에 대한 과거 증거다. 현재 background loader/Tail N 변경의
+로컬 ici deep no-cache 결과는 구현 head `e19fea9`에서 Suite PASS, 11 pass / 0 warn / 0 fail /
+0 error / 2 skip, TEM 4.83, line/function/branch 93.4%/96.6%/81.6%, maximum complexity
+15(0 issues), duplication 1.72%, sanitizer PASS, HTML 428,025 bytes·external refs 0개였다.
+이 변경에 대한 새 원격 PR·sticky comment·Pages 링크는 아직 만들지 않았고, CI와 publish 검증은
+slice를 PR로 올린 뒤 수집한다.
+
 ### Qt 셸 테스트 현황
 
 GUI는 헤드리스 QtTest와 실제 fixture 파일을 사용해 상태 전이를 검증한다. `loglens`는
-Qt5/Qt6 CMake/CTest에서 같은 테스트를 실행했고, `diskmap`의 내비게이션 셸도 T0-4에서
-완료했다. T0-5의 CI matrix는 이 두 프로젝트를 Qt5와 Qt6로 각각 빌드·native test·실제
-headless smoke까지 실행한다.
+Qt5/Qt6 CMake/CTest에서 같은 12개 CTest target을 실행했고, `diskmap`의 내비게이션 셸도
+T0-4에서 완료했다. T0-5의 CI matrix는 이 두 프로젝트를 Qt5와 Qt6로 각각 빌드·native
+test·실제 headless smoke까지 실행한다.
 
 | 파일 | 상태 |
 |---|---|
 | `loglens/src/gui/log_model.cpp` | `QAbstractItemModelTester` 로 검증 |
+| `loglens/src/gui/log_load_worker.cpp` | `test_log_load_worker` — 전용 QThread, 512-record ACK backpressure, stale job/sequence, Tail N line number, invalid source와 rotation |
 | `diskmap/src/gui/treemap_widget.cpp` | `QSignalSpy` 로 검증 |
-| `loglens/src/gui/main_window.cpp` | `test_main_window` — open/growth/truncation, retryable missing/reappear, follow stop/resume, fatal source와 timer/status |
+| `loglens/src/gui/main_window.cpp` | `test_main_window` — Tail N/From start, open/growth/truncation, retryable missing/reappear, follow stop/resume, search/filter during load, stale sequence와 status |
 | `loglens/src/gui/timeline_widget.cpp` | `test_main_window` — empty/populated paint branch |
 | `diskmap/src/gui/main_window.cpp` | `test_main_window` — scan, breadcrumb, descend/up, leaf no-op |
 
@@ -255,8 +285,10 @@ L1 Slice 2의 GUI 회귀 테스트는 `QTemporaryDir`로 실제 파일을 만들
 `QMetaObject::invokeMethod(..., Qt::DirectConnection)`으로 poll 경계를 결정적으로 구동한다.
 `test_main_window`는 retryable missing 상태에서 기존 행을 보존하는지, 동일 경로의 replacement를
 새 generation으로 재개하는지, 사용자의 Follow 중지/재개와 fatal unsupported source를 각각
-확인한다. 이 브랜치에서 기록된 native CMake/CTest 결과는 Qt 6과 Qt 5 각각 10/10 PASS이며,
-ici verify, CI report-pr/sticky HTML, headless GUI smoke 결과는 PR 검증에서 별도로 수집한다.
+확인한다. 이 background slice에서 기록된 native CMake/CTest 결과는 Qt 6과 Qt 5 각각
+12/12 PASS이고, Qt 6 strict `-Wall -Wextra -Wpedantic -Werror` 빌드와 CTest도 12/12
+PASS다. 위 local ici deep no-cache 결과는 이 코드에 대한 분석 증거이며, 새 변경의 CI
+report-pr/sticky HTML와 원격 Pages 링크는 아직 만들지 않았다.
 
 ## CI 리포트
 
@@ -309,6 +341,8 @@ QT_QPA_PLATFORM=offscreen ../../ici/dist/ici.pyz verify --report
 `loglens`의 셸 상태 테스트만 빠르게 돌리려면 CTest를 쓴다. 테스트는 프로젝트 루트에서
 실행되며, 실제 follow timer는 `QTRY_COMPARE`로 기다리고 truncation/read error는 Qt
 meta-object로 기존 `pollSource` slot을 동기 호출해 구동한다.
+전용 loader 테스트는 `QSignalSpy`/`QTRY`와 queued 또는 blocking meta-object 경계를 사용해
+고정 sleep 없이 batch ACK, stale job, Tail N line number와 Follow/cancel 계약을 검증한다.
 
 ```bash
 # manifest/discovery

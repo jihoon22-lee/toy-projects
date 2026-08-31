@@ -97,8 +97,9 @@ bool SourceChunk::ok() const { return error.kind == SourceErrorKind::None; }
 
 LogSource::~LogSource() = default;
 
-FileTailer::FileTailer(std::string path, std::size_t maxChunkBytes)
-    : path_(std::move(path)), max_chunk_bytes_(maxChunkBytes) {
+FileTailer::FileTailer(std::string path, std::size_t maxChunkBytes,
+                       std::uint64_t initialOffset)
+    : path_(std::move(path)), offset_(initialOffset), max_chunk_bytes_(maxChunkBytes) {
     if (maxChunkBytes == 0 || maxChunkBytes > kMaxSourceChunkBytes) {
         throw std::invalid_argument("source chunk size is outside the supported range");
     }

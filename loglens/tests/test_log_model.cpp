@@ -58,6 +58,8 @@ private slots:
     void evictedExtensionIsIgnored();
     void retainedUpdatesRespectFilterAfterWrap();
     void omittedBytesAreVisibleInMessageAndTooltip();
+    void caseInsensitiveRawSearchComposesWithStructuredFilter();
+    void searchMembershipSurvivesAppendUpdateAndEviction();
 };
 
 // QAbstractItemModelTester asserts the whole QAbstractItemModel contract on
@@ -452,6 +454,71 @@ void TestLogModel::omittedBytesAreVisibleInMessageAndTooltip() {
              QStringLiteral("retained prefix  [17 source byte(s) omitted]"));
     QCOMPARE(model.data(message, Qt::ToolTipRole).toString(),
              QStringLiteral("raw retained prefix\n[17 source byte(s) omitted]"));
+}
+
+void TestLogModel::caseInsensitiveRawSearchComposesWithStructuredFilter() {
+    LogModel model;
+    QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::Fatal);
+
+    loglens::LogRecord errorMatch = numberedRecord(Level::Error, 1, "completed request");
+    errorMatch.raw = "2026-08-26 ERROR [api] TIMEOUT from upstream";
+    loglens::LogRecord infoMatch = numberedRecord(Level::Info, 2, "completed request");
+    infoMatch.raw = "2026-08-26 INFO [api] timeout from upstream";
+    loglens::LogRecord errorMiss = numberedRecord(Level::Error, 3, "connection reset");
+    errorMiss.raw = "2026-08-26 ERROR [api] connection reset";
+    model.setRecords({errorMatch, infoMatch, errorMiss});
+
+    const loglens::Filter filter = errorsOnly();
+    model.setFilter(&filter);
+    model.setSearch(QStringLiteral("TiMeOuT"));
+
+    // Search is against raw source text and is case-insensitive. The
+    // structured predicate still applies, so the INFO timeout is excluded.
+    QCOMPARE(model.rowCount(), 1);
+    QVERIFY(model.recordAt(0) != nullptr);
+    QCOMPARE(model.recordAt(0)->line_number, static_cast<std::size_t>(1));
+
+    model.setSearch(QString());
+    QCOMPARE(model.rowCount(), 2);
+    QCOMPARE(model.recordAt(0)->line_number, static_cast<std::size_t>(1));
+    QCOMPARE(model.recordAt(1)->line_number, static_cast<std::size_t>(3));
+}
+
+void TestLogModel::searchMembershipSurvivesAppendUpdateAndEviction() {
+    LogModel model(nullptr, 3);
+    QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::Fatal);
+    model.resetRecords(4);
+    model.setSearch(QStringLiteral("needle"));
+
+    model.appendRecords(
+        {numberedRecord(Level::Info, 1, "NEEDLE first"),
+         numberedRecord(Level::Info, 2, "ordinary"),
+         numberedRecord(Level::Error, 3, "needle second")},
+        0, 4);
+    QCOMPARE(model.rowCount(), 2);
+    QCOMPARE(model.recordAt(0)->line_number, static_cast<std::size_t>(1));
+    QCOMPARE(model.recordAt(1)->line_number, static_cast<std::size_t>(3));
+
+    // An update can enter the search result without changing its absolute
+    // logical record ID or its position relative to other visible records.
+    model.updateRecord(1, numberedRecord(Level::Warn, 2, "NeEdLe updated"), 4);
+    QCOMPARE(model.rowCount(), 3);
+    QCOMPARE(model.recordAt(0)->line_number, static_cast<std::size_t>(1));
+    QCOMPARE(model.recordAt(1)->line_number, static_cast<std::size_t>(2));
+    QCOMPARE(model.recordAt(2)->line_number, static_cast<std::size_t>(3));
+
+    // A non-matching append still evicts the oldest matching row from the
+    // visible index. The next non-matching append evicts the next match.
+    model.appendRecords({numberedRecord(Level::Info, 4, "ordinary tail")}, 3, 4);
+    QCOMPARE(model.rowCount(), 2);
+    QCOMPARE(model.recordAt(0)->line_number, static_cast<std::size_t>(2));
+    QCOMPARE(model.recordAt(1)->line_number, static_cast<std::size_t>(3));
+
+    model.appendRecords({numberedRecord(Level::Info, 5, "another ordinary tail")}, 4, 4);
+    QCOMPARE(model.rowCount(), 1);
+    QCOMPARE(model.recordAt(0)->line_number, static_cast<std::size_t>(3));
+    QCOMPARE(model.totalSeen(), static_cast<std::size_t>(5));
+    QCOMPARE(model.droppedCount(), static_cast<std::size_t>(2));
 }
 
 QTEST_MAIN(TestLogModel)
