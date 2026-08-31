@@ -10,7 +10,7 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 
 | 이름 | 설명 | 상태 |
 |---|---|---|
-| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D2 cancellable/latest-generation scan · identity-safe scan · 9 test targets |
+| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D2 cancellable/latest-generation scan complete (PR #28) · identity-safe scan · D3 next |
 | [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · L2 1 GiB benchmark merged in PR #26 · default capacity 8192 |
 
 ## 공통 구조 규칙
@@ -104,7 +104,7 @@ checks를 통과했고 merge commit `039052f9f30e355e12f3c812065657e3be4576f2`�
 [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/23#issuecomment-5471613383)와
 Pages HTML도 HTTP 200·`text/html`·외부 참조 0개로 확인했다.
 
-### diskmap D2 cancellable/latest-generation scan — local candidate
+### diskmap D2 cancellable/latest-generation scan — complete
 
 D2는 스캔을 취소할 수 있고, 최신 요청의 결과만 화면에 반영하는 계약을 추가했다.
 core scanner는 `ScanCancellationToken`을 atomic flag로 공유하고 directory listing 전·중·후에
@@ -140,20 +140,42 @@ CLI는 다음 옵션을 제공한다.
 | `--one-file-system` | root와 device가 다른 directory를 visible incomplete node로 남기고 확장하지 않는다. identity를 확인할 수 없으면 안전하게 오류를 남긴다. |
 | `--exclude GLOB` | basename과 root-relative generic path에 `*`/`?` wildcard를 적용한다. repeatable이며 매칭된 entry는 aggregate에서 제외된다. |
 
-2026-08-31 local candidate에서는 `/usr/bin/qmake` Qt 5.15.18과 `/usr/bin/qmake6` Qt 6.10.2의
+2026-08-31 local candidate 구현에서는 `/usr/bin/qmake` Qt 5.15.18과 `/usr/bin/qmake6` Qt 6.10.2의
 full build 및 `make check`가 모두 통과했고, 두 `test_main_window`가 각각 `10/10 PASS`를
 보고했다. CLI integration smoke도 fixture에 `--max-depth`, legacy `--depth`, `--min-size`와
 `--exclude`를 함께 적용한 JSON 검증으로 PASS했다. ici complexity-only gate에서 처음
 발견한 scan complexity/nesting FAIL은 `b7218c6`의 상태 전이 분리 refactor로 해소되어
-maximum cyclomatic 14 (limit 15), 129 functions, 0 issues로 PASS했다. 이 candidate의 toy
-remote PR/CI, sticky comment/Pages evidence는 아직 수집 전이다. current ici main commit
+maximum cyclomatic 14 (limit 15), 129 functions, 0 issues로 PASS했다. 이 candidate의 local
+ici main commit
 `6a0eadb`의 candidate pyz SHA256 `8cd2d4b128ab2d181e708660c4c4f38bcc9d50f9ad91e3aa5670f557e6077fed`로
 수행한 full post-refactor local `ici verify`는 `Suite PASS`, 10 pass / 0 warn / 0 fail /
 0 error / 2 skip, test 9/9, TEM 4.92, line95.7% / function98.5% / branch84.4%, complexity
 max14 across129 functions / 0 issues, dup3.11%, sanitize clean, 30 tools/21 ready/0 incomplete/
 9 unavailable, total82.29s, cache hits0이었다. HTML은 299034 bytes, SHA256
 `cf75f9d6f28179d95645d0e1582022008804078d5e3844de503a8c1a130c64a0`, external resource tags0이다.
-이 local evidence는 candidate에 한정되며 이 문서는 merge 완료를 주장하지 않는다.
+이 local evidence는 candidate artifact에 대한 기록이며, 아래 원격 증거가 toy-projects `main`의
+D2 병합과 검증을 닫는다.
+
+#### D2 원격 완료 증거
+
+2026-08-31 [PR #28](https://github.com/jihoon22-lee/toy-projects/pull/28)은 squash merge
+commit `ec075e57874d20654f7cbfbc604ad8aaee8401a6`으로 toy-projects `main`에 병합됐다.
+[PR CI run `33368958698`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33368958698)의
+12개 check가 모두 green이었다. 여기에는 DiskMap benchmark smoke Qt5/Qt6, 네 GUI matrix
+job, 두 ici verification job, publish와 Merge Gate가 포함된다.
+[sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/28#issuecomment-5475254935)에는
+`diskmap: PASS · TEM 4.92 · 10 pass / 2 skip · tests 9/9`와
+`loglens: PASS · TEM 4.80 · 10 pass / 2 skip · tests 12/12`, 양쪽 report link가 게시됐다.
+
+Pages도 HTTP/2 `200`, content-type `text/html`, 외부 `script`/`link`/`img`/`iframe`
+resource 0개로 각각 확인했다.
+
+| Pages 경로 | bytes | SHA-256 |
+|---|---:|---|
+| `diskmap/pr/28/` | 199843 | `c8a0d8009e1c19cd2d9df041969396f6abce95275713fe7ead6a499ac0b33b72` |
+| `loglens/pr/28/` | 334215 | `acda3bfb29bf5f3534256f614719e678ec89ed21b3420ee2b282ec55e2107830` |
+
+이것은 toy-projects `main`의 기능 병합 및 검증 기록이며, 별도 제품 버전 release를 의미하지 않는다.
 
 ### GUI 는 빌드되고 테스트된다
 
@@ -206,8 +228,9 @@ done
 
 결과는 `loglens: Suite PASS, TEM 4.84 (10 passed, 2 skipped)`와 `diskmap: Suite PASS,
 TEM 4.85 (10 passed, 2 skipped)`다. 이 historical snapshot과 별개로 D2 candidate의 full
-post-refactor local `ici verify`는 위 current-ici evidence로 완료됐다. toy remote PR/CI,
-sticky comment/Pages evidence는 아직 pending이며, Qt5 강제 CMake build는 loglens에서
+post-refactor local `ici verify`는 위 current-ici evidence로 완료됐다. D2의 toy remote PR/CI,
+sticky comment/Pages evidence와 병합된 main full benchmark는 위 원격 증거와 아래 benchmark
+기록으로 완료됐다. Qt5 강제 CMake build는 loglens에서
 `CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON`으로, diskmap의 Qt5 qmake build/test는
 `/usr/bin/qmake`로 각각 별도 실측했다. T0-5에서는 이 선택을 매 PR의 명시적 CI matrix로
 강제한다. 현재 로컬에서는 CMake Qt6/Qt5와 qmake6/Qt5 네 조합 모두 native test와
@@ -588,6 +611,19 @@ full sample은 `nodes_retained=1,000,001`을 확인했고, summary JSON의 SHA-2
 `743d5c5409101cfd9ef889da2da421e94cc205f585770ab19bb611472926246d`다. 이 수치는 단일
 local candidate artifact의 evidence이며, 실행마다 scheduler와 host RSS에 따라 시간·메모리는
 달라질 수 있다.
+
+PR #28 병합 후 head `ec075e5`에서 수행한 [main full benchmark run `33369288586`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33369288586)은
+Qt5/Qt6 full, combine, verdict job을 모두 성공시켰다. 설정은 1,000,000 entries,
+`cancel-after 10000`, process timeout 60초였고, 두 Qt 결과 모두 correctness `true`, failures
+0, budgets enforced `PASS`였다.
+
+| Qt | full elapsed | full throughput | full peak RSS | cancellation elapsed |
+|---|---:|---:|---:|---:|
+| 5 | 2131.069 ms | 469248.020 entries/s | 1064.094 MiB | 1.479 ms |
+| 6 | 3120.463 ms | 320465.315 entries/s | 1064.137 MiB | 1.580 ms |
+
+combined `summary.json`은 3567 bytes이며 SHA-256은
+`26391797763aed17fedb04e2a4aeb5cf8238ec4d5b5d040d473d32a513369251`이다.
 
 PR 경로의 `.github/workflows/ci.yml` `diskmap-benchmark-smoke`는 Qt5/Qt6 matrix에서
 10,000 entries와 1,000-entry cancellation, 30초 timeout, `--skip-budgets`로 harness

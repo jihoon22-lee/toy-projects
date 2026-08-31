@@ -2,7 +2,8 @@
 
 ## Overview
 
-Completed the `diskmap` D2 local candidate after the D1 identity-safe scanner.
+Completed the `diskmap` D2 implementation after the D1 identity-safe scanner and
+closed its toy-projects remote evidence on `main`.
 The scan can be cancelled cooperatively, GUI progress and completion are guarded
 by a monotonically increasing generation, and a cancelled partial result is
 discarded so it cannot replace the tree already visible to the user. The CLI
@@ -11,8 +12,10 @@ contract, while the scanner and analysis/layout helpers remain safe for deep
 trees.
 
 The local candidate implementation, native/benchmark checks, and full post-refactor
-`ici verify` are complete. Only the toy remote PR/CI, sticky comment, and Pages
-evidence remain pending; this document does not claim those remote gates are complete.
+`ici verify` are complete. PR #28, its 12-check CI run, sticky report comment, both
+Pages documents, and the merged-main full benchmark are also recorded below; together
+they close D2. This is a toy-projects `main` merge and verification record, not a
+product version release.
 
 ## Context
 
@@ -214,13 +217,47 @@ cache hits 0 · total 82.29s
 The HTML report is `/tmp/tmp.RFA39KzhyH.html`, 299034 bytes, SHA-256
 `cf75f9d6f28179d95645d0e1582022008804078d5e3844de503a8c1a130c64a0`, with zero
 external `script`/`link`/`img`/`iframe` resource tags. D2 local verification is
-complete; only toy remote PR/CI, sticky comment, and Pages evidence remain pending.
+complete; the remote closure is documented next.
+
+### Remote PR, report, and Pages evidence
+
+On 2026-08-31, [PR #28](https://github.com/jihoon22-lee/toy-projects/pull/28) was squash
+merged into toy-projects `main` as commit
+`ec075e57874d20654f7cbfbc604ad8aaee8401a6`.
+[PR CI run `33368958698`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33368958698)
+finished with all 12 checks green, including DiskMap benchmark smoke on Qt5 and Qt6,
+all four GUI matrix jobs, both ici verification jobs, publish, and Merge Gate.
+
+The [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/28#issuecomment-5475254935)
+contains `diskmap: PASS · TEM 4.92 · 10 pass / 2 skip · tests 9/9` and
+`loglens: PASS · TEM 4.80 · 10 pass / 2 skip · tests 12/12`, with both report links.
+Each Pages report was verified over HTTP/2 with status `200`, content-type `text/html`,
+and zero external `script`/`link`/`img`/`iframe` resources:
+
+| Pages path | bytes | SHA-256 |
+|---|---:|---|
+| `diskmap/pr/28/` | 199843 | `c8a0d8009e1c19cd2d9df041969396f6abce95275713fe7ead6a499ac0b33b72` |
+| `loglens/pr/28/` | 334215 | `acda3bfb29bf5f3534256f614719e678ec89ed21b3420ee2b282ec55e2107830` |
+
+### Merged-main full benchmark
+
+The [main full benchmark run `33369288586`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33369288586)
+ran on head `ec075e5` and succeeded for all Qt5/Qt6 full, combine, and verdict jobs.
+Its configuration was 1,000,000 entries, `cancel-after 10000`, and a 60-second process
+timeout. Both Qt results had correctness `true`, zero failures, and budgets enforced
+`PASS`:
+
+| Qt | full elapsed | full throughput | full peak RSS | cancellation elapsed |
+|---|---:|---:|---:|---:|
+| 5 | 2131.069 ms | 469248.020 entries/s | 1064.094 MiB | 1.479 ms |
+| 6 | 3120.463 ms | 320465.315 entries/s | 1064.137 MiB | 1.580 ms |
+
+The combined `summary.json` is 3567 bytes with SHA-256
+`26391797763aed17fedb04e2a4aeb5cf8238ec4d5b5d040d473d32a513369251`.
 
 ## Next Steps
 
-- Open the candidate PR after this local docs/evidence commit is reviewed, then
-  wait for the toy PR/CI and `Merge Gate` result.
-- Verify the sticky comment and linked Pages HTML before calling D2 remotely
-  complete.
-- Keep the cancelled-result discard and fatal/partial error policy stable as
-  D3 explorer UX adds refresh and selection behavior.
+- D2 is fully complete: local/native/ici evidence, PR #28 merge, all 12 PR checks,
+  sticky report, Pages integrity, and the merged-main Qt5/Qt6 benchmark are recorded.
+- Begin D3 explorer UX while keeping the cancelled-result discard and fatal/partial
+  error policy stable as refresh and selection behavior are added.
