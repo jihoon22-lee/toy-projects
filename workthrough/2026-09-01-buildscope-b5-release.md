@@ -65,8 +65,8 @@ The workflow is intentionally tag-only: it revalidates the remote annotated
 tag immediately before and after publication, fails on unmatched paths, and
 audits that the final release exposes exactly those nine names with matching
 sizes and GitHub API SHA-256 digests.
-The later operational CI/release contract pins corrective public ici `v0.10.1`
-at SHA-256 `9e262730b49420c59ee115cf389881dbfbb944b6a96ca1d397a1ecb247ec17ca`;
+The later operational CI/release contract pins corrective public ici `v0.10.2`
+at SHA-256 `8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4`;
 the v0.10.0 values above remain the dated local measurement rather than the
 current dependency contract.
 Both the exact-main check-run poll and the final public-release audit treat a

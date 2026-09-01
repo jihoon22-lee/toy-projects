@@ -81,7 +81,7 @@ def _valid_report() -> dict[str, object]:
     lint["tool_evidence"] = [_tool_record("clang-tidy"), _tool_record("clazy")]
     return {
         "schema_version": "ici.result/v3",
-        "analysis_metadata": {"producer_version": "0.10.1"},
+        "analysis_metadata": {"producer_version": "0.10.2"},
         "analysis_context": {"profile": "deep"},
         "results": [
             lint,

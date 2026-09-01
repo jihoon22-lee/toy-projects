@@ -342,7 +342,7 @@ exact title은 `ici Verification Report — buildscope`, external refs는 `0`이
 
 `.github/workflows/buildscope-release.yml`은 annotated tag가 exact `origin/main`과 green Merge Gate를
 가리키는 provenance를 먼저 확인하고, Python `3.10/3.14`, Qt `5/6`, pure wheel/sdist, reproducible
-pyz, Qt6 Linux x86_64 bundle, native handoff, ici v0.10.1 sidecar/download/API digest와
+pyz, Qt6 Linux x86_64 bundle, native handoff, ici v0.10.2 sidecar/download/API digest와
 `SHA256SUMS`를 검사하도록 정의돼 있다. 예정된 asset 이름은 `buildscope.pyz`,
 `buildscope.pyz.sha256`, `buildscope-<version>-py3-none-any.whl`,
 `buildscope-<version>.tar.gz`, `buildscope-ici-deep.{json,html}`, `buildscope-provenance.json`,

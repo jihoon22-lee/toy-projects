@@ -232,7 +232,7 @@ SHA-256 `ea5fce118e6edad8fa5af24c821663e4290805570377e9b7c190de8da1029612`이며
 
 `.github/workflows/buildscope-release.yml`은 annotated `buildscope-vX.Y.Z` tag가 exact `origin/main`
 및 green `Merge Gate`를 가리키는지 확인하고, Python `3.10/3.14`와 Qt `5/6` Release/CTest matrix,
-MOC/UIC/RCC generated-path 검사, Qt6 native bundle, wheel/pyz-to-native-CLI handoff, ici v0.10.1
+MOC/UIC/RCC generated-path 검사, Qt6 native bundle, wheel/pyz-to-native-CLI handoff, ici v0.10.2
 literal SHA/API digest 검증을 정의한다. 예정된 top-level release assets는
 `buildscope.pyz`, `buildscope.pyz.sha256`, pure `buildscope-<version>-py3-none-any.whl`, sdist,
 `buildscope-ici-deep.{json,html}`, `buildscope-provenance.json`,

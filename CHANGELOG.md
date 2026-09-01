@@ -117,6 +117,12 @@
   using `LSAN_OPTIONS` with `detect_leaks=1`; Qt6 remains unsuppressed. The control fixture
   `ci/fixtures/outside/project_leak.cpp` runs with the same options and must still produce a
   nonzero LeakSanitizer result, proving project-owned leaks remain visible.
+- Replaced the temporary source-pinned ici diagnostic candidate in the Qt5/Qt6 deep legs with the
+  checksummed public ici `v0.10.2`, pinned by literal SHA-256
+  `8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4`. Both deep legs validate
+  the sidecar, literal digest, and downloaded bytes before executing the pyz from an absolute
+  runner-temp path; the B5 checker now requires producer version `0.10.2`, while BuildScope remains
+  product version `0.5.0`.
 
 ### BuildScope 0.4.0 — B3 implementation + remote evidence (main candidate, unreleased)
 

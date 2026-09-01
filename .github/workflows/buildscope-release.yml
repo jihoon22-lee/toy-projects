@@ -13,10 +13,10 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  ICI_VERSION: "v0.10.1"
-  # Public ici v0.10.1 asset digest. Both the published checksum file and a
+  ICI_VERSION: "v0.10.2"
+  # Public ici v0.10.2 asset digest. Both the published checksum file and a
   # fresh digest are checked against this literal before ici can run source.
-  ICI_PYZ_SHA256: "9e262730b49420c59ee115cf389881dbfbb944b6a96ca1d397a1ecb247ec17ca"
+  ICI_PYZ_SHA256: "8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4"
 
 jobs:
   provenance:
@@ -348,7 +348,7 @@ jobs:
           clazy-standalone --version 2>/dev/null || clazy --version
           clang-tidy --version
 
-      - name: Download public ici v0.10.1 and validate its literal SHA twice
+      - name: Download public ici v0.10.2 and validate its literal SHA twice
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -370,6 +370,11 @@ jobs:
             | jq -r '.assets[] | select(.name == "ici.pyz") | .digest')"
           test "$api_digest" = "sha256:$ICI_PYZ_SHA256"
           chmod +x "$ici_root/ici.pyz"
+          test -x "$ici_root/ici.pyz"
+          case "$ici_root/ici.pyz" in
+            /*) ;;
+            *) echo "::error::ICI_PYZ must be absolute" >&2; exit 1 ;;
+          esac
           echo "ICI_PYZ=$ici_root/ici.pyz" >> "$GITHUB_ENV"
           echo "validated ici ${ICI_VERSION}: manifest=$manifest_hash downloaded=$downloaded_hash api=$api_digest"
 
@@ -540,7 +545,7 @@ jobs:
           grep -Fq 'contract: buildscope.snapshot/v2' "$artifact/native-wheel-consumer.txt"
           grep -Fq 'contract: buildscope.snapshot/v2' "$artifact/native-pyz-consumer.txt"
 
-      - name: Run Qt6 ici v0.10.1 deep checker and enforce B5 report
+      - name: Run Qt6 ici v0.10.2 deep checker and enforce B5 report
         working-directory: buildscope
         env:
           QT_QPA_PLATFORM: offscreen

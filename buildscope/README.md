@@ -519,15 +519,17 @@ retains smaller process-global offscreen-plugin allocations, so its deep workflo
 suppression. Its `ci/fixtures/outside/project_leak.cpp` control runs under the same options and must
 still return nonzero with a LeakSanitizer diagnostic, so project-owned leaks remain visible.
 
-For the final corrective ici integration rerun, only the Qt5/Qt6 deep legs build exact ici commit
-`27f4e5cf820ceb36b24711be927f19076472c822`; the ordinary portfolio jobs still download and verify
-the public v0.10.1 checksum. The preceding candidate
+The final pre-release corrective ici integration rerun used only the Qt5/Qt6 deep legs to build exact
+ici commit `27f4e5cf820ceb36b24711be927f19076472c822`; at that time, the ordinary portfolio jobs
+downloaded and verified the public v0.10.1 checksum. The preceding candidate
 `e5096e10e9ce0069d5cea951dbdb28f87ee60e14` passed all 21 jobs in run `33536526972`, including both
 deep Qt legs and the release contract. Its single sticky comment was updated to that run, and the
 BuildScope, DiskMap, and LogLens PR Pages each returned HTTP 200 with the exact report title and no
-external resources. This temporary source-pinned candidate distinguishes pre-release evidence from
-a stable dependency. It is replaced by a released ici checksum before BuildScope is merged or
-tagged.
+external resources. This source-pinned candidate evidence is historical. The current Qt5/Qt6 deep
+legs use public ici v0.10.2, pinned to literal SHA-256
+`8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4`; each leg validates the
+sidecar, literal hash, and downloaded bytes before executing the pyz from an absolute runner-temp
+path, and no ici source checkout/build remains in the workflow.
 
 ### B5 release contract (defined, not published)
 
@@ -618,7 +620,7 @@ QT_QPA_PLATFORM=offscreen \
   "$repo_root/buildscope/fixtures/sample.snapshot.json"
 
 # Historical ici 0.9.0 public-release verification. Provision this interpreter outside the repo;
-# the current B5 candidate workflow pins ici v0.10.1 with a literal SHA-256 and verifies it twice.
+# the current B5 workflow pins public ici v0.10.2 with a literal SHA-256 and verifies it twice.
 # beforehand with pytest, coverage, and mypy, then point ici at it.
 (
   cd "$repo_root/buildscope"

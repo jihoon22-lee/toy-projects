@@ -14,8 +14,8 @@ permissions:
   contents: read
 
 env:
-  ICI_VERSION: v0.10.1
-  ICI_SHA256: "9e262730b49420c59ee115cf389881dbfbb944b6a96ca1d397a1ecb247ec17ca"
+  ICI_VERSION: v0.10.2
+  ICI_SHA256: "8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4"
 
 jobs:
   # ci/projects.json is the only project list. Both verification and GUI jobs
@@ -558,9 +558,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  # B5 normally runs the public ici release against the native project once per Qt major.
-  # While the exact diagnostic fix is under review, this branch builds that public commit as an
-  # explicit candidate for the deep legs; the ordinary portfolio jobs still exercise v0.10.1.
+  # B5 runs the public ici release against the native project once per Qt major.
   # The build directory is deliberately the path discovered by BuildScope's ici
   # configuration, so compile-db, codegen, and tool-backed C++ evidence all
   # describe the exact matrix build rather than a checked-in fixture.
@@ -580,14 +578,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Checkout exact ici diagnostic candidate
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: jihoon22-lee/ici
-          ref: 27f4e5cf820ceb36b24711be927f19076472c822
-          path: ici-candidate
-          persist-credentials: false
-
       - name: Set up Python 3.10
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -595,19 +585,6 @@ jobs:
 
       - name: Set up uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-
-      - name: Build exact ici diagnostic candidate
-        working-directory: ici-candidate
-        run: |
-          set -euo pipefail
-          expected_sha=27f4e5cf820ceb36b24711be927f19076472c822
-          test "$(git rev-parse HEAD)" = "$expected_sha"
-          chmod +x scripts/build-pyz.sh scripts/launcher.sh
-          ./scripts/build-pyz.sh
-          test -x dist/ici.pyz
-          echo "ICI_DEEP_BIN=$PWD/dist/ici.pyz" >> "$GITHUB_ENV"
-          printf 'ici candidate %s  ' "$expected_sha"
-          sha256sum dist/ici.pyz
 
       - name: Install pinned Python analysis and test tools
         run: |
@@ -671,19 +648,34 @@ jobs:
           cmake --build "$build_dir" --parallel
           QT_QPA_PLATFORM=offscreen ctest --test-dir "$build_dir" --output-on-failure
 
-      - name: Fetch and double-check public ici v0.10.1
+      - name: Fetch and double-check public ici v0.10.2 for deep verification
         run: |
           set -euo pipefail
+          ici_root="$RUNNER_TEMP/buildscope-b5-ici"
+          ici_pyz="$ici_root/ici.pyz"
+          mkdir -p "$ici_root"
           base="https://github.com/jihoon22-lee/ici/releases/download/${ICI_VERSION}"
-          curl -fsSL --retry 3 -o ici.pyz "${base}/ici.pyz"
-          curl -fsSL --retry 3 -o ici.pyz.sha256 "${base}/ici.pyz.sha256"
-          sha256sum --check ici.pyz.sha256
-          test "$(awk '{print $1}' ici.pyz.sha256)" = "$ICI_SHA256"
-          printf '%s  ici.pyz\n' "$ICI_SHA256" | sha256sum --check -
-          chmod +x ici.pyz
-          ICI_PYTHON="$ICI_PYTHON" ./ici.pyz --version
+          curl -fsSL --retry 3 -o "$ici_pyz" "${base}/ici.pyz"
+          curl -fsSL --retry 3 -o "$ici_root/ici.pyz.sha256" "${base}/ici.pyz.sha256"
+          manifest_hash="$(awk 'NR == 1 {print $1}' "$ici_root/ici.pyz.sha256")"
+          manifest_name="$(awk 'NR == 1 {print $2}' "$ici_root/ici.pyz.sha256")"
+          test "$manifest_name" = "ici.pyz"
+          test "$manifest_hash" = "$ICI_SHA256"
+          (cd "$ici_root" && sha256sum --check ici.pyz.sha256)
+          printf '%s  %s\n' "$ICI_SHA256" "$ici_pyz" | sha256sum --check -
+          downloaded_hash="$(sha256sum "$ici_pyz" | awk '{print $1}')"
+          test "$downloaded_hash" = "$ICI_SHA256"
+          chmod +x "$ici_pyz"
+          test -x "$ici_pyz"
+          case "$ici_pyz" in
+            /*) ;;
+            *) echo "::error::deep ici path must be absolute" >&2; exit 1 ;;
+          esac
+          printf 'ICI_DEEP_BIN=%s\n' "$ici_pyz" >> "$GITHUB_ENV"
+          ICI_PYTHON="$ICI_PYTHON" "$ici_pyz" --version
+          echo "validated ici ${ICI_VERSION}: manifest=$manifest_hash downloaded=$downloaded_hash"
 
-      - name: Verify BuildScope with exact ici candidate
+      - name: Verify BuildScope with checksummed public ici v0.10.2
         env:
           QT_MAJOR: ${{ matrix.qt_major }}
           QT_QPA_PLATFORM: offscreen
@@ -691,6 +683,11 @@ jobs:
         working-directory: buildscope
         run: |
           set -euo pipefail
+          test -x "$ICI_DEEP_BIN"
+          case "$ICI_DEEP_BIN" in
+            /*) ;;
+            *) echo "::error::ICI_DEEP_BIN must be absolute" >&2; exit 1 ;;
+          esac
           if [ "$QT_MAJOR" = 5 ]; then
             # Qt 5's offscreen platform plugin retains process-global GUI state
             # at shutdown on the hosted runner. Keep leak detection enabled and
