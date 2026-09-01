@@ -627,11 +627,17 @@ jobs:
             --owner=0 --group=0 --numeric-owner -cf "$tar_file" \
             -C "$artifact" "$BUNDLE_NAME"
           gzip -n -f "$tar_file"
-          # Release assets are the top-level files; inner bundle files are
-          # covered by the deterministic bundle tarball itself.
           (
             cd "$artifact"
-            find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\n' | sort | xargs sha256sum
+            sha256sum \
+              buildscope.pyz \
+              buildscope.pyz.sha256 \
+              "buildscope-${VERSION}-py3-none-any.whl" \
+              "buildscope-${VERSION}.tar.gz" \
+              buildscope-ici-deep.json \
+              buildscope-ici-deep.html \
+              buildscope-provenance.json \
+              "$BUNDLE_NAME.tar.gz"
           ) > "$artifact/SHA256SUMS"
           (cd "$artifact" && sha256sum --check SHA256SUMS)
           find "$artifact" -maxdepth 2 -type f -print | sort
