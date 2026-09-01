@@ -102,7 +102,11 @@
   retained by deferred Qt5 offscreen/fontconfig/widget work at process shutdown. The test now drains
   deferred-delete and event work after every case. A rebuilt Qt5 ASan/UBSan binary using the same
   toolchain and configuration passes with the original `detect_leaks=1` policy, and the full
-  sanitizer CTest tree is `9/9`; no leak suppression or sanitizer weakening was added.
+  sanitizer CTest tree is `9/9`; the cleanup does not weaken sanitizer policy. The Qt5 deep workflow
+  additionally suppresses only residual stacks through the known `libqoffscreen.so` platform plugin
+  using `LSAN_OPTIONS` with `detect_leaks=1`; Qt6 remains unsuppressed. The control fixture
+  `ci/fixtures/outside/project_leak.cpp` runs with the same options and must still produce a
+  nonzero LeakSanitizer result, proving project-owned leaks remain visible.
 
 ### BuildScope 0.4.0 — B3 implementation + remote evidence (main candidate, unreleased)
 

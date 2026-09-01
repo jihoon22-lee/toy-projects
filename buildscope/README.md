@@ -515,7 +515,10 @@ result entries). Draining deferred-delete
 and event work in the QtTest `cleanup()` hook removes the retained Qt5 offscreen/fontconfig/widget
 state: a rebuilt instrumented binary using the same toolchain and configuration, plus the full
 `9/9` CTest tree, pass with `detect_leaks=1` still
-enabled. No sanitizer suppression was introduced; final B5 evidence requires the corrected PR rerun.
+enabled. The Qt5 deep workflow now uses a narrow `LSAN_OPTIONS` suppression for residual
+`libqoffscreen.so` platform-plugin process-global state while retaining `detect_leaks=1`; Qt6 has no
+suppression. Its `ci/fixtures/outside/project_leak.cpp` control runs under the same options and must
+still return nonzero with a LeakSanitizer diagnostic, so project-owned leaks remain visible.
 
 ### B5 release contract (defined, not published)
 
