@@ -14,6 +14,7 @@ import math
 import os
 import re
 import stat
+import struct
 import tarfile
 import zipfile
 from collections.abc import Iterator, Sequence
@@ -33,6 +34,7 @@ MAX_METADATA_BYTES = 2 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 10_000
 MAX_ARCHIVE_MEMBER_BYTES = 256 * 1024 * 1024
 MAX_ARCHIVE_TOTAL_BYTES = 512 * 1024 * 1024
+MAX_ZIP_CENTRAL_DIRECTORY_BYTES = 16 * 1024 * 1024
 HASH_CHUNK_BYTES = 1024 * 1024
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -246,6 +248,232 @@ def _check_member_budget(count: int, total: int, size: int, label: str) -> int:
     return updated
 
 
+def _zip_preflight(
+    stream: BinaryIO,
+    label: str,
+    *,
+    prefix: bytes = b"",
+) -> None:
+    """Validate a bounded, single-volume, non-ZIP64 archive before ZipFile.
+
+    ``zipfile.ZipFile`` constructs one ``ZipInfo`` object per central-directory
+    record in its constructor.  A hostile archive can therefore consume a
+    large amount of memory before the later inventory limits run.  This raw
+    preflight only reads the bounded EOCD tail and central directory bytes,
+    counts/scans records without creating ``ZipInfo`` objects, and then resets
+    the stream for the normal parser.
+    """
+
+    eocd_size = 22
+    eocd_signature = b"PK\x05\x06"
+    central_signature = b"PK\x01\x02"
+    zip64_locator_signature = b"PK\x06\x07"
+    central_header_size = 46
+    max_comment_bytes = 65_535
+    try:
+        stream.seek(0, os.SEEK_END)
+        file_size = stream.tell()
+        if file_size <= len(prefix) + eocd_size:
+            raise BuildScopeReleasePayloadError(
+                f"{label} is too small for a ZIP archive"
+            )
+        tail_size = min(file_size, eocd_size + max_comment_bytes)
+        stream.seek(file_size - tail_size, os.SEEK_SET)
+        tail = stream.read(tail_size)
+        if len(tail) != tail_size:
+            raise BuildScopeReleasePayloadError(f"{label} ZIP trailer is truncated")
+
+        eocd_offset = tail.rfind(eocd_signature)
+        if eocd_offset < 0 or eocd_offset + eocd_size > len(tail):
+            raise BuildScopeReleasePayloadError(f"{label} has no valid ZIP end record")
+        eocd_position = file_size - tail_size + eocd_offset
+        (
+            signature,
+            disk_number,
+            central_disk,
+            entries_on_disk,
+            total_entries,
+            central_size,
+            central_offset,
+            comment_size,
+        ) = struct.unpack_from("<4s4H2LH", tail, eocd_offset)
+        if signature != eocd_signature:
+            raise BuildScopeReleasePayloadError(
+                f"{label} has an invalid ZIP end record"
+            )
+        if eocd_position + eocd_size + comment_size != file_size:
+            raise BuildScopeReleasePayloadError(
+                f"{label} ZIP end record has an inconsistent comment length"
+            )
+        if disk_number != 0 or central_disk != 0 or entries_on_disk != total_entries:
+            raise BuildScopeReleasePayloadError(
+                f"{label} must be a single-volume ZIP with consistent member counts"
+            )
+        if (
+            entries_on_disk == 0xFFFF
+            or total_entries == 0xFFFF
+            or central_size == 0xFFFFFFFF
+            or central_offset == 0xFFFFFFFF
+        ):
+            raise BuildScopeReleasePayloadError(
+                f"{label} ZIP64 archives are not supported"
+            )
+        if (
+            eocd_offset >= 20
+            and tail[eocd_offset - 20 : eocd_offset - 16] == zip64_locator_signature
+        ):
+            raise BuildScopeReleasePayloadError(
+                f"{label} ZIP64 archives are not supported"
+            )
+        if total_entries > MAX_ARCHIVE_MEMBERS:
+            raise BuildScopeReleasePayloadError(
+                f"{label} contains more than {MAX_ARCHIVE_MEMBERS} members"
+            )
+        if central_size > MAX_ZIP_CENTRAL_DIRECTORY_BYTES:
+            raise BuildScopeReleasePayloadError(
+                f"{label} central directory exceeds "
+                f"{MAX_ZIP_CENTRAL_DIRECTORY_BYTES} bytes"
+            )
+
+        central_position = len(prefix) + central_offset
+        central_end = central_position + central_size
+        if (
+            central_position < len(prefix)
+            or central_position > eocd_position
+            or central_end != eocd_position
+        ):
+            raise BuildScopeReleasePayloadError(
+                f"{label} central directory bounds are inconsistent"
+            )
+        stream.seek(central_position, os.SEEK_SET)
+        central = stream.read(central_size)
+        if len(central) != central_size:
+            raise BuildScopeReleasePayloadError(
+                f"{label} central directory is truncated"
+            )
+
+        position = 0
+        count = 0
+        total_uncompressed = 0
+        names: set[str] = set()
+        while position < central_size:
+            remaining = central_size - position
+            if remaining < central_header_size:
+                raise BuildScopeReleasePayloadError(
+                    f"{label} central directory has a truncated header"
+                )
+            fields = struct.unpack_from("<4s6H3L5H2L", central, position)
+            (
+                signature,
+                _made_by,
+                _needed,
+                flags,
+                _compression,
+                _modified_time,
+                _modified_date,
+                _crc32,
+                compressed_size,
+                uncompressed_size,
+                name_size,
+                extra_size,
+                comment_size,
+                disk_start,
+                _internal_attributes,
+                _external_attributes,
+                local_offset,
+            ) = fields
+            if signature != central_signature:
+                raise BuildScopeReleasePayloadError(
+                    f"{label} central directory has an invalid header at member {count + 1}"
+                )
+            if (
+                compressed_size == 0xFFFFFFFF
+                or uncompressed_size == 0xFFFFFFFF
+                or disk_start == 0xFFFF
+                or local_offset == 0xFFFFFFFF
+            ):
+                raise BuildScopeReleasePayloadError(
+                    f"{label} ZIP64 member fields are not supported"
+                )
+            if name_size > 4096:
+                raise BuildScopeReleasePayloadError(f"{label} member name is too long")
+            record_size = central_header_size + name_size + extra_size + comment_size
+            if record_size > remaining:
+                raise BuildScopeReleasePayloadError(
+                    f"{label} central directory member is truncated"
+                )
+            record_end = position + record_size
+            name_start = position + central_header_size
+            name_end = name_start + name_size
+            extra_end = name_end + extra_size
+            name_bytes = central[name_start:name_end]
+            extra = central[name_end:extra_end]
+            extra_position = 0
+            while extra_position < len(extra):
+                if len(extra) - extra_position < 4:
+                    raise BuildScopeReleasePayloadError(
+                        f"{label} member extra data is malformed"
+                    )
+                extra_id, extra_length = struct.unpack_from(
+                    "<HH", extra, extra_position
+                )
+                extra_position += 4
+                if extra_length > len(extra) - extra_position:
+                    raise BuildScopeReleasePayloadError(
+                        f"{label} member extra data is truncated"
+                    )
+                if extra_id == 0x0001:
+                    raise BuildScopeReleasePayloadError(
+                        f"{label} ZIP64 member fields are not supported"
+                    )
+                extra_position += extra_length
+            encoding = "utf-8" if flags & 0x800 else "cp437"
+            try:
+                member_name = name_bytes.decode(encoding)
+            except UnicodeDecodeError as exc:
+                raise BuildScopeReleasePayloadError(
+                    f"{label} member name is not valid {encoding}: {exc}"
+                ) from exc
+            canonical_name = member_name.rstrip("/")
+            _safe_member_name(canonical_name, label)
+            if canonical_name in names:
+                raise BuildScopeReleasePayloadError(
+                    f"{label} contains duplicate member {member_name!r}"
+                )
+            names.add(canonical_name)
+            count += 1
+            total_uncompressed = _check_member_budget(
+                count,
+                total_uncompressed,
+                uncompressed_size,
+                label,
+            )
+            local_position = len(prefix) + local_offset
+            if local_position < len(prefix) or local_position + 30 > central_position:
+                raise BuildScopeReleasePayloadError(
+                    f"{label} member local-header offset is inconsistent"
+                )
+            position = record_end
+        if count != total_entries:
+            raise BuildScopeReleasePayloadError(
+                f"{label} central directory member count mismatch: "
+                f"EOCD={total_entries}, scanned={count}"
+            )
+        if not names:
+            raise BuildScopeReleasePayloadError(f"{label} is empty")
+    except BuildScopeReleasePayloadError:
+        raise
+    except (OSError, struct.error, ValueError) as exc:
+        raise BuildScopeReleasePayloadError(
+            f"invalid {label} ZIP structure: {exc}"
+        ) from exc
+    finally:
+        try:
+            stream.seek(0, os.SEEK_SET)
+        except (OSError, ValueError):
+            pass
+
+
 def _zip_inventory(
     archive: zipfile.ZipFile,
     label: str,
@@ -426,6 +654,7 @@ def check_wheel(path: Path, version: str) -> dict[str, str]:
     expected_dist = f"buildscope-{version}.dist-info/"
     with _open_regular(path, label) as (stream, _):
         try:
+            _zip_preflight(stream, label)
             with zipfile.ZipFile(stream) as archive:
                 inventory = _zip_inventory(archive, label)
                 names = set(inventory)
@@ -517,6 +746,7 @@ def check_pyz(path: Path, version: str) -> dict[str, str]:
                     "standalone pyz must contain the exact Python shebang"
                 )
             stream.seek(0)
+            _zip_preflight(stream, label, prefix=PYZ_SHEBANG)
             with zipfile.ZipFile(stream) as archive:
                 inventory = _zip_inventory(archive, label)
                 names = set(inventory)

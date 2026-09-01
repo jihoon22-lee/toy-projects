@@ -17,6 +17,7 @@ from contextlib import redirect_stderr
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import cast
+from unittest.mock import patch
 
 CI_DIR = Path(__file__).resolve().parent
 if str(CI_DIR) not in sys.path:
@@ -71,6 +72,24 @@ class BuildScopeReleasePayloadTests(unittest.TestCase):
         path.write_bytes(prefix + buffer.getvalue())
         if mode is not None:
             path.chmod(mode)
+
+    @staticmethod
+    def _mutate_zip_eocd(
+        path: Path,
+        offset: int,
+        value: int,
+        *,
+        width: int = 2,
+    ) -> None:
+        payload = bytearray(path.read_bytes())
+        eocd = payload.rfind(b"PK\x05\x06")
+        if eocd < 0:
+            raise AssertionError("fixture has no ZIP EOCD")
+        payload[eocd + offset : eocd + offset + width] = value.to_bytes(
+            width,
+            "little",
+        )
+        path.write_bytes(payload)
 
     @staticmethod
     def _write_tar(path: Path, entries: Sequence[TarEntry]) -> None:
@@ -559,6 +578,73 @@ class BuildScopeReleasePayloadTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(
             BuildScopeReleasePayloadError, "schema inventory|member inventory"
+        ):
+            check_pyz(pyz, VERSION)
+
+    def test_rejects_more_than_member_limit_before_zipfile_constructor(self) -> None:
+        wheel = self.dist / f"buildscope-{VERSION}-py3-none-any.whl"
+        entries = [
+            *self._wheel_entries(),
+            *((f"padding/{index:05d}", b"") for index in range(10_001)),
+        ]
+        self._write_zip(wheel, entries)
+        with (
+            patch(
+                "check_buildscope_release_payload.zipfile.ZipFile",
+                side_effect=AssertionError(
+                    "ZipFile must not construct high-member archives"
+                ),
+            ),
+            self.assertRaisesRegex(
+                BuildScopeReleasePayloadError, "more than 10000 members"
+            ),
+        ):
+            check_wheel(wheel, VERSION)
+
+    def test_rejects_malformed_central_header_before_zipfile_constructor(self) -> None:
+        wheel = self.dist / f"buildscope-{VERSION}-py3-none-any.whl"
+        payload = bytearray(wheel.read_bytes())
+        central = payload.find(b"PK\x01\x02")
+        if central < 0:
+            raise AssertionError("fixture has no ZIP central directory")
+        payload[central] = 0
+        wheel.write_bytes(payload)
+        with (
+            patch(
+                "check_buildscope_release_payload.zipfile.ZipFile",
+                side_effect=AssertionError(
+                    "ZipFile must not construct malformed archives"
+                ),
+            ),
+            self.assertRaisesRegex(
+                BuildScopeReleasePayloadError, "invalid header at member 1"
+            ),
+        ):
+            check_wheel(wheel, VERSION)
+
+    def test_rejects_shebang_pyz_with_inconsistent_eocd_member_count(self) -> None:
+        pyz = self.dist / "buildscope.pyz"
+        declared_count = len(self._pyz_entries()) + 1
+        self._mutate_zip_eocd(
+            pyz,
+            8,
+            declared_count,
+        )
+        self._mutate_zip_eocd(
+            pyz,
+            10,
+            declared_count,
+        )
+        with (
+            patch(
+                "check_buildscope_release_payload.zipfile.ZipFile",
+                side_effect=AssertionError(
+                    "ZipFile must not construct inconsistent archives"
+                ),
+            ),
+            self.assertRaisesRegex(
+                BuildScopeReleasePayloadError, "member count mismatch"
+            ),
         ):
             check_pyz(pyz, VERSION)
 
