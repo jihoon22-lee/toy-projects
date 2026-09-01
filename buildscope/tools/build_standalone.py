@@ -13,6 +13,7 @@ import tempfile
 import zipfile
 from collections.abc import Iterable
 from pathlib import Path
+from typing import BinaryIO
 
 FIXED_ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 SHEBANG = b"#!/usr/bin/env python3\n"
@@ -98,46 +99,55 @@ def _zip_info(name: str) -> zipfile.ZipInfo:
     return info
 
 
-def build_standalone(project_root: Path, output: Path) -> tuple[str, str]:
-    """Build ``output`` atomically and return its version and SHA-256 digest."""
+def _write_archive(stream: BinaryIO, project_root: Path) -> None:
+    stream.write(SHEBANG)
+    with zipfile.ZipFile(
+        stream,
+        mode="w",
+        compression=zipfile.ZIP_DEFLATED,
+        compresslevel=9,
+        strict_timestamps=True,
+    ) as archive:
+        archive.writestr(_zip_info("__main__.py"), ENTRYPOINT)
+        seen = {"__main__.py"}
+        for name, payload in _payload_files(project_root):
+            if name in seen:
+                raise ValueError(f"duplicate standalone archive member: {name}")
+            seen.add(name)
+            archive.writestr(_zip_info(name), payload)
 
-    project_root = project_root.resolve(strict=True)
-    version = validate_version(project_root)
-    output = output.absolute()
-    output.parent.mkdir(parents=True, exist_ok=True)
-    if output.is_symlink():
-        raise ValueError(f"refusing to replace symlink output: {output}")
 
+def _install_archive(project_root: Path, output: Path) -> None:
     descriptor, temporary_name = tempfile.mkstemp(
         dir=output.parent,
         prefix=f".{output.name}.",
         suffix=".tmp",
     )
+    cleanup_required = True
     try:
         with os.fdopen(descriptor, "w+b") as stream:
-            stream.write(SHEBANG)
-            with zipfile.ZipFile(
-                stream,
-                mode="w",
-                compression=zipfile.ZIP_DEFLATED,
-                compresslevel=9,
-                strict_timestamps=True,
-            ) as archive:
-                archive.writestr(_zip_info("__main__.py"), ENTRYPOINT)
-                seen = {"__main__.py"}
-                for name, payload in _payload_files(project_root):
-                    if name in seen:
-                        raise ValueError(f"duplicate standalone archive member: {name}")
-                    seen.add(name)
-                    archive.writestr(_zip_info(name), payload)
+            _write_archive(stream, project_root)
             stream.flush()
             os.fsync(stream.fileno())
         os.chmod(temporary_name, 0o755)
         os.replace(temporary_name, output)
-    except BaseException:
-        with contextlib.suppress(FileNotFoundError):
-            os.unlink(temporary_name)
-        raise
+        cleanup_required = False
+    finally:
+        if cleanup_required:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(temporary_name)
+
+
+def build_standalone(project_root: Path, output: Path) -> tuple[str, str]:
+    """Build ``output`` atomically and return its version and SHA-256 digest."""
+
+    project_root = project_root.resolve(strict=True)
+    version = validate_version(project_root)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output = output.parent.resolve(strict=True) / output.name
+    if output.is_symlink():
+        raise ValueError(f"refusing to replace symlink output: {output}")
+    _install_archive(project_root, output)
 
     digest = hashlib.sha256(output.read_bytes()).hexdigest()
     return version, digest
