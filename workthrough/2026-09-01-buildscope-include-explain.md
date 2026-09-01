@@ -1,13 +1,13 @@
-# BuildScope B3 include explanation local candidate
+# BuildScope B3 include explanation — main candidate with remote evidence
 
 ## Overview
 
-BuildScope B3 adds optional include explanation to the unreleased `0.4.0` local candidate on
-`feat/buildscope-include-explain`. The existing v2 normalized compile-database contract remains
-the default; callers opt into `buildscope.snapshot/v3` with `--include-analysis estimate` or
-`--include-analysis compiler`. This record describes the implementation and the local evidence
-available on the branch. It does not claim a B3 PR, remote CI, hosted report, release, B5
-integration, or ici I3 cross-repository comparison.
+BuildScope B3 adds optional include explanation to the unreleased `0.4.0` main candidate, originally
+implemented on `feat/buildscope-include-explain`. The existing v2 normalized compile-database
+contract remains the default; callers opt into `buildscope.snapshot/v3` with `--include-analysis
+estimate` or `--include-analysis compiler`. This record keeps the pre-PR local candidate evidence
+distinct from the completed B3 remote evidence. The implementation is shipped on `main`; B5
+release integration remains pending, while ici I3 cross-repository comparison is complete.
 
 ## Context
 
@@ -153,7 +153,7 @@ Qt 5.15.18: 6/6 PASS
 This includes v3 contract parsing, GUI edge navigation, and the hybrid include contract. The builds
 and tests were kept outside the repository.
 
-### Local public-release validation (ici v0.8.0)
+### Historical local public-release validation (ici v0.8.0; before PR #34)
 
 After the published `ici v0.8.0` release checksum passed, the final no-cache local public-release
 validation of this candidate completed with `Suite WARN` (verification passed): engines `11 PASS / 2
@@ -173,15 +173,38 @@ The final benchmark used `100,000` entries / `25,000` sources and recorded model
 `buildscope-0.4.0-py3-none-any.whl` packaged `compiler_replay.py` and the v3 schema; schema
 validation passed.
 
-### Pending remote evidence
+### B3 remote integration and main evidence
 
-The local B3 candidate checks above are green. No code or test change is made by this documentation
-task. B3 PR/remote CI, hosted reports, B5 release integration, and the ici I3 target-by-target
-same-basename comparison remain pending.
+No code or test change is made by this documentation task. [PR #34](https://github.com/jihoon22-lee/toy-projects/pull/34)
+used feature head `c3835cd4b0c859c38ae0f4afbdb20aae970515dc`; [PR CI run
+`33459294092`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33459294092) passed all 16 checks,
+including `Merge Gate` and `Publish Reports & Sticky Comment`. The [sticky comment
+`#5487386460`](https://github.com/jihoon22-lee/toy-projects/pull/34#issuecomment-5487386460) has exactly
+one marker and exactly three project links. Its BuildScope report was `WARN` (`11 PASS / 2 WARN / 0
+FAIL / 0 ERROR / 0 SKIP`), TEM `4.94`, tests `63/63`, line/function/branch `92.7% / 98.9% / 79.5%`;
+diskmap and loglens were `PASS`, TEM `4.92` and `4.80` respectively.
+
+The PR BuildScope benchmark used `100,000` entries / `25,000` sources and recorded model `118 ms`,
+filter `1,424 ms`, budget `10,000 ms`, and correctness `true`. Independent PR Pages checks for all
+three reports were HTTP 200 `text/html`, had the exact title, and found zero external attributes/CSS
+references.
+
+| Project | Hosted report | Bytes | SHA-256 |
+|---|---|---:|---|
+| BuildScope | [buildscope/pr/34](https://jihoon22-lee.github.io/toy-projects/buildscope/pr/34/) | 858,143 | `e0b9c9ece1fb7268aa519bd0a4c62fd3da7c44a52b2efe6121393474d3ad36d4` |
+| diskmap | [diskmap/pr/34](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/34/) | 311,847 | `8a6b01544b99eee6f0c2b95758f81395032f2b67a7c1a600879447cf7fb5f3bf` |
+| loglens | [loglens/pr/34](https://jihoon22-lee.github.io/toy-projects/loglens/pr/34/) | 446,786 | `1144759ef7e1b83ef7bd23f7bcfe9d02b05430a37af372350ec3b6e26d6c7ac7` |
+
+PR #34 was squash-merged to `main` as
+`9cce2699606e58ed67c3dac46f60dc7bf113bb60`, and its branch was deleted. Exact-main [CI run
+`33459591250`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33459591250) succeeded for all
+applicable jobs, including `Merge Gate` (PR publish correctly skipped on push). [Dependency Graph run
+`33459594605`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33459594605) also succeeded on
+the same head.
 
 ## Next steps
 
-- Run the B3 branch through the repository PR/remote evidence workflow before changing the status to
+- Keep the historical local candidate evidence separate from the completed B3 PR/remote evidence.
+- Keep B5 release integration pending; `0.4.0` remains unreleased until B5.
+- Proceed to the next toy-project stage, B4 configuration diff; ici I3 cross-repository comparison is
   complete.
-- Keep B5 release integration and ici I3 cross-repository comparison separate from this local
-  include-analysis candidate.
