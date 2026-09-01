@@ -12,7 +12,7 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 |---|---|---|
 | [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D2 cancellable/latest-generation scan complete (PR #28) · identity-safe scan · D3 next |
 | [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · L2 1 GiB benchmark merged in PR #26 · default capacity 8192 |
-| [buildscope](buildscope/) | compile DB explorer | B3 include explanation 0.4.0 local candidate · B2 PR #32/main remote verified · B3 remote pending |
+| [buildscope](buildscope/) | compile DB explorer | B3 include explanation 0.4.0 implementation + remote evidence complete on main (unreleased; B5 pending) · B4 next |
 
 ### buildscope B0 hybrid skeleton — release-backed evidence
 
@@ -39,7 +39,7 @@ ici [PR #109](https://github.com/jihoon22-lee/ici/pull/109)의 sticky report와 
 성공했다. [공개 v0.7.1 release asset](https://github.com/jihoon22-lee/ici/releases/tag/v0.7.1)은
 9개 asset을 제공하며 `sha256sum --check ici.pyz.sha256`가 통과했다. B1의
 compiler/configuration normalization과 B2 Qt explorer는 아래에 별도로 기록한다. ici I3 target
-comparison은 아직 완료로 표시하지 않는다.
+comparison은 B3 cross-repository comparison으로 완료됐다.
 
 ### buildscope B2 normalized Qt explorer — 0.3.0
 
@@ -81,9 +81,10 @@ functions였다. PR 100k benchmark는 model `53 ms`, filter `1,518 ms`, summary 
 | [diskmap](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/32/) | 311,846 | `752f07251bc38285ea1633f5df879985131963e4b99f90532722eaedc9be1802` | `ici Verification Report — diskmap` |
 | [loglens](https://jihoon22-lee.github.io/toy-projects/loglens/pr/32/) | 446,791 | `7b2669fb7de82ada30bfdf28a2d82533f5566ad92779ea08c90528e188ea582b` | `ici Verification Report — loglens` |
 
-### buildscope B3 include explanation — 0.4.0 local candidate
+### buildscope B3 include explanation — 0.4.0 main candidate (implementation + remote evidence complete)
 
-BuildScope의 현재 브랜치는 아직 release되지 않은 `0.4.0` B3 local candidate다. 옵션을 생략하면
+BuildScope B3 구현은 PR #34에서 검증되어 `main`에 들어간 `0.4.0` main candidate다. 제품
+버전 `0.4.0`은 B5 hybrid release integration 전까지 release하지 않는다. 옵션을 생략하면
 기존처럼 normalized `buildscope.snapshot/v2`를 만들고, `--schema-version v1`은 raw compatibility
 projection을 유지한다. `--include-analysis estimate|compiler`는 명시적으로 `v3`를 만들며,
 `--schema-version v3`만 쓰면 `estimate`가 기본이다. v3는 root/entry/analysis/edge/search/
@@ -104,7 +105,7 @@ existing unselected 후보와 일치하는지 검증하며, 중복 search path�
 Qt **Include Edges** 탭에서는 provenance, ordered candidates, collision alternatives, directive
 위치와 replay command를 확인할 수 있다. Edge를 선택하면 상세가 열리고, 더블클릭 또는 **Open
 Source Location**으로 parent source 위치를 열며, **Compilation Command**로 원래 command 탭으로
-돌아간다. 최신 local candidate 검증에서 Python 3.10 pytest `57/57`, Ruff check+format `14 files`,
+돌아간다. PR 전 historical local candidate 검증에서 Python 3.10 pytest `57/57`, Ruff check+format `14 files`,
 mypy `11 source files`, Qt5 5.15.18과 Qt6 6.10.2 Release CMake/CTest 각각 `6/6` PASS를
 확인했다. 현재 compiler execution/sanitization/process bounds는 새
 `buildscope/python/buildscope/compiler_replay.py`로 분리하고, `include_analysis.py`는 source
@@ -121,8 +122,36 @@ sanitize/security/resource/cycle/dead/exception `PASS`, duplication `11.65%` (ra
 `ici Verification Report — buildscope`, external refs `0`이었다. B3 PR/remote Pages evidence와도
 별개다. 최종 benchmark는 `100,000` entries/`25,000` sources, model `61 ms`, filter `1,126 ms`,
 budget `10,000 ms`, correctness `true`였고, `buildscope-0.4.0-py3-none-any.whl`에
-`compiler_replay.py`와 v3 schema가 패키징되어 schema validation `PASS`였다. B3 PR/remote CI, B5 release integration,
-ici I3 cross-repository comparison은 아직 pending이다.
+`compiler_replay.py`와 v3 schema가 패키징되어 schema validation `PASS`였다. 이 local evidence는
+아래 B3 원격 evidence와 별개다.
+
+**B3 remote evidence (2026-09-01):** [PR #34](https://github.com/jihoon22-lee/toy-projects/pull/34)의
+feature head `c3835cd4b0c859c38ae0f4afbdb20aae970515dc`에 대한 PR CI
+[run 33459294092](https://github.com/jihoon22-lee/toy-projects/actions/runs/33459294092)은 `Merge Gate`와
+`Publish Reports & Sticky Comment`를 포함한 16개 check를 모두 성공시켰다. [sticky comment
+#5487386460](https://github.com/jihoon22-lee/toy-projects/pull/34#issuecomment-5487386460)는 marker
+정확히 1개와 project link 정확히 3개를 포함한다. BuildScope report는 `WARN`(`11 PASS / 2 WARN /
+0 FAIL / 0 ERROR / 0 SKIP`), TEM `4.94`, tests `63/63`, line/function/branch `92.7% / 98.9% /
+79.5%`를 기록했고, diskmap과 loglens는 각각 `PASS`, TEM `4.92`와 `4.80`이었다.
+
+PR BuildScope benchmark는 `100,000` entries / `25,000` sources, model `118 ms`, filter `1,424 ms`,
+budget `10,000 ms`, correctness `true`였다. 세 PR Pages report는 모두 HTTP 200 `text/html`, exact
+title, external attributes/CSS references `0`으로 독립 확인됐다.
+
+| Project | URL | Bytes | SHA-256 | Title |
+|---|---|---:|---|---|
+| BuildScope | [buildscope/pr/34](https://jihoon22-lee.github.io/toy-projects/buildscope/pr/34/) | 858,143 | `e0b9c9ece1fb7268aa519bd0a4c62fd3da7c44a52b2efe6121393474d3ad36d4` | `ici Verification Report — buildscope` |
+| diskmap | [diskmap/pr/34](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/34/) | 311,847 | `8a6b01544b99eee6f0c2b95758f81395032f2b67a7c1a600879447cf7fb5f3bf` | `ici Verification Report — diskmap` |
+| loglens | [loglens/pr/34](https://jihoon22-lee.github.io/toy-projects/loglens/pr/34/) | 446,786 | `1144759ef7e1b83ef7bd23f7bcfe9d02b05430a37af372350ec3b6e26d6c7ac7` | `ici Verification Report — loglens` |
+
+PR #34 was squash-merged to `main` as
+`9cce2699606e58ed67c3dac46f60dc7bf113bb60`, and its branch was deleted. Exact-main CI
+[run 33459591250](https://github.com/jihoon22-lee/toy-projects/actions/runs/33459591250) and Dependency
+Graph [run 33459594605](https://github.com/jihoon22-lee/toy-projects/actions/runs/33459594605) both succeeded
+on that head; on push, PR publish was correctly skipped while applicable jobs and `Merge Gate` passed.
+
+B3 implementation and remote evidence are complete, ici I3 cross-repository comparison is complete,
+and the next toy-project stage is B4 configuration diff. B5 hybrid release integration remains pending.
 
 ## 공통 구조 규칙
 

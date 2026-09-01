@@ -91,9 +91,10 @@ native reader는 snapshot final symlink도 읽기 전에 거부한다. 공개
 pure wheel에 함께 패키징된다. v2 `producer.version`의 schema `maxLength` 1 MiB와 native
 reader의 문자열 bound도 서로 일치한다.
 strict 외부 v1 consumer는 v1 raw document가 필요하다. B2는 이 계약을 받아 normalized C++
-model/UI로 전환하는 범위다. B1 구현 범위는 완료로 표시한다. B3 include explanation은 현재
-구현/local candidate 상태를 아래에 기록하지만, B3 remote integration, B4 configuration diff,
-B5 hybrid release integration, ici I3 target-by-target 외부 대조는 아직 완료하지 않는다.
+model/UI로 전환하는 범위다. B1 구현 범위는 완료로 표시한다. B3 include explanation은 구현과
+원격 증거까지 완료되어 `main`의 `0.4.0` candidate로 기록하며, 제품 release는 B5 hybrid
+release integration까지 기다린다. B4 configuration diff가 다음 toy-project stage이고, ici I3
+target-by-target 외부 대조도 완료됐다.
 
 **B1 final local/public evidence (2026-09-01):** public
 `ici v0.7.1` cold verification은 표준 `sha256sum --check ici.pyz.sha256`가 통과했고 suite
@@ -131,8 +132,8 @@ marker 1개와 정확히 3개 project link를 포함하고 BuildScope `11 PASS /
 | loglens | [loglens/pr/31](https://jihoon22-lee.github.io/toy-projects/loglens/pr/31/) | 446,796 | `56f3b2d54ed2a05ebf100313b4d9447553e9c6fb9c85f7e7adce8eccc838dc4f` | `ici Verification Report — loglens` |
 
 B1 implementation과 PR #31 remote integration evidence는 complete다. B2 implementation/local 및
-remote verification도 complete다. B3 implementation/local candidate는 아래에 기록한다. B3
-remote verification, B4/B5와 ici I3 target-by-target same-basename comparison은 아직 pending이다.
+remote verification도 complete다. B3 implementation과 원격 evidence도 아래에 기록한다. B4
+configuration diff는 next toy stage이고, B5 hybrid release integration은 아직 pending이다.
 
 ## BuildScope B2 Qt compilation explorer (implementation + local/remote evidence, complete)
 
@@ -180,15 +181,15 @@ filter `1,527 ms`, summary JSON SHA-256
 | diskmap | [diskmap/pr/32](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/32/) | 311,846 | `752f07251bc38285ea1633f5df879985131963e4b99f90532722eaedc9be1802` | `ici Verification Report — diskmap` |
 | loglens | [loglens/pr/32](https://jihoon22-lee.github.io/toy-projects/loglens/pr/32/) | 446,791 | `7b2669fb7de82ada30bfdf28a2d82533f5566ad92779ea08c90528e188ea582b` | `ici Verification Report — loglens` |
 
-B3 implementation/local candidate는 아래에 기록한다. B3 remote verification, B4 configuration
-diff, B5 hybrid release integration, and ici I3 target-by-target same-basename comparison remain
-pending.
+B3 implementation과 원격 evidence는 아래에 기록한다. B4 configuration diff는 next toy stage이고,
+B5 hybrid release integration은 아직 pending이다. ici I3 target-by-target same-basename comparison은
+완료됐다.
 
-## BuildScope B3 include explanation (implementation + local candidate; remote pending)
+## BuildScope B3 include explanation (implementation + remote evidence complete; main candidate)
 
 **브랜치:** `feat/buildscope-include-explain`
 
-BuildScope `0.4.0` metadata에 optional include explanation을 추가했다. compile DB 입력과 v1/v2
+BuildScope `0.4.0` main candidate에 optional include explanation을 추가했다. compile DB 입력과 v1/v2
 projection은 그대로 유지하며, `--include-analysis estimate|compiler`를 사용하면
 `buildscope.snapshot/v3`를 생성한다. `--schema-version v3`만 지정하면 `estimate`가 선택되고,
 v1/v2와 analysis 조합은 거부된다. v3 schema는 root/entry/analysis/edge/search/diagnostic을
@@ -209,7 +210,7 @@ shape으로 기록한다.
   search order와 alternatives를 펼쳐 보고, edge 선택 상세와 parent source 위치 열기,
   Compilation Command 이동을 제공한다.
 
-**B3 local candidate evidence (2026-09-01):**
+**B3 historical local candidate evidence (2026-09-01; before PR #34):**
 
 - [x] Python 3.10 pytest `57/57` PASS, Ruff check + format `14 files` PASS, mypy `11 source
   files` PASS (replay policy, estimate/compiler, v3 projection, bounded failures 포함).
@@ -224,11 +225,32 @@ shape으로 기록한다.
   external refs `0`로 확인했다. 이는 B3 PR/remote Pages evidence와 구분되는 local evidence다.
 - [x] 100,000 entries/25,000 sources benchmark는 model `61 ms`, filter `1,126 ms`, budget
   `10,000 ms`, correctness `true`였고, pure wheel에 `compiler_replay.py`와 v3 schema가 포함됐다.
-- [ ] B3 PR/remote CI, hosted report, B5 release integration, ici I3 target-by-target
-  same-basename comparison — pending.
+- [x] B3 PR/remote CI와 hosted report. [PR #34](https://github.com/jihoon22-lee/toy-projects/pull/34)의
+  feature head `c3835cd4b0c859c38ae0f4afbdb20aae970515dc`에 대한 [run
+  `33459294092`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33459294092)은 `Merge Gate`와
+  `Publish Reports & Sticky Comment`를 포함한 16개 check 모두 SUCCESS였다. [sticky comment
+  `#5487386460`](https://github.com/jihoon22-lee/toy-projects/pull/34#issuecomment-5487386460)는 marker
+  정확히 1개와 project link 정확히 3개를 포함한다. BuildScope report는 `WARN`, `11 PASS / 2 WARN /
+  0 FAIL / 0 ERROR / 0 SKIP`, TEM `4.94`, tests `63/63`, line/function/branch `92.7% / 98.9% /
+  79.5%`였고, diskmap/loglens는 `PASS`, TEM `4.92`/`4.80`이었다.
+- [x] PR benchmark는 `100,000` entries/`25,000` sources, model `118 ms`, filter `1,424 ms`,
+  budget `10,000 ms`, correctness `true`였다. 세 PR Pages report는 HTTP 200 `text/html`, exact
+  title, external attributes/CSS references `0`으로 독립 확인됐다.
 
-이 상태는 B3의 구현과 확인된 local candidate evidence만 닫는다. release/remote completion은
-위 pending 항목이 충족될 때까지 열어 둔다.
+| Project | URL | Bytes | SHA-256 | Title |
+|---|---|---:|---|---|
+| BuildScope | [buildscope/pr/34](https://jihoon22-lee.github.io/toy-projects/buildscope/pr/34/) | 858,143 | `e0b9c9ece1fb7268aa519bd0a4c62fd3da7c44a52b2efe6121393474d3ad36d4` | `ici Verification Report — buildscope` |
+| diskmap | [diskmap/pr/34](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/34/) | 311,847 | `8a6b01544b99eee6f0c2b95758f81395032f2b67a7c1a600879447cf7fb5f3bf` | `ici Verification Report — diskmap` |
+| loglens | [loglens/pr/34](https://jihoon22-lee.github.io/toy-projects/loglens/pr/34/) | 446,786 | `1144759ef7e1b83ef7bd23f7bcfe9d02b05430a37af372350ec3b6e26d6c7ac7` | `ici Verification Report — loglens` |
+
+- [x] PR #34는 `main`에 `9cce2699606e58ed67c3dac46f60dc7bf113bb60`으로 squash-merge됐고 branch는
+  삭제됐다. 같은 head의 exact-main [CI run `33459591250`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33459591250)와
+  [Dependency Graph run `33459594605`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33459594605)가
+  성공했다. Push에서는 PR publish가 올바르게 skip됐고 applicable jobs와 `Merge Gate`는 성공했다.
+
+B3 implementation과 remote evidence는 complete이고 code는 `main`에 shipped됐다. `0.4.0`은
+B5 hybrid release integration 전까지 unreleased로 유지한다. ici I3 cross-repository comparison은
+완료됐으며 다음 toy stage는 B4 configuration diff다.
 
 ## 배경
 

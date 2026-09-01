@@ -1,6 +1,6 @@
 # BuildScope
 
-BuildScope 0.4.0 is the unreleased local candidate for the B3 hybrid build explorer. B0 established the producer/consumer boundary:
+BuildScope 0.4.0 is the unreleased main candidate for the B3 hybrid build explorer. B0 established the producer/consumer boundary:
 Python 3.10+ reads a `compile_commands.json` without executing its commands and emits a
 deterministic `buildscope.snapshot/v1` document; a C++20/Qt CLI and GUI validate and consume that
 document. B1 adds the Python compile-database normalization core and emits the additive
@@ -10,8 +10,8 @@ commands remain separate from structured JSON argv. The B1 public ici v0.7.1 col
 the B2 public ici v0.8.0 evidence recorded here remain separate from the hosted evidence below:
 B1 was verified in [PR #31](https://github.com/jihoon22-lee/toy-projects/pull/31), and B2 was
 verified in [PR #32](https://github.com/jihoon22-lee/toy-projects/pull/32). B3 adds optional
-include explanation while keeping v2 as the default and is documented below as implementation and
-local-candidate evidence only; no B3 PR or remote verification is claimed here.
+include explanation while keeping v2 as the default. B3 implementation and remote evidence are
+complete on `main`; B5 hybrid release integration remains before the product version is released.
 
 ## B0 scope
 
@@ -43,9 +43,9 @@ bounded/core/cross-entry v2 validation; B2 completes the normalized C++ model/UI
 The B0 `v1` snapshot remains the raw compatibility boundary. B1 normalization is implemented in
 the Python producer, while B2 presents the normalized view and retains the raw compatibility fields.
 B1 owns contract acceptance; B2 owns the normalized C++ model/UI transition and is complete. B3's
-include explanation is implemented locally in the `0.4.0` candidate, but its remote integration is
-still pending. Configuration diff (B4), hybrid release integration (B5), and the ici I3
-target-by-target comparison remain pending.
+include explanation is implemented and remotely verified in the `0.4.0` main candidate. Configuration
+diff (B4) is the next toy-project stage, hybrid release integration (B5) remains pending, and the
+ici I3 target-by-target comparison is complete.
 
 ## B1 compile-database normalization (`buildscope.snapshot/v2`)
 
@@ -171,13 +171,13 @@ source nodes and a 10,000 ms budget:
 The benchmark checks entry/source counts, parent-child data, the final source role, and the
 filtered-source count in addition to both timing budgets.
 
-## B3 include explanation (`0.4.0` local candidate)
+## B3 include explanation (`0.4.0` main candidate, unreleased)
 
 B3 adds an optional include graph to the normalized snapshot. The input is still a bounded
 `compile_commands.json`; no external `ici` context is required. The producer can either explain
-the include paths lexically or ask the compiler for its actual include trace. B3 is implemented in
-this branch and has local candidate evidence below, but it is not yet a remote-verified or released
-BuildScope version.
+the include paths lexically or ask the compiler for its actual include trace. B3 is implemented and
+remote-verified on `main`; it is not a released BuildScope version because B5 hybrid release
+integration remains pending.
 
 ### CLI modes and compatibility
 
@@ -279,7 +279,7 @@ or using **Open Source Location**, opens the recorded parent source location; **
 jumps back to the structured/raw command view. v1/v2 snapshots continue to show that include
 analysis is unavailable rather than being treated as measured data.
 
-### B3 local candidate evidence (2026-09-01)
+### B3 historical local candidate evidence (2026-09-01; before PR #34)
 
 The implementation and local checks currently recorded for this branch are:
 
@@ -311,8 +311,41 @@ The final benchmark used `100,000` entries / `25,000` sources and recorded model
 `buildscope-0.4.0-py3-none-any.whl` packaged `compiler_replay.py` and the v3 schema; schema
 validation passed.
 
-No B3 PR, remote CI, hosted report, B5 release integration, or ici I3 cross-repository comparison is
-claimed by this local evidence.
+This historical local evidence is separate from the B3 PR/remote Pages evidence below and does not
+by itself claim B5 release integration or ici I3 completion.
+
+### B3 remote integration and main evidence (2026-09-01)
+
+[PR #34](https://github.com/jihoon22-lee/toy-projects/pull/34) carried feature head
+`c3835cd4b0c859c38ae0f4afbdb20aae970515dc`. Its [CI run
+`33459294092`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33459294092) completed all 16
+checks successfully, including `Merge Gate` and `Publish Reports & Sticky Comment`. The [sticky
+comment](https://github.com/jihoon22-lee/toy-projects/pull/34#issuecomment-5487386460) contains exactly
+one marker and exactly three project links. The BuildScope report was `WARN` with `11 PASS / 2 WARN /
+0 FAIL / 0 ERROR / 0 SKIP`, TEM `4.94`, tests `63/63`, and line/function/branch `92.7% / 98.9% /
+79.5%`; diskmap and loglens were `PASS` with TEM `4.92` and `4.80` respectively.
+
+The PR BuildScope benchmark used `100,000` entries / `25,000` sources and recorded model `118 ms`,
+filter `1,424 ms`, a `10,000 ms` budget, and correctness `true`. Independent PR Pages checks for all
+three reports found HTTP 200 `text/html`, the exact expected title, and zero external attributes/CSS
+references.
+
+| Project | Hosted report | Bytes | SHA-256 | Title |
+|---|---|---:|---|---|
+| BuildScope | [buildscope/pr/34](https://jihoon22-lee.github.io/toy-projects/buildscope/pr/34/) | 858,143 | `e0b9c9ece1fb7268aa519bd0a4c62fd3da7c44a52b2efe6121393474d3ad36d4` | `ici Verification Report — buildscope` |
+| diskmap | [diskmap/pr/34](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/34/) | 311,847 | `8a6b01544b99eee6f0c2b95758f81395032f2b67a7c1a600879447cf7fb5f3bf` | `ici Verification Report — diskmap` |
+| loglens | [loglens/pr/34](https://jihoon22-lee.github.io/toy-projects/loglens/pr/34/) | 446,786 | `1144759ef7e1b83ef7bd23f7bcfe9d02b05430a37af372350ec3b6e26d6c7ac7` | `ici Verification Report — loglens` |
+
+PR #34 was squash-merged to `main` as
+`9cce2699606e58ed67c3dac46f60dc7bf113bb60`, and the feature branch was deleted. Exact-main [CI run
+`33459591250`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33459591250) succeeded for all
+applicable jobs, including `Merge Gate` (PR publish correctly skipped on push). [Dependency Graph run
+`33459594605`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33459594605) also succeeded on
+the same head.
+
+B3 implementation and remote evidence are complete and the code is shipped to `main`; `0.4.0` remains
+unreleased until B5 hybrid release integration. ici I3 cross-repository comparison is complete, and
+B4 configuration diff is the next toy-project stage.
 
 ## Run without installing into the repository
 
@@ -452,8 +485,9 @@ external dependencies:
 | loglens | [loglens/pr/31](https://jihoon22-lee.github.io/toy-projects/loglens/pr/31/) | 446,796 | `56f3b2d54ed2a05ebf100313b4d9447553e9c6fb9c85f7e7adce8eccc838dc4f` | `ici Verification Report — loglens` |
 
 B1 implementation and PR #31 remote integration evidence are complete. B2 implementation and its
-local/public verification are recorded below. B3 implementation/local-candidate status is recorded
-above; B3 remote verification, B4/B5, and the ici I3 target-by-target comparison remain pending.
+local/public verification are recorded below. B3 implementation and remote evidence are recorded
+above; B4 is the next toy-project stage, B5 hybrid release integration remains pending, and the ici
+I3 target-by-target comparison is complete.
 
 ## B2 local, public, and remote verification evidence (2026-09-01)
 
@@ -488,6 +522,6 @@ titles and zero external resource references:
 | [diskmap](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/32/) | 311,846 | `752f07251bc38285ea1633f5df879985131963e4b99f90532722eaedc9be1802` | `ici Verification Report — diskmap` |
 | [loglens](https://jihoon22-lee.github.io/toy-projects/loglens/pr/32/) | 446,791 | `7b2669fb7de82ada30bfdf28a2d82533f5566ad92779ea08c90528e188ea582b` | `ici Verification Report — loglens` |
 
-B3 implementation/local-candidate status is recorded above. B3 remote verification, B4
-configuration diff, B5 hybrid release integration, and the ici I3 target-by-target same-basename
-comparison remain future work.
+B3 implementation and remote evidence are recorded above. B4 configuration diff is the next
+toy-project stage; B5 hybrid release integration remains future work, while the ici I3 target-by-
+target same-basename comparison is complete.
