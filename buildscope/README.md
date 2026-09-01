@@ -489,7 +489,7 @@ unreleased until the annotated tag, GitHub Release, and exact nine-asset post-re
 - `tools/build_standalone.py` validates the Python, pyproject, CMake, and ici version surfaces,
   writes a fixed-metadata zipapp containing the package and all four public schemas, and atomically
   installs it. `tests/python/test_standalone.py` covers version/output, schema inventory, execution,
-  reproducibility, and symlink refusal.
+  reproducibility, symlink refusal, and the database-free `buildscope.pyz --version` contract.
 - `CMakeLists.txt` installs `buildscope-cli` and `buildscope-gui` under `bin/`, documentation under
   `share/doc/buildscope/`, and schemas/examples under `share/buildscope/`. The checked-in
   `examples/cmake` and `examples/qmake` projects plus [quickstart.md](docs/quickstart.md) provide
@@ -551,10 +551,14 @@ The eventual release publishes `buildscope.pyz`, `buildscope.pyz.sha256`,
 `buildscope-<version>-py3-none-any.whl`, `buildscope-<version>.tar.gz`,
 `buildscope-ici-deep.json`, `buildscope-ici-deep.html`, `buildscope-provenance.json`,
 `buildscope-<version>-linux-x86_64.tar.gz`, and `SHA256SUMS`. Publication fails closed on a missing
-path and audits the remote annotated-tag target plus the exact nine uploaded names, sizes, and API
-digests after release creation. The equivalent CI preflight acceptance is recorded in PR #38 below;
-the tag-only release workflow has not run, and the annotated tag, GitHub Release, exact nine uploaded
-names, and post-release digest audit do not exist yet, so `0.5.0` remains unreleased.
+path and stages these files in a private draft. Before publication, a Python 3.10 gate parses the
+ordered eight-entry `SHA256SUMS`, verifies every file and the exact pyz sidecar, checks the deep HTML
+title/Zero-CDN contract, and downloads all nine draft assets by immutable API ID into a fresh
+directory. API state, size, and digest must match those independently downloaded bytes before the
+draft is made public; the final release ID/state and immutable tag are then checked again. The
+equivalent CI preflight acceptance is recorded in PR #38 below; the tag-only release workflow has
+not run, and the annotated tag, GitHub Release, exact nine uploaded names, and post-release digest
+audit do not exist yet, so `0.5.0` remains unreleased.
 
 ### Release-boundary remote acceptance (PR #38)
 

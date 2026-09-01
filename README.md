@@ -216,7 +216,8 @@ also succeeded on the same head.
 기록한다. 현재 상태는 release-ready이며, public tag/GitHub Release만 남아 있다.
 `tools/build_standalone.py`는
 Python/CMake/ici 버전 surface를 일치시키고 고정 zip metadata·정렬된 payload·schema inventory로
-재현 가능한 `buildscope.pyz`를 만들며, direct test는 두 번의 산출물이 byte-identical인지 확인한다.
+재현 가능한 `buildscope.pyz`를 만들며, direct test는 두 번의 산출물이 byte-identical인지와
+`buildscope.pyz --version`이 `buildscope 0.5.0`을 보고하는지 확인한다.
 `CMakeLists.txt`의 install rule은 native `buildscope-cli`/`buildscope-gui`, 문서, examples, schemas를
 하나의 Linux bundle layout으로 설치한다. [B5 quickstart](buildscope/docs/quickstart.md)는
 `buildscope.pyz` 또는 `buildscope-0.5.0-py3-none-any.whl`로 compile DB를 JSON으로 만들고
@@ -240,9 +241,12 @@ MOC/UIC/RCC generated-path 검사, Qt6 native bundle, wheel/pyz-to-native-CLI ha
 literal SHA/API digest 검증을 정의한다. 예정된 top-level release assets는
 `buildscope.pyz`, `buildscope.pyz.sha256`, pure `buildscope-<version>-py3-none-any.whl`, sdist,
 `buildscope-ici-deep.{json,html}`, `buildscope-provenance.json`,
-`buildscope-<version>-linux-x86_64.tar.gz`, `SHA256SUMS`다. 동등한 CI preflight와 exact-main
-검증은 완료됐지만 tag-only workflow 자체는 아직 실행되지 않았다. Annotated tag와 GitHub
-Release는 최종 release boundary 실행 전까지 pending이다.
+`buildscope-<version>-linux-x86_64.tar.gz`, `SHA256SUMS`다. 게시 단계는 먼저 private draft에
+업로드하고, 정확한 8항목 checksum manifest·pyz sidecar·deep HTML Zero-CDN 계약을 검사한다.
+그 뒤 9개 자산을 immutable API ID로 새 디렉터리에 다시 내려받아 API size/digest와 대조한
+경우에만 draft를 공개하고 final release ID/state를 재검증한다. 동등한 CI preflight와
+exact-main 검증은 완료됐지만 tag-only workflow 자체는 아직 실행되지 않았다. Annotated tag와
+GitHub Release는 최종 release boundary 실행 전까지 pending이다.
 
 #### Release-boundary verification
 

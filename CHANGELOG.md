@@ -110,6 +110,13 @@
   duplicate asset names, and then verify the exact name set, uploaded states, sizes, and SHA-256
   digests through a tested Python 3.10 helper. Bounded regular JSON input, nonempty regular local
   files, symlink refusal, and streaming hashes avoid both hidden duplicates and full-bundle reads.
+- Added `buildscope --version` and standalone-pyz coverage so wheel and zipapp consumers can prove
+  the exact `0.5.0` producer before supplying a compilation database.
+- Changed release publication to upload into a private draft first. The gate validates the exact
+  ordered eight-entry `SHA256SUMS`, the pyz sidecar, deep-report title and Zero-CDN contract, then
+  downloads all nine draft assets by immutable API ID into a fresh directory and rechecks their
+  sizes and streaming SHA-256 digests. Only that audited draft is made public, after which the
+  immutable tag, release ID, final state, and the same downloaded bytes are checked again.
 - Hardened both release API polling loops so transient GitHub 404/5xx/API failures are retried
   inside their existing bounded windows instead of being terminated early by shell `errexit`.
 - Updated the current CI, release workflow, and B5 report contract to the corrective public ici

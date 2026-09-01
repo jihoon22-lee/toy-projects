@@ -314,7 +314,8 @@ B5 hybrid release integration이 pending/not started였다. 이후의 local B5 �
 
 - [x] `buildscope/tools/build_standalone.py`가 Python/pyproject/CMake/ici version surface를
   일치시키고 fixed zip metadata와 정렬된 package/schema payload로 `buildscope.pyz`를 생성한다.
-  direct tests는 두 산출물의 byte identity, 실행, schema inventory와 symlink refusal을 확인한다.
+  direct tests는 두 산출물의 byte identity, 실행, schema inventory, symlink refusal과
+  database-free `buildscope.pyz --version`을 확인한다.
 - [x] `buildscope/CMakeLists.txt` install rule이 native CLI/GUI, `share/doc/buildscope/`,
   `share/buildscope/examples/`, `share/buildscope/schemas/` layout을 제공한다.
 - [x] `buildscope/examples/cmake`, `buildscope/examples/qmake` sample compile database와
@@ -349,7 +350,9 @@ exact title은 `ici Verification Report — buildscope`, external refs는 `0`이
 `.github/workflows/buildscope-release.yml`은 annotated tag가 exact `origin/main`과 green Merge Gate를
 가리키는 provenance를 먼저 확인하고, Python `3.10/3.14`, Qt `5/6`, pure wheel/sdist, reproducible
 pyz, Qt6 Linux x86_64 bundle, native handoff, ici v0.10.2 sidecar/download/API digest와
-`SHA256SUMS`를 검사하도록 정의돼 있다. PR #38 CI의 동등한 preflight contract는 원격
+`SHA256SUMS`를 검사하도록 정의돼 있다. 업로드는 private draft에 한정한 뒤 정확한 checksum
+manifest·HTML Zero-CDN·pyz version을 검사하고, 9개 asset을 immutable API ID로 다시 내려받아
+API digest와 일치할 때만 공개한다. PR #38 CI의 동등한 preflight contract는 원격
 acceptance를 완료했지만 tag-only workflow 자체는 아직 실행되지 않았다. 예정된 asset 이름은
 `buildscope.pyz`, `buildscope.pyz.sha256`,
 `buildscope-<version>-py3-none-any.whl`, `buildscope-<version>.tar.gz`,
