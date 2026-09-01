@@ -39,6 +39,7 @@ class MainWindowTest final : public QObject {
 
 private slots:
     void initTestCase();
+    void generatedQtArtifactsAreLinked();
     void loadsSampleSnapshot();
     void reportsMissingSnapshot();
     void openButtonLoadsSelectedSnapshot();
@@ -54,6 +55,14 @@ private slots:
 
 void MainWindowTest::initTestCase() {
     QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
+}
+
+void MainWindowTest::generatedQtArtifactsAreLinked() {
+    buildscope::MainWindow window;
+
+    QVERIFY(findWidget<QPushButton>(&window, "openButton") != nullptr);
+    QVERIFY(QFile::exists(QStringLiteral(":/icons/buildscope.svg")));
+    QVERIFY(window.metaObject()->indexOfSlot("chooseSnapshot()") >= 0);
 }
 
 void MainWindowTest::loadsSampleSnapshot() {

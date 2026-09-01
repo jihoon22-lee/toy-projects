@@ -3,7 +3,7 @@ type = "hybrid"
 version = "0.5.0"
 
 [project]
-source_dirs = ["python", "src", "include"]
+source_dirs = ["python", "src", "include", "ui", "resources", "tools"]
 cpp_pkg_config = ["Qt6Core", "Qt6Widgets", "Qt5Core", "Qt5Widgets"]
 
 [engines.test]
