@@ -12,7 +12,7 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 |---|---|---|
 | [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D2 cancellable/latest-generation scan complete (PR #28) · identity-safe scan · D3 next |
 | [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · L2 1 GiB benchmark merged in PR #26 · default capacity 8192 |
-| [buildscope](buildscope/) | compile DB explorer | B3 include explanation 0.4.0 implementation + remote evidence complete on main (unreleased; B5 pending) · B4 next |
+| [buildscope](buildscope/) | compile DB explorer | B4 semantic configuration diff 0.5.0 implementation/local evidence complete on `feat/buildscope-config-diff` · PR/remote/release pending · B5 next |
 
 ### buildscope B0 hybrid skeleton — release-backed evidence
 
@@ -151,7 +151,20 @@ Graph [run 33459594605](https://github.com/jihoon22-lee/toy-projects/actions/run
 on that head; on push, PR publish was correctly skipped while applicable jobs and `Merge Gate` passed.
 
 B3 implementation and remote evidence are complete, ici I3 cross-repository comparison is complete,
-and the next toy-project stage is B4 configuration diff. B5 hybrid release integration remains pending.
+and B4 configuration diff implementation/local evidence is now on the feature branch. B4 compares
+raw `compile_commands.json` pairs without executing commands, normalizes relocation noise while
+retaining ordered defines/includes and compiler/standard/language/target drift, and exports strict
+`buildscope.diff/v1` JSON. Exit `0` means no visible drift, `1` means visible drift, and `2` means
+invalid/untrusted input, policy, security, or export failure. Native C++/Qt diff consumption and the
+Python-to-C++ hybrid fixture are covered by the local Release CTest evidence. Python is `83/83`,
+Ruff check/format covers `19` files, mypy covers `15` source files, and the default Qt5 5.15.18
+plus Qt6 6.10.2 Release CMake/CTest matrices are each `9/9` (`10/10` with the benchmark); the pure
+`buildscope-0.5.0-py3-none-any` wheel contains snapshot v1/v2/v3 and
+diff v1 schemas with no native extension. The public ici v0.9.0 uncached deep suite is `WARN`
+(11 PASS / 3 WARN, no FAIL/ERROR/SKIP) with `92/92` tests, `93.5% / 99.0% / 76.7%`
+line/function/branch coverage, sanitizer PASS, compile DB `12/12` production units and `27`
+configurations, and TEM `4.95/5.0`. B4 PR/remote CI, hosted reports, and release-artifact
+publication remain pending; B5 hybrid release integration is not started.
 
 ## 공통 구조 규칙
 

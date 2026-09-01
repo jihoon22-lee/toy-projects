@@ -1,7 +1,7 @@
 # toy-projects 제품 포트폴리오와 ici 실물 검증 마스터 계획
 
 **상태:** 승인된 장기 마스터 계획. 2026-08-30 이후 toy-projects의 기능 우선순위, 신규 프로젝트 선정과 완료 조건은 이 문서를 기준으로 판단한다.
-**문서 기준일:** 2026-08-31. 이 계획은 toy-projects [PR #12](https://github.com/jihoon22-lee/toy-projects/pull/12)로 `main`에 병합됐다. 현재 완료 상태는 이 문서의 체크리스트와 병합된 PR을 함께 기준으로 삼는다.
+**문서 기준일:** 2026-09-01. 이 계획은 toy-projects [PR #12](https://github.com/jihoon22-lee/toy-projects/pull/12)로 `main`에 병합됐다. 현재 완료 상태는 이 문서의 체크리스트와 병합된 PR을 함께 기준으로 삼는다.
 
 **목표:** `loglens`와 `diskmap`을 실제로 쓸 만한 완성도 높은 Qt 제품으로 발전시키고, ici의 Python·C++·Qt 분석 공백을 메우는 `buildscope`, `envlens`, `abilens`와 `quality-zoo`를 단계적으로 구축한다.
 
@@ -769,8 +769,9 @@ pure wheel에 함께 포함된다. v2 `producer.version`의 schema `maxLength` 1
 문자열 bound도 일치한다. v2 normalized model/UI 전환은 B2 범위다. B1 구현과 PR #31
 remote integration evidence는 complete이며, B2 구현/local/remote verification도 아래와 같이
 완료됐다. B3 include explanation은 구현과 원격 증거까지 완료되어 `main`의 `0.4.0` candidate로
-기록한다. B4 configuration diff가 다음 toy-project stage이고 B5 hybrid release integration은
-미완료이며, ici I3 target-by-target same-basename 비교는 완료됐다.
+기록한다. B4 configuration diff implementation/local evidence가 현재 feature branch에서
+완료됐고, B4 PR/remote evidence와 B5 hybrid release integration은 미완료이며, ici I3
+target-by-target same-basename 비교는 완료됐다.
 
 **B1 final local/public evidence (2026-09-01):** public
 `ici v0.7.1` cold verification은 표준 `sha256sum --check ici.pyz.sha256`가 통과했고 suite
@@ -809,8 +810,8 @@ marker 1개와 정확히 3개 project link를 포함하고 BuildScope `11 PASS /
 
 B1 implementation과 PR #31 remote integration evidence는 complete다. B2 implementation/local 및
 remote verification도 complete다. B3 implementation과 원격 evidence도 아래에 기록한다. B4
-configuration diff는 next toy stage이고, B5 hybrid release integration은 아직 pending이며, ici
-I3 target-by-target same-basename comparison은 완료됐다.
+configuration diff implementation/local evidence는 아래에 기록하고, B4 PR/remote와 B5 hybrid
+release integration은 아직 pending이며, ici I3 target-by-target same-basename comparison은 완료됐다.
 
 ### B2. C++ model과 Qt UI — implementation/local/remote verification 완료
 
@@ -942,26 +943,46 @@ analysis를 생략하면 기존 normalized `buildscope.snapshot/v2`가 기본이
 
 B3 implementation과 remote evidence는 complete이고 code는 `main`에 shipped됐다. `0.4.0`은
 B5 hybrid release integration 전까지 unreleased로 유지한다. ici I3 cross-repository comparison은
-완료됐으며 다음 toy stage는 B4 configuration diff다.
+완료됐으며 B4 configuration diff는 현재 `0.5.0` feature-branch candidate다.
 
-### B4. configuration diff (next toy-project stage)
+### B4. configuration diff (implementation complete; 0.5.0 candidate, unreleased)
 
 **브랜치:** `feat/buildscope-config-diff`
 
-**선행 조건:** 완료된 B1 normalized snapshot 계약과 B2 C++ model/UI를 semantic comparison의
-기준으로 사용한다. B3 v3 include analysis는 optional additive field로 비교하되 v1/v2 호환 입력을
-깨뜨리지 않는다.
+**현재 상태:** B4 implementation은 현재 feature branch의 `0.5.0` candidate에 반영됐다. 입력은
+두 개의 raw `compile_commands.json`만 받고, snapshot v1/v2/v3는 기존 producer compatibility
+경계로 유지한다. 출력은 strict `buildscope.diff/v1`이며 Python producer, C++ parser/model, Qt
+GUI와 hybrid contract가 같은 의미론을 사용한다.
 
-- [ ] 두 compile DB의 added/removed/moved translation unit을 비교한다.
-- [ ] standard, define, include order, compiler/target drift를 구조화한다.
-- [ ] noisy absolute build path와 output filename 차이를 normalization policy로 줄인다.
-- [ ] suppression/ignore rule과 diff report export를 제공한다.
+- [x] 두 raw compile DB의 added/removed/changed/moved translation unit을 비교하고, 보수적인
+  basename/role move heuristic과 중복 configuration one-to-one pairing을 적용한다.
+- [x] standard, language, ordered define/undefine, include kind/order, compiler
+  family/name/path/wrappers, launcher, target/sysroot와 residual flag drift를 구조화한다.
+- [x] project-root-relative lexical normalization으로 noisy absolute build path와 output
+  filename/build-directory 차이를 정책상 제외한다. Windows path/case와 slash-aware suppression
+  glob도 계약에 포함한다.
+- [x] suppression/ignore rule과 canonical deterministic export를 제공하고, malformed/oversized/
+  duplicate-key input 및 symlink/TOCTOU/alias 경계를 실패로 처리한다.
+- [x] strict schema validation과 native `buildscope-cli --diff`/Qt issues-first diff UI를
+  Python-to-C++ byte-identical hybrid fixture로 연결한다.
 
-### B5. hybrid integration과 release
+**로컬 증거:** Python 단위/CLI `83/83`, Ruff check/format `19 files`, mypy `15 source files`,
+기본 Qt5 5.15.18 및 Qt6 6.10.2 Release CMake/CTest 각각 `9/9`
+(`BUILDSCOPE_BUILD_BENCHMARKS=ON`이면 `10/10`)이 PASS다. pure
+`buildscope-0.5.0-py3-none-any` wheel에는 snapshot v1/v2/v3와 diff v1 schema가 포함되고
+native extension은 없다. checksum-validated public ici v0.9.0 uncached deep suite는 `WARN`,
+14 engines = 11 PASS / 3 WARN / 0 FAIL / 0 ERROR / 0 SKIP, `92/92` tests,
+line/function/branch `93.5% / 99.0% / 76.7%`, sanitizer PASS, compile DB `12/12`
+production units와 `27` configurations, TEM `4.95/5.0`이다. Zero-CDN HTML은 1,235,505
+bytes, SHA-256 `0c98a38b27e928df2c60dcadff9ecc3daa1072cb620354d9f4a9fe8d9b987f80`이다.
+B4 PR/remote CI, hosted report, release-artifact publication은 TODO/evidence pending이다.
 
-**선행 조건:** B3와 B4를 완료하고, ici I3 compile-context 기능이 public release로 제공되어야
-한다. clang-tidy/clazy deep-profile 완료 조건은 ici I4의 tool-backed analyzer가 검증·릴리스된
-뒤에 닫는다. 따라서 현재 B5는 B4와 ici I4를 기다리는 release boundary다.
+### B5. hybrid integration과 release (B4 이후 대기)
+
+**선행 조건:** B3/B4 implementation과 ici I3 compile-context 기능이 public release로 제공되어야
+한다. B4는 implementation/local evidence까지 닫혔지만 PR/remote evidence가 pending이므로
+B5 hybrid integration과 제품 release는 아직 시작하지 않았다. clang-tidy/clazy deep-profile
+완료 조건은 ici I4의 tool-backed analyzer가 검증·릴리스된 뒤에 닫는다.
 
 - [ ] Python analyzer → JSON → C++ consumer contract를 ici integration engine으로 검증
 - [ ] CMake compile DB가 모든 production TU를 포함하는지 ici가 검증
@@ -1281,7 +1302,8 @@ ici와 toy-projects가 함께 바뀌는 기능은 다음 순서를 따른다.
 7. ici Python compatibility I5와 함께 E0/E1 envlens를 시작한다.
 8. benchmark 결과가 안정되면 ici Make/ABI I7와 함께 A0/A1 abilens를 시작한다.
 
-이 순서는 계획 수립 당시의 역사적 실행 순서다. 현재는 B0~B3가 완료됐고, B5 release boundary는
-아직 열려 있다. 2026-09-01 기준 다음 toy-project stage는 B4 configuration diff이며, ici I3
+이 순서는 계획 수립 당시의 역사적 실행 순서다. 현재는 B0~B4 implementation/local evidence가
+완료됐고 B4 PR/remote evidence와 B5 release boundary는 아직 열려 있다. 2026-09-01 기준
+BuildScope의 다음 경계는 B4 evidence와 B5 configuration-diff hybrid release이며, ici I3
 cross-repository comparison은 완료됐다. 이 순서를 다시 바꾸려면 제품 dependency나 ici release
 boundary라는 구체적 근거를 문서에 남긴다.
