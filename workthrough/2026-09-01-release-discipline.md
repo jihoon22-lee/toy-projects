@@ -11,7 +11,8 @@ infrastructure and verification changes from creating accidental releases while 
 The repository records implementation stages, ici pin changes, CI evidence, candidates, and releases in
 the same timeline. Without an explicit cadence, a B-stage or workflow-only change could be mistaken for
 a product version bump. This update makes the stable-release evidence threshold and per-product version
-ownership explicit without rewriting historical evidence or changing the operational ici `v0.10.0` pin.
+ownership explicit without rewriting historical evidence. The independent operational dependency pin
+can change without changing the toy product version.
 
 ## Changes Made
 
@@ -35,7 +36,7 @@ ownership explicit without rewriting historical evidence or changing the operati
 
 ### CHANGELOG.md
 
-- Added an `Unreleased` entry documenting the policy and the unchanged ici `v0.10.0` operational pin.
+- Added an `Unreleased` entry documenting the policy and independent ici dependency pinning.
 - Left existing B-stage and release evidence in place.
 
 ## Policy snapshot
@@ -54,11 +55,12 @@ boundary remains under `Unreleased` until the same evidence standard is met.
 
 - `git diff --check` — passed.
 - Lightweight documentation search confirmed the cadence language, PR naming rule, BuildScope `0.5.0`
-  boundary, and unchanged ici `v0.10.0` pin are present in the requested documents.
+  boundary, preserved historical evidence, and current operational pin are present in the requested
+  documents.
 - No source, workflow, package, tag, or release artifacts were modified.
 
 ## Next Steps
 
 The B5 release candidate still requires its remote evidence and release workflow acceptance before a
-stable BuildScope `0.5.0` tag is created. A future ici pin update is an independent change and must not
-implicitly alter the toy version cadence.
+stable BuildScope `0.5.0` tag is created. The current ici pin update is an independent dependency
+correction and does not alter the toy version cadence.

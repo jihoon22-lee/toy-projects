@@ -606,7 +606,7 @@ QT_QPA_PLATFORM=offscreen \
   "$repo_root/buildscope/fixtures/sample.snapshot.json"
 
 # Historical ici 0.9.0 public-release verification. Provision this interpreter outside the repo;
-# the current B5 candidate workflow pins ici v0.10.0 with a literal SHA-256 and verifies it twice.
+# the current B5 candidate workflow pins ici v0.10.1 with a literal SHA-256 and verifies it twice.
 # beforehand with pytest, coverage, and mypy, then point ici at it.
 (
   cd "$repo_root/buildscope"

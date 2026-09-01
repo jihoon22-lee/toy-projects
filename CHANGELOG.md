@@ -13,8 +13,8 @@
   `0.5.0` remains justified as the bundled B3/B4/B5 first usable release boundary; later work stays
   under `Unreleased` until a comparable checkpoint is complete.
 - Added the PR naming rule that product/technical outcomes are primary and plan codes such as `T0`/`B1`/
-  `D2` are secondary body or label metadata only. Historical evidence is preserved, and operational
-  ici `v0.10.0` pins are unchanged.
+  `D2` are secondary body or label metadata only. Historical evidence is preserved; an operational
+  ici pin change remains independent from the toy product version.
 
 ### BuildScope 0.5.0 — B4 semantic configuration diff + B5 release candidate groundwork (unreleased)
 
@@ -92,6 +92,11 @@
   run, annotated tag, or GitHub Release exists yet; the `0.5.0` product release remains pending.
 - Hardened both release API polling loops so transient GitHub 404/5xx/API failures are retried
   inside their existing bounded windows instead of being terminated early by shell `errexit`.
+- Updated the current CI, release workflow, and B5 report contract to the corrective public ici
+  `v0.10.1` artifact, pinned by literal SHA-256
+  `9e262730b49420c59ee115cf389881dbfbb944b6a96ca1d397a1ecb247ec17ca`. The v0.10.0
+  local measurements below remain historical evidence; this dependency correction does not change
+  the BuildScope `0.5.0` product version.
 - The first B5 PR deep matrix exposed a Qt5-only sanitizer failure in `test_main_window`: all 12
   test functions passed (14 QtTest lifecycle result entries), then LeakSanitizer found 1,288 bytes
   retained by deferred Qt5 offscreen/fontconfig/widget work at process shutdown. The test now drains

@@ -1065,7 +1065,7 @@ exact title `ici Verification Report — buildscope`, external refs `0`였다. l
 **B5 release contract (defined, not executed):** `.github/workflows/buildscope-release.yml`은
 annotated `buildscope-vX.Y.Z` tag가 exact `origin/main`과 green `Merge Gate`를 가리키는지 확인하고,
 Python `3.10/3.14` 및 Qt `5/6` Release/CTest matrix, generated MOC/UIC/RCC path checks, Qt6 Linux
-x86_64 bundle, wheel/pyz → native CLI handoff, ici v0.10.0 sidecar/download/API digest와
+x86_64 bundle, wheel/pyz → native CLI handoff, ici v0.10.1 sidecar/download/API digest와
 `SHA256SUMS`를 검사한다. 예정된 assets는 `buildscope.pyz`, `buildscope.pyz.sha256`,
 `buildscope-<version>-py3-none-any.whl`, `buildscope-<version>.tar.gz`,
 `buildscope-ici-deep.{json,html}`, `buildscope-provenance.json`,

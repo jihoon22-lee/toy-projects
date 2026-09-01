@@ -232,7 +232,7 @@ SHA-256 `ea5fce118e6edad8fa5af24c821663e4290805570377e9b7c190de8da1029612`이며
 
 `.github/workflows/buildscope-release.yml`은 annotated `buildscope-vX.Y.Z` tag가 exact `origin/main`
 및 green `Merge Gate`를 가리키는지 확인하고, Python `3.10/3.14`와 Qt `5/6` Release/CTest matrix,
-MOC/UIC/RCC generated-path 검사, Qt6 native bundle, wheel/pyz-to-native-CLI handoff, ici v0.10.0
+MOC/UIC/RCC generated-path 검사, Qt6 native bundle, wheel/pyz-to-native-CLI handoff, ici v0.10.1
 literal SHA/API digest 검증을 정의한다. 예정된 top-level release assets는
 `buildscope.pyz`, `buildscope.pyz.sha256`, pure `buildscope-<version>-py3-none-any.whl`, sdist,
 `buildscope-ici-deep.{json,html}`, `buildscope-provenance.json`,
@@ -241,7 +241,7 @@ annotated tag, GitHub Release는 없으므로 B5와 `0.5.0` 제품 release는 pe
 
 `0.5.0`은 B3 include explanation, B4 semantic configuration diff, B5 hybrid packaging/integration을
 한데 묶는 첫 usable BuildScope release boundary로 유지한다. B5의 local candidate 기록이나 ici
-`v0.10.0` pin 변경만으로 stable release 또는 다음 버전 bump를 만들지 않으며, `0.5.0` 이후의
+ici pin 변경만으로 stable release 또는 다음 버전 bump를 만들지 않으며, `0.5.0` 이후의
 기능은 위 checkpoint 증거가 다시 모일 때까지 `Unreleased`에 기록한다.
 
 ## 공통 구조 규칙
