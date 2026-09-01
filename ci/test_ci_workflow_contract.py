@@ -124,6 +124,7 @@ class WorkflowPublicationContractTests(unittest.TestCase):
         )
 
         self.assertIn("actions: read", RELEASE_WORKFLOW)
+        self.assertIn("gh api --paginate --slurp", block)
         self.assertIn("check-runs?per_page=100&filter=all", block)
         self.assertIn("ci/check_buildscope_merge_gate.py", block)
         self.assertIn('select "$check_runs" "$target_sha" "$GITHUB_REPOSITORY"', block)
@@ -329,21 +330,24 @@ class WorkflowPublicationContractTests(unittest.TestCase):
         )
 
         self.assertIn(
-            "if: ${{ failure() && steps.create_draft.outputs.release_id != '' }}",
+            "if: ${{ failure() && steps.release_slot.outputs.mode == 'empty' }}",
             block,
         )
         self.assertIn(
             "RELEASE_ID: ${{ steps.create_draft.outputs.release_id }}",
             block,
         )
+        self.assertIn('if [ -z "$release_id" ]; then', block)
+        self.assertIn("recover-owned-draft", block)
+        self.assertIn("gh api --paginate --slurp", block)
         self.assertIn(
             'state "$candidate" "$TAG" "$VERSION" "$TARGET_SHA"',
             block,
         )
-        self.assertIn('--stage draft --expected-release-id "$RELEASE_ID"', block)
+        self.assertIn('--stage draft --expected-release-id "$release_id"', block)
         self.assertIn("--expected-owner-marker", block)
         self.assertIn(
-            '--stage final --expected-release-id "$RELEASE_ID" --expected-asset-count 9',
+            '--stage final --expected-release-id "$release_id" --expected-asset-count 9',
             block,
         )
         self.assertIn(

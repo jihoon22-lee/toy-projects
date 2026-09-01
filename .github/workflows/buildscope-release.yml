@@ -133,7 +133,7 @@ jobs:
           selection="$RUNNER_TEMP/buildscope-merge-gate-selection.json"
           workflow_run="$RUNNER_TEMP/buildscope-merge-gate-workflow-run.json"
           for attempt in $(seq 1 120); do
-            if ! gh api \
+            if ! gh api --paginate --slurp \
                 -H 'Accept: application/vnd.github+json' \
                 -H 'X-GitHub-Api-Version: 2022-11-28' \
                 "repos/${GITHUB_REPOSITORY}/commits/${target_sha}/check-runs?per_page=100&filter=all" \
@@ -1264,7 +1264,7 @@ jobs:
           echo "Final BuildScope $VERSION release audit passed for release $RELEASE_ID"
 
       - name: Preserve a failed private draft for explicit review
-        if: ${{ failure() && steps.create_draft.outputs.release_id != '' }}
+        if: ${{ failure() && steps.release_slot.outputs.mode == 'empty' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_ID: ${{ steps.create_draft.outputs.release_id }}
@@ -1274,31 +1274,49 @@ jobs:
         run: |
           set -euo pipefail
           owner_marker="<!-- buildscope-release-owner:${GITHUB_REPOSITORY}:${GITHUB_RUN_ID}:${TARGET_SHA} -->"
+          release_id="$RELEASE_ID"
+          if [ -z "$release_id" ]; then
+            listing="$RUNNER_TEMP/buildscope-failed-release-recovery.json"
+            if ! gh api --paginate --slurp \
+                -H 'Accept: application/vnd.github+json' \
+                -H 'X-GitHub-Api-Version: 2022-11-28' \
+                "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > "$listing" \
+              || ! release_id="$(python3 ci/check_buildscope_release_state.py \
+                recover-owned-draft "$listing" "$TAG" "$VERSION" "$TARGET_SHA" \
+                "$owner_marker")";
+            then
+              echo "No exact current-run-owned empty draft could be recovered; no remote mutation was attempted" >&2
+              exit 0
+            fi
+          fi
+          case "$release_id" in
+            ''|0|*[!0-9]*) echo "Invalid failed release id: $release_id" >&2; exit 0 ;;
+          esac
           candidate="$RUNNER_TEMP/buildscope-failed-release.json"
           if ! gh api -H 'Accept: application/vnd.github+json' \
               -H 'X-GitHub-Api-Version: 2022-11-28' \
-              "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" > "$candidate";
+              "repos/${GITHUB_REPOSITORY}/releases/${release_id}" > "$candidate";
           then
-            echo "Could not read failed release $RELEASE_ID; no remote mutation was attempted" >&2
+            echo "Could not read failed release $release_id; no remote mutation was attempted" >&2
             exit 0
           fi
           if python3 ci/check_buildscope_release_state.py \
               state "$candidate" "$TAG" "$VERSION" "$TARGET_SHA" \
-              --stage draft --expected-release-id "$RELEASE_ID" \
+              --stage draft --expected-release-id "$release_id" \
               --expected-owner-marker "$owner_marker";
           then
-            echo "::warning::Private draft release $RELEASE_ID was preserved for explicit review; no automatic deletion is safe after a publication attempt."
+            echo "::warning::Private draft release $release_id was preserved for explicit review; no automatic deletion is safe after a publication attempt."
             {
               echo "## BuildScope release requires review"
               echo
-              echo "Private draft release ID $RELEASE_ID remains unpublished after a failed run."
+              echo "Private draft release ID $release_id remains unpublished after a failed run."
               echo "Inspect its fixed tag, assets, and audit logs before explicitly deleting or resuming it."
             } >> "$GITHUB_STEP_SUMMARY"
           elif python3 ci/check_buildscope_release_state.py \
               state "$candidate" "$TAG" "$VERSION" "$TARGET_SHA" \
-              --stage final --expected-release-id "$RELEASE_ID" --expected-asset-count 9;
+              --stage final --expected-release-id "$release_id" --expected-asset-count 9;
           then
-            echo "Release $RELEASE_ID is already public; leaving it unchanged for audit-only rerun"
+            echo "Release $release_id is already public; leaving it unchanged for audit-only rerun"
           else
-            echo "Release $RELEASE_ID no longer has the expected identity; no remote mutation was attempted" >&2
+            echo "Release $release_id no longer has the expected identity; no remote mutation was attempted" >&2
           fi
