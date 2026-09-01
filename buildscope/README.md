@@ -20,9 +20,10 @@ the historical `0.4.0` candidate and is now included in the `0.5.0` boundary; it
 as a separate stable release. Semantic comparison of two raw compile databases is also complete.
 The implementation, native contract tests, PR/remote CI, sticky reports, hosted Pages evidence, and
 merged-main CI are complete on `main`. The release-boundary work tracked in the roadmap as B5 adds
-reproducible standalone packaging, installable native/docs/example assets, and a release workflow
-contract; its CI preflight acceptance and trusted `main` Pages verification are complete, while the
-tag-only workflow, public release, and nine-asset post-release audit remain.
+reproducible standalone packaging, installable native/docs/example assets, and a guarded release
+workflow contract; its CI preflight acceptance and trusted `main` Pages verification are complete,
+while the tag-only workflow, public release, and nine-asset post-release audit remain. Version
+`0.5.0` stays unchanged and unreleased until that boundary is executed.
 
 ## B0 scope
 
@@ -484,7 +485,8 @@ The release-boundary work tracked in the roadmap as B5 connects the configuratio
 producer/consumer contract to a releasable, inspectable bundle. Local packaging and workflow
 implementation are complete, PR #38 accepted the remote integration/matrix/handoff/release gates,
 and PR #39 verified trusted `main` Pages publication. Version `0.5.0` remains release-ready but
-unreleased until the annotated tag, GitHub Release, and exact nine-asset post-release audit complete.
+unreleased until the fixed annotated tag target, GitHub Release, and exact nine-asset final-byte audit
+complete. No public tag or Release is claimed by this document.
 
 - `tools/build_standalone.py` validates the Python, pyproject, CMake, and ici version surfaces,
   writes a fixed-metadata zipapp containing the package and all four public schemas, and atomically
@@ -497,6 +499,12 @@ unreleased until the annotated tag, GitHub Release, and exact nine-asset post-re
 - The release workflow builds a pure `buildscope-<version>-py3-none-any.whl`, sdist, deterministic
   Linux x86_64 native bundle, and standalone pyz; it compares wheel/pyz snapshots through the native
   CLI before publishing any asset.
+- `ci/check_buildscope_release_payload.py` validates the exact release directory, exact-shebang/version pyz,
+  pure wheel, sdist, Linux bundle, matching schema bytes, provenance, B5 deep JSON, and Zero-CDN HTML.
+  Before `ZipFile` is constructed it performs a bounded EOCD/central-directory preflight, then its
+  temporary/in-memory archive fixture tests traversal, duplicate, symlink/hardlink/special-file,
+  native-extension, wrong metadata/version/schema, embedded-artifact/ELF, provenance, and CLI failure
+  paths, including both valid self-extracting ZIP offset layouts.
 
 ### Historical local ici candidate evidence (2026-09-01)
 
@@ -513,7 +521,7 @@ Qt code generation was exact for 3 inputs: MOC `1`, UIC `1`, and RCC `1`; the re
 `ici Verification Report — buildscope`, and 0 external references. Local `clang-tidy` and `clazy`
 were unavailable, so tool-backed static-analysis evidence remains a release-runner requirement.
 
-The focused Python suite now contains 87 tests, and the standalone builder's two direct outputs are
+The focused Python suite now contains 88 tests, and the standalone builder's two direct outputs are
 byte-identical. Existing Qt5 5.15.18 and Qt6 6.10.2 Release CMake/CTest evidence remains the B4
 historical/local baseline (`9/9`, or `10/10` with the opt-in benchmark); the B5 release workflow
 defines fresh Python `3.10/3.14` and Qt `5/6` legs. The first PR deep run exposed a Qt5-only
@@ -540,23 +548,57 @@ path, and no ici source checkout/build remains in the workflow.
 
 ### Release contract (accepted remotely; publication pending)
 
-`buildscope-release.yml` runs only for an annotated `buildscope-vX.Y.Z` tag, requires that it point
-to exact `origin/main` with a successful `Merge Gate`, and checks all public version surfaces plus
-one matching `CHANGELOG.md` heading. Its Qt legs inspect generated
-`ui_main_window.h`, `qrc_buildscope.cpp`, and `moc_main_window.cpp`, then run CTest and a six-second
-offscreen GUI smoke. The package/deep leg requires `clang-tidy` and `clazy`, validates the ici sidecar,
-downloaded digest, and API digest against the literal pin, and checks wheel/sdist purity.
+`buildscope-release.yml` runs only for a fixed annotated `buildscope-vX.Y.Z` tag, requires its peeled
+commit to equal exact `origin/main` with a successful `Merge Gate`, and checks all public version surfaces
+plus one matching `CHANGELOG.md` heading. The newest `ci/check_buildscope_merge_gate.py` helper selects
+the highest-ID exact `Merge Gate` check-run, requires the GitHub Actions app and completed success, then
+verifies the referenced Actions run's ID, repository/head repository, SHA, workflow name/path/event/
+status/conclusion, and canonical URLs. The GitHub Release API's `target_commitish` is intentionally not
+compared; the annotated tag peel is authoritative. Its Qt legs inspect generated `ui_main_window.h`,
+`qrc_buildscope.cpp`, and `moc_main_window.cpp`, then run CTest and a six-second offscreen GUI smoke.
+The package/deep leg requires `clang-tidy` and `clazy`, validates the ici sidecar, downloaded digest,
+and API digest against the literal pin, and checks wheel/sdist purity.
 
-The eventual release publishes `buildscope.pyz`, `buildscope.pyz.sha256`,
+The eventual release publishes exactly these nine assets: `buildscope.pyz`, `buildscope.pyz.sha256`,
 `buildscope-<version>-py3-none-any.whl`, `buildscope-<version>.tar.gz`,
 `buildscope-ici-deep.json`, `buildscope-ici-deep.html`, `buildscope-provenance.json`,
-`buildscope-<version>-linux-x86_64.tar.gz`, and `SHA256SUMS`. Publication fails closed on a missing
-path and stages these files in a private draft. Before publication, a Python 3.10 gate parses the
-ordered eight-entry `SHA256SUMS`, verifies every file and the exact pyz sidecar, checks the deep HTML
-title/Zero-CDN contract, and downloads all nine draft assets by immutable API ID into a fresh
-directory. API state, size, and digest must match those independently downloaded bytes before the
-draft is made public; the final release ID/state and immutable tag are then checked again. The
-equivalent CI preflight acceptance is recorded in PR #38 below; the tag-only release workflow has
+`buildscope-<version>-linux-x86_64.tar.gz`, and `SHA256SUMS`. Publication does not use
+softprops' existing-release update behavior. An authenticated paginated release-slot audit fails
+closed: only an empty slot may create a direct private draft; an existing final release is left
+untouched for audit-only verification, while an existing draft or ambiguous/duplicate slot stops.
+The created draft body ends with one exact current-run owner marker containing repository, run ID, and
+peeled target SHA. If creation is ambiguous, recovery accepts only that exact owner-marked private draft
+with zero assets and the expected body digest; a pre-existing draft is never guessed at or overwritten.
+The workflow normalizes `RELEASE_NOTES.md` once and materializes separate expected final and
+owner-marked draft body files. It computes exact UTF-8 SHA-256 values for both; the draft digest is
+rechecked at creation, before upload, prepublish, and failure reporting, while the final digest is
+required for publication and final audit.
+
+For an empty slot, the workflow creates a draft with the exact tag/name/notes and `prerelease=false`,
+validates and retains its fixed numeric release ID, then uploads the exact nine paths to that ID's
+binary upload endpoint without `--clobber`. Uploads use HTTPS/TLS, a 20-second connect bound and
+300-second transfer bound, and require HTTP 201 plus exact uploaded/id/size/digest response fields.
+The tag's remote peeled SHA—not the Release API's `target_commitish`—proves the target. A bounded
+numeric-API-ID downloader writes to a fresh directory and the prepublish gate checks API metadata,
+manifest/sidecar, payload/archive and schema bytes, provenance, B5 JSON, Zero-CDN HTML, and pyz version.
+The same draft is re-audited immediately before the PATCH. An ambiguous PATCH is reconciled by
+re-reading that same ID: exact final succeeds, exact private draft retries, and all other states fail
+closed.
+
+The final public release is downloaded again into a fresh directory and independently rechecked. Every
+final asset is byte-compared with the current local `dist` in both the newly-created and existing-final
+audit-only modes; a newly-created release also must byte-match the audited draft. The write-token publish
+job never executes a downloaded remote BuildScope pyz. After download it re-fetches metadata by release
+ID and tag, the asset records, and the peeled tag. Failed owned drafts are preserved for explicit manual
+review; no remote draft is deleted automatically. On an empty-slot failure, the report step can
+paginate and recover a lost-ID draft only when its current-run owner marker, zero-asset state, and
+expected body digest match, solely to report and preserve it.
+
+The current dependency-free CI helper discovery suite is `145/145` on both Python `3.10` and `3.14`.
+`actionlint`, Ruff check/format, and mypy pass; these are pre-release implementation checks, not a
+public tag or release claim.
+
+The equivalent CI preflight acceptance is recorded in PR #38 below; the tag-only release workflow has
 not run, and the annotated tag, GitHub Release, exact nine uploaded names, and post-release digest
 audit do not exist yet, so `0.5.0` remains unreleased.
 

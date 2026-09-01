@@ -1068,15 +1068,44 @@ unavailable은 당시 환경의 historical limitation이며, remote preflight ma
 release-runner 검증 경계를 확인했다.
 
 **B5 release contract (CI preflight validated; tag workflow pending):** `.github/workflows/buildscope-release.yml`은
-annotated `buildscope-vX.Y.Z` tag가 exact `origin/main`과 green `Merge Gate`를 가리키는지 확인하고,
-Python `3.10/3.14` 및 Qt `5/6` Release/CTest matrix, generated MOC/UIC/RCC path checks, Qt6 Linux
-x86_64 bundle, wheel/pyz → native CLI handoff, ici v0.10.2 sidecar/download/API digest와
-`SHA256SUMS`를 검사한다. 예정된 assets는 `buildscope.pyz`, `buildscope.pyz.sha256`,
-`buildscope-<version>-py3-none-any.whl`, `buildscope-<version>.tar.gz`,
-`buildscope-ici-deep.{json,html}`, `buildscope-provenance.json`,
+고정 annotated `buildscope-vX.Y.Z` tag의 peeled commit이 exact `origin/main`과 green `Merge Gate`를
+가리키는지 확인하고, Python `3.10/3.14` 및 Qt `5/6` Release/CTest matrix, generated MOC/UIC/RCC
+path checks, Qt6 Linux x86_64 bundle, wheel/pyz → native CLI handoff, ici v0.10.2
+sidecar/download/API digest와 `SHA256SUMS`를 검사한다. 최신 `ci/check_buildscope_merge_gate.py`는
+exact SHA의 newest `Merge Gate` check-run을 positive ID로 선택하고 GitHub Actions app 및
+completed/success를 요구한 뒤 독립 Actions run의 ID, repository/head repository, SHA, workflow
+name/path/event/status/conclusion과 canonical URL을 검증한다. Release API의 `target_commitish`
+equality는 사용하지 않고 annotated tag peel을 authoritative proof로 삼는다. 예정된 assets는
+`buildscope.pyz`, `buildscope.pyz.sha256`, `buildscope-<version>-py3-none-any.whl`,
+`buildscope-<version>.tar.gz`, `buildscope-ici-deep.{json,html}`, `buildscope-provenance.json`,
 `buildscope-<version>-linux-x86_64.tar.gz`, `SHA256SUMS`다. PR/remote/PR Pages와 trusted main
 Pages를 포함한 acceptance는 완료됐지만 tag, GitHub Release와 9개 public asset의 게시·독립
 checksum/provenance audit은 아직 pending이다.
+
+**B5 publication hardening (2026-09-02):** tag workflow는 authenticated paginated slot을
+fail-closed로 검사해 빈 슬롯에서만 fixed numeric release ID의 private draft를 만들고, 기존 final은
+mutation 없는 audit-only 경로로 처리한다. 기존 draft·중복·모호한 slot은 중단한다. 새 draft body는
+repository/run/peeled target SHA를 담은 terminal current-run owner marker로 끝나며, 모호한 생성
+응답 recovery는 exact owner-marked zero-asset private draft 중 expected body digest까지 일치하는
+하나에만 허용된다. workflow는
+`RELEASE_NOTES.md`를 정규화해 별도 final body와 owner-marker draft body 파일을 만들고 각 body의
+정확한 UTF-8 SHA-256을 계산한다. draft digest는 create/upload/prepublish/failure-report에서,
+final digest는 publish/final audit에서 재검증한다. 정확히 9개 asset은 해당 release ID의 binary
+upload endpoint에 no-clobber로 전송되고, 20초 connect/300초 transfer
+bound와 HTTP 201/uploaded 응답을 요구한다. Release API의 `target_commitish`는 비교하지 않으며
+annotated tag peel이 target proof다. fresh API-ID download를 통해 manifest/sidecar,
+payload/archive/schema/provenance, B5 JSON, Zero-CDN HTML과 pyz version을 공개 직전에 다시
+검사하고, ZIP은 `ZipFile` 이전에 bounded EOCD/central-directory preflight를 거친다. PATCH 응답이
+모호하면 동일 ID의 exact final/draft만 reconciliation하고, write-token publish 단계에서는
+다운로드한 원격 BuildScope pyz를 실행하지 않는다. 공개 후에는 9개 final byte를 독립적으로
+재다운로드해 current `dist`와 모두 byte-compare하며, 기존 final audit-only mode에도 적용한다.
+다운로드 후 ID/tag metadata, assets, peeled tag를 다시 fetch한다. 실패한 owned draft는 자동 삭제하지
+않고 명시적 수동 검토를 위해 보존한다. empty-slot failure-report 단계에서 create output ID가
+유실되어도 paginated listing에서 exact current-run-owned zero-asset draft 중 expected body
+digest까지 일치하는 항목을 복구해 보고·보존만 수행한다. 공개 tag/Release와 최종 독립 감사는 여전히 pending이다.
+현재 dependency-free CI helper discovery suite는 Python 3.10/3.14 각각 `145/145`로 통과했고,
+Ruff check/format, mypy, actionlint도 통과했다. 이는 현재 구현에 대한 사전 검증이며 공개
+release evidence가 아니다.
 
 **B5 remote acceptance (2026-09-02):** PR #38의 public ici pin과 hybrid release integration은
 head `3ba645eae5181698e1272729dddaa8a72189b067`, [run `33545168957`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33545168957),

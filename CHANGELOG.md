@@ -31,7 +31,7 @@
   `D2` are secondary body or label metadata only. Historical evidence is preserved; an operational
   ici pin change remains independent from the toy product version.
 
-## [0.5.0] - 2026-09-02
+### BuildScope 0.5.0 — release candidate
 
 - Added a shell-free semantic diff for two raw `compile_commands.json` arrays. Snapshot v1/v2/v3
   compatibility remains on the producer boundary; the diff output is the separate strict
@@ -99,24 +99,55 @@
   `4e12e77ee11f98b2d5bb146bd3d08252b088083726e6f11235e25a449471a565`, exact title
   `ici Verification Report — buildscope`, with 0 external references. `clang-tidy` and `clazy`
   were unavailable locally; the limitation was subsequently covered by the remote PR gate recorded below.
-- Added the `buildscope-release.yml` contract: annotated `buildscope-vX.Y.Z` tag at exact `origin/main`
-  with a green `Merge Gate`, Python `3.10/3.14` and Qt `5/6` release matrices, generated MOC/UIC/RCC
-  checks, pure wheel/sdist checks, wheel/pyz-to-native handoff, and deterministic bundle plus
-  `SHA256SUMS` assets. The workflow is tag-only, allows up to 20 minutes for the exact-main gate,
-  revalidates the remote annotated tag before and after publication, fails on unmatched asset paths,
-  and audits the exact nine public names, sizes, states, and API digests. Equivalent PR CI preflight
-  and exact-main evidence is recorded below.
+- Added the `buildscope-release.yml` contract: a fixed annotated `buildscope-vX.Y.Z` tag target at
+  exact `origin/main` with a green `Merge Gate`, Python `3.10/3.14` and Qt `5/6` release matrices,
+  generated MOC/UIC/RCC checks, pure wheel/sdist checks, wheel/pyz-to-native handoff, and deterministic
+  bundle plus `SHA256SUMS` assets. The workflow is tag-only, allows up to 20 minutes for the
+  exact-main gate, revalidates the fixed tag target before publication and final audit, fails on
+  unmatched asset paths, and audits the exact nine names, sizes, states, and API digests.
+- Added the newest exact Merge Gate identity boundary: `ci/check_buildscope_merge_gate.py` selects
+  the newest exact `Merge Gate` check-run by positive check-run ID, requires the GitHub Actions app and
+  completed success, then independently verifies the referenced Actions run's ID, repository/head
+  repository, SHA, workflow name/path/event/status/conclusion, and canonical URLs. The annotated tag's
+  peeled commit remains authoritative; the release API's `target_commitish` is not compared as proof.
 - Hardened the final public release audit to require exactly nine API assets, reject malformed or
   duplicate asset names, and then verify the exact name set, uploaded states, sizes, and SHA-256
   digests through a tested Python 3.10 helper. Bounded regular JSON input, nonempty regular local
   files, symlink refusal, and streaming hashes avoid both hidden duplicates and full-bundle reads.
 - Added `buildscope --version` and standalone-pyz coverage so wheel and zipapp consumers can prove
   the exact `0.5.0` producer before supplying a compilation database.
-- Changed release publication to upload into a private draft first. The gate validates the exact
-  ordered eight-entry `SHA256SUMS`, the pyz sidecar, deep-report title and Zero-CDN contract, then
-  downloads all nine draft assets by immutable API ID into a fresh directory and rechecks their
-  sizes and streaming SHA-256 digests. Only that audited draft is made public, after which the
-  immutable tag, release ID, final state, and the same downloaded bytes are checked again.
+- Reworked release publication to remove softprops' existing-release update behavior. An authenticated
+  paginated release-slot audit is fail-closed: an empty slot alone may create a direct private draft;
+  an existing final release is never mutated and follows an audit-only path, while an existing draft
+  or ambiguous slot stops the workflow. A newly created draft carries a terminal current-run owner
+  marker; ambiguous creation recovery accepts only one exact owner-marked private draft with zero
+  assets and the expected body digest. Its fixed numeric release ID is checked before uploading exactly nine paths without
+  `--clobber`.
+- The workflow normalizes `RELEASE_NOTES.md` once and materializes separate expected final and
+  owner-marked draft body files. It computes the exact UTF-8 SHA-256 of each: the draft digest is
+  rechecked at creation, before upload, prepublish, and failure reporting, while the final digest is
+  required for publication and final audit.
+- Direct asset uploads use the fixed numeric release-ID endpoint with a binary body, HTTPS/TLS, a
+  20-second connect bound, a 300-second transfer bound, and an exact HTTP 201/uploaded response
+  contract. No release is selected by tag after the fixed ID has been assigned.
+- The prepublish gate now validates the ordered eight-entry `SHA256SUMS`, pyz sidecar, exact release
+  payload/archive contracts, schema-byte agreement, provenance, B5 deep JSON, and Zero-CDN HTML. ZIP
+  archives receive a bounded EOCD/central-directory preflight before `ZipFile` constructs its
+  inventory. The workflow then downloads all nine draft assets through a bounded numeric-API-ID
+  downloader into a fresh directory. The same fixed draft is re-audited immediately before publication.
+- Publication uses an explicit fixed-ID PATCH and reconciles an ambiguous response: an exact final
+  release succeeds, an exact private draft is retried, and any other state fails closed. The write-token
+  publish steps never execute a downloaded remote BuildScope pyz; remote pyz bytes are inspected as
+  payload data. The final public release is independently downloaded into a fresh directory, every
+  asset is byte-compared with the current `dist` (including existing-final audit-only mode), and release
+  metadata by ID, metadata by tag, asset records, and the peeled tag are re-fetched after download.
+  Failed current-run-owned drafts are preserved for explicit manual review; no remote draft is deleted
+  automatically. On an empty-slot failure, the report step can recover a lost-ID draft only by paginating
+  and matching the exact current-run owner marker, zero-asset state, and expected body digest, solely
+  to report and preserve it.
+- The current dependency-free CI helper discovery suite passes `145/145` on Python `3.10` and `3.14`;
+  `actionlint`, Ruff check/format, and mypy also pass. This is implementation evidence only and does
+  not claim a new PR, tag, or release.
 - Hardened both release API polling loops so transient GitHub 404/5xx/API failures are retried
   inside their existing bounded windows instead of being terminated early by shell `errexit`.
 - Updated the current CI, release workflow, and B5 report contract to the corrective public ici
@@ -173,8 +204,8 @@
 
 - BuildScope `0.5.0` combines the public ici `v0.10.2` pin
   (`8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4`) with the completed
-  PR/main verification boundary. Publication is guarded by the exact-main annotated-tag check and
-  the exact nine-asset audit described above.
+  PR/main verification boundary. Its publication boundary requires the exact-main fixed annotated-
+  tag check, fail-closed slot policy, prepublish audit, and final nine-asset public-byte audit.
 
 ### BuildScope 0.4.0 — historical B3 implementation and remote evidence
 

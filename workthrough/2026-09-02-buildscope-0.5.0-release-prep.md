@@ -41,15 +41,21 @@ The release state is synchronized across the following full paths:
 
 | Full path | Synchronized information |
 |---|---|
-| `/home/jihoon/projects/toy-projects/CHANGELOG.md` | Promotes the completed BuildScope checkpoint to the dated `[0.5.0]` entry, preserves historical candidate notes, records PR #38/#39 evidence, and keeps the top-level `Unreleased` section for future work. |
+| `/home/jihoon/projects/toy-projects/CHANGELOG.md` | Keeps the completed BuildScope checkpoint under `Unreleased` as the `0.5.0` release candidate, preserves historical notes, and records PR #38/#39 evidence without claiming publication. |
 | `/home/jihoon/projects/toy-projects/README.md` | Describes BuildScope as release-ready, records the public ici pin and remote validation boundary, and distinguishes the remaining public tag/release from completed implementation evidence. |
 | `/home/jihoon/projects/toy-projects/ROADMAP.md` | Changes the release-boundary checklist from local groundwork to remotely accepted readiness, records the exact-main and Pages evidence, and leaves only tag/release/post-release audit unchecked. |
 | `/home/jihoon/projects/toy-projects/buildscope/README.md` | Documents the product boundary, supported matrix, release contract, exact PR/main evidence, stable Pages bytes/digests, and the fact that no public stable release is claimed yet. |
 | `/home/jihoon/projects/toy-projects/docs/superpowers/2026-08-30-handover.md` | Updates the handoff state so a new session sees implementation, remote acceptance, exact-main CI, and trusted main Pages as complete, with the public release audit pending. |
 | `/home/jihoon/projects/toy-projects/docs/superpowers/plans/2026-08-30-product-portfolio-master-plan.md` | Keeps the portfolio release cadence and checkpoint policy aligned: B-stage progress, ici pins, and CI-only changes do not automatically bump a product version; `0.5.0` is the single usable BuildScope boundary. |
-| `/home/jihoon/projects/toy-projects/.github/workflows/buildscope-release.yml` | Calls the tested final asset-audit helper instead of embedding untestable Python in YAML. |
+| `/home/jihoon/projects/toy-projects/.github/workflows/buildscope-release.yml` | Uses the bounded Merge Gate identity helper and fail-closed fixed-ID publication state machine; remote pyz is never executed in write-token steps. |
 | `/home/jihoon/projects/toy-projects/.github/workflows/ci.yml` | Runs the release-asset auditor regression suite during manifest discovery. |
+| `/home/jihoon/projects/toy-projects/ci/check_buildscope_merge_gate.py` | Selects the newest exact GitHub Actions `Merge Gate` check-run and independently verifies the referenced workflow-run identity. |
+| `/home/jihoon/projects/toy-projects/ci/test_check_buildscope_merge_gate.py` | Covers newest-ID selection, bounded pagination, exact SHA/app/status, canonical URLs, workflow identity, and CLI failures. |
 | `/home/jihoon/projects/toy-projects/ci/check_buildscope_release_assets.py` | Validates bounded release metadata and exactly nine unique public assets with regular-file and streaming-digest checks. |
+| `/home/jihoon/projects/toy-projects/ci/check_buildscope_release_state.py` | Validates paginated release slots, current-run owner markers, zero-asset ambiguous-create recovery, fixed IDs, and draft/final state. |
+| `/home/jihoon/projects/toy-projects/ci/check_buildscope_release_payload.py` | Validates cross-format payload identity and bounded ZIP EOCD/central-directory structure before `ZipFile`. |
+| `/home/jihoon/projects/toy-projects/ci/test_check_buildscope_release_payload.py` | Covers both valid self-extracting ZIP offset layouts plus hostile archive and cross-format rejection paths. |
+| `/home/jihoon/projects/toy-projects/ci/download_buildscope_release_assets.py` | Downloads by fixed numeric asset ID into a fresh directory under bounded subprocess/process-group budgets and verifies bytes. |
 | `/home/jihoon/projects/toy-projects/ci/test_check_buildscope_release_assets.py` | Covers valid assets plus count, name, tag, state, size, digest, encoding, bound, missing-file, symlink, directory, and CLI failures. |
 | `/home/jihoon/projects/toy-projects/ci/test_ci_workflow_contract.py` | Locks the release workflow to the tested helper and the PR discovery job to its unit suite. |
 | `/home/jihoon/projects/toy-projects/workthrough/2026-09-02-buildscope-0.5.0-release-prep.md` | This pre-tag record of context, changes, evidence, verification, and remaining release gates. |
@@ -77,8 +83,11 @@ Supporting workflow and checker surfaces referenced by this documentation are:
 
 The tag-only release workflow already enforces the following before publication:
 
-- annotated `buildscope-vX.Y.Z` tag resolves to the exact remote `main` commit;
-- the exact target commit has a successful `Merge Gate`;
+- fixed annotated `buildscope-vX.Y.Z` tag has a peeled commit equal to the exact remote `main` commit;
+- the newest exact `Merge Gate` check-run is selected by positive check-run ID, requires the GitHub
+  Actions app and completed success, and its independently fetched Actions run is verified for ID,
+  repository/head repository, SHA, workflow name/path/event/status/conclusion, and canonical URLs;
+- the Release API's `target_commitish` is not compared; the annotated tag peel is authoritative;
 - Python `3.10` and `3.14` test/lint/type-quality legs;
 - Qt `5` and `6` Release CMake/CTest legs, generated MOC/UIC/RCC path checks, and offscreen GUI
   execution;
@@ -88,7 +97,29 @@ The tag-only release workflow already enforces the following before publication:
 - Qt6 Linux `x86_64` installed bundle checks;
 - checksummed ici `v0.10.2` download, sidecar, literal, downloaded-byte, and API digest checks;
 - B5 deep JSON/HTML report contract and deterministic `SHA256SUMS` generation;
-- exact asset-name matching and immutable tag/release re-audit after publication.
+- exact asset-name matching and fixed tag target/release-ID re-audit after publication;
+- no execution of downloaded remote BuildScope pyz in write-token publish steps; downloaded pyz bytes
+  are inspected as payload data only.
+
+This pre-tag baseline was subsequently tightened by the publication-gate workthrough. The current
+workflow first performs an authenticated paginated slot audit, creates a private draft only for an
+empty slot, normalizes `RELEASE_NOTES.md` once, materializes separate final and owner-marked draft body
+files, and computes exact UTF-8 SHA-256 values for both. It rechecks the draft digest at creation,
+upload, prepublish, and failure reporting, and the final digest at publication and final audit. It recovers an ambiguous
+create only for one exact owner-marked zero-asset private draft with the expected body digest, uploads through that draft's fixed
+numeric release-ID endpoint without replacement, and leaves an existing final release mutation-free on
+an audit-only path. Direct
+uploads have bounded connect/transfer windows and require an exact HTTP 201/uploaded response. It
+independently downloads the draft assets, checks the manifest/sidecar, archive payload/schema agreement,
+provenance, B5 JSON, Zero-CDN HTML, and pyz identity, repeats those checks immediately before
+publication, reconciles an ambiguous PATCH against the same ID, and downloads the final public bytes
+again. ZIPs undergo bounded EOCD/central-directory preflight before `ZipFile`. Every final asset
+byte-compares with current `dist` even in existing-final audit-only mode; post-download release metadata
+by ID and tag, asset records, and the peeled tag are re-fetched. The failure-report step runs for the
+empty-slot path even when the create step lost its ID; it paginates and recovers an exact current-run-
+owned zero-asset draft with the expected body digest solely to report and preserve it. Failed owned drafts are preserved for explicit
+manual review, with no automatic remote deletion. The complete current contract is recorded in
+`workthrough/2026-09-02-buildscope-release-publication-gate.md`.
 
 The final API audit is a dependency-free Python 3.10 helper rather than an inline workflow script.
 It bounds and validates regular UTF-8 JSON metadata, requires a final non-draft/non-prerelease tag,
@@ -104,7 +135,7 @@ The release boundary does not change the BuildScope version surfaces:
 /home/jihoon/projects/toy-projects/buildscope/pyproject.toml                -> 0.5.0
 /home/jihoon/projects/toy-projects/buildscope/CMakeLists.txt                -> 0.5.0
 /home/jihoon/projects/toy-projects/buildscope/ici.toml                      -> 0.5.0
-/home/jihoon/projects/toy-projects/CHANGELOG.md                             -> [0.5.0] - 2026-09-02
+/home/jihoon/projects/toy-projects/CHANGELOG.md                             -> BuildScope 0.5.0 release candidate
 ~~~
 
 ## Remote acceptance evidence
@@ -210,38 +241,29 @@ python3 ci/check_buildscope_release_assets.py \
 Local release-prep verification completed with:
 
 ~~~bash
-python3.10 -m unittest \
-  ci/test_check_manifest.py \
-  ci/test_check_published_html.py \
-  ci/test_check_buildscope_release_assets.py \
-  ci/test_ci_workflow_contract.py -v
-python3.14 -m unittest \
-  ci/test_check_manifest.py \
-  ci/test_check_published_html.py \
-  ci/test_check_buildscope_release_assets.py \
-  ci/test_ci_workflow_contract.py -v
+python3.10 -m unittest discover -s ci -p 'test_*.py' -v
+python3.14 -m unittest discover -s ci -p 'test_*.py' -v
 (
   cd buildscope
   PYTHONPATH=python:. uvx --python 3.10 --from pytest==9.1.1 pytest -q tests/python
   PYTHONPATH=python:. uvx --python 3.14 --from pytest==9.1.1 pytest -q tests/python
 )
-python3.10 -m unittest ci/test_check_buildscope_b5_report.py -v
-python3.14 -m unittest ci/test_check_buildscope_b5_report.py -v
-uvx ruff check ci/check_buildscope_release_assets.py \
-  ci/test_check_buildscope_release_assets.py ci/test_ci_workflow_contract.py
-uvx ruff format --check ci/check_buildscope_release_assets.py \
-  ci/test_check_buildscope_release_assets.py ci/test_ci_workflow_contract.py
+uvx ruff check buildscope/python buildscope/tests/python buildscope/tools ci
+uvx ruff format --check buildscope/python buildscope/tests/python buildscope/tools ci
 uvx --from mypy==2.3.1 mypy --python-version 3.10 \
-  ci/check_buildscope_release_assets.py ci/test_check_buildscope_release_assets.py \
-  ci/test_ci_workflow_contract.py
+  ci/check_buildscope_merge_gate.py \
+  ci/check_buildscope_release_assets.py ci/check_buildscope_release_state.py \
+  ci/check_buildscope_release_manifest.py ci/check_buildscope_release_payload.py \
+  ci/download_buildscope_release_assets.py
 actionlint .github/workflows/ci.yml .github/workflows/buildscope-release.yml
 git diff --check
 ~~~
 
-Both Python interpreters passed all 34 selected CI contract tests, all 87 BuildScope Python tests,
-and all 14 B5 report-contract tests; Ruff, mypy, actionlint, and diff checks passed. The full
-implementation gates already passed in the accepted PR #38 workflow and must be repeated by the tag
-workflow for the exact release commit; this document does not replace those gates.
+Both Python interpreters passed `145/145` CI helper discovery tests and all 88 BuildScope Python tests;
+Ruff check/format, mypy, actionlint, and diff checks passed. The full implementation gates already
+passed in the historical PR #38 workflow and must be repeated by the tag workflow for the exact release
+commit; this document does not replace those gates. These local results do not claim a current PR, tag,
+or release.
 
 ## Intended release and remaining gates
 
@@ -279,7 +301,7 @@ Post-tag, post-release audit gates are mandatory:
 - inspect the pure wheel (`py3-none-any`, no native extension) and sdist contents;
 - confirm the Linux bundle contains the expected native binaries, docs, examples, schemas, and
   embedded Python artifacts;
-- re-check the GitHub API asset states/digests and immutable tag target after propagation;
+- re-check the GitHub API asset states/digests and fixed annotated-tag target after propagation;
 - update the release notes, roadmap, README, handover, and this workthrough to state that the public
   release audit actually passed. Until those checks succeed, retain the wording “release-ready” and
   “public release pending.”
