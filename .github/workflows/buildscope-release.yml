@@ -21,7 +21,8 @@ on:
         default: false
         type: boolean
 
-permissions: {}
+permissions:
+  contents: read
 
 concurrency:
   group: buildscope-release-${{ github.ref }}
@@ -360,7 +361,7 @@ jobs:
           echo "ICI_PYTHON=$tool_env/bin/python" >> "$GITHUB_ENV"
           echo "$tool_env/bin" >> "$GITHUB_PATH"
           "$tool_env/bin/python" -m build --version
-          clazy --version
+          clazy-standalone --version 2>/dev/null || clazy --version
           clang-tidy --version
 
       - name: Download public ici v0.10.0 and validate its literal SHA twice
@@ -408,7 +409,7 @@ jobs:
           test "$first_hash" = "$second_hash"
           mv "$artifact/.buildscope-first.pyz" "$artifact/buildscope.pyz"
           rm -f "$artifact/.buildscope-second.pyz"
-          sha256sum "$artifact/buildscope.pyz" > "$artifact/buildscope.pyz.sha256"
+          (cd "$artifact" && sha256sum buildscope.pyz) > "$artifact/buildscope.pyz.sha256"
           wheel="$(find "$package_dir" -maxdepth 1 -type f -name "buildscope-${VERSION}-*.whl" -print -quit)"
           sdist="$(find "$package_dir" -maxdepth 1 -type f -name "buildscope-${VERSION}.tar.gz" -print -quit)"
           test -n "$wheel" && test -f "$wheel"
@@ -620,7 +621,7 @@ jobs:
           }
           destination.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
           PY
-          sha256sum "$artifact/buildscope.pyz" > "$artifact/buildscope.pyz.sha256"
+          (cd "$artifact" && sha256sum buildscope.pyz) > "$artifact/buildscope.pyz.sha256"
           tar_file="$artifact/$BUNDLE_NAME.tar"
           tar --sort=name --mtime='UTC 1970-01-01 00:00:00Z' \
             --owner=0 --group=0 --numeric-owner -cf "$tar_file" \
