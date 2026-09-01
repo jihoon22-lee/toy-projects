@@ -88,17 +88,65 @@ class WorkflowPublicationContractTests(unittest.TestCase):
 
         self.assertIn("ci/test_ci_workflow_contract.py", block)
 
-    def test_buildscope_release_invokes_the_tested_asset_auditor(self) -> None:
-        self.assertIn("python3 ci/check_buildscope_release_assets.py", RELEASE_WORKFLOW)
+    def test_buildscope_release_audits_a_private_draft_before_publication(self) -> None:
+        draft = RELEASE_WORKFLOW.index(
+            "      - name: Create private draft and upload BuildScope assets"
+        )
+        audit = RELEASE_WORKFLOW.index(
+            "      - name: Audit private draft metadata and independently downloaded assets"
+        )
+        publish = RELEASE_WORKFLOW.index(
+            "      - name: Publish the fully audited draft"
+        )
+        final = RELEASE_WORKFLOW.index(
+            "      - name: Re-audit immutable tag and final public release metadata"
+        )
+        self.assertLess(draft, audit)
+        self.assertLess(audit, publish)
+        self.assertLess(publish, final)
+        self.assertIn("        id: draft_release", RELEASE_WORKFLOW)
+        self.assertIn("          draft: true", RELEASE_WORKFLOW)
         self.assertIn(
-            '"$RUNNER_TEMP/buildscope-release.json" dist "$TAG" "$VERSION"',
+            "python3 ci/download_buildscope_release_assets.py",
             RELEASE_WORKFLOW,
         )
+        self.assertIn("python3 ci/check_buildscope_release_assets.py", RELEASE_WORKFLOW)
+        self.assertIn(
+            '"$RUNNER_TEMP/buildscope-draft-release.json" dist "$TAG" "$VERSION"',
+            RELEASE_WORKFLOW,
+        )
+        self.assertIn("--stage draft", RELEASE_WORKFLOW)
+        self.assertIn("--stage final", RELEASE_WORKFLOW)
+        self.assertIn("AUDITED_ASSET_DIR", RELEASE_WORKFLOW)
+        self.assertIn('\'{"draft":false,"make_latest":"true"}\'', RELEASE_WORKFLOW)
         self.assertNotIn(
             'if python3 - "$RUNNER_TEMP/buildscope-release.json"',
             RELEASE_WORKFLOW,
         )
-        self.assertIn("ci/test_check_buildscope_release_assets.py", WORKFLOW)
+
+    def test_buildscope_release_checks_manifest_html_and_standalone_version(
+        self,
+    ) -> None:
+        self.assertGreaterEqual(
+            RELEASE_WORKFLOW.count("ci/check_buildscope_release_manifest.py"),
+            3,
+        )
+        self.assertGreaterEqual(
+            RELEASE_WORKFLOW.count("ci/check_published_html.py"),
+            3,
+        )
+        self.assertGreaterEqual(
+            RELEASE_WORKFLOW.count('buildscope.pyz" --version'),
+            3,
+        )
+
+    def test_discovery_runs_every_release_audit_regression_suite(self) -> None:
+        for test_file in (
+            "ci/test_check_buildscope_release_assets.py",
+            "ci/test_check_buildscope_release_manifest.py",
+            "ci/test_download_buildscope_release_assets.py",
+        ):
+            self.assertIn(test_file, WORKFLOW)
 
 
 if __name__ == "__main__":

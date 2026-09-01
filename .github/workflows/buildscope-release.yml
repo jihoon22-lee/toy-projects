@@ -538,6 +538,8 @@ jobs:
           "$artifact/buildscope.pyz" "$database" \
             --project-root "$GITHUB_WORKSPACE/buildscope" \
             --output "$pyz_snapshot"
+          test "$("$wheel_env/bin/buildscope" --version)" = "buildscope $VERSION"
+          test "$("$artifact/buildscope.pyz" --version)" = "buildscope $VERSION"
           cmp "$wheel_snapshot" "$pyz_snapshot"
           native_cli="$artifact/$BUNDLE_NAME/bin/buildscope-cli"
           "$native_cli" "$wheel_snapshot" | tee "$artifact/native-wheel-consumer.txt"
@@ -555,7 +557,9 @@ jobs:
           report_dir="$GITHUB_WORKSPACE/buildscope/release-reports"
           mkdir -p "$report_dir"
           checker="$GITHUB_WORKSPACE/ci/check_buildscope_b5_report.py"
+          html_checker="$GITHUB_WORKSPACE/ci/check_published_html.py"
           test -f "$checker"
+          test -f "$html_checker"
           "$ICI_PYZ" verify \
             --profile deep \
             --no-cache \
@@ -566,6 +570,8 @@ jobs:
           mv verify_report.json "$report_dir/buildscope-ici-deep.json"
           "$ICI_PYTHON" "$checker" "$report_dir/buildscope-ici-deep.json" \
             --expected-qt-major 6
+          "$ICI_PYTHON" "$html_checker" "$report_dir/buildscope-ici-deep.html" \
+            --project buildscope
           cp "$report_dir/buildscope-ici-deep.json" "$RUNNER_TEMP/buildscope-release-assets/buildscope-ici-deep.json"
           cp "$report_dir/buildscope-ici-deep.html" "$RUNNER_TEMP/buildscope-release-assets/buildscope-ici-deep.html"
 
@@ -628,6 +634,8 @@ jobs:
               buildscope-provenance.json \
               "$BUNDLE_NAME.tar.gz"
           ) > "$artifact/SHA256SUMS"
+          "$ICI_PYTHON" "$GITHUB_WORKSPACE/ci/check_buildscope_release_manifest.py" \
+            "$artifact" "$VERSION"
           (cd "$artifact" && sha256sum --check SHA256SUMS)
           find "$artifact" -maxdepth 2 -type f -print | sort
 
@@ -665,18 +673,27 @@ jobs:
         env:
           TAG: ${{ needs.provenance.outputs.tag }}
           TARGET_SHA: ${{ needs.provenance.outputs.target_sha }}
+          VERSION: ${{ needs.provenance.outputs.version }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$TARGET_SHA"
           git fetch --force --tags origin
           test "$(git cat-file -t "refs/tags/$TAG" 2>/dev/null || true)" = tag
           test "$(git rev-parse --verify "refs/tags/${TAG}^{commit}")" = "$TARGET_SHA"
-          remote_target="$(git ls-remote --tags origin "refs/tags/${TAG}^{}" | awk 'NR == 1 {print $1}')"
+          remote_tag="$(git ls-remote --tags origin "refs/tags/${TAG}")"
+          remote_peeled="$(git ls-remote --tags origin "refs/tags/${TAG}^{}")"
+          test "$(printf '%s\n' "$remote_tag" | sed '/^$/d' | wc -l)" -eq 1
+          test "$(printf '%s\n' "$remote_peeled" | sed '/^$/d' | wc -l)" -eq 1
+          test "$(printf '%s\n' "$remote_tag" | awk '{print $2}')" = "refs/tags/$TAG"
+          test "$(printf '%s\n' "$remote_peeled" | awk '{print $2}')" = "refs/tags/${TAG}^{}"
+          test "$(printf '%s\n' "$remote_tag" | awk '{print $1}')" = "$(git rev-parse "refs/tags/$TAG")"
+          remote_target="$(printf '%s\n' "$remote_peeled" | awk '{print $1}')"
           test "$remote_target" = "$TARGET_SHA"
+          python3 ci/check_buildscope_release_manifest.py dist "$VERSION"
           (cd dist && sha256sum --check SHA256SUMS)
-          test -s dist/buildscope-provenance.json
-          test -s dist/buildscope-ici-deep.json
-          test -s dist/buildscope-ici-deep.html
+          python3 ci/check_published_html.py \
+            dist/buildscope-ici-deep.html --project buildscope
+          test "$(python3 dist/buildscope.pyz --version)" = "buildscope $VERSION"
 
       - name: Extract BuildScope release notes
         env:
@@ -712,14 +729,30 @@ jobs:
           print("Release assets were built from the exact green `main` commit; see `buildscope-provenance.json`.")
           PY
 
-      - name: Create GitHub Release and upload BuildScope assets
+      - name: Refuse to replace an existing final release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.provenance.outputs.tag }}
+        run: |
+          set -euo pipefail
+          existing="$RUNNER_TEMP/buildscope-existing-release.json"
+          if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" > "$existing" 2>/dev/null; then
+            if [ "$(python3 -c 'import json,sys; print(str(json.load(open(sys.argv[1], encoding="utf-8")).get("draft")).lower())' "$existing")" != true ]; then
+              echo "Refusing to replace already-published release $TAG" >&2
+              exit 1
+            fi
+          fi
+
+      - name: Create private draft and upload BuildScope assets
+        id: draft_release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: ${{ needs.provenance.outputs.tag }}
           name: "BuildScope ${{ needs.provenance.outputs.version }}"
           body_path: RELEASE_NOTES.md
-          draft: false
+          draft: true
           prerelease: false
+          preserve_order: true
           fail_on_unmatched_files: true
           files: |
             dist/buildscope.pyz
@@ -734,32 +767,113 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Audit immutable tag and exact public release assets
+      - name: Audit private draft metadata and independently downloaded assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.draft_release.outputs.id }}
           TAG: ${{ needs.provenance.outputs.tag }}
           TARGET_SHA: ${{ needs.provenance.outputs.target_sha }}
           VERSION: ${{ needs.provenance.outputs.version }}
         run: |
           set -euo pipefail
-          remote_target="$(git ls-remote --tags origin "refs/tags/${TAG}^{}" | awk 'NR == 1 {print $1}')"
+          case "$RELEASE_ID" in
+            ''|*[!0-9]*) echo "Invalid draft release id: $RELEASE_ID" >&2; exit 1 ;;
+          esac
+          remote_peeled="$(git ls-remote --tags origin "refs/tags/${TAG}^{}")"
+          test "$(printf '%s\n' "$remote_peeled" | sed '/^$/d' | wc -l)" -eq 1
+          test "$(printf '%s\n' "$remote_peeled" | awk '{print $2}')" = "refs/tags/${TAG}^{}"
+          remote_target="$(printf '%s\n' "$remote_peeled" | awk '{print $1}')"
           test "$remote_target" = "$TARGET_SHA"
 
           audit_ok=false
           for attempt in $(seq 1 12); do
-            if ! gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
-              > "$RUNNER_TEMP/buildscope-release.json"; then
-              echo "Release API attempt $attempt/12 failed; retrying" >&2
+            if ! gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+              > "$RUNNER_TEMP/buildscope-draft-release.json"; then
+              echo "Draft API attempt $attempt/12 failed; retrying" >&2
               sleep 5
               continue
             fi
             if python3 ci/check_buildscope_release_assets.py \
-              "$RUNNER_TEMP/buildscope-release.json" dist "$TAG" "$VERSION";
+              "$RUNNER_TEMP/buildscope-draft-release.json" dist "$TAG" "$VERSION" \
+              --stage draft;
             then
               audit_ok=true
               break
             fi
-            echo "Release API asset audit attempt $attempt/12 is not ready"
+            echo "Draft asset metadata attempt $attempt/12 is not ready"
             sleep 5
           done
           test "$audit_ok" = true
+
+          download_ok=false
+          for attempt in 1 2 3; do
+            downloaded="$RUNNER_TEMP/buildscope-draft-download-$attempt"
+            if python3 ci/download_buildscope_release_assets.py \
+                "$RUNNER_TEMP/buildscope-draft-release.json" \
+                "$downloaded" "$GITHUB_REPOSITORY" "$TAG" "$VERSION" \
+                --stage draft \
+              && python3 ci/check_buildscope_release_manifest.py "$downloaded" "$VERSION" \
+              && python3 ci/check_published_html.py \
+                "$downloaded/buildscope-ici-deep.html" --project buildscope \
+              && test "$(python3 "$downloaded/buildscope.pyz" --version)" = "buildscope $VERSION";
+            then
+              echo "AUDITED_ASSET_DIR=$downloaded" >> "$GITHUB_ENV"
+              download_ok=true
+              break
+            fi
+            echo "Draft download audit attempt $attempt/3 failed; retrying" >&2
+            sleep 5
+          done
+          test "$download_ok" = true
+
+      - name: Publish the fully audited draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.draft_release.outputs.id }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' '{"draft":false,"make_latest":"true"}' \
+            | gh api --method PATCH \
+                "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+                --input - \
+            > "$RUNNER_TEMP/buildscope-published-release.json"
+
+      - name: Re-audit immutable tag and final public release metadata
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.draft_release.outputs.id }}
+          TAG: ${{ needs.provenance.outputs.tag }}
+          TARGET_SHA: ${{ needs.provenance.outputs.target_sha }}
+          VERSION: ${{ needs.provenance.outputs.version }}
+        run: |
+          set -euo pipefail
+          remote_peeled="$(git ls-remote --tags origin "refs/tags/${TAG}^{}")"
+          test "$(printf '%s\n' "$remote_peeled" | sed '/^$/d' | wc -l)" -eq 1
+          test "$(printf '%s\n' "$remote_peeled" | awk '{print $2}')" = "refs/tags/${TAG}^{}"
+          test "$(printf '%s\n' "$remote_peeled" | awk '{print $1}')" = "$TARGET_SHA"
+
+          audit_ok=false
+          for attempt in $(seq 1 12); do
+            if ! gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+              > "$RUNNER_TEMP/buildscope-final-release.json"; then
+              echo "Final release API attempt $attempt/12 failed; retrying" >&2
+              sleep 5
+              continue
+            fi
+            api_release_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["id"])' "$RUNNER_TEMP/buildscope-final-release.json")"
+            if [ "$api_release_id" = "$RELEASE_ID" ] \
+              && python3 ci/check_buildscope_release_assets.py \
+                "$RUNNER_TEMP/buildscope-final-release.json" \
+                "$AUDITED_ASSET_DIR" "$TAG" "$VERSION" --stage final;
+            then
+              audit_ok=true
+              break
+            fi
+            echo "Final release metadata attempt $attempt/12 is not ready" >&2
+            sleep 5
+          done
+          test "$audit_ok" = true
+          python3 ci/check_buildscope_release_manifest.py "$AUDITED_ASSET_DIR" "$VERSION"
+          python3 ci/check_published_html.py \
+            "$AUDITED_ASSET_DIR/buildscope-ici-deep.html" --project buildscope
+          test "$(python3 "$AUDITED_ASSET_DIR/buildscope.pyz" --version)" = "buildscope $VERSION"
