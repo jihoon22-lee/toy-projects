@@ -69,7 +69,8 @@ class BuildScopeReleaseAssetTests(unittest.TestCase):
         check_release_assets(self.release_json, self.dist, TAG, VERSION)
 
     def test_accepts_final_release_with_exact_nine_streamed_assets(self) -> None:
-        self._check()
+        with patch("check_buildscope_release_assets.HASH_CHUNK_BYTES", 7):
+            self._check()
 
     def test_cli_returns_success_for_valid_release(self) -> None:
         self.assertEqual(

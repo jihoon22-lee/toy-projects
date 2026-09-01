@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Audit the final BuildScope GitHub Release and its downloaded assets.
 
-The release workflow downloads the GitHub API response and the nine assets
-and compares it with the nine locally built assets after publication. Keeping
-this dependency-free standard-library audit in a normal Python module makes
-the final-publication contract testable on every supported interpreter and
-prevents the workflow from silently drifting away from its unit-tested checks.
+After publication, the release workflow compares the GitHub API response with
+the same nine local artifacts that it uploaded. Keeping this dependency-free
+standard-library audit in a normal Python module makes the final-publication
+contract testable on every supported interpreter and prevents the workflow
+from silently drifting away from its unit-tested checks.
 """
 
 from __future__ import annotations
