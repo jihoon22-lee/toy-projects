@@ -36,6 +36,8 @@ checker expects producer version `0.10.2` without the release tag's leading
 - Updated the release workflow and current operational documentation. Existing
   v0.10.0/v0.10.1 measurements, candidate commits, and historical workthrough
   records remain unchanged.
+- Updated `ICI-GAPS.md` to name v0.10.2 as the current validation baseline and
+  marked the older Qt5 source-candidate narrative explicitly as historical.
 
 ## Key workflow path
 

@@ -7,6 +7,10 @@ but the hosted Qt 5.15.18 offscreen run still retains 688 bytes in 10 allocation
 `libqoffscreen.so`/fontconfig platform-global state at process shutdown. That is outside
 BuildScope's ownership and is not present in the Qt6 leg.
 
+> Historical boundary: the source-candidate path described below records the pre-release validation
+> sequence. The current PR workflow has removed that checkout/build path and checksum-pins public
+> ici v0.10.2; its final hosted-run evidence remains the merge prerequisite.
+
 ## Changes
 
 - Added `ci/fixtures/outside/qt5-offscreen-platform.supp` with the single module-scoped

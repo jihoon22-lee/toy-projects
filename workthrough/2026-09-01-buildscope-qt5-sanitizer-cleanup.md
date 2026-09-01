@@ -64,5 +64,5 @@ ctest --test-dir /tmp/buildscope-qt5-check.DI35vX --output-on-failure
 
 ## Next Steps
 
-- [ ] 공개 ici v0.10.1을 pin한 PR rerun에서 Qt5/Qt6 sanitizer와 clazy exact evidence를 확인한다.
+- [ ] 공개 ici v0.10.2를 checksum pin한 PR rerun에서 Qt5/Qt6 sanitizer와 clazy exact evidence를 확인한다.
 - [ ] PR #38 전체 Merge Gate와 sticky comment/three Pages를 감사한 뒤에만 병합한다.
