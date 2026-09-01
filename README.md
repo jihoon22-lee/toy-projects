@@ -12,7 +12,7 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 |---|---|---|
 | [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D2 cancellable/latest-generation scan complete (PR #28) · identity-safe scan · D3 next |
 | [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · L2 1 GiB benchmark merged in PR #26 · default capacity 8192 |
-| [buildscope](buildscope/) | compile DB explorer | B3 include explanation 0.4.0 implementation + remote evidence complete on main (unreleased; B5 pending) · B4 next |
+| [buildscope](buildscope/) | compile DB explorer | B4 semantic configuration diff implementation + PR/remote/hosted evidence complete on `feat/buildscope-config-diff` · 0.5.0 release/B5 pending |
 
 ### buildscope B0 hybrid skeleton — release-backed evidence
 
@@ -151,7 +151,40 @@ Graph [run 33459594605](https://github.com/jihoon22-lee/toy-projects/actions/run
 on that head; on push, PR publish was correctly skipped while applicable jobs and `Merge Gate` passed.
 
 B3 implementation and remote evidence are complete, ici I3 cross-repository comparison is complete,
-and the next toy-project stage is B4 configuration diff. B5 hybrid release integration remains pending.
+and B4 configuration diff implementation/local evidence is now on the feature branch. B4 compares
+raw `compile_commands.json` pairs without executing commands, normalizes relocation noise while
+retaining ordered defines/includes and compiler/standard/language/target drift, and exports strict
+`buildscope.diff/v1` JSON. Exit `0` means no visible drift, `1` means visible drift, and `2` means
+invalid/untrusted input, policy, security, or export failure. Native C++/Qt diff consumption and the
+Python-to-C++ hybrid fixture are covered by the local Release CTest evidence. Python is `83/83`,
+Ruff check/format covers `19` files, mypy covers `15` source files, and the default Qt5 5.15.18
+plus Qt6 6.10.2 Release CMake/CTest matrices are each `9/9` (`10/10` with the benchmark); the pure
+`buildscope-0.5.0-py3-none-any` wheel contains snapshot v1/v2/v3 and
+diff v1 schemas with no native extension. The public ici v0.9.0 uncached deep suite is historical
+local evidence: `WARN` (11 PASS / 3 WARN, no FAIL/ERROR/SKIP) with `92/92` tests,
+`93.5% / 99.0% / 76.7%` line/function/branch coverage, sanitizer PASS, compile DB `12/12`
+production units and `27` configurations, and TEM `4.95/5.0`.
+
+B4 remote evidence is complete on [PR #36](https://github.com/jihoon22-lee/toy-projects/pull/36): head
+`ce64613263f0c4358579012aab135e0b23341a0e`, [run `33485837830`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33485837830),
+and ici `v0.9.1` completed all `16/16` checks successfully. The BuildScope report was `WARN`
+(`10 PASS / 3 WARN / 0 FAIL / 0 ERROR / 0 SKIP`), with lint WARN (49 warnings), `92/92` tests,
+`93.5% / 99.0% / 77.3%` line/function/branch coverage, sanitizer PASS, compile DB `12/12`
+production units and `27` configurations, and TEM `4.95/5.0`. The remote 100,000-entry /
+25,000-source benchmark recorded model `65 ms`, filter `1,602 ms`, filtered sources `1`,
+budget `10,000 ms`, and correctness `true`. [Sticky comment #5489976814](https://github.com/jihoon22-lee/toy-projects/pull/36#issuecomment-5489976814)
+has exactly one marker and three hosted-report links.
+
+| Project | Hosted report | Bytes | SHA-256 |
+|---|---|---:|---|
+| BuildScope | [buildscope/pr/36](https://jihoon22-lee.github.io/toy-projects/buildscope/pr/36/) | 1,319,378 | `5dc517d3ec8324cb1aedb6e611120ac9ae2951e27851cbc6b0e28303d02c5d43` |
+| diskmap | [diskmap/pr/36](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/36/) | 337,554 | `39a52d1e3d5b9eed6bbc1ec5253f1bf837deb4a7bb33ed2f2ef3b32df0f90e0e` |
+| loglens | [loglens/pr/36](https://jihoon22-lee.github.io/toy-projects/loglens/pr/36/) | 492,746 | `0480f07aea266c0777403ac37ebf90d4acd10f84b04e49aa2a9ccf99a6153007` |
+
+All three Pages responses were HTTP 200 with the exact `ici Verification Report — <project>` title
+and zero external resource references. B4 implementation plus remote/hosted evidence is complete on
+the feature branch; the `0.5.0` product release artifact and B5 hybrid release integration remain
+pending/not started.
 
 ## 공통 구조 규칙
 

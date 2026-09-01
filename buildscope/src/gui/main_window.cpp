@@ -2,6 +2,8 @@
 
 #include "buildscope/compilation_model.hpp"
 #include "buildscope/contract.hpp"
+#include "buildscope/diff.hpp"
+#include "buildscope/diff_model.hpp"
 #include "ui_main_window.h"
 
 #include <QDesktopServices>
@@ -36,11 +38,19 @@ public:
         setDynamicSortFilter(true);
     }
 
+    void setStatusDecorationsEnabled(bool enabled) {
+        statusDecorationsEnabled_ = enabled;
+    }
+
     QVariant data(const QModelIndex &index, int role) const override {
-        if (role != Qt::DecorationRole || index.column() != CompilationTreeModel::StatusColumn) {
+        if (!statusDecorationsEnabled_ || role != Qt::DecorationRole ||
+            index.column() != CompilationTreeModel::StatusColumn) {
             return QSortFilterProxyModel::data(index, role);
         }
         const auto status = QSortFilterProxyModel::data(index, SourceStatusRole).toString();
+        if (status.isEmpty()) {
+            return {};
+        }
         if (status == QLatin1String("present")) {
             return QIcon(QStringLiteral(":/icons/status-present.svg"));
         }
@@ -52,6 +62,9 @@ public:
         }
         return QIcon(QStringLiteral(":/icons/status-unknown.svg"));
     }
+
+private:
+    bool statusDecorationsEnabled_ = true;
 };
 
 namespace {
@@ -194,6 +207,7 @@ void populateIncludeAnalysis(Ui::MainWindow &ui, const SnapshotEntry &entry) {
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), ui_(new Ui::MainWindow),
       model_(std::make_unique<CompilationTreeModel>()),
+      diffModel_(std::make_unique<DiffTreeModel>()),
       proxy_(std::make_unique<StatusFilterProxyModel>()) {
     initializeBuildScopeResources();
     ui_->setupUi(this);
@@ -207,9 +221,11 @@ MainWindow::MainWindow(QWidget *parent)
     }
     ui_->defineTable->horizontalHeader()->setStretchLastSection(true);
     ui_->includeTable->horizontalHeader()->setStretchLastSection(true);
+    ui_->diffChangeTable->horizontalHeader()->setStretchLastSection(true);
     ui_->diagnosticTree->header()->setStretchLastSection(true);
     ui_->includeEdgeTree->header()->setStretchLastSection(true);
     connect(ui_->openButton, &QPushButton::clicked, this, &MainWindow::chooseSnapshot);
+    connect(ui_->openDiffButton, &QPushButton::clicked, this, &MainWindow::chooseDiff);
     connect(ui_->filterEdit, &QLineEdit::textChanged, this, &MainWindow::applyFilter);
     connect(ui_->sourceTree->selectionModel(), &QItemSelectionModel::currentChanged, this,
             [this](const QModelIndex &current, const QModelIndex &) {
@@ -227,6 +243,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui_->showCommandButton, &QPushButton::clicked, this,
             &MainWindow::showCompilationCommand);
     clearDetails(tr("Select a source or configuration"));
+    setDiffMode(false);
 }
 
 MainWindow::~MainWindow() = default;
@@ -237,6 +254,11 @@ bool MainWindow::loadSnapshot(const QString &path) {
         const auto schemaVersion = snapshot.schemaVersion;
         const auto producerVersion = snapshot.producerVersion;
         model_->setSnapshot(std::move(snapshot));
+        diffModel_->clear();
+        setDiffMode(false);
+        proxy_->setSourceModel(model_.get());
+        proxy_->setFilterRole(SearchTextRole);
+        proxy_->setStatusDecorationsEnabled(true);
         ui_->pathEdit->setText(path);
         ui_->filterEdit->clear();
         ui_->statusLabel->setText(
@@ -255,6 +277,11 @@ bool MainWindow::loadSnapshot(const QString &path) {
         return true;
     } catch (const ContractError &error) {
         model_->clear();
+        diffModel_->clear();
+        setDiffMode(false);
+        proxy_->setSourceModel(model_.get());
+        proxy_->setFilterRole(SearchTextRole);
+        proxy_->setStatusDecorationsEnabled(true);
         ui_->pathEdit->setText(path);
         const auto message = tr("Could not load snapshot: %1").arg(error.what());
         ui_->statusLabel->setText(message);
@@ -263,8 +290,57 @@ bool MainWindow::loadSnapshot(const QString &path) {
     }
 }
 
+bool MainWindow::loadDiff(const QString &path) {
+    try {
+        auto report = loadDiffFile(path);
+        const auto schemaVersion = report.schemaVersion;
+        const auto producerVersion = report.producerVersion;
+        const auto summary = report.summary;
+        model_->clear();
+        diffModel_->setReport(std::move(report));
+        setDiffMode(true);
+        proxy_->setSourceModel(diffModel_.get());
+        proxy_->setFilterRole(DiffSearchTextRole);
+        proxy_->setStatusDecorationsEnabled(false);
+        ui_->pathEdit->setText(path);
+        ui_->filterEdit->clear();
+        ui_->statusLabel->setText(
+            tr("Changes: %1 visible · %2 suppressed · %3 unchanged · contract %4 · producer %5")
+                .arg(summary.visibleUnits)
+                .arg(summary.suppressedUnits)
+                .arg(summary.unchanged)
+                .arg(schemaVersion, producerVersion));
+        clearDetails(tr("Select a changed configuration"));
+        for (const auto &diagnostic : diffModel_->report().diagnostics) {
+            const auto message = diagnostic.source.isEmpty()
+                                     ? diagnostic.message
+                                     : tr("%1: %2").arg(diagnostic.source,
+                                                        diagnostic.message);
+            addDiagnostic(ui_->diagnosticTree,
+                          {diagnostic.code, message, diagnostic.severity});
+        }
+        if (proxy_->rowCount() > 0) {
+            const auto unitIndex = proxy_->index(0, 0);
+            ui_->sourceTree->setCurrentIndex(unitIndex);
+            ui_->sourceTree->expand(unitIndex);
+        }
+        return true;
+    } catch (const ContractError &error) {
+        diffModel_->clear();
+        setDiffMode(true);
+        proxy_->setSourceModel(diffModel_.get());
+        proxy_->setFilterRole(DiffSearchTextRole);
+        proxy_->setStatusDecorationsEnabled(false);
+        ui_->pathEdit->setText(path);
+        const auto message = tr("Could not load diff report: %1").arg(error.what());
+        ui_->statusLabel->setText(message);
+        clearDetails(message);
+        return false;
+    }
+}
+
 int MainWindow::entryCount() const {
-    return model_->entryCount();
+    return diffMode_ ? diffModel_->unitCount() : model_->entryCount();
 }
 
 QString MainWindow::statusText() const {
@@ -279,12 +355,30 @@ void MainWindow::chooseSnapshot() {
     }
 }
 
+void MainWindow::chooseDiff() {
+    const auto path = QFileDialog::getOpenFileName(
+        this, tr("Open BuildScope diff report"), {}, tr("JSON files (*.json);;All files (*)"));
+    if (!path.isEmpty()) {
+        loadDiff(path);
+    }
+}
+
 void MainWindow::showSelection(const QModelIndex &proxyIndex) {
     if (!proxyIndex.isValid()) {
         clearDetails(tr("Select a source or configuration"));
         return;
     }
     const auto sourceIndex = proxy_->mapToSource(proxyIndex.siblingAtColumn(0));
+    if (diffMode_) {
+        const auto unitIndex = diffModel_->unitIndex(sourceIndex);
+        if (!unitIndex.has_value()) {
+            clearDetails(tr("Select a changed configuration"));
+            return;
+        }
+        showDiffUnit(diffModel_->report().units.at(*unitIndex),
+                     diffModel_->changeIndex(sourceIndex));
+        return;
+    }
     const auto view = model_->entryView(sourceIndex);
     if (!view.isValid()) {
         const auto source = sourceIndex.data(SourcePathRole).toString();
@@ -324,6 +418,8 @@ void MainWindow::clearDetails(const QString &message) {
     selectedIncludePath_.clear();
     selectedIncludeLine_ = 0;
     ui_->diagnosticTree->clear();
+    ui_->diffSummaryLabel->setText(message);
+    ui_->diffChangeTable->setRowCount(0);
 }
 
 void MainWindow::showEntry(const CompilationEntryView &view) {

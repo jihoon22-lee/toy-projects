@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 env:
-  ICI_VERSION: v0.8.0
+  ICI_VERSION: v0.9.1
 
 jobs:
   # ci/projects.json is the only project list. Both verification and GUI jobs

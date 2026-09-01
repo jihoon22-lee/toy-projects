@@ -167,10 +167,14 @@ def _consume_standard(argv: list[str], index: int, result: dict[str, Any]) -> in
     if token.startswith("/std:"):
         result["standard"] = token[len("/std:") :]
         return index + 1
-    match = _equals(argv, index, "-std")
-    if match is None:
+    matched = _first_match(
+        argv,
+        index,
+        (("-std", "separated"), ("-std", "equals")),
+    )
+    if matched is None:
         return None
-    value, next_index = match
+    _, value, next_index = matched
     if value:
         result["standard"] = value
     else:

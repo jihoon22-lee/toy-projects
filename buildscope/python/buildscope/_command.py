@@ -29,6 +29,7 @@ _COMPILER_FAMILIES = {
 _COMPILER_WRAPPERS = frozenset({"ccache", "distcc", "icecc", "sccache"})
 _ENV_OPTIONS_WITH_VALUE = frozenset({"-u", "--unset"})
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
+_VERSION_SUFFIX = re.compile(r"(?:[-.]\d+(?:\.\d+)*)$")
 
 
 class CommandError(ValueError):
@@ -200,13 +201,18 @@ def _env_prefix(argv: list[str]) -> tuple[int, list[str]]:
 
 
 def _compiler_family(stem: str) -> str:
-    family = _COMPILER_FAMILIES.get(stem)
+    unversioned = _VERSION_SUFFIX.sub("", stem)
+    family = _COMPILER_FAMILIES.get(unversioned)
     if family is not None:
         return family
-    if stem.endswith(("clang++", "clang")):
+    if unversioned.endswith("clang-cl"):
+        return "clang-cl"
+    if unversioned.endswith(("clang++", "clang")):
         return "clang"
-    if stem.endswith(("g++", "gcc")):
+    if unversioned.endswith(("g++", "gcc", "c++", "cc")):
         return "gcc"
+    if unversioned.endswith(("em++", "emcc")):
+        return "emscripten"
     return "unknown"
 
 

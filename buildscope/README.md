@@ -1,6 +1,8 @@
 # BuildScope
 
-BuildScope 0.4.0 is the unreleased main candidate for the B3 hybrid build explorer. B0 established the producer/consumer boundary:
+BuildScope 0.5.0 is the current unreleased B4 configuration-diff candidate on
+`feat/buildscope-config-diff`. B4 implementation plus PR/remote/hosted evidence is complete; the
+product release remains pending. B0 established the producer/consumer boundary:
 Python 3.10+ reads a `compile_commands.json` without executing its commands and emits a
 deterministic `buildscope.snapshot/v1` document; a C++20/Qt CLI and GUI validate and consume that
 document. B1 adds the Python compile-database normalization core and emits the additive
@@ -12,6 +14,9 @@ B1 was verified in [PR #31](https://github.com/jihoon22-lee/toy-projects/pull/31
 verified in [PR #32](https://github.com/jihoon22-lee/toy-projects/pull/32). B3 adds optional
 include explanation while keeping v2 as the default. B3 implementation and remote evidence are
 complete on `main`; B5 hybrid release integration remains before the product version is released.
+B4 adds semantic comparison of two raw compile databases. The implementation, native contract tests,
+PR/remote CI, sticky report, and hosted Pages evidence are complete on the feature branch; the 0.5.0
+release artifact and B5 hybrid release boundary remain pending.
 
 ## B0 scope
 
@@ -43,9 +48,10 @@ bounded/core/cross-entry v2 validation; B2 completes the normalized C++ model/UI
 The B0 `v1` snapshot remains the raw compatibility boundary. B1 normalization is implemented in
 the Python producer, while B2 presents the normalized view and retains the raw compatibility fields.
 B1 owns contract acceptance; B2 owns the normalized C++ model/UI transition and is complete. B3's
-include explanation is implemented and remotely verified in the `0.4.0` main candidate. Configuration
-diff (B4) is the next toy-project stage, hybrid release integration (B5) remains pending, and the
-ici I3 target-by-target comparison is complete.
+include explanation is implemented and remotely verified in the `0.4.0` main candidate. B4's
+configuration diff implementation and PR/remote/hosted evidence are recorded below, while the 0.5.0
+release artifact and hybrid release integration (B5) remain pending and the ici I3 target-by-target
+comparison is complete.
 
 ## B1 compile-database normalization (`buildscope.snapshot/v2`)
 
@@ -345,7 +351,117 @@ the same head.
 
 B3 implementation and remote evidence are complete and the code is shipped to `main`; `0.4.0` remains
 unreleased until B5 hybrid release integration. ici I3 cross-repository comparison is complete, and
-B4 configuration diff is the next toy-project stage.
+B4 configuration diff is the current `0.5.0` feature-branch candidate with implementation and remote
+evidence complete.
+
+## B4 semantic configuration diff (`0.5.0` candidate, unreleased)
+
+B4 compares two **raw** `compile_commands.json` arrays. The diff command does not accept
+`buildscope.snapshot/v1`, `v2`, or `v3` documents as inputs and never executes a compiler, shell, or
+response file. Snapshot compatibility remains separate: the producer defaults to v2, can explicitly
+emit the v1 raw projection, and can opt into the v3 include-analysis contract. The diff output is the
+strict `buildscope.diff/v1` contract.
+
+### CLI and exit policy
+
+```bash
+PYTHONPATH="$repo_root/buildscope/python" \
+  "$py310_bin" -m buildscope diff \
+  "$repo_root/buildscope/fixtures/diff-before.compile_commands.json" \
+  "$repo_root/buildscope/fixtures/diff-after.compile_commands.json" \
+  --before-project-root /project \
+  --after-project-root /project \
+  --suppress "standard:src/**/*.cpp" --pretty \
+  --output "$scratch_root/buildscope.diff.json"
+```
+
+The installed `buildscope-diff` entry point accepts the same arguments. Exit status is intentionally
+small and scriptable:
+
+| Status | Meaning |
+|---:|---|
+| `0` | No visible semantic units remain (identical inputs or all changes suppressed). |
+| `1` | At least one unsuppressed added, removed, moved, or changed unit remains. |
+| `2` | The comparison/export failed: malformed, oversized, duplicate-key, or untrusted JSON; invalid normalization or suppression; an opaque response file; a final symlink or input/output TOCTOU/alias violation; or an output size/write failure. |
+
+### Semantic normalization and pairing
+
+The semantic view retains compiler command style/family/name/path and wrappers, launcher tokens,
+language, standard, target (build target and triple), sysroot, ordered define/undefine actions,
+ordered include kind/path records, and residual flags. Project-relative path-bearing values are
+lexically rebased against each side's project root; no filesystem existence or timestamp is used.
+Windows separators are normalized and Windows identities/globs are case-insensitive. This reduces
+noise from relocated build directories, absolute project paths, and output object names while still
+reporting real toolchain or option drift.
+
+The following are explicitly ignored by the policy: raw command spelling, compilation directory,
+output path/filename, original entry index and duplicate annotation, filesystem existence/stale
+status, and snapshot diagnostics/include-analysis observations. Define and include order is
+semantic—reordering either is a change, and define versus undefine actions are not collapsed into a
+last-wins map.
+
+Source identity is the normalized path plus command style. Within one source, duplicate semantic
+digests pair one-to-one in stable canonical order; remaining unique language/build-target/triple
+roles pair when unambiguous, and a single remaining configuration may pair as changed. Extra
+duplicates stay added/removed. Across source paths, the conservative move heuristic first pairs a
+unique basename + role + semantic digest, then a unique basename + role. A move unit retains the
+rename and any configuration drift together. Ambiguous candidates remain added/removed and emit a
+warning; there is no source-content identity, so a unique same-basename replacement can still look
+like a move and should be reviewed.
+
+### Suppressions and deterministic export
+
+Suppressions use `CATEGORY[:GLOB]` with repeatable `--suppress`; `*` as the category suppresses all
+categories. The glob is slash-aware: `*` and `?` do not cross `/`, while `**` may cross path
+segments. A pattern without `/` can match a basename at any depth. Backslashes and character
+classes are rejected, duplicate rules are rejected, and rule count/length are bounded. Rules are
+canonicalized before export, and suppression evidence remains attached to each affected change.
+
+Reports are canonical JSON (stable semantic/unit ordering, sorted keys, one trailing newline, and a
+256 MiB serialized bound). `schemas/buildscope-diff-v1.schema.json` describes the strict contract.
+The C++ parser rejects duplicate keys, unknown fields, inconsistent summaries, tampered semantic
+digests, omitted semantic changes, and invalid suppression evidence. `buildscope-cli --diff
+DIFF.json` consumes the same contract, while the native Qt GUI opens it in an issues-first tree with
+change details, filtering, and suppressed counts.
+
+The B4 fixture and test coverage includes Python semantic/CLI tests, native C++ parser/model and
+adversarial rejection tests, the Python-to-C++ byte-identical hybrid contract, and the GUI diff-mode
+test. Python is `83/83`; Ruff check/format covers `19` files and mypy covers `15` source files. The
+default Qt5 5.15.18 and Qt6 6.10.2 Release CMake/CTest matrices are each `9/9`; enabling
+`BUILDSCOPE_BUILD_BENCHMARKS` makes each matrix `10/10`. The pure
+`buildscope-0.5.0-py3-none-any` wheel contains the v1/v2/v3 snapshot and diff v1 schemas and no
+native extension.
+
+The checksum-validated public ici v0.9.0 release also passed an uncached deep verification as
+historical local evidence: suite `WARN`, 14 engines = 11 PASS / 3 WARN / 0 FAIL / 0 ERROR / 0 SKIP,
+`92/92` tests, line/function/branch coverage `93.5% / 99.0% / 76.7%`, sanitizer PASS, compile DB
+`12/12` production units and `27` configurations, and TEM `4.95/5.0`. The standalone Zero-CDN HTML
+was 1,235,505 bytes, SHA-256
+`0c98a38b27e928df2c60dcadff9ecc3daa1072cb620354d9f4a9fe8d9b987f80`, with title
+`ici Verification Report — buildscope`. This historical local result is separate from the current
+v0.9.1 remote evidence below.
+
+### B4 PR #36 remote integration evidence (2026-09-01)
+
+B4 implementation and PR/remote/hosted evidence are complete on [PR #36](https://github.com/jihoon22-lee/toy-projects/pull/36),
+head `ce64613263f0c4358579012aab135e0b23341a0e`. [Run `33485837830`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33485837830)
+used ici `v0.9.1` and completed all `16/16` checks successfully. The BuildScope report was `WARN`
+(`10 PASS / 3 WARN / 0 FAIL / 0 ERROR / 0 SKIP`) with lint WARN (49 warnings), `92/92` tests,
+line/function/branch coverage `93.5% / 99.0% / 77.3%`, sanitizer PASS, compile DB `12/12`
+production units and `27` configurations, and TEM `4.95/5.0`. The remote 100,000-entry /
+25,000-source benchmark recorded model `65 ms`, filter `1,602 ms`, filtered sources `1`, budget
+`10,000 ms`, and correctness `true`. [Sticky comment #5489976814](https://github.com/jihoon22-lee/toy-projects/pull/36#issuecomment-5489976814)
+has exactly one marker and three hosted-report links.
+
+The three hosted Pages reports were HTTP 200 with exact titles and zero external resource references:
+
+| Project | Hosted report | Bytes | SHA-256 |
+|---|---|---:|---|
+| BuildScope | [buildscope/pr/36](https://jihoon22-lee.github.io/toy-projects/buildscope/pr/36/) | 1,319,378 | `5dc517d3ec8324cb1aedb6e611120ac9ae2951e27851cbc6b0e28303d02c5d43` |
+| diskmap | [diskmap/pr/36](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/36/) | 337,554 | `39a52d1e3d5b9eed6bbc1ec5253f1bf837deb4a7bb33ed2f2ef3b32df0f90e0e` |
+| loglens | [loglens/pr/36](https://jihoon22-lee.github.io/toy-projects/loglens/pr/36/) | 492,746 | `0480f07aea266c0777403ac37ebf90d4acd10f84b04e49aa2a9ccf99a6153007` |
+
+The `0.5.0` product release artifact and B5 hybrid integration remain pending/not started.
 
 ## Run without installing into the repository
 
@@ -356,15 +472,15 @@ with `PYTHONPATH`; it is not installed into `buildscope`.
 repo_root="$(git rev-parse --show-toplevel)"
 scratch_root="$(mktemp -d /tmp/buildscope-b2.XXXXXX)"
 py310_bin="$(command -v python3.10)"
-release_root="$(mktemp -d /tmp/buildscope-ici-v0.8.0.XXXXXX)"
+release_root="$(mktemp -d /tmp/buildscope-ici-v0.9.0.XXXXXX)"  # historical local evidence
 ici_bin="$release_root/ici.pyz"
 ici_python="/tmp/buildscope-ici-py310/bin/python"  # external env with pytest+coverage+mypy
 
 # Fetch and verify the public release asset under /tmp, never under the repository.
 curl -fsSL -o "$ici_bin" \
-  "https://github.com/jihoon22-lee/ici/releases/download/v0.8.0/ici.pyz"
+  "https://github.com/jihoon22-lee/ici/releases/download/v0.9.0/ici.pyz"
 curl -fsSL -o "$release_root/ici.pyz.sha256" \
-  "https://github.com/jihoon22-lee/ici/releases/download/v0.8.0/ici.pyz.sha256"
+  "https://github.com/jihoon22-lee/ici/releases/download/v0.9.0/ici.pyz.sha256"
 (
   cd "$release_root"
   sha256sum --check ici.pyz.sha256
@@ -418,7 +534,8 @@ QT_QPA_PLATFORM=offscreen \
 "$scratch_root/qt6/src/core/buildscope-cli" \
   "$repo_root/buildscope/fixtures/sample.snapshot.json"
 
-# ici 0.8.0 public release verification. Provision this interpreter outside the repo
+# Historical ici 0.9.0 public-release verification. Provision this interpreter outside the repo;
+# current PR CI uses ici v0.9.1.
 # beforehand with pytest, coverage, and mypy, then point ici at it.
 (
   cd "$repo_root/buildscope"
@@ -486,8 +603,9 @@ external dependencies:
 
 B1 implementation and PR #31 remote integration evidence are complete. B2 implementation and its
 local/public verification are recorded below. B3 implementation and remote evidence are recorded
-above; B4 is the next toy-project stage, B5 hybrid release integration remains pending, and the ici
-I3 target-by-target comparison is complete.
+above; B4 implementation and PR/remote/hosted evidence are recorded above, while the 0.5.0 release
+artifact and B5 hybrid release integration remain pending; the ici I3 target-by-target comparison is
+complete.
 
 ## B2 local, public, and remote verification evidence (2026-09-01)
 
@@ -522,6 +640,6 @@ titles and zero external resource references:
 | [diskmap](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/32/) | 311,846 | `752f07251bc38285ea1633f5df879985131963e4b99f90532722eaedc9be1802` | `ici Verification Report — diskmap` |
 | [loglens](https://jihoon22-lee.github.io/toy-projects/loglens/pr/32/) | 446,791 | `7b2669fb7de82ada30bfdf28a2d82533f5566ad92779ea08c90528e188ea582b` | `ici Verification Report — loglens` |
 
-B3 implementation and remote evidence are recorded above. B4 configuration diff is the next
-toy-project stage; B5 hybrid release integration remains future work, while the ici I3 target-by-
-target same-basename comparison is complete.
+B3 implementation and remote evidence are recorded above. B4 configuration diff implementation and
+PR/remote/hosted evidence are recorded above; the 0.5.0 release artifact and B5 hybrid release
+integration remain future work, while the ici I3 target-by-target same-basename comparison is complete.

@@ -2,6 +2,50 @@
 
 ## Unreleased
 
+### BuildScope 0.5.0 — B4 semantic configuration diff (implementation candidate, unreleased)
+
+- Added a shell-free semantic diff for two raw `compile_commands.json` arrays. Snapshot v1/v2/v3
+  compatibility remains on the producer boundary; the diff output is the separate strict
+  `buildscope.diff/v1` contract.
+- Added relocation-aware normalization for compiler family/name/path/style and wrappers, launcher,
+  language/standard, target/sysroot, ordered define/undefine actions, ordered include kind/path, and
+  residual flags. Raw command spelling, build directory, output path/name, entry indexes/duplicate
+  annotations, filesystem status, and snapshot diagnostics are ignored by policy.
+- Added conservative added/removed/changed/moved TU pairing, deterministic duplicate pairing, and
+  structured drift categories. Moves require a unique basename/role match and retain configuration
+  drift; ambiguous matches remain visible as additions/removals with a warning.
+- Added bounded slash-aware suppression globs (`*`/`?` do not cross `/`; `**` does), canonical
+  deterministic export, exit statuses `0` (no visible drift), `1` (visible drift), and `2` (input,
+  policy, security, or export failure), including strict malformed/oversized/duplicate-key and
+  symlink/TOCTOU boundaries.
+- Added native C++ strict diff parser/model/UI consumption, Python-to-C++ byte-identical hybrid
+  coverage, and adversarial envelope/policy/semantic rejection tests. Python is `83/83`, Ruff
+  check/format covers `19` files, mypy covers `15` source files, and the default Qt5 5.15.18 plus
+  Qt6 6.10.2 Release CMake/CTest matrices are each `9/9` (`10/10` with the opt-in benchmark).
+  The pure `buildscope-0.5.0-py3-none-any` wheel contains the v1/v2/v3 snapshot and diff v1
+  schemas and no native extension.
+- Historical local validation used the checksum-validated public ici v0.9.0 release under the
+  uncached deep profile: suite `WARN`, 14 engines = 11 PASS / 3 WARN / 0 FAIL / 0 ERROR / 0 SKIP,
+  `92/92` tests, line/function/branch coverage `93.5% / 99.0% / 76.7%`, sanitizer PASS,
+  compile DB `12/12` production units and `27` configurations, and TEM `4.95/5.0`. The
+  Zero-CDN HTML is 1,235,505 bytes with SHA-256
+  `0c98a38b27e928df2c60dcadff9ecc3daa1072cb620354d9f4a9fe8d9b987f80`; this remains separate
+  from the current remote CI evidence.
+- B4 implementation and PR/remote/hosted evidence are complete on [PR #36](https://github.com/jihoon22-lee/toy-projects/pull/36),
+  head `ce64613263f0c4358579012aab135e0b23341a0e`. [Run `33485837830`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33485837830)
+  used ici `v0.9.1` and completed all `16/16` checks successfully. BuildScope was `WARN`
+  (`10 PASS / 3 WARN / 0 FAIL / 0 ERROR / 0 SKIP`) with lint WARN (49 warnings), `92/92` tests,
+  line/function/branch `93.5% / 99.0% / 77.3%`, compile DB `12/12` production units and `27`
+  configurations, sanitizer PASS, and TEM `4.95/5.0`. The remote 100,000-entry / 25,000-source
+  benchmark recorded model `65 ms`, filter `1,602 ms`, filtered sources `1`, budget `10,000 ms`,
+  and correctness `true`. [Sticky comment #5489976814](https://github.com/jihoon22-lee/toy-projects/pull/36#issuecomment-5489976814)
+  has exactly one marker and three hosted-report links. Pages reports were HTTP 200 with exact titles
+  and zero external resource references: BuildScope `1,319,378` bytes / SHA-256
+  `5dc517d3ec8324cb1aedb6e611120ac9ae2951e27851cbc6b0e28303d02c5d43`, diskmap `337,554` bytes /
+  `39a52d1e3d5b9eed6bbc1ec5253f1bf837deb4a7bb33ed2f2ef3b32df0f90e0e`, and loglens `492,746` bytes /
+  `0480f07aea266c0777403ac37ebf90d4acd10f84b04e49aa2a9ccf99a6153007`. The `0.5.0` product
+  release artifact and B5 hybrid integration remain pending/not started.
+
 ### BuildScope 0.4.0 — B3 implementation + remote evidence (main candidate, unreleased)
 
 - Added optional include explanation modes: `--include-analysis estimate` performs bounded

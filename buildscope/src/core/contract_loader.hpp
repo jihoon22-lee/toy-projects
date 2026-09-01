@@ -3,6 +3,7 @@
 #include "buildscope/contract.hpp"
 
 #include <QFile>
+#include <QJsonDocument>
 
 #include <functional>
 
@@ -12,6 +13,9 @@ namespace buildscope::detail {
 // filesystem race. Production callers always use loadSnapshotFile(), which
 // supplies no hooks.
 using SnapshotPostReadHook = std::function<void(QFile &)>;
+
+QJsonDocument loadJsonContractFile(const QString &path, const QString &kind,
+                                   const SnapshotPostReadHook &postReadHook = {});
 
 Snapshot loadSnapshotFileWithPostReadHook(
     const QString &path, const SnapshotPostReadHook &postReadHook);

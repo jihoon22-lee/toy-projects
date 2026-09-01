@@ -83,6 +83,17 @@ void appendIncludeAnalysisSearchFields(QStringList &fields, const SnapshotEntry 
     }
 }
 
+QString sourceGroupKey(const SnapshotEntry &entry, const CompilationEntryView &view) {
+    if (!entry.hasNormalized) {
+        return QStringLiteral("legacy") + QChar::Null + view.sourcePath();
+    }
+    auto path = view.sourcePath();
+    if (entry.normalized.commandStyle == QStringLiteral("windows")) {
+        path = path.toCaseFolded();
+    }
+    return entry.normalized.commandStyle + QChar::Null + path;
+}
+
 }  // namespace
 
 CompilationEntryView::CompilationEntryView(const SnapshotEntry *entry) : entry_(entry) {}
@@ -466,14 +477,15 @@ void CompilationTreeModel::rebuildGroups() {
     for (qsizetype entryIndex = 0; entryIndex < snapshot_.entries.size(); ++entryIndex) {
         const CompilationEntryView view(&snapshot_.entries.at(entryIndex));
         const auto source = view.sourcePath();
-        auto found = sourceIndexes.constFind(source);
+        const auto sourceKey = sourceGroupKey(snapshot_.entries.at(entryIndex), view);
+        auto found = sourceIndexes.constFind(sourceKey);
         if (found == sourceIndexes.cend()) {
             const auto newIndex = groups_.size();
             SourceGroup group;
             group.source = source;
             groups_.append(std::move(group));
-            sourceIndexes.insert(source, newIndex);
-            found = sourceIndexes.constFind(source);
+            sourceIndexes.insert(sourceKey, newIndex);
+            found = sourceIndexes.constFind(sourceKey);
         }
         groups_[*found].entries.append(entryIndex);
     }

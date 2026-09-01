@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(buildscope VERSION 0.4.0 LANGUAGES CXX)
+project(buildscope VERSION 0.5.0 LANGUAGES CXX)
 
 option(BUILDSCOPE_BUILD_BENCHMARKS "Build the 100k-entry model benchmark" OFF)
 
@@ -39,8 +39,14 @@ add_library(buildscope_contract STATIC
     src/core/contract_parser.hpp
     src/core/contract_parser.cpp
     src/core/contract_parser_v2.cpp
+    src/core/diff_model.cpp
+    src/core/diff_parser.cpp
+    src/core/diff_validation.cpp
+    src/core/diff_validation.hpp
     include/buildscope/compilation_model.hpp
     include/buildscope/contract.hpp
+    include/buildscope/diff.hpp
+    include/buildscope/diff_model.hpp
 )
 target_include_directories(buildscope_contract PUBLIC include)
 target_link_libraries(buildscope_contract PUBLIC Qt${QT_VERSION_MAJOR}::Core)
@@ -52,6 +58,7 @@ set_target_properties(buildscope-cli PROPERTIES
 )
 
 add_library(buildscope_gui STATIC
+    src/gui/diff_window.cpp
     src/gui/main_window.cpp
     include/buildscope/main_window.hpp
     resources/buildscope.qrc
@@ -91,11 +98,29 @@ target_link_libraries(test_compilation_model PRIVATE
 )
 add_test(NAME test_compilation_model COMMAND test_compilation_model)
 
+add_executable(test_diff tests/cpp/test_diff.cpp)
+target_link_libraries(test_diff PRIVATE buildscope_contract Qt${QT_VERSION_MAJOR}::Test)
+target_compile_definitions(test_diff PRIVATE
+    BUILDSCOPE_SAMPLE_DIFF="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/sample-diff.json"
+)
+add_test(NAME test_diff COMMAND test_diff)
+
+add_executable(test_diff_validation tests/cpp/test_diff_validation.cpp)
+target_link_libraries(test_diff_validation PRIVATE
+    buildscope_contract
+    Qt${QT_VERSION_MAJOR}::Test
+)
+target_compile_definitions(test_diff_validation PRIVATE
+    BUILDSCOPE_SAMPLE_DIFF="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/sample-diff.json"
+)
+add_test(NAME test_diff_validation COMMAND test_diff_validation)
+
 add_executable(test_main_window tests/cpp/test_main_window.cpp)
 target_link_libraries(test_main_window PRIVATE buildscope_gui Qt${QT_VERSION_MAJOR}::Test)
 target_compile_definitions(test_main_window PRIVATE
     BUILDSCOPE_SAMPLE_SNAPSHOT="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/sample.snapshot.json"
     BUILDSCOPE_V2_SNAPSHOT="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/sample-v2.snapshot.json"
+    BUILDSCOPE_SAMPLE_DIFF="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/sample-diff.json"
 )
 add_test(NAME test_main_window COMMAND test_main_window)
 set_tests_properties(test_main_window PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
@@ -120,6 +145,19 @@ add_test(
         -DWORK=${CMAKE_CURRENT_BINARY_DIR}/tests/integration/include-trace
         -DCONSUMER=$<TARGET_FILE:buildscope-cli>
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/test_hybrid_include_contract.cmake
+)
+
+add_test(
+    NAME test_hybrid_diff_contract
+    COMMAND ${CMAKE_COMMAND}
+        -DPYTHON_EXECUTABLE=${Python3_EXECUTABLE}
+        -DPYTHON_PACKAGE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/python
+        -DBEFORE_DATABASE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/diff-before.compile_commands.json
+        -DAFTER_DATABASE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/diff-after.compile_commands.json
+        -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/sample-diff.json
+        -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/tests/integration/diff.json
+        -DCONSUMER=$<TARGET_FILE:buildscope-cli>
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/test_hybrid_diff_contract.cmake
 )
 
 if(BUILDSCOPE_BUILD_BENCHMARKS)

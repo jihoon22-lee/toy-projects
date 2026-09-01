@@ -93,8 +93,8 @@ reader의 문자열 bound도 서로 일치한다.
 strict 외부 v1 consumer는 v1 raw document가 필요하다. B2는 이 계약을 받아 normalized C++
 model/UI로 전환하는 범위다. B1 구현 범위는 완료로 표시한다. B3 include explanation은 구현과
 원격 증거까지 완료되어 `main`의 `0.4.0` candidate로 기록하며, 제품 release는 B5 hybrid
-release integration까지 기다린다. B4 configuration diff가 다음 toy-project stage이고, ici I3
-target-by-target 외부 대조도 완료됐다.
+release integration까지 기다린다. **B1 checkpoint transition (historical):** 당시에는 B4
+configuration diff가 다음 toy-project stage였고, ici I3 target-by-target 외부 대조도 완료됐다.
 
 **B1 final local/public evidence (2026-09-01):** public
 `ici v0.7.1` cold verification은 표준 `sha256sum --check ici.pyz.sha256`가 통과했고 suite
@@ -132,8 +132,9 @@ marker 1개와 정확히 3개 project link를 포함하고 BuildScope `11 PASS /
 | loglens | [loglens/pr/31](https://jihoon22-lee.github.io/toy-projects/loglens/pr/31/) | 446,796 | `56f3b2d54ed2a05ebf100313b4d9447553e9c6fb9c85f7e7adce8eccc838dc4f` | `ici Verification Report — loglens` |
 
 B1 implementation과 PR #31 remote integration evidence는 complete다. B2 implementation/local 및
-remote verification도 complete다. B3 implementation과 원격 evidence도 아래에 기록한다. B4
-configuration diff는 next toy stage이고, B5 hybrid release integration은 아직 pending이다.
+remote verification도 complete다. B3 implementation과 원격 evidence도 아래에 기록한다. **B1-era
+roadmap transition (historical):** 당시 B4 configuration diff는 next toy stage였고, B5 hybrid
+release integration은 pending이었다.
 
 ## BuildScope B2 Qt compilation explorer (implementation + local/remote evidence, complete)
 
@@ -181,9 +182,9 @@ filter `1,527 ms`, summary JSON SHA-256
 | diskmap | [diskmap/pr/32](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/32/) | 311,846 | `752f07251bc38285ea1633f5df879985131963e4b99f90532722eaedc9be1802` | `ici Verification Report — diskmap` |
 | loglens | [loglens/pr/32](https://jihoon22-lee.github.io/toy-projects/loglens/pr/32/) | 446,791 | `7b2669fb7de82ada30bfdf28a2d82533f5566ad92779ea08c90528e188ea582b` | `ici Verification Report — loglens` |
 
-B3 implementation과 원격 evidence는 아래에 기록한다. B4 configuration diff는 next toy stage이고,
-B5 hybrid release integration은 아직 pending이다. ici I3 target-by-target same-basename comparison은
-완료됐다.
+B3 implementation과 원격 evidence는 아래에 기록한다. **B2-era roadmap transition (historical):**
+당시 B4 configuration diff는 next toy stage였고, B5 hybrid release integration은 pending이었다.
+ici I3 target-by-target same-basename comparison은 완료됐다.
 
 ## BuildScope B3 include explanation (implementation + remote evidence complete; main candidate)
 
@@ -250,7 +251,33 @@ shape으로 기록한다.
 
 B3 implementation과 remote evidence는 complete이고 code는 `main`에 shipped됐다. `0.4.0`은
 B5 hybrid release integration 전까지 unreleased로 유지한다. ici I3 cross-repository comparison은
-완료됐으며 다음 toy stage는 B4 configuration diff다.
+완료됐으며 B4 configuration diff 구현과 PR/remote/hosted evidence도 feature branch에서 완료됐다.
+
+## 완료: BuildScope B4 semantic configuration diff (implementation + remote evidence, 2026-09-01)
+
+`feat/buildscope-config-diff`의 B4 implementation은 두 raw `compile_commands.json`을 비교하는
+strict `buildscope.diff/v1` contract, native C++/Qt consumption, and Python-to-C++ hybrid fixture를
+제공한다. B4는 [PR #36](https://github.com/jihoon22-lee/toy-projects/pull/36)의 head
+`ce64613263f0c4358579012aab135e0b23341a0e`에서 remote/hosted evidence까지 완료됐다.
+
+**B4 remote evidence:** [run `33485837830`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33485837830)은 ici
+`v0.9.1`로 `16/16` checks를 모두 성공시켰다. BuildScope report는 `WARN` (`10 PASS / 3 WARN /
+0 FAIL / 0 ERROR / 0 SKIP`), lint WARN (49 warnings), `92/92` tests, line/function/branch
+`93.5% / 99.0% / 77.3%`, sanitizer PASS, compile DB `12/12` production units·`27`
+configurations, TEM `4.95/5.0`이다. 100,000 entries / 25,000 sources benchmark는 model `65 ms`,
+filter `1,602 ms`, filtered sources `1`, budget `10,000 ms`, correctness `true`를 기록했다.
+[Sticky comment #5489976814](https://github.com/jihoon22-lee/toy-projects/pull/36#issuecomment-5489976814)는
+marker 1개와 hosted report link 3개를 포함한다.
+
+| Project | Hosted report | Bytes | SHA-256 |
+|---|---|---:|---|
+| BuildScope | [buildscope/pr/36](https://jihoon22-lee.github.io/toy-projects/buildscope/pr/36/) | 1,319,378 | `5dc517d3ec8324cb1aedb6e611120ac9ae2951e27851cbc6b0e28303d02c5d43` |
+| diskmap | [diskmap/pr/36](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/36/) | 337,554 | `39a52d1e3d5b9eed6bbc1ec5253f1bf837deb4a7bb33ed2f2ef3b32df0f90e0e` |
+| loglens | [loglens/pr/36](https://jihoon22-lee.github.io/toy-projects/loglens/pr/36/) | 492,746 | `0480f07aea266c0777403ac37ebf90d4acd10f84b04e49aa2a9ccf99a6153007` |
+
+세 Pages report는 HTTP 200, exact title, external resource reference 0개였다. B4는 implementation과
+PR/remote/hosted evidence까지 완료됐지만 `0.5.0` product release artifact와 B5 hybrid release
+integration은 pending/not started이다.
 
 ## 배경
 

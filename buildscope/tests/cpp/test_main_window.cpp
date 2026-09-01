@@ -19,6 +19,7 @@
 #include <QtTest>
 
 #include "buildscope/compilation_model.hpp"
+#include "buildscope/diff_model.hpp"
 
 namespace {
 
@@ -47,6 +48,8 @@ private slots:
     void populatesV3IncludeExplanation();
     void filtersV2SourcesAndStructuredFields();
     void reportsMalformedV2ValidationLocation();
+    void loadsDiffReportAndShowsIssuesFirstDetails();
+    void failedSnapshotClearsDiffMode();
 };
 
 void MainWindowTest::initTestCase() {
@@ -369,6 +372,65 @@ void MainWindowTest::reportsMalformedV2ValidationLocation() {
     auto *selection = findWidget<QLabel>(&window, "selectionLabel");
     QVERIFY(selection != nullptr);
     QVERIFY(selection->text().contains(QStringLiteral("entries[1].state.source_status")));
+}
+
+void MainWindowTest::loadsDiffReportAndShowsIssuesFirstDetails() {
+    buildscope::MainWindow window;
+
+    QVERIFY(window.loadDiff(QStringLiteral(BUILDSCOPE_SAMPLE_DIFF)));
+    QCOMPARE(window.entryCount(), 4);
+    QVERIFY(window.statusText().contains(QStringLiteral("4 visible")));
+    QVERIFY(window.statusText().contains(QStringLiteral("buildscope.diff/v1")));
+
+    auto *tree = findWidget<QTreeView>(&window, "sourceTree");
+    auto *filter = findWidget<QLineEdit>(&window, "filterEdit");
+    auto *summary = findWidget<QLabel>(&window, "diffSummaryLabel");
+    auto *changes = findWidget<QTableWidget>(&window, "diffChangeTable");
+    auto *tabs = findWidget<QTabWidget>(&window, "detailTabs");
+    auto *diffTab = window.findChild<QWidget *>(QStringLiteral("diffTab"));
+    QVERIFY(tree != nullptr);
+    QVERIFY(filter != nullptr);
+    QVERIFY(summary != nullptr);
+    QVERIFY(changes != nullptr);
+    QVERIFY(tabs != nullptr);
+    QVERIFY(diffTab != nullptr);
+    QCOMPARE(tree->model()->rowCount(), 4);
+    QCOMPARE(tree->model()->columnCount(), buildscope::DiffTreeModel::ColumnCount);
+    QCOMPARE(tree->model()->index(0, buildscope::DiffTreeModel::SourceColumn)
+                 .data(Qt::DisplayRole)
+                 .toString(),
+             QStringLiteral("src/move.cpp → renamed/move.cpp"));
+    QCOMPARE(changes->rowCount(), 2);
+    QCOMPARE(changes->item(0, 0)->text(), QStringLiteral("moved"));
+    QCOMPARE(tabs->currentWidget(), diffTab);
+
+    const auto changed =
+        tree->model()->index(2, buildscope::DiffTreeModel::SourceColumn);
+    tree->setCurrentIndex(changed);
+    processGuiEvents();
+    QCOMPARE(changes->rowCount(), 8);
+    QVERIFY(summary->text().contains(QStringLiteral("visible drift")));
+    QCOMPARE(changes->item(0, 0)->text(), QStringLiteral("compiler"));
+
+    filter->setText(QStringLiteral("MODE=release"));
+    processGuiEvents();
+    QCOMPARE(tree->model()->rowCount(), 1);
+    QCOMPARE(tree->model()->index(0, 0).data(Qt::DisplayRole).toString(),
+             QStringLiteral("src/common.cpp"));
+}
+
+void MainWindowTest::failedSnapshotClearsDiffMode() {
+    buildscope::MainWindow window;
+
+    QVERIFY(window.loadDiff(QStringLiteral(BUILDSCOPE_SAMPLE_DIFF)));
+    QCOMPARE(window.entryCount(), 4);
+    QVERIFY(!window.loadSnapshot(QStringLiteral("missing-after-diff.json")));
+    QCOMPARE(window.entryCount(), 0);
+    QVERIFY(window.statusText().startsWith(QStringLiteral("Could not load snapshot:")));
+
+    auto *tree = findWidget<QTreeView>(&window, "sourceTree");
+    QVERIFY(tree != nullptr);
+    QCOMPARE(tree->model()->columnCount(), buildscope::CompilationTreeModel::ColumnCount);
 }
 
 QTEST_MAIN(MainWindowTest)

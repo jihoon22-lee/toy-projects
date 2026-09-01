@@ -1,0 +1,56 @@
+[
+  {
+    "arguments": [
+      "env",
+      "MODE=debug",
+      "ccache",
+      "/usr/bin/g++",
+      "-std=c++17",
+      "-DAPI_LEVEL=1",
+      "-DPLATFORM=linux",
+      "-I/project/include",
+      "-isystem",
+      "/opt/sdk/include",
+      "--sysroot=/opt/sdk",
+      "--target=x86_64-linux-gnu",
+      "-O0",
+      "-c",
+      "/project/src/common.cpp",
+      "-o",
+      "CMakeFiles/app.dir/src/common.cpp.o"
+    ],
+    "directory": "/project/build",
+    "file": "/project/src/common.cpp",
+    "output": "CMakeFiles/app.dir/src/common.cpp.o"
+  },
+  {
+    "arguments": [
+      "/usr/bin/g++",
+      "-std=c++20",
+      "-DKEEP=1",
+      "-I/project/include",
+      "-c",
+      "/project/src/move.cpp",
+      "-o",
+      "CMakeFiles/app.dir/src/move.cpp.o"
+    ],
+    "directory": "/project/build",
+    "file": "/project/src/move.cpp",
+    "output": "CMakeFiles/app.dir/src/move.cpp.o"
+  },
+  {
+    "arguments": [
+      "/usr/bin/g++",
+      "-std=c++17",
+      "-DREMOVED=1",
+      "-I/project/include",
+      "-c",
+      "/project/src/remove.cpp",
+      "-o",
+      "CMakeFiles/app.dir/src/remove.cpp.o"
+    ],
+    "directory": "/project/build",
+    "file": "/project/src/remove.cpp",
+    "output": "CMakeFiles/app.dir/src/remove.cpp.o"
+  }
+]
