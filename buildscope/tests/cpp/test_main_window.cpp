@@ -7,7 +7,11 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QTableWidget>
+#include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTreeView>
 #include <QTreeWidget>
@@ -40,6 +44,7 @@ private slots:
     void destroysThroughWidgetPointer();
     void loadsV2SnapshotAndBuildsTree();
     void populatesV2DetailsAutomatically();
+    void populatesV3IncludeExplanation();
     void filtersV2SourcesAndStructuredFields();
     void reportsMalformedV2ValidationLocation();
 };
@@ -206,6 +211,100 @@ void MainWindowTest::populatesV2DetailsAutomatically() {
     QCOMPARE(diagnostic->text(0), QStringLiteral("warning"));
     QCOMPARE(diagnostic->text(1), QStringLiteral("Wshadow"));
     QCOMPARE(diagnostic->text(2), QStringLiteral("declaration shadows a parameter"));
+}
+
+void MainWindowTest::populatesV3IncludeExplanation() {
+    QFile fixture(QStringLiteral(BUILDSCOPE_V2_SNAPSHOT));
+    QVERIFY(fixture.open(QIODevice::ReadOnly));
+    auto document = QJsonDocument::fromJson(fixture.readAll());
+    auto root = document.object();
+    root.insert(QStringLiteral("schema_version"), QStringLiteral("buildscope.snapshot/v3"));
+    auto entries = root.value(QStringLiteral("entries")).toArray();
+    for (qsizetype index = 0; index < entries.size(); ++index) {
+        auto entry = entries.at(index).toObject();
+        QJsonObject analysis;
+        if (index == 0) {
+            analysis = QJsonDocument::fromJson(R"json({
+              "command":["/usr/bin/c++","-E","-H","src/main.cpp"],
+              "diagnostics":[{"code":"trace-note","message":"Measured safely.","severity":"info"}],
+              "duration_ms":8,
+              "evidence":"compiler-measured",
+              "edges":[{
+                "alternatives":["include/second/common.hpp"],
+                "classification":"project",
+                "delimiter":"quote",
+                "evidence":"compiler-measured",
+                "line":3,
+                "location_evidence":"source-scan",
+                "parent":"src/main.cpp",
+                "requested":"common.hpp",
+                "resolved":"include/first/common.hpp",
+                "search":[
+                  {"candidate":"src/common.hpp","exists":false,"kind":"current","order":0,"selected":false},
+                  {"candidate":"include/first/common.hpp","exists":true,"kind":"include","order":1,"selected":true},
+                  {"candidate":"include/second/common.hpp","exists":true,"kind":"include","order":2,"selected":false}
+                ]
+              }]
+            })json")
+                           .object();
+        } else {
+            analysis = QJsonDocument::fromJson(R"json({
+              "command":[],
+              "diagnostics":[{"code":"include-analysis-unavailable","message":"No compiler.","severity":"warning"}],
+              "duration_ms":0,
+              "edges":[],
+              "evidence":"unavailable"
+            })json")
+                           .object();
+        }
+        entry.insert(QStringLiteral("include_analysis"), analysis);
+        entries.replace(index, entry);
+    }
+    root.insert(QStringLiteral("entries"), entries);
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const auto path = temporary.filePath(QStringLiteral("sample-v3.json"));
+    QFile output(path);
+    QVERIFY(output.open(QIODevice::WriteOnly));
+    const auto payload = QJsonDocument(root).toJson(QJsonDocument::Compact);
+    QCOMPARE(output.write(payload), payload.size());
+    output.close();
+
+    buildscope::MainWindow window;
+    QVERIFY(window.loadSnapshot(path));
+    processGuiEvents();
+
+    auto *evidence = findWidget<QLabel>(&window, "includeEvidenceLabel");
+    auto *tree = findWidget<QTreeWidget>(&window, "includeEdgeTree");
+    auto *details = findWidget<QPlainTextEdit>(&window, "includeEdgeEdit");
+    auto *replay = findWidget<QPlainTextEdit>(&window, "includeReplayEdit");
+    auto *commandButton = findWidget<QPushButton>(&window, "showCommandButton");
+    auto *tabs = findWidget<QTabWidget>(&window, "detailTabs");
+    auto *commandTab = window.findChild<QWidget *>(QStringLiteral("commandTab"));
+    QVERIFY(evidence != nullptr);
+    QVERIFY(tree != nullptr);
+    QVERIFY(details != nullptr);
+    QVERIFY(replay != nullptr);
+    QVERIFY(commandButton != nullptr);
+    QVERIFY(tabs != nullptr);
+    QVERIFY(commandTab != nullptr);
+    QVERIFY(window.statusText().contains(QStringLiteral("buildscope.snapshot/v3")));
+    QVERIFY(evidence->text().contains(QStringLiteral("compiler-measured")));
+    QCOMPARE(tree->topLevelItemCount(), 1);
+    auto *edge = tree->topLevelItem(0);
+    QVERIFY(edge != nullptr);
+    QCOMPARE(edge->text(1), QStringLiteral("common.hpp"));
+    QCOMPARE(edge->text(2), QStringLiteral("include/first/common.hpp"));
+    QCOMPARE(edge->text(3), QStringLiteral("project"));
+    QCOMPARE(edge->childCount(), 3);
+    QVERIFY(replay->toPlainText().contains(QStringLiteral("-H")));
+
+    QVERIFY(QMetaObject::invokeMethod(&window, "showIncludeEdge", Qt::DirectConnection,
+                                      Q_ARG(QTreeWidgetItem *, edge), Q_ARG(int, 0)));
+    QVERIFY(details->toPlainText().contains(QStringLiteral("source-scan")));
+    QVERIFY(details->toPlainText().contains(QStringLiteral("second/common.hpp")));
+    QTest::mouseClick(commandButton, Qt::LeftButton);
+    QCOMPARE(tabs->currentWidget(), commandTab);
 }
 
 void MainWindowTest::filtersV2SourcesAndStructuredFields() {

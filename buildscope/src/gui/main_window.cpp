@@ -4,7 +4,10 @@
 #include "buildscope/contract.hpp"
 #include "ui_main_window.h"
 
+#include <QDesktopServices>
+#include <QDir>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QHeaderView>
 #include <QIcon>
 #include <QItemSelectionModel>
@@ -12,6 +15,7 @@
 #include <QSortFilterProxyModel>
 #include <QTableWidgetItem>
 #include <QTreeWidgetItem>
+#include <QUrl>
 
 #include <utility>
 
@@ -69,6 +73,122 @@ QTableWidgetItem *tableItem(const QString &text) {
     return item;
 }
 
+QString includeEdgeDetails(const SnapshotIncludeEdge &edge) {
+    QStringList lines = {
+        QObject::tr("Evidence: %1").arg(edge.evidence),
+        QObject::tr("Directive: %1:%2  #include %3")
+            .arg(edge.parent)
+            .arg(edge.line)
+            .arg(edge.requested),
+        QObject::tr("Location evidence: %1").arg(edge.locationEvidence),
+        QObject::tr("Resolved: %1")
+            .arg(edge.resolved.has_value() ? *edge.resolved : QObject::tr("unresolved")),
+        QObject::tr("Classification: %1").arg(edge.classification),
+    };
+    if (!edge.alternatives.isEmpty()) {
+        lines.append(QObject::tr("Same-name alternatives: %1")
+                         .arg(edge.alternatives.join(QStringLiteral(", "))));
+    }
+    lines.append(QObject::tr("Ordered search:"));
+    for (const auto &candidate : edge.search) {
+        lines.append(QObject::tr("  %1. [%2] %3 — %4%5")
+                         .arg(candidate.order)
+                         .arg(candidate.kind, candidate.candidate,
+                              candidate.exists ? QObject::tr("exists")
+                                               : QObject::tr("missing"),
+                              candidate.selected ? QObject::tr(" (selected)") : QString()));
+    }
+    return lines.join(QLatin1Char('\n'));
+}
+
+void addDiagnostic(QTreeWidget *tree, const SnapshotDiagnostic &diagnostic) {
+    auto *item =
+        new QTreeWidgetItem({diagnostic.severity, diagnostic.code, diagnostic.message});
+    item->setToolTip(2, diagnostic.message);
+    tree->addTopLevelItem(item);
+}
+
+QTreeWidgetItem *includeSearchItem(const SnapshotIncludeSearch &candidate,
+                                   const SnapshotIncludeEdge &edge,
+                                   const QString &details) {
+    auto *item = new QTreeWidgetItem(
+        {QObject::tr("%1. %2").arg(candidate.order).arg(candidate.kind), QString(),
+         candidate.candidate,
+         candidate.selected
+             ? QObject::tr("selected")
+             : (candidate.exists ? QObject::tr("candidate") : QObject::tr("missing")),
+         edge.parent});
+    item->setData(0, Qt::UserRole, edge.parent);
+    item->setData(0, Qt::UserRole + 1, edge.line);
+    item->setData(0, Qt::UserRole + 2, details);
+    return item;
+}
+
+QTreeWidgetItem *includeEdgeItem(const SnapshotIncludeEdge &edge) {
+    auto *item = new QTreeWidgetItem(
+        {edge.evidence, edge.requested,
+         edge.resolved.has_value() ? *edge.resolved : QObject::tr("unresolved"),
+         edge.classification, QObject::tr("%1:%2").arg(edge.parent).arg(edge.line)});
+    const auto details = includeEdgeDetails(edge);
+    item->setData(0, Qt::UserRole, edge.parent);
+    item->setData(0, Qt::UserRole + 1, edge.line);
+    item->setData(0, Qt::UserRole + 2, details);
+    item->setToolTip(2, details);
+    for (const auto &candidate : edge.search) {
+        item->addChild(includeSearchItem(candidate, edge, details));
+    }
+    return item;
+}
+
+void populateDefinitions(Ui::MainWindow &ui, const SnapshotEntry &entry) {
+    ui.defineTable->setRowCount(entry.hasNormalized ? entry.normalized.defines.size() : 0);
+    if (!entry.hasNormalized) {
+        return;
+    }
+    for (qsizetype row = 0; row < entry.normalized.defines.size(); ++row) {
+        const auto &define = entry.normalized.defines.at(row);
+        ui.defineTable->setItem(row, 0, tableItem(define.action));
+        ui.defineTable->setItem(row, 1, tableItem(define.name));
+        ui.defineTable->setItem(
+            row, 2, tableItem(define.value.has_value() ? *define.value : QStringLiteral("—")));
+    }
+}
+
+void populateSearchPaths(Ui::MainWindow &ui, const SnapshotEntry &entry) {
+    ui.includeTable->setRowCount(entry.hasNormalized ? entry.normalized.includePaths.size() : 0);
+    if (!entry.hasNormalized) {
+        return;
+    }
+    for (qsizetype row = 0; row < entry.normalized.includePaths.size(); ++row) {
+        const auto &include = entry.normalized.includePaths.at(row);
+        ui.includeTable->setItem(row, 0, tableItem(QString::number(include.order)));
+        ui.includeTable->setItem(row, 1, tableItem(include.kind));
+        ui.includeTable->setItem(row, 2, tableItem(include.scope));
+        ui.includeTable->setItem(row, 3, tableItem(existenceText(include.exists)));
+        ui.includeTable->setItem(row, 4, tableItem(include.path));
+    }
+}
+
+void populateIncludeAnalysis(Ui::MainWindow &ui, const SnapshotEntry &entry) {
+    if (!entry.hasIncludeAnalysis) {
+        ui.includeEvidenceLabel->setText(
+            QObject::tr("Include analysis unavailable (v1/v2 snapshot)"));
+        return;
+    }
+    const auto &analysis = entry.includeAnalysis;
+    ui.includeEvidenceLabel->setText(QObject::tr("Evidence: %1 · edges: %2 · %3 ms")
+                                         .arg(analysis.evidence)
+                                         .arg(analysis.edges.size())
+                                         .arg(analysis.durationMs));
+    ui.includeReplayEdit->setPlainText(renderArgumentVector(analysis.command));
+    for (const auto &edge : analysis.edges) {
+        ui.includeEdgeTree->addTopLevelItem(includeEdgeItem(edge));
+    }
+    for (const auto &diagnostic : analysis.diagnostics) {
+        addDiagnostic(ui.diagnosticTree, diagnostic);
+    }
+}
+
 }  // namespace
 
 MainWindow::MainWindow(QWidget *parent)
@@ -88,12 +208,24 @@ MainWindow::MainWindow(QWidget *parent)
     ui_->defineTable->horizontalHeader()->setStretchLastSection(true);
     ui_->includeTable->horizontalHeader()->setStretchLastSection(true);
     ui_->diagnosticTree->header()->setStretchLastSection(true);
+    ui_->includeEdgeTree->header()->setStretchLastSection(true);
     connect(ui_->openButton, &QPushButton::clicked, this, &MainWindow::chooseSnapshot);
     connect(ui_->filterEdit, &QLineEdit::textChanged, this, &MainWindow::applyFilter);
     connect(ui_->sourceTree->selectionModel(), &QItemSelectionModel::currentChanged, this,
             [this](const QModelIndex &current, const QModelIndex &) {
                 showSelection(current);
             });
+    connect(ui_->includeEdgeTree, &QTreeWidget::itemClicked, this,
+            &MainWindow::showIncludeEdge);
+    connect(ui_->includeEdgeTree, &QTreeWidget::itemDoubleClicked, this,
+            [this](QTreeWidgetItem *item, int column) {
+                showIncludeEdge(item, column);
+                openIncludeLocation();
+            });
+    connect(ui_->openIncludeButton, &QPushButton::clicked, this,
+            &MainWindow::openIncludeLocation);
+    connect(ui_->showCommandButton, &QPushButton::clicked, this,
+            &MainWindow::showCompilationCommand);
     clearDetails(tr("Select a source or configuration"));
 }
 
@@ -184,6 +316,13 @@ void MainWindow::clearDetails(const QString &message) {
     ui_->rawCommandEdit->clear();
     ui_->defineTable->setRowCount(0);
     ui_->includeTable->setRowCount(0);
+    ui_->includeEdgeTree->clear();
+    ui_->includeEvidenceLabel->setText(tr("Include analysis unavailable"));
+    ui_->includeEdgeEdit->clear();
+    ui_->includeReplayEdit->clear();
+    ui_->openIncludeButton->setEnabled(false);
+    selectedIncludePath_.clear();
+    selectedIncludeLine_ = 0;
     ui_->diagnosticTree->clear();
 }
 
@@ -206,38 +345,47 @@ void MainWindow::showEntry(const CompilationEntryView &view) {
     ui_->argumentsEdit->setPlainText(view.structuredArguments());
     ui_->rawCommandEdit->setPlainText(
         view.rawCommand().isEmpty() ? tr("<not provided>") : view.rawCommand());
-
-    ui_->defineTable->setRowCount(entry->hasNormalized ? entry->normalized.defines.size() : 0);
-    if (entry->hasNormalized) {
-        for (qsizetype row = 0; row < entry->normalized.defines.size(); ++row) {
-            const auto &define = entry->normalized.defines.at(row);
-            ui_->defineTable->setItem(row, 0, tableItem(define.action));
-            ui_->defineTable->setItem(row, 1, tableItem(define.name));
-            ui_->defineTable->setItem(
-                row, 2, tableItem(define.value.has_value() ? *define.value : QStringLiteral("—")));
-        }
-    }
-
-    ui_->includeTable->setRowCount(
-        entry->hasNormalized ? entry->normalized.includePaths.size() : 0);
-    if (entry->hasNormalized) {
-        for (qsizetype row = 0; row < entry->normalized.includePaths.size(); ++row) {
-            const auto &include = entry->normalized.includePaths.at(row);
-            ui_->includeTable->setItem(row, 0, tableItem(QString::number(include.order)));
-            ui_->includeTable->setItem(row, 1, tableItem(include.kind));
-            ui_->includeTable->setItem(row, 2, tableItem(include.scope));
-            ui_->includeTable->setItem(row, 3, tableItem(existenceText(include.exists)));
-            ui_->includeTable->setItem(row, 4, tableItem(include.path));
-        }
-    }
-
     ui_->diagnosticTree->clear();
     for (const auto &diagnostic : entry->diagnostics) {
-        auto *item = new QTreeWidgetItem(
-            {diagnostic.severity, diagnostic.code, diagnostic.message});
-        item->setToolTip(2, diagnostic.message);
-        ui_->diagnosticTree->addTopLevelItem(item);
+        addDiagnostic(ui_->diagnosticTree, diagnostic);
     }
+    populateDefinitions(*ui_, *entry);
+
+    ui_->includeEdgeTree->clear();
+    ui_->includeEdgeEdit->clear();
+    ui_->includeReplayEdit->clear();
+    selectedIncludePath_.clear();
+    selectedIncludeLine_ = 0;
+    ui_->openIncludeButton->setEnabled(false);
+    populateIncludeAnalysis(*ui_, *entry);
+    populateSearchPaths(*ui_, *entry);
+}
+
+void MainWindow::showIncludeEdge(QTreeWidgetItem *item, int) {
+    if (item == nullptr) {
+        return;
+    }
+    selectedIncludePath_ = item->data(0, Qt::UserRole).toString();
+    selectedIncludeLine_ = item->data(0, Qt::UserRole + 1).toLongLong();
+    ui_->includeEdgeEdit->setPlainText(item->data(0, Qt::UserRole + 2).toString());
+    ui_->openIncludeButton->setEnabled(!selectedIncludePath_.isEmpty());
+}
+
+void MainWindow::openIncludeLocation() {
+    if (selectedIncludePath_.isEmpty()) {
+        return;
+    }
+    auto path = selectedIncludePath_;
+    if (!QFileInfo(path).isAbsolute() && !model_->snapshot().projectRoot.isEmpty()) {
+        path = QDir(model_->snapshot().projectRoot).filePath(path);
+    }
+    ui_->statusLabel->setText(
+        tr("Opening include location %1:%2").arg(selectedIncludePath_).arg(selectedIncludeLine_));
+    QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+}
+
+void MainWindow::showCompilationCommand() {
+    ui_->detailTabs->setCurrentWidget(ui_->commandTab);
 }
 
 }  // namespace buildscope

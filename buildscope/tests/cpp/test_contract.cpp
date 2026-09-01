@@ -20,10 +20,12 @@ class ContractTest final : public QObject {
 private slots:
     void loadsVersionedSnapshot();
     void loadsNormalizedV2Snapshot();
+    void loadsIncludeExplanationV3();
     void acceptsCommandOnlyV2Entry();
     void acceptsEmptyNonCompilerV2Arg();
     void preservesEmptyV1Arguments();
     void rejectsMalformedV2Core();
+    void rejectsMalformedV3Core();
     void rejectsMismatchedEntryCount();
     void rejectsInvalidContracts();
     void rejectsDuplicateJsonKeys();
@@ -89,6 +91,56 @@ QByteArray validV2Payload() {
         "diagnostics":[{"code":"notice","message":"A stable diagnostic.","severity":"warning"}]
       }]
     })json";
+}
+
+QByteArray validV3Payload() {
+    auto document = QJsonDocument::fromJson(validV2Payload());
+    auto root = document.object();
+    root.insert(QStringLiteral("schema_version"), QStringLiteral("buildscope.snapshot/v3"));
+    auto entries = root.value(QStringLiteral("entries")).toArray();
+    auto entry = entries.at(0).toObject();
+    entry.insert(
+        QStringLiteral("include_analysis"),
+        QJsonDocument::fromJson(R"json({
+          "command":["/usr/bin/c++","-E","-H","src/main.cpp"],
+          "diagnostics":[{"code":"trace-note","message":"Measured safely.","severity":"info"}],
+          "duration_ms":12,
+          "evidence":"compiler-measured",
+          "edges":[{
+            "alternatives":["include/second/common.hpp"],
+            "classification":"project",
+            "delimiter":"quote",
+            "evidence":"compiler-measured",
+            "line":7,
+            "location_evidence":"source-scan",
+            "parent":"src/main.cpp",
+            "requested":"common.hpp",
+            "resolved":"include/first/common.hpp",
+            "search":[
+              {"candidate":"src/common.hpp","exists":false,"kind":"current","order":0,"selected":false},
+              {"candidate":"include/first/common.hpp","exists":true,"kind":"include","order":1,"selected":true},
+              {"candidate":"include/second/common.hpp","exists":true,"kind":"include","order":2,"selected":false}
+            ]
+          }]
+        })json")
+            .object());
+    entries.replace(0, entry);
+    root.insert(QStringLiteral("entries"), entries);
+    return QJsonDocument(root).toJson(QJsonDocument::Compact);
+}
+
+template <typename Mutator>
+QByteArray mutateV3Analysis(Mutator mutator) {
+    auto document = QJsonDocument::fromJson(validV3Payload());
+    auto root = document.object();
+    auto entries = root.value(QStringLiteral("entries")).toArray();
+    auto entry = entries.at(0).toObject();
+    auto analysis = entry.value(QStringLiteral("include_analysis")).toObject();
+    mutator(analysis);
+    entry.insert(QStringLiteral("include_analysis"), analysis);
+    entries.replace(0, entry);
+    root.insert(QStringLiteral("entries"), entries);
+    return QJsonDocument(root).toJson(QJsonDocument::Compact);
 }
 
 #if defined(Q_OS_UNIX)
@@ -266,6 +318,38 @@ void ContractTest::loadsNormalizedV2Snapshot() {
     QCOMPARE(entry.diagnostics.front().severity, QStringLiteral("warning"));
     QCOMPARE(buildscope::invocationText(entry),
              QStringLiteral("c++ -std=c++20 -DFEATURE=1 -Iinclude -c src/main.cpp"));
+}
+
+void ContractTest::loadsIncludeExplanationV3() {
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const auto path = temporary.filePath(QStringLiteral("snapshot.json"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    const auto payload = validV3Payload();
+    QCOMPARE(file.write(payload), payload.size());
+    file.close();
+
+    const auto snapshot = buildscope::loadSnapshotFile(path);
+
+    QCOMPARE(snapshot.schemaVersion, QStringLiteral("buildscope.snapshot/v3"));
+    const auto &entry = snapshot.entries.front();
+    QVERIFY(entry.hasIncludeAnalysis);
+    QCOMPARE(entry.includeAnalysis.evidence, QStringLiteral("compiler-measured"));
+    QCOMPARE(entry.includeAnalysis.durationMs, qsizetype(12));
+    QCOMPARE(entry.includeAnalysis.command.size(), 4);
+    QCOMPARE(entry.includeAnalysis.diagnostics.size(), 1);
+    QCOMPARE(entry.includeAnalysis.edges.size(), 1);
+    const auto &edge = entry.includeAnalysis.edges.front();
+    QCOMPARE(edge.parent, QStringLiteral("src/main.cpp"));
+    QCOMPARE(edge.line, qsizetype(7));
+    QCOMPARE(edge.locationEvidence, QStringLiteral("source-scan"));
+    QCOMPARE(edge.requested, QStringLiteral("common.hpp"));
+    QVERIFY(edge.resolved.has_value());
+    QCOMPARE(*edge.resolved, QStringLiteral("include/first/common.hpp"));
+    QCOMPARE(edge.alternatives, QStringList({QStringLiteral("include/second/common.hpp")}));
+    QCOMPARE(edge.search.size(), 3);
+    QVERIFY(edge.search.at(1).selected);
 }
 
 void ContractTest::acceptsEmptyNonCompilerV2Arg() {
@@ -751,6 +835,65 @@ void ContractTest::rejectsMalformedV2Core() {
             diagnostic.insert(QStringLiteral("severity"), QStringLiteral("other"));
         }),
         QStringLiteral("entries[0].diagnostics[0].severity is unsupported"));
+}
+
+void ContractTest::rejectsMalformedV3Core() {
+    expectContractError(
+        mutateV3Analysis([](QJsonObject &analysis) {
+            analysis.insert(QStringLiteral("command"), QJsonArray());
+        }),
+        QStringLiteral("compiler-measured evidence requires a command"));
+    expectContractError(
+        mutateV3Analysis([](QJsonObject &analysis) {
+            auto edges = analysis.value(QStringLiteral("edges")).toArray();
+            auto edge = edges.at(0).toObject();
+            auto search = edge.value(QStringLiteral("search")).toArray();
+            auto extraSelected = search.at(0).toObject();
+            extraSelected.insert(QStringLiteral("exists"), true);
+            extraSelected.insert(QStringLiteral("selected"), true);
+            search.replace(0, extraSelected);
+            edge.insert(QStringLiteral("search"), search);
+            edges.replace(0, edge);
+            analysis.insert(QStringLiteral("edges"), edges);
+        }),
+        QStringLiteral("search must select exactly one resolved candidate"));
+    expectContractError(
+        mutateV3Analysis([](QJsonObject &analysis) {
+            auto edges = analysis.value(QStringLiteral("edges")).toArray();
+            auto edge = edges.at(0).toObject();
+            auto search = edge.value(QStringLiteral("search")).toArray();
+            auto selected = search.at(1).toObject();
+            selected.insert(QStringLiteral("candidate"),
+                            QStringLiteral("include/other/common.hpp"));
+            search.replace(1, selected);
+            edge.insert(QStringLiteral("search"), search);
+            edges.replace(0, edge);
+            analysis.insert(QStringLiteral("edges"), edges);
+        }),
+        QStringLiteral("resolved must match the selected search candidate"));
+    expectContractError(
+        mutateV3Analysis([](QJsonObject &analysis) {
+            auto edges = analysis.value(QStringLiteral("edges")).toArray();
+            auto edge = edges.at(0).toObject();
+            edge.insert(QStringLiteral("alternatives"),
+                        QJsonArray{QStringLiteral("include/unlisted/common.hpp")});
+            edges.replace(0, edge);
+            analysis.insert(QStringLiteral("edges"), edges);
+        }),
+        QStringLiteral("alternatives must match distinct existing unselected candidates"));
+    expectContractError(
+        mutateV3Analysis([](QJsonObject &analysis) {
+            auto edges = analysis.value(QStringLiteral("edges")).toArray();
+            auto edge = edges.at(0).toObject();
+            edge.insert(QStringLiteral("classification"), QStringLiteral("missing"));
+            edges.replace(0, edge);
+            analysis.insert(QStringLiteral("edges"), edges);
+        }),
+        QStringLiteral("classification contradicts the resolved path"));
+    auto legacy = QJsonDocument::fromJson(validV3Payload()).object();
+    legacy.insert(QStringLiteral("schema_version"), QStringLiteral("buildscope.snapshot/v2"));
+    expectContractError(QJsonDocument(legacy).toJson(QJsonDocument::Compact),
+                        QStringLiteral("include_analysis is unsupported before snapshot v3"));
 }
 
 void ContractTest::rejectsMismatchedEntryCount() {

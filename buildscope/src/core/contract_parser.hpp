@@ -36,8 +36,10 @@ qsizetype requiredInteger(const QJsonObject &object, const QString &key,
 QStringList requiredStringArray(const QJsonObject &object, const QString &key,
                                 const QString &location, bool nonEmpty,
                                 bool allowEmptyNonCompiler = false);
-ParsedRawEntry parseRawEntry(const QJsonValue &value, qsizetype index, bool v2);
+ParsedRawEntry parseRawEntry(const QJsonValue &value, qsizetype index, bool normalized,
+                             bool v3 = false);
 SnapshotEntry parseV2Entry(const QJsonValue &value, qsizetype index);
+SnapshotEntry parseV3Entry(const QJsonValue &value, qsizetype index);
 Snapshot parseSnapshotDocument(const QJsonDocument &document);
 
 }  // namespace buildscope::detail

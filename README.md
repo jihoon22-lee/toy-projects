@@ -12,7 +12,7 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 |---|---|---|
 | [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D2 cancellable/latest-generation scan complete (PR #28) · identity-safe scan · D3 next |
 | [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · L2 1 GiB benchmark merged in PR #26 · default capacity 8192 |
-| [buildscope](buildscope/) | compile DB explorer | B2 Qt explorer 0.3.0 · ici v0.8.0 · PR #32/main remote verified |
+| [buildscope](buildscope/) | compile DB explorer | B3 include explanation 0.4.0 local candidate · B2 PR #32/main remote verified · B3 remote pending |
 
 ### buildscope B0 hybrid skeleton — release-backed evidence
 
@@ -80,6 +80,49 @@ functions였다. PR 100k benchmark는 model `53 ms`, filter `1,518 ms`, summary 
 | [BuildScope](https://jihoon22-lee.github.io/toy-projects/buildscope/pr/32/) | 562,234 | `f15d18fe42ac172385e682ceb49e4b6d6f1d9bbfcc0ead301c11d1ee049c4c82` | `ici Verification Report — buildscope` |
 | [diskmap](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/32/) | 311,846 | `752f07251bc38285ea1633f5df879985131963e4b99f90532722eaedc9be1802` | `ici Verification Report — diskmap` |
 | [loglens](https://jihoon22-lee.github.io/toy-projects/loglens/pr/32/) | 446,791 | `7b2669fb7de82ada30bfdf28a2d82533f5566ad92779ea08c90528e188ea582b` | `ici Verification Report — loglens` |
+
+### buildscope B3 include explanation — 0.4.0 local candidate
+
+BuildScope의 현재 브랜치는 아직 release되지 않은 `0.4.0` B3 local candidate다. 옵션을 생략하면
+기존처럼 normalized `buildscope.snapshot/v2`를 만들고, `--schema-version v1`은 raw compatibility
+projection을 유지한다. `--include-analysis estimate|compiler`는 명시적으로 `v3`를 만들며,
+`--schema-version v3`만 쓰면 `estimate`가 기본이다. v3는 root/entry/analysis/edge/search/
+diagnostic 필드를 모두 담는 strict self-contained schema이며, 분석이 불가능한 entry도
+`evidence: unavailable` warning으로 같은 계약 안에 남긴다.
+
+`estimate`는 bounded source scan만 수행한다. `compiler`는 shell 없이 직접 실행되는 승인된
+system GCC/Clang driver에 `-E -H`를 적용하고, positive option allowlist·argv/trace/edge/source
+limits·unit/time budget을 지키며 response file, stdin, extra input, plugin/linker escape를
+거부한다. compiler trace가 실제 resolved edge를 결정하고 source scan이 parent:line 위치를
+보강하므로 `compiler-measured`와 `source-scan` location evidence가 별도로 보존된다. 각 edge는
+current/quote → include/framework → system → after 순서의 후보와 selected path, same-basename
+alternatives, project/vendor/generated/system/missing/unresolved classification을 기록한다. strict
+v3 consumer는 `resolved`가 선택된 단 하나의 후보와 일치하는지, `alternatives`가 distinct
+existing unselected 후보와 일치하는지 검증하며, 중복 search path에서는 최초 후보만 `selected`로
+표시한다.
+
+Qt **Include Edges** 탭에서는 provenance, ordered candidates, collision alternatives, directive
+위치와 replay command를 확인할 수 있다. Edge를 선택하면 상세가 열리고, 더블클릭 또는 **Open
+Source Location**으로 parent source 위치를 열며, **Compilation Command**로 원래 command 탭으로
+돌아간다. 최신 local candidate 검증에서 Python 3.10 pytest `57/57`, Ruff check+format `14 files`,
+mypy `11 source files`, Qt5 5.15.18과 Qt6 6.10.2 Release CMake/CTest 각각 `6/6` PASS를
+확인했다. 현재 compiler execution/sanitization/process bounds는 새
+`buildscope/python/buildscope/compiler_replay.py`로 분리하고, `include_analysis.py`는 source
+scan/edge assembly/trace interpretation을 담당한다. checksum이 확인된 ici v0.8.0 release
+asset을 사용한 no-cache local public-release validation은 `Suite WARN`(검증 통과), engines
+`11 PASS / 2 WARN / 0 FAIL / 0 ERROR / 0 SKIP`, line `PASS`(`5,151` total / `4,591` code /
+`3` comment / `557` blank across `25` files), lint `PASS`, compile_db `8/8` production units·`19`
+configurations·`0` failures/warnings, tests `63/63`, line/function/branch `92.6% / 98.9% / 79.1%`,
+TEM `4.94`, complexity `PASS` (max `14` / `251` functions / `0` issues),
+sanitize/security/resource/cycle/dead/exception `PASS`, duplication `11.65%` (raw display `11.7%`,
+`78` groups, `179` findings), total `34.71s`를 기록했다. WARN은 type(C++ unsupported)와 dup뿐이다.
+`/tmp` HTML은 `851,656` bytes, SHA-256
+`07d25971e04ed6a4aece36724ce8cf5e3c0548b7c382941a810454d8521c3e34`, 정확한 title
+`ici Verification Report — buildscope`, external refs `0`이었다. B3 PR/remote Pages evidence와도
+별개다. 최종 benchmark는 `100,000` entries/`25,000` sources, model `61 ms`, filter `1,126 ms`,
+budget `10,000 ms`, correctness `true`였고, `buildscope-0.4.0-py3-none-any.whl`에
+`compiler_replay.py`와 v3 schema가 패키징되어 schema validation `PASS`였다. B3 PR/remote CI, B5 release integration,
+ici I3 cross-repository comparison은 아직 pending이다.
 
 ## 공통 구조 규칙
 

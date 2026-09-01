@@ -296,10 +296,181 @@ QVector<SnapshotDiagnostic> parseDiagnostics(const QJsonValue &value, const QStr
         });
 }
 
+QVector<SnapshotIncludeSearch> parseIncludeSearch(const QJsonValue &value,
+                                                  const QString &location) {
+    return parseObjectArray<SnapshotIncludeSearch>(
+        value, location, kMaxArguments,
+        [](const QJsonObject &object, const QString &itemLocation, qsizetype index) {
+            rejectUnknownKeys(object,
+                              {QStringLiteral("candidate"), QStringLiteral("exists"),
+                               QStringLiteral("kind"), QStringLiteral("order"),
+                               QStringLiteral("selected")},
+                              itemLocation);
+            SnapshotIncludeSearch search;
+            search.candidate =
+                requiredString(object, QStringLiteral("candidate"), itemLocation);
+            search.exists = requiredBool(object, QStringLiteral("exists"), itemLocation);
+            search.kind = requiredEnumString(
+                object, QStringLiteral("kind"), itemLocation,
+                {QStringLiteral("current"), QStringLiteral("quote"),
+                 QStringLiteral("include"), QStringLiteral("framework"),
+                 QStringLiteral("system"), QStringLiteral("after"),
+                 QStringLiteral("compiler")});
+            search.order = requiredInteger(object, QStringLiteral("order"), itemLocation);
+            search.selected = requiredBool(object, QStringLiteral("selected"), itemLocation);
+            if (search.order != index) {
+                throw ContractError(itemLocation + ".order must match search order");
+            }
+            if (search.selected && !search.exists) {
+                throw ContractError(itemLocation + ".selected requires an existing candidate");
+            }
+            return search;
+        });
+}
+
+struct IncludeSearchSummary {
+    qsizetype selected = 0;
+    QString selectedCandidate;
+    QStringList expectedAlternatives;
+};
+
+IncludeSearchSummary summarizeIncludeSearch(const SnapshotIncludeEdge &edge) {
+    IncludeSearchSummary summary;
+    for (const auto &candidate : edge.search) {
+        if (candidate.selected) {
+            ++summary.selected;
+            summary.selectedCandidate = candidate.candidate;
+        } else if (candidate.exists &&
+                   (!edge.resolved.has_value() || candidate.candidate != *edge.resolved)) {
+            summary.expectedAlternatives.append(candidate.candidate);
+        }
+    }
+    summary.expectedAlternatives.removeDuplicates();
+    summary.expectedAlternatives.sort();
+    return summary;
+}
+
+void validateIncludeEdge(const SnapshotIncludeEdge &edge, const QString &location) {
+    const auto summary = summarizeIncludeSearch(edge);
+    if (edge.resolved.has_value() && summary.selected != 1) {
+        throw ContractError(location + ".search must select exactly one resolved candidate");
+    }
+    if (!edge.resolved.has_value() && summary.selected != 0) {
+        throw ContractError(location + ".search cannot select an unresolved candidate");
+    }
+    if (edge.resolved.has_value() && summary.selectedCandidate != *edge.resolved) {
+        throw ContractError(location + ".resolved must match the selected search candidate");
+    }
+    auto actualAlternatives = edge.alternatives;
+    actualAlternatives.removeDuplicates();
+    if (actualAlternatives.size() != edge.alternatives.size() ||
+        actualAlternatives != summary.expectedAlternatives) {
+        throw ContractError(
+            location + ".alternatives must match distinct existing unselected candidates");
+    }
+    const bool unresolved = edge.classification == QStringLiteral("missing") ||
+                            edge.classification == QStringLiteral("unresolved");
+    if (unresolved == edge.resolved.has_value()) {
+        throw ContractError(location + ".classification contradicts the resolved path");
+    }
+}
+
+SnapshotIncludeEdge parseIncludeEdge(const QJsonObject &object, const QString &location) {
+    rejectUnknownKeys(object,
+                      {QStringLiteral("alternatives"), QStringLiteral("classification"),
+                       QStringLiteral("delimiter"), QStringLiteral("evidence"),
+                       QStringLiteral("line"), QStringLiteral("parent"),
+                       QStringLiteral("location_evidence"), QStringLiteral("requested"),
+                       QStringLiteral("resolved"), QStringLiteral("search")},
+                      location);
+    SnapshotIncludeEdge edge;
+    edge.alternatives =
+        requiredStringArray(object, QStringLiteral("alternatives"), location, false);
+    edge.classification = requiredEnumString(
+        object, QStringLiteral("classification"), location,
+        {QStringLiteral("project"), QStringLiteral("vendor"), QStringLiteral("generated"),
+         QStringLiteral("system"), QStringLiteral("missing"), QStringLiteral("unresolved")});
+    edge.delimiter = requiredEnumString(
+        object, QStringLiteral("delimiter"), location,
+        {QStringLiteral("quote"), QStringLiteral("angle"), QStringLiteral("unknown")});
+    edge.evidence = requiredEnumString(
+        object, QStringLiteral("evidence"), location,
+        {QStringLiteral("estimated"), QStringLiteral("compiler-measured")});
+    edge.line = requiredInteger(object, QStringLiteral("line"), location);
+    edge.locationEvidence = requiredEnumString(
+        object, QStringLiteral("location_evidence"), location,
+        {QStringLiteral("source-scan"), QStringLiteral("compiler-diagnostic"),
+         QStringLiteral("unavailable")});
+    if ((edge.line > 0) == (edge.locationEvidence == QStringLiteral("unavailable"))) {
+        throw ContractError(location + ".location_evidence contradicts the source line");
+    }
+    edge.parent = requiredString(object, QStringLiteral("parent"), location);
+    edge.requested = requiredString(object, QStringLiteral("requested"), location);
+    const auto resolved = object.value(QStringLiteral("resolved"));
+    if (resolved.isString()) {
+        edge.resolved = requiredString(object, QStringLiteral("resolved"), location);
+    } else if (!resolved.isNull()) {
+        throw ContractError(location + ".resolved must be a non-empty string or null");
+    }
+    edge.search = parseIncludeSearch(object.value(QStringLiteral("search")), location + ".search");
+    validateIncludeEdge(edge, location);
+    return edge;
+}
+
+QVector<SnapshotIncludeEdge> parseIncludeEdges(const QJsonValue &value,
+                                               const QString &location) {
+    constexpr qsizetype kMaxIncludeEdges = 100000;
+    return parseObjectArray<SnapshotIncludeEdge>(
+        value, location, kMaxIncludeEdges,
+        [](const QJsonObject &object, const QString &itemLocation, qsizetype) {
+            return parseIncludeEdge(object, itemLocation);
+        });
+}
+
+SnapshotIncludeAnalysis parseIncludeAnalysis(const QJsonValue &value,
+                                             const QString &location) {
+    const auto object = requiredObject(value, location);
+    rejectUnknownKeys(object,
+                      {QStringLiteral("command"), QStringLiteral("diagnostics"),
+                       QStringLiteral("duration_ms"), QStringLiteral("edges"),
+                       QStringLiteral("evidence")},
+                      location);
+    SnapshotIncludeAnalysis analysis;
+    analysis.command =
+        requiredStringArray(object, QStringLiteral("command"), location, false);
+    analysis.diagnostics = parseDiagnostics(object.value(QStringLiteral("diagnostics")),
+                                            location + ".diagnostics");
+    analysis.durationMs = requiredInteger(object, QStringLiteral("duration_ms"), location);
+    analysis.edges = parseIncludeEdges(object.value(QStringLiteral("edges")),
+                                       location + ".edges");
+    analysis.evidence = requiredEnumString(
+        object, QStringLiteral("evidence"), location,
+        {QStringLiteral("unavailable"), QStringLiteral("estimated"),
+         QStringLiteral("compiler-measured")});
+    if (analysis.evidence == QStringLiteral("unavailable") &&
+        (!analysis.command.isEmpty() || !analysis.edges.isEmpty())) {
+        throw ContractError(location +
+                            " unavailable evidence cannot contain a command or edges");
+    }
+    if (analysis.evidence == QStringLiteral("estimated") && !analysis.command.isEmpty()) {
+        throw ContractError(location + " estimated evidence cannot contain a replay command");
+    }
+    if (analysis.evidence == QStringLiteral("compiler-measured") &&
+        analysis.command.isEmpty()) {
+        throw ContractError(location + " compiler-measured evidence requires a command");
+    }
+    for (const auto &edge : analysis.edges) {
+        if (edge.evidence != analysis.evidence) {
+            throw ContractError(location + ".edges evidence must match the analysis evidence");
+        }
+    }
+    return analysis;
+}
+
 }  // namespace
 
-SnapshotEntry parseV2Entry(const QJsonValue &value, qsizetype index) {
-    const auto raw = parseRawEntry(value, index, true);
+SnapshotEntry parseNormalizedEntry(const QJsonValue &value, qsizetype index, bool v3) {
+    const auto raw = parseRawEntry(value, index, true, v3);
     const auto object = value.toObject();
     SnapshotEntry entry;
     entry.file = raw.file;
@@ -315,6 +486,12 @@ SnapshotEntry parseV2Entry(const QJsonValue &value, qsizetype index) {
     entry.diagnostics = parseDiagnostics(
         object.value(QStringLiteral("diagnostics")),
         QStringLiteral("entries[") + QString::number(index) + "].diagnostics");
+    if (v3) {
+        entry.includeAnalysis = parseIncludeAnalysis(
+            object.value(QStringLiteral("include_analysis")),
+            QStringLiteral("entries[") + QString::number(index) + "].include_analysis");
+        entry.hasIncludeAnalysis = true;
+    }
     const auto expectedSource = raw.hasArguments ? QStringLiteral("arguments")
                                                  : QStringLiteral("command");
     if (entry.normalized.invocationSource != expectedSource) {
@@ -328,6 +505,14 @@ SnapshotEntry parseV2Entry(const QJsonValue &value, qsizetype index) {
     entry.hasNormalized = true;
     entry.hasState = true;
     return entry;
+}
+
+SnapshotEntry parseV2Entry(const QJsonValue &value, qsizetype index) {
+    return parseNormalizedEntry(value, index, false);
+}
+
+SnapshotEntry parseV3Entry(const QJsonValue &value, qsizetype index) {
+    return parseNormalizedEntry(value, index, true);
 }
 
 }  // namespace buildscope::detail

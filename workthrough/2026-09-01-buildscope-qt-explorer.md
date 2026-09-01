@@ -137,6 +137,7 @@ titles and zero external resource references:
 ## Scope after B2
 
 B2 normalized model, Qt explorer, local-resource packaging, focused tests, benchmark evidence, and
-remote integration are complete for the 0.3.0 main state. B3 compiler-measured include explanation,
-B4 configuration diff, B5 hybrid release integration, and the ici I3 target-by-target same-basename
+remote integration are complete for the 0.3.0 main state. B3 include explanation is now recorded as
+an implementation/local candidate in the separate B3 workthrough; B3 remote verification, B4
+configuration diff, B5 hybrid release integration, and the ici I3 target-by-target same-basename
 comparison remain future work.

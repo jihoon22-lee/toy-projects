@@ -1,6 +1,6 @@
 # BuildScope
 
-BuildScope 0.3.0 is a hybrid build explorer. B0 established the producer/consumer boundary:
+BuildScope 0.4.0 is the unreleased local candidate for the B3 hybrid build explorer. B0 established the producer/consumer boundary:
 Python 3.10+ reads a `compile_commands.json` without executing its commands and emits a
 deterministic `buildscope.snapshot/v1` document; a C++20/Qt CLI and GUI validate and consume that
 document. B1 adds the Python compile-database normalization core and emits the additive
@@ -9,7 +9,9 @@ sources are grouped with their configurations, status/search/detail views are av
 commands remain separate from structured JSON argv. The B1 public ici v0.7.1 cold verification and
 the B2 public ici v0.8.0 evidence recorded here remain separate from the hosted evidence below:
 B1 was verified in [PR #31](https://github.com/jihoon22-lee/toy-projects/pull/31), and B2 was
-verified in [PR #32](https://github.com/jihoon22-lee/toy-projects/pull/32).
+verified in [PR #32](https://github.com/jihoon22-lee/toy-projects/pull/32). B3 adds optional
+include explanation while keeping v2 as the default and is documented below as implementation and
+local-candidate evidence only; no B3 PR or remote verification is claimed here.
 
 ## B0 scope
 
@@ -40,9 +42,9 @@ bounded/core/cross-entry v2 validation; B2 completes the normalized C++ model/UI
 
 The B0 `v1` snapshot remains the raw compatibility boundary. B1 normalization is implemented in
 the Python producer, while B2 presents the normalized view and retains the raw compatibility fields.
-B1 owns contract acceptance; B2 owns the normalized C++ model/UI transition and is complete.
-Configuration diff (B4),
-compiler-measured include explanation (B3), hybrid release integration (B5), and the ici I3
+B1 owns contract acceptance; B2 owns the normalized C++ model/UI transition and is complete. B3's
+include explanation is implemented locally in the `0.4.0` candidate, but its remote integration is
+still pending. Configuration diff (B4), hybrid release integration (B5), and the ici I3
 target-by-target comparison remain pending.
 
 ## B1 compile-database normalization (`buildscope.snapshot/v2`)
@@ -168,6 +170,149 @@ source nodes and a 10,000 ms budget:
 
 The benchmark checks entry/source counts, parent-child data, the final source role, and the
 filtered-source count in addition to both timing budgets.
+
+## B3 include explanation (`0.4.0` local candidate)
+
+B3 adds an optional include graph to the normalized snapshot. The input is still a bounded
+`compile_commands.json`; no external `ici` context is required. The producer can either explain
+the include paths lexically or ask the compiler for its actual include trace. B3 is implemented in
+this branch and has local candidate evidence below, but it is not yet a remote-verified or released
+BuildScope version.
+
+### CLI modes and compatibility
+
+The CLI remains backward-compatible by default. With no analysis flag it emits normalized v2, and
+`--schema-version v1` still emits the raw compatibility projection. `--include-analysis` accepts
+`estimate` or `compiler` and implies v3; it may also be written explicitly as:
+
+The examples use the `repo_root`, `scratch_root`, and `py310_bin` variables initialized in the
+run section below; choose a scratch directory outside the repository.
+
+```bash
+# v2 remains the default and does not execute a compiler.
+PYTHONPATH="$repo_root/buildscope/python" \
+  "$py310_bin" -m buildscope "$repo_root/buildscope/fixtures/compile_commands.json" \
+  --project-root "$repo_root/buildscope" \
+  --output "$scratch_root/buildscope.snapshot.v2.json" --pretty
+
+# Lexical/source-scan explanation; no subprocess is started.
+PYTHONPATH="$repo_root/buildscope/python" \
+  "$py310_bin" -m buildscope "$repo_root/buildscope/fixtures/compile_commands.json" \
+  --project-root "$repo_root/buildscope" \
+  --schema-version v3 --include-analysis estimate \
+  --output "$scratch_root/buildscope.snapshot.estimate.json" --pretty
+
+# Compiler-measured explanation through the bounded replay policy.
+PYTHONPATH="$repo_root/buildscope/python" \
+  "$py310_bin" -m buildscope "$repo_root/buildscope/fixtures/compile_commands.json" \
+  --project-root "$repo_root/buildscope" \
+  --schema-version v3 --include-analysis compiler \
+  --analysis-max-units 512 --analysis-time-budget 120 \
+  --output "$scratch_root/buildscope.snapshot.compiler.json" --pretty
+```
+
+`--schema-version v3` without an explicit mode selects `estimate`. Supplying
+`--include-analysis` with v1 or v2 is rejected, so a caller cannot silently drop the analysis
+fields. The published `schemas/buildscope-snapshot-v3.schema.json` is self-contained and strict,
+and is packaged with the pure wheel under `buildscope/schemas/` alongside v1/v2:
+the root, entries, analysis records, edges, search candidates, diagnostics, and normalized fields
+reject unknown keys and use bounded arrays/strings and explicit enums. Every v3 entry contains an
+`include_analysis` record; if a unit cannot be inspected, the record keeps the reason in a warning
+diagnostic with `evidence: "unavailable"` instead of changing the shape of the contract. Existing
+v1/v2 consumers can continue to request their original projection.
+
+### Replay boundary and resolution evidence
+
+`estimate` scans bounded source files for `#include` directives and labels the result
+`evidence: "estimated"`; it never starts a shell, compiler, or other subprocess. `compiler` uses
+the normalized compiler entry to construct an argv-only, shell-free `-E -H` trace with output sent
+to the null device. Only a direct, executable GCC/Clang driver resolved from the system search path
+is accepted. The replay policy applies a positive option allowlist, removes compile/output/dependency
+flags, rejects response files, stdin, extra input operands, plugins, linker/driver escape options,
+and runs with a fixed minimal environment. It is a bounded read-oriented replay, not a general
+build invocation.
+
+Compiler execution, argument sanitization, and process/trace bounds are isolated in
+`buildscope/python/buildscope/compiler_replay.py`; `include_analysis.py` retains source scanning,
+edge assembly, and compiler-trace interpretation. The current split is 483 lines in
+`include_analysis.py` and 255 lines in `compiler_replay.py`.
+
+The limits are explicit: 32,768 argv items and 1 MiB of argv text per unit, 16 MiB of compiler trace,
+100,000 edges, 4 MiB per source scan, 15 seconds per compiler trace, and (by default) 512
+translation units within a 120-second overall budget. The CLI permits at most 4,096 units and a
+600-second overall budget. A rejected command, unavailable compiler, stale path, timeout, or budget
+cutoff is represented as an unavailable analysis warning in v3.
+
+For compiler-measured edges, the compiler `-H` trace decides `resolved` and the actual edge
+relationship. BuildScope source-scans the parent to recover the directive line and delimiter, so
+`evidence: "compiler-measured"` can appear with `location_evidence: "source-scan"`. Missing-header
+diagnostics use `location_evidence: "compiler-diagnostic"`; an edge whose location cannot be
+recovered reports `unavailable`. Estimated edges use `source-scan` location evidence and never
+claim compiler measurement.
+
+Each edge records its parent, requested header, delimiter, resolved path (or null), ordered search
+records, alternatives, classification, line, and both evidence labels. Search order follows the
+normalized include roots: for quoted includes, the parent directory then `quote` roots; then
+`include`/`framework`, `system`, and `after` roots in recorded order. Angle includes skip the
+current/quote phase. The first existing candidate is selected for estimates; measured traces mark
+the compiler-selected candidate. Other existing candidates are retained in `alternatives`, making
+same-basename collisions visible rather than silently losing them.
+
+The strict v3 consumer cross-checks that a resolved edge equals exactly one search candidate marked
+`selected`, and that `alternatives` contains the distinct existing candidates that were not selected.
+If a search path is recorded more than once, its candidates retain recorded order but only the first
+occurrence is marked `selected`.
+
+Classification distinguishes `project`, `vendor`, `generated`, `system`, `missing`, and
+`unresolved`: vendor path components use the known vendor directory names, generated files are
+recognized below the compilation build roots (`build`, `out`, `.build`, or `cmake-build-*`), paths
+outside the project root are system, a compiler diagnostic with no file is missing, and an estimate
+with no existing candidate is unresolved.
+
+### GUI edge navigation
+
+The v3 **Include Edges** tab shows the analysis provenance, edge count, duration, requested/resolved
+paths, classification, source location, and an expandable list of ordered search candidates. Click
+an edge to inspect its directive, location evidence, collision alternatives, and search order. The
+replay command is shown separately (and is empty for estimated evidence). Double-clicking an edge,
+or using **Open Source Location**, opens the recorded parent source location; **Compilation Command**
+jumps back to the structured/raw command view. v1/v2 snapshots continue to show that include
+analysis is unavailable rather than being treated as measured data.
+
+### B3 local candidate evidence (2026-09-01)
+
+The implementation and local checks currently recorded for this branch are:
+
+| Check | Result | Scope |
+|---|---:|---|
+| Python 3.10 pytest suite | 57/57 PASS | includes replay-policy, estimate/compiler, duplicate-search selection, v3 projection, and bounded-failure tests |
+| Ruff check + format | 14 files PASS | local Python quality gate |
+| mypy | 11 source files PASS | local Python type-check gate |
+| Qt 6.10.2 Release CMake/CTest | 6/6 PASS | v3 contract parsing, GUI edge navigation, and hybrid include contract |
+| Qt 5.15.18 Release CMake/CTest | 6/6 PASS | same six-test local candidate matrix |
+
+### Local public-release validation (ici v0.8.0)
+
+After the published `ici v0.8.0` release checksum passed, the final no-cache local public-release
+validation of this candidate completed with `Suite WARN` (verification passed): engines `11 PASS / 2
+WARN / 0 FAIL / 0 ERROR / 0 SKIP`, line `PASS` (`5,151` total / `4,591` code / `3` comment / `557`
+blank across `25` files), lint `PASS`, `compile_db` `8/8` production units · `19` configurations ·
+`0` failures/warnings, `63/63` tests, line/function/branch `92.6% / 98.9% / 79.1%`, TEM `4.94`,
+complexity `PASS` (max `14` / `251` functions / `0` issues),
+sanitize/security/resource/cycle/dead/exception `PASS`, duplication `11.65%` (raw display `11.7%`,
+`78` groups, `179` findings), and total `34.71s`. WARNs were only type (C++ unsupported) and
+duplication. The `/tmp` HTML result was `851,656` bytes with SHA-256
+`07d25971e04ed6a4aece36724ce8cf5e3c0548b7c382941a810454d8521c3e34`, exact title
+`ici Verification Report — buildscope`, and `0` external references. This is local public-release
+validation, separate from B3 PR/remote Pages evidence.
+
+The final benchmark used `100,000` entries / `25,000` sources and recorded model `61 ms`, filter
+`1,126 ms`, budget `10,000 ms`, and correctness `true`. The pure
+`buildscope-0.4.0-py3-none-any.whl` packaged `compiler_replay.py` and the v3 schema; schema
+validation passed.
+
+No B3 PR, remote CI, hosted report, B5 release integration, or ici I3 cross-repository comparison is
+claimed by this local evidence.
 
 ## Run without installing into the repository
 
@@ -307,8 +452,8 @@ external dependencies:
 | loglens | [loglens/pr/31](https://jihoon22-lee.github.io/toy-projects/loglens/pr/31/) | 446,796 | `56f3b2d54ed2a05ebf100313b4d9447553e9c6fb9c85f7e7adce8eccc838dc4f` | `ici Verification Report — loglens` |
 
 B1 implementation and PR #31 remote integration evidence are complete. B2 implementation and its
-local/public verification are recorded below. B3/B4/B5 and the ici I3 target-by-target comparison
-remain pending.
+local/public verification are recorded below. B3 implementation/local-candidate status is recorded
+above; B3 remote verification, B4/B5, and the ici I3 target-by-target comparison remain pending.
 
 ## B2 local, public, and remote verification evidence (2026-09-01)
 
@@ -343,5 +488,6 @@ titles and zero external resource references:
 | [diskmap](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/32/) | 311,846 | `752f07251bc38285ea1633f5df879985131963e4b99f90532722eaedc9be1802` | `ici Verification Report — diskmap` |
 | [loglens](https://jihoon22-lee.github.io/toy-projects/loglens/pr/32/) | 446,791 | `7b2669fb7de82ada30bfdf28a2d82533f5566ad92779ea08c90528e188ea582b` | `ici Verification Report — loglens` |
 
-B3 compiler-measured include explanation, B4 configuration diff, B5 hybrid release integration, and
-the ici I3 target-by-target same-basename comparison remain future work.
+B3 implementation/local-candidate status is recorded above. B3 remote verification, B4
+configuration diff, B5 hybrid release integration, and the ici I3 target-by-target same-basename
+comparison remain future work.

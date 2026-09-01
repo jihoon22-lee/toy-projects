@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(buildscope VERSION 0.3.0 LANGUAGES CXX)
+project(buildscope VERSION 0.4.0 LANGUAGES CXX)
 
 option(BUILDSCOPE_BUILD_BENCHMARKS "Build the 100k-entry model benchmark" OFF)
 
@@ -109,6 +109,17 @@ add_test(
         -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/tests/integration/snapshot.json
         -DCONSUMER=$<TARGET_FILE:buildscope-cli>
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/test_hybrid_contract.cmake
+)
+
+add_test(
+    NAME test_hybrid_include_contract
+    COMMAND ${CMAKE_COMMAND}
+        -DPYTHON_EXECUTABLE=${Python3_EXECUTABLE}
+        -DPYTHON_PACKAGE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/python
+        -DCOMPILER=${CMAKE_CXX_COMPILER}
+        -DWORK=${CMAKE_CURRENT_BINARY_DIR}/tests/integration/include-trace
+        -DCONSUMER=$<TARGET_FILE:buildscope-cli>
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/test_hybrid_include_contract.cmake
 )
 
 if(BUILDSCOPE_BUILD_BENCHMARKS)
