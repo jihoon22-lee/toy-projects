@@ -130,11 +130,11 @@ marker 1개와 정확히 3개 project link를 포함하고 BuildScope `11 PASS /
 | diskmap | [diskmap/pr/31](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/31/) | 311,846 | `a8806808638c584312943d2551c1668a407c45830311de07cb0eed30d15e6924` | `ici Verification Report — diskmap` |
 | loglens | [loglens/pr/31](https://jihoon22-lee.github.io/toy-projects/loglens/pr/31/) | 446,796 | `56f3b2d54ed2a05ebf100313b4d9447553e9c6fb9c85f7e7adce8eccc838dc4f` | `ici Verification Report — loglens` |
 
-B1 implementation과 PR #31 remote integration evidence는 complete다. B2 implementation/local
-verification도 complete이며 remote integration evidence는 아직 pending이다. B3/B4/B5와 ici
-I3 target-by-target comparison은 아직 pending이다.
+B1 implementation과 PR #31 remote integration evidence는 complete다. B2 implementation/local 및
+remote verification도 complete다. B3/B4/B5와 ici I3 target-by-target same-basename comparison은
+아직 pending이다.
 
-## BuildScope B2 Qt compilation explorer (implementation + local evidence, remote pending)
+## BuildScope B2 Qt compilation explorer (implementation + local/remote evidence, complete)
 
 BuildScope `0.3.0`은 v2 snapshot을 소스별로 묶는 `QAbstractItemModel`과 가상 configuration
 child index를 제공한다. snapshot entry를 다시 객체 트리로 복제하지 않고 index identity로
@@ -155,8 +155,33 @@ production units·`19` configurations, complexity max `14`/`196` functions·0 is
 HTML은 558,384 bytes, SHA-256
 `cdaefa06c52de696e0340b698e37b88dde199bc5a7bd2bbba27421618f44e444`, title은
 `ici Verification Report — buildscope`, external resource reference는 0개다. 구현과 local
-verification은 complete지만 PR CI, ici sticky comment와 BuildScope/diskmap/loglens Pages 독립
-감사가 끝나기 전에는 B2 remote integration을 complete로 표시하지 않는다.
+verification은 complete다. PR CI, ici sticky comment와 BuildScope/diskmap/loglens Pages 독립
+검증도 아래 PR 및 main 원격 증거로 완료되어 B2 remote integration까지 complete다.
+
+**B2 remote integration evidence (2026-09-01):** PR #32 head
+`41472a66e69477fde7a71fe78c3ae9e47ba7f292`는 main에
+`51a3480677a740475857dd92dd5a5a9373a287a4`로 squash-merge됐다. [PR run
+`33454143021`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33454143021)의 16개 check가
+모두 SUCCESS였고, [sticky comment #5486637533](https://github.com/jihoon22-lee/toy-projects/pull/32#issuecomment-5486637533)는
+marker 1개와 link 3개를 포함한다. PR BuildScope는 `46/46`, branch `84.2%`, TEM `4.98`,
+compile DB `8/8` production units·`19` configurations, complexity max `14`/`196` functions를
+기록했다. PR benchmark는 model `53 ms`, filter `1,518 ms`, summary JSON SHA-256
+`af7162b7603d558da6e7bc49d7bf5a80f546f412b7076992ded5e15739024db7`이며, exact-main run
+`33454634202`도 SUCCESS였다(Report job expected skipped). main benchmark는 model `58 ms`,
+filter `1,527 ms`, summary JSON SHA-256
+`247c0b33095e0a09e97a289af556eae30f47f4f5c4136c530e3d6ca0018ae2d2`다.
+
+세 hosted report는 HTTP 200·`text/html`, expected title, external resource reference 0개로
+독립 확인됐다.
+
+| Project | URL | Bytes | SHA-256 | Title |
+|---|---|---:|---|---|
+| BuildScope | [buildscope/pr/32](https://jihoon22-lee.github.io/toy-projects/buildscope/pr/32/) | 562,234 | `f15d18fe42ac172385e682ceb49e4b6d6f1d9bbfcc0ead301c11d1ee049c4c82` | `ici Verification Report — buildscope` |
+| diskmap | [diskmap/pr/32](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/32/) | 311,846 | `752f07251bc38285ea1633f5df879985131963e4b99f90532722eaedc9be1802` | `ici Verification Report — diskmap` |
+| loglens | [loglens/pr/32](https://jihoon22-lee.github.io/toy-projects/loglens/pr/32/) | 446,791 | `7b2669fb7de82ada30bfdf28a2d82533f5566ad92779ea08c90528e188ea582b` | `ici Verification Report — loglens` |
+
+B3 compiler-measured include explanation, B4 configuration diff, B5 hybrid release integration, and
+ici I3 target-by-target same-basename comparison remain pending.
 
 ## 배경
 

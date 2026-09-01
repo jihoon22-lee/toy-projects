@@ -7,9 +7,9 @@ document. B1 adds the Python compile-database normalization core and emits the a
 `buildscope.snapshot/v2` contract. B2 completes the normalized C++/Qt explorer over that contract:
 sources are grouped with their configurations, status/search/detail views are available, and raw
 commands remain separate from structured JSON argv. The B1 public ici v0.7.1 cold verification and
-the B2 public ici v0.8.0 evidence recorded here remain separate from the hosted BuildScope evidence for
-[PR #31](https://github.com/jihoon22-lee/toy-projects/pull/31), whose initial verified
-implementation/docs head is `1ff08fe5d2accddc0e9107113eb83dd86bd6d50a`.
+the B2 public ici v0.8.0 evidence recorded here remain separate from the hosted evidence below:
+B1 was verified in [PR #31](https://github.com/jihoon22-lee/toy-projects/pull/31), and B2 was
+verified in [PR #32](https://github.com/jihoon22-lee/toy-projects/pull/32).
 
 ## B0 scope
 
@@ -310,7 +310,7 @@ B1 implementation and PR #31 remote integration evidence are complete. B2 implem
 local/public verification are recorded below. B3/B4/B5 and the ici I3 target-by-target comparison
 remain pending.
 
-## B2 local and public verification evidence (2026-09-01)
+## B2 local, public, and remote verification evidence (2026-09-01)
 
 The public `ici v0.8.0` verification for the 0.3.0 explorer completed with `46/46` tests, line /
 function / branch coverage of `94.5% / 99.5% / 83.9%`, and TEM `4.98`. Its `compile_db` result
@@ -322,6 +322,26 @@ result was `100,000` entries / `25,000` source groups, model build `45 ms`, recu
 `1,071 ms`, peak RSS `132,612 KiB`, and a `10,000 ms` budget; all correctness and budget checks
 passed.
 
-BuildScope B2 is implemented locally as version `0.3.0`. B3 compiler-measured include explanation,
-B4 configuration diff, B5 hybrid release integration, and the ici I3 target-by-target comparison
-remain future work.
+BuildScope B2 is implemented locally as version `0.3.0` and its remote integration evidence is
+complete. PR #32 head `41472a66e69477fde7a71fe78c3ae9e47ba7f292` was squash-merged to main as
+`51a3480677a740475857dd92dd5a5a9373a287a4`. [Run `33454143021`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33454143021)
+passed all 16 checks; [sticky comment #5486637533](https://github.com/jihoon22-lee/toy-projects/pull/32#issuecomment-5486637533)
+has one marker and three project links. The PR BuildScope report recorded `46/46` tests, branch
+`84.2%`, TEM `4.98`, compile DB `8/8` production units across `19` configurations, and complexity
+max `14` across `196` functions. The PR benchmark summary was model `53 ms`, filter `1,518 ms`,
+with summary JSON SHA-256 `af7162b7603d558da6e7bc49d7bf5a80f546f412b7076992ded5e15739024db7`; exact-main run
+`33454634202` succeeded with the report job expected skipped, and the main benchmark was model
+`58 ms`, filter `1,527 ms`, summary JSON SHA-256
+`247c0b33095e0a09e97a289af556eae30f47f4f5c4136c530e3d6ca0018ae2d2`.
+
+The three hosted reports were independently confirmed as HTTP 200 `text/html`, with the expected
+titles and zero external resource references:
+
+| Project | Bytes | SHA-256 | Title |
+|---|---:|---|---|
+| [BuildScope](https://jihoon22-lee.github.io/toy-projects/buildscope/pr/32/) | 562,234 | `f15d18fe42ac172385e682ceb49e4b6d6f1d9bbfcc0ead301c11d1ee049c4c82` | `ici Verification Report — buildscope` |
+| [diskmap](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/32/) | 311,846 | `752f07251bc38285ea1633f5df879985131963e4b99f90532722eaedc9be1802` | `ici Verification Report — diskmap` |
+| [loglens](https://jihoon22-lee.github.io/toy-projects/loglens/pr/32/) | 446,791 | `7b2669fb7de82ada30bfdf28a2d82533f5566ad92779ea08c90528e188ea582b` | `ici Verification Report — loglens` |
+
+B3 compiler-measured include explanation, B4 configuration diff, B5 hybrid release integration, and
+the ici I3 target-by-target same-basename comparison remain future work.
