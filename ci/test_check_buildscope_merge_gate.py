@@ -16,6 +16,8 @@ if str(CI_DIR) not in sys.path:
     sys.path.insert(0, str(CI_DIR))
 
 from check_buildscope_merge_gate import (
+    MAX_CHECK_RUN_PAGES,
+    MAX_CHECK_RUNS_PER_PAGE,
     MAX_GITHUB_ID,
     MAX_JSON_BYTES,
     BuildScopeMergeGateError,
@@ -178,7 +180,105 @@ class BuildScopeMergeGateTests(unittest.TestCase):
     def test_total_count_must_equal_the_fetched_page(self) -> None:
         self._write_checks([self._check_run(100)], total_count=2)
 
-        with self.assertRaisesRegex(BuildScopeMergeGateError, "total_count"):
+        with self.assertRaisesRegex(BuildScopeMergeGateError, "incomplete"):
+            select_merge_gate(self.checks_json, TARGET_SHA, REPOSITORY)
+
+    def test_select_accepts_a_complete_paginated_slurp_response(self) -> None:
+        first_page = {
+            "total_count": 2,
+            "check_runs": [self._check_run(100, workflow_run_id=2000)],
+        }
+        second_page = {
+            "total_count": 2,
+            "check_runs": [self._check_run(101, workflow_run_id=2001)],
+        }
+        self._write(self.checks_json, [first_page, second_page])
+
+        selection = select_merge_gate(self.checks_json, TARGET_SHA, REPOSITORY)
+
+        self.assertEqual(selection.check_run_id, 101)
+        self.assertEqual(selection.workflow_run_id, 2001)
+
+    def test_paginated_response_rejects_hidden_or_incomplete_entries(self) -> None:
+        self._write(
+            self.checks_json,
+            [
+                {
+                    "total_count": 2,
+                    "check_runs": [self._check_run(100)],
+                }
+            ],
+        )
+        with self.assertRaisesRegex(BuildScopeMergeGateError, "incomplete"):
+            select_merge_gate(self.checks_json, TARGET_SHA, REPOSITORY)
+
+        self._write(
+            self.checks_json,
+            [
+                {
+                    "total_count": 2,
+                    "check_runs": [self._check_run(100)],
+                },
+                {
+                    "total_count": 2,
+                    "check_runs": [],
+                },
+            ],
+        )
+        with self.assertRaisesRegex(BuildScopeMergeGateError, "incomplete"):
+            select_merge_gate(self.checks_json, TARGET_SHA, REPOSITORY)
+
+    def test_paginated_response_rejects_inconsistent_counts_duplicates_and_limits(
+        self,
+    ) -> None:
+        self._write(
+            self.checks_json,
+            [
+                {
+                    "total_count": 2,
+                    "check_runs": [self._check_run(100)],
+                },
+                {
+                    "total_count": 3,
+                    "check_runs": [self._check_run(101), self._check_run(102)],
+                },
+            ],
+        )
+        with self.assertRaisesRegex(BuildScopeMergeGateError, "disagree"):
+            select_merge_gate(self.checks_json, TARGET_SHA, REPOSITORY)
+
+        duplicate = self._check_run(100)
+        self._write(
+            self.checks_json,
+            [
+                {"total_count": 2, "check_runs": [duplicate]},
+                {"total_count": 2, "check_runs": [duplicate]},
+            ],
+        )
+        with self.assertRaisesRegex(BuildScopeMergeGateError, "duplicate"):
+            select_merge_gate(self.checks_json, TARGET_SHA, REPOSITORY)
+
+        too_many_entries = [self._check_run(index + 1) for index in range(101)]
+        self._write(
+            self.checks_json,
+            [{"total_count": 101, "check_runs": too_many_entries}],
+        )
+        with self.assertRaisesRegex(BuildScopeMergeGateError, "page size"):
+            select_merge_gate(self.checks_json, TARGET_SHA, REPOSITORY)
+
+        pages = [
+            {"total_count": 0, "check_runs": []} for _ in range(MAX_CHECK_RUN_PAGES + 1)
+        ]
+        self._write(self.checks_json, pages)
+        with self.assertRaisesRegex(BuildScopeMergeGateError, "1 to"):
+            select_merge_gate(self.checks_json, TARGET_SHA, REPOSITORY)
+
+        one_page_too_large = [
+            {"total_count": 0, "check_runs": []}
+            for _ in range(MAX_CHECK_RUNS_PER_PAGE + 1)
+        ]
+        self._write(self.checks_json, one_page_too_large)
+        with self.assertRaisesRegex(BuildScopeMergeGateError, "1 to"):
             select_merge_gate(self.checks_json, TARGET_SHA, REPOSITORY)
 
     def test_rejects_invalid_details_url_and_duplicate_check_run_id(self) -> None:
@@ -196,7 +296,7 @@ class BuildScopeMergeGateTests(unittest.TestCase):
                 self._check_run(100, workflow_run_id=2001),
             ]
         )
-        with self.assertRaisesRegex(BuildScopeMergeGateError, "share ID"):
+        with self.assertRaisesRegex(BuildScopeMergeGateError, "duplicate"):
             select_merge_gate(self.checks_json, TARGET_SHA, REPOSITORY)
 
     def test_rejects_malformed_oversized_and_duplicate_json(self) -> None:

@@ -24,7 +24,9 @@ from pathlib import Path
 from typing import Any
 
 MAX_JSON_BYTES = 20_000_000
-MAX_CHECK_RUNS = 1_000
+MAX_CHECK_RUN_PAGES = 10
+MAX_CHECK_RUNS_PER_PAGE = 100
+MAX_CHECK_RUNS = MAX_CHECK_RUN_PAGES * MAX_CHECK_RUNS_PER_PAGE
 MAX_JSON_NODES = 100_000
 MAX_JSON_DEPTH = 100
 MAX_GITHUB_ID = (1 << 63) - 1
@@ -231,31 +233,68 @@ def _details_url(repository: str, value: object) -> tuple[str, int]:
 
 
 def _check_runs(value: Any) -> tuple[list[dict[str, Any]], int]:
-    if not isinstance(value, dict):
-        raise BuildScopeMergeGateError("check-runs response must be a JSON object")
-    total_count = value.get("total_count")
-    check_runs = value.get("check_runs")
-    if (
-        isinstance(total_count, bool)
-        or not isinstance(total_count, int)
-        or not isinstance(check_runs, list)
-        or total_count != len(check_runs)
-    ):
-        raise BuildScopeMergeGateError(
-            "check-runs total_count must be an exact count of check_runs"
-        )
-    if len(check_runs) > MAX_CHECK_RUNS:
-        raise BuildScopeMergeGateError(
-            f"check-runs response contains too many runs: {len(check_runs)}"
-        )
-    entries: list[dict[str, Any]] = []
-    for index, item in enumerate(check_runs):
-        if not isinstance(item, dict):
+    """Normalize one Checks API response or a bounded ``--slurp`` result."""
+
+    if isinstance(value, dict):
+        pages = [value]
+    elif isinstance(value, list):
+        if not 1 <= len(value) <= MAX_CHECK_RUN_PAGES:
             raise BuildScopeMergeGateError(
-                f"check-runs entry {index} must be a JSON object"
+                "paginated check-runs response must contain 1 to "
+                f"{MAX_CHECK_RUN_PAGES} pages"
             )
-        entries.append(item)
-    return entries, total_count
+        pages = value
+    else:
+        raise BuildScopeMergeGateError(
+            "check-runs response must be a JSON object or page array"
+        )
+
+    expected_total: int | None = None
+    entries: list[dict[str, Any]] = []
+    seen_ids: set[int] = set()
+    for page_index, page in enumerate(pages):
+        if not isinstance(page, dict):
+            raise BuildScopeMergeGateError(
+                f"check-runs page {page_index} must be a JSON object"
+            )
+        total_count = page.get("total_count")
+        check_runs = page.get("check_runs")
+        if (
+            isinstance(total_count, bool)
+            or not isinstance(total_count, int)
+            or total_count < 0
+            or not isinstance(check_runs, list)
+            or len(check_runs) > MAX_CHECK_RUNS_PER_PAGE
+        ):
+            raise BuildScopeMergeGateError(
+                f"check-runs page {page_index} has invalid count or page size"
+            )
+        if expected_total is None:
+            expected_total = total_count
+        elif total_count != expected_total:
+            raise BuildScopeMergeGateError("check-runs pages disagree on total_count")
+        for entry_index, item in enumerate(check_runs):
+            if not isinstance(item, dict):
+                raise BuildScopeMergeGateError(
+                    f"check-runs entry {page_index}:{entry_index} must be a JSON object"
+                )
+            run_id = _positive_id(
+                item.get("id"), f"check-run {page_index}:{entry_index} id"
+            )
+            if run_id in seen_ids:
+                raise BuildScopeMergeGateError(
+                    f"duplicate check-run ID across response: {run_id}"
+                )
+            seen_ids.add(run_id)
+            entries.append(item)
+
+    if expected_total is None or len(entries) != expected_total:
+        actual = len(entries)
+        expected = expected_total if expected_total is not None else "missing"
+        raise BuildScopeMergeGateError(
+            f"check-runs response is incomplete: {actual} entries != {expected}"
+        )
+    return entries, expected_total
 
 
 def select_merge_gate(
