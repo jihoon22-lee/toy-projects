@@ -28,7 +28,7 @@
   },
   "producer": {
     "name": "buildscope",
-    "version": "0.4.0"
+    "version": "0.5.0"
   },
   "schema_version": "buildscope.diff/v1",
   "summary": {

@@ -61,7 +61,7 @@ void DiffContractTest::loadsStrictDiffContract() {
     const auto report = buildscope::loadDiffFile(QStringLiteral(BUILDSCOPE_SAMPLE_DIFF));
 
     QCOMPARE(report.schemaVersion, QStringLiteral("buildscope.diff/v1"));
-    QCOMPARE(report.producerVersion, QStringLiteral("0.4.0"));
+    QCOMPARE(report.producerVersion, QStringLiteral("0.5.0"));
     QCOMPARE(report.beforeInput.configurationCount, 3);
     QCOMPARE(report.afterInput.configurationCount, 3);
     QCOMPARE(report.summary.visibleUnits, 4);
