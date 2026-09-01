@@ -65,6 +65,9 @@ The workflow is intentionally tag-only: it revalidates the remote annotated
 tag immediately before and after publication, fails on unmatched paths, and
 audits that the final release exposes exactly those nine names with matching
 sizes and GitHub API SHA-256 digests.
+Both the exact-main check-run poll and the final public-release audit treat a
+transient GitHub API failure as a bounded retry, while a missing successful
+Merge Gate or incomplete final asset set still fails closed after the deadline.
 
 Until that workflow runs successfully and the PR/remote/tag/release artifacts
 exist, B5 acceptance and the 0.5.0 product release remain pending.

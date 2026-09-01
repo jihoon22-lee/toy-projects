@@ -129,9 +129,13 @@ jobs:
           gate_ok=false
           gate_url=""
           for attempt in $(seq 1 120); do
-            check_runs="$(gh api \
+            if ! check_runs="$(gh api \
               -H 'Accept: application/vnd.github+json' \
-              "repos/${GITHUB_REPOSITORY}/commits/${target_sha}/check-runs?per_page=100&filter=latest")"
+              "repos/${GITHUB_REPOSITORY}/commits/${target_sha}/check-runs?per_page=100&filter=latest")"; then
+              echo "Merge Gate API attempt $attempt/120 failed; retrying" >&2
+              sleep 10
+              continue
+            fi
             gate_status="$(printf '%s' "$check_runs" | jq -r --arg sha "$target_sha" '
               [.check_runs[] | select(.name == "Merge Gate" and .head_sha == $sha)]
               | sort_by(.completed_at // "") | last // {} | .status // "missing"')"
@@ -738,8 +742,12 @@ jobs:
 
           audit_ok=false
           for attempt in $(seq 1 12); do
-            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
-              > "$RUNNER_TEMP/buildscope-release.json"
+            if ! gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+              > "$RUNNER_TEMP/buildscope-release.json"; then
+              echo "Release API attempt $attempt/12 failed; retrying" >&2
+              sleep 5
+              continue
+            fi
             if python3 - "$RUNNER_TEMP/buildscope-release.json" dist "$TAG" "$VERSION" <<'PY'
           from __future__ import annotations
 

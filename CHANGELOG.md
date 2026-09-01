@@ -76,6 +76,8 @@
   revalidates the remote annotated tag before and after publication, fails on unmatched asset paths,
   and audits the exact nine public names, sizes, states, and API digests. No B5 PR/remote CI/Pages
   run, annotated tag, or GitHub Release exists yet; the `0.5.0` product release remains pending.
+- Hardened both release API polling loops so transient GitHub 404/5xx/API failures are retried
+  inside their existing bounded windows instead of being terminated early by shell `errexit`.
 - The first B5 PR deep matrix exposed a Qt5-only sanitizer failure in `test_main_window`: all 12
   test functions passed (14 QtTest lifecycle result entries), then LeakSanitizer found 1,288 bytes
   retained by deferred Qt5 offscreen/fontconfig/widget work at process shutdown. The test now drains
