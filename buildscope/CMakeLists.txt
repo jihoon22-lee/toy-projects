@@ -3,6 +3,8 @@ project(buildscope VERSION 0.5.0 LANGUAGES CXX)
 
 option(BUILDSCOPE_BUILD_BENCHMARKS "Build the 100k-entry model benchmark" OFF)
 
+include(GNUInstallDirs)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -11,6 +13,15 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_AUTOUIC_SEARCH_PATHS "${CMAKE_CURRENT_SOURCE_DIR}/ui")
+
+if(WIN32)
+    set(_buildscope_pythonpath_separator ";")
+else()
+    set(_buildscope_pythonpath_separator ":")
+endif()
+set(_buildscope_pythonpath
+    "${CMAKE_CURRENT_SOURCE_DIR}/python${_buildscope_pythonpath_separator}${CMAKE_CURRENT_SOURCE_DIR}"
+)
 
 if(MSVC)
     add_compile_options(/W4 /WX /permissive-)
@@ -75,12 +86,28 @@ set_target_properties(buildscope-gui PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/src/gui"
 )
 
+install(TARGETS buildscope-cli buildscope-gui
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+    BUNDLE DESTINATION "${CMAKE_INSTALL_BINDIR}"
+)
+install(FILES
+    README.md
+    docs/quickstart.md
+    DESTINATION "${CMAKE_INSTALL_DOCDIR}"
+)
+install(DIRECTORY examples/
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/buildscope/examples"
+)
+install(DIRECTORY schemas/
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/buildscope/schemas"
+)
+
 enable_testing()
 
 add_test(
     NAME buildscope_python
     COMMAND ${CMAKE_COMMAND} -E env
-        "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/python"
+        "PYTHONPATH=${_buildscope_pythonpath}"
         ${Python3_EXECUTABLE} -m unittest discover
         -s "${CMAKE_CURRENT_SOURCE_DIR}/tests/python"
         -p "test_*.py"
