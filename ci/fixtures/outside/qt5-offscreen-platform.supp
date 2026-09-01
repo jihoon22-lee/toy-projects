@@ -1,0 +1,3 @@
+# Qt 5.15's offscreen platform plugin retains process-global GUI state at exit.
+# Keep this match scoped to the plugin module; project-owned stacks must fail.
+leak:libqoffscreen.so

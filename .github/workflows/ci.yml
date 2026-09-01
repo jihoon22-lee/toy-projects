@@ -668,11 +668,54 @@ jobs:
         working-directory: buildscope
         run: |
           set -euo pipefail
-          ../ici.pyz verify --profile deep --no-cache --report \
-            --html verify_report.html --github-summary
+          if [ "$QT_MAJOR" = 5 ]; then
+            # Qt 5's offscreen platform plugin retains process-global GUI state
+            # at shutdown on the hosted runner. Keep leak detection enabled and
+            # suppress only stacks that pass through that plugin.
+            suppression_file="$GITHUB_WORKSPACE/ci/fixtures/outside/qt5-offscreen-platform.supp"
+            test -f "$suppression_file"
+            LSAN_OPTIONS="detect_leaks=1:suppressions=$suppression_file" \
+              ../ici.pyz verify --profile deep --no-cache --report \
+                --html verify_report.html --github-summary
+          else
+            ../ici.pyz verify --profile deep --no-cache --report \
+              --html verify_report.html --github-summary
+          fi
           cd "$GITHUB_WORKSPACE"
           "$ICI_PYTHON" ci/check_buildscope_b5_report.py \
             buildscope/verify_report.json --expected-qt-major "$QT_MAJOR"
+
+      # This fixture is deliberately outside buildscope/ici.toml source_dirs.
+      # Running it with the exact Qt5 LSAN_OPTIONS must still fail, proving that
+      # the platform-plugin suppression does not mask project-owned leaks.
+      - name: Prove Qt5 LSAN suppression preserves real leak detection
+        if: ${{ matrix.qt_major == 5 }}
+        run: |
+          set -euo pipefail
+          suppression_file="$GITHUB_WORKSPACE/ci/fixtures/outside/qt5-offscreen-platform.supp"
+          fixture="$GITHUB_WORKSPACE/ci/fixtures/outside/project_leak.cpp"
+          control_root="$RUNNER_TEMP/buildscope-lsan-control"
+          control_binary="$control_root/project-leak"
+          test -f "$suppression_file"
+          test -f "$fixture"
+          mkdir -p "$control_root"
+          g++ -std=c++17 -O0 -g \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            "$fixture" -o "$control_binary"
+
+          set +e
+          control_output="$(
+            LSAN_OPTIONS="detect_leaks=1:suppressions=$suppression_file" \
+            ASAN_OPTIONS="detect_leaks=1:halt_on_error=1" \
+            UBSAN_OPTIONS="halt_on_error=1" \
+            "$control_binary" 2>&1
+          )"
+          control_status=$?
+          set -e
+          printf '%s\n' "$control_output"
+          test "$control_status" -ne 0
+          grep -Fq 'LeakSanitizer: detected memory leaks' <<<"$control_output"
+          grep -Fq 'project_leak.cpp' <<<"$control_output"
 
       # Keep this artifact outside the ici-report-* namespace. report-pr's
       # exact-three-project contract must continue to consume only its three
