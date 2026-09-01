@@ -45,6 +45,44 @@ QString shortConfiguration(const QString &configuration) {
     return configuration;
 }
 
+void appendNormalizedSearchFields(QStringList &fields, const SnapshotEntry &entry) {
+    for (const auto &define : entry.normalized.defines) {
+        fields.append(define.name);
+        if (define.value.has_value()) {
+            fields.append(*define.value);
+        }
+    }
+    for (const auto &include : entry.normalized.includePaths) {
+        fields.append({include.path, include.kind, include.scope});
+    }
+    for (const auto &diagnostic : entry.diagnostics) {
+        fields.append({diagnostic.code, diagnostic.message, diagnostic.severity});
+    }
+}
+
+void appendIncludeEdgeSearchFields(QStringList &fields, const SnapshotIncludeEdge &edge) {
+    fields.append({edge.parent, edge.requested, edge.classification, edge.delimiter,
+                   edge.evidence, edge.locationEvidence});
+    if (edge.resolved.has_value()) {
+        fields.append(*edge.resolved);
+    }
+    fields.append(edge.alternatives);
+    for (const auto &candidate : edge.search) {
+        fields.append({candidate.candidate, candidate.kind});
+    }
+}
+
+void appendIncludeAnalysisSearchFields(QStringList &fields, const SnapshotEntry &entry) {
+    fields.append(entry.includeAnalysis.evidence);
+    fields.append(entry.includeAnalysis.command);
+    for (const auto &edge : entry.includeAnalysis.edges) {
+        appendIncludeEdgeSearchFields(fields, edge);
+    }
+    for (const auto &diagnostic : entry.includeAnalysis.diagnostics) {
+        fields.append({diagnostic.code, diagnostic.message, diagnostic.severity});
+    }
+}
+
 }  // namespace
 
 CompilationEntryView::CompilationEntryView(const SnapshotEntry *entry) : entry_(entry) {}
@@ -142,22 +180,10 @@ QString CompilationEntryView::searchText() const {
                           targetLabel(), standard(), configurationId(), invocationSource(),
                           structuredArguments(), rawCommand()};
     if (isNormalized()) {
-        for (const auto &define : entry_->normalized.defines) {
-            fields.append(define.name);
-            if (define.value.has_value()) {
-                fields.append(*define.value);
-            }
-        }
-        for (const auto &include : entry_->normalized.includePaths) {
-            fields.append(include.path);
-            fields.append(include.kind);
-            fields.append(include.scope);
-        }
-        for (const auto &diagnostic : entry_->diagnostics) {
-            fields.append(diagnostic.code);
-            fields.append(diagnostic.message);
-            fields.append(diagnostic.severity);
-        }
+        appendNormalizedSearchFields(fields, *entry_);
+    }
+    if (entry_->hasIncludeAnalysis) {
+        appendIncludeAnalysisSearchFields(fields, *entry_);
     }
     return fields.join(QLatin1Char('\n'));
 }

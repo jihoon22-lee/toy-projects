@@ -11,7 +11,8 @@ namespace buildscope {
 
 inline constexpr auto kSnapshotSchemaV1 = "buildscope.snapshot/v1";
 inline constexpr auto kSnapshotSchemaV2 = "buildscope.snapshot/v2";
-inline constexpr auto kSnapshotSchema = kSnapshotSchemaV2;
+inline constexpr auto kSnapshotSchemaV3 = "buildscope.snapshot/v3";
+inline constexpr auto kSnapshotSchema = kSnapshotSchemaV3;
 
 struct SnapshotPath {
     QString path;
@@ -77,6 +78,35 @@ struct SnapshotDiagnostic {
     QString severity;
 };
 
+struct SnapshotIncludeSearch {
+    QString candidate;
+    bool exists = false;
+    QString kind;
+    qsizetype order = -1;
+    bool selected = false;
+};
+
+struct SnapshotIncludeEdge {
+    QStringList alternatives;
+    QString classification;
+    QString delimiter;
+    QString evidence;
+    qsizetype line = 0;
+    QString locationEvidence;
+    QString parent;
+    QString requested;
+    std::optional<QString> resolved;
+    QVector<SnapshotIncludeSearch> search;
+};
+
+struct SnapshotIncludeAnalysis {
+    QStringList command;
+    QVector<SnapshotDiagnostic> diagnostics;
+    qsizetype durationMs = 0;
+    QVector<SnapshotIncludeEdge> edges;
+    QString evidence;
+};
+
 struct SnapshotEntry {
     QString file;
     QString directory;
@@ -88,6 +118,8 @@ struct SnapshotEntry {
     bool hasState = false;
     SnapshotState state;
     QVector<SnapshotDiagnostic> diagnostics;
+    bool hasIncludeAnalysis = false;
+    SnapshotIncludeAnalysis includeAnalysis;
 };
 
 struct Snapshot {

@@ -1,0 +1,294 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jihoon22-lee/toy-projects/buildscope/schemas/buildscope-snapshot-v3.schema.json",
+  "title": "BuildScope compilation snapshot v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["entries", "producer", "schema_version", "source"],
+  "properties": {
+    "schema_version": {"const": "buildscope.snapshot/v3"},
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "buildscope"},
+        "version": {"type": "string", "minLength": 1, "maxLength": 1048576}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entry_count", "path", "project_root"],
+      "properties": {
+        "entry_count": {"type": "integer", "minimum": 0, "maximum": 100000},
+        "path": {"type": "string", "minLength": 1, "maxLength": 1048576},
+        "project_root": {"type": "string", "minLength": 1, "maxLength": 1048576}
+      }
+    },
+    "entries": {
+      "type": "array",
+      "maxItems": 100000,
+      "items": {"$ref": "#/$defs/entry"}
+    }
+  },
+  "$defs": {
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "severity"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1, "maxLength": 1048576},
+        "message": {"type": "string", "minLength": 1, "maxLength": 1048576},
+        "severity": {"enum": ["info", "warning", "error"]}
+      }
+    },
+    "path": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exists", "path", "scope", "style"],
+      "properties": {
+        "exists": {"type": ["boolean", "null"]},
+        "path": {"type": "string", "minLength": 1, "maxLength": 1048576},
+        "scope": {"enum": ["project", "vendor", "system"]},
+        "style": {"enum": ["posix", "windows"]}
+      }
+    },
+    "normalized": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "argv",
+        "command_style",
+        "compiler",
+        "configuration",
+        "defines",
+        "directory",
+        "include_paths",
+        "invocation_source",
+        "language",
+        "output",
+        "source",
+        "standard",
+        "sysroot",
+        "target"
+      ],
+      "properties": {
+        "argv": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32768,
+          "prefixItems": [{"type": "string", "minLength": 1, "maxLength": 1048576}],
+          "items": {"type": "string", "maxLength": 1048576}
+        },
+        "command_style": {"enum": ["posix", "windows"]},
+        "invocation_source": {"enum": ["arguments", "command"]},
+        "compiler": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["family", "name", "path", "wrappers"],
+          "properties": {
+            "family": {"enum": ["clang", "clang-cl", "emscripten", "gcc", "msvc", "unknown"]},
+            "name": {"type": "string", "minLength": 1, "maxLength": 1048576},
+            "path": {"type": "string", "minLength": 1, "maxLength": 1048576},
+            "wrappers": {
+              "type": "array",
+              "maxItems": 32768,
+              "items": {"type": "string", "minLength": 1, "maxLength": 1048576}
+            }
+          }
+        },
+        "configuration": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "defines": {
+          "type": "array",
+          "maxItems": 32768,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["action", "name", "value"],
+            "properties": {
+              "action": {"enum": ["define", "undefine"]},
+              "name": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+              "value": {"type": ["string", "null"], "maxLength": 1048576}
+            }
+          }
+        },
+        "directory": {"$ref": "#/$defs/path"},
+        "include_paths": {
+          "type": "array",
+          "maxItems": 32768,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["exists", "kind", "order", "path", "scope", "style"],
+            "properties": {
+              "exists": {"type": ["boolean", "null"]},
+              "kind": {"enum": ["after", "framework", "include", "quote", "system"]},
+              "order": {"type": "integer", "minimum": 0},
+              "path": {"type": "string", "minLength": 1, "maxLength": 1048576},
+              "scope": {"enum": ["project", "vendor", "system"]},
+              "style": {"enum": ["posix", "windows"]}
+            }
+          }
+        },
+        "language": {"enum": ["", "c", "c++", "objective-c", "objective-c++"]},
+        "output": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/path"}]},
+        "source": {"$ref": "#/$defs/path"},
+        "standard": {"type": "string", "maxLength": 1048576},
+        "sysroot": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/path"}]},
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["build_target", "triple"],
+          "properties": {
+            "build_target": {"type": "string", "maxLength": 1048576},
+            "triple": {"type": "string", "maxLength": 1048576}
+          }
+        }
+      }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["duplicate", "entry_index", "source_configuration_count", "source_status"],
+      "properties": {
+        "duplicate": {"type": "boolean"},
+        "entry_index": {"type": "integer", "minimum": 0},
+        "source_configuration_count": {"type": "integer", "minimum": 1},
+        "source_status": {"enum": ["missing", "present", "stale", "unknown"]}
+      }
+    },
+    "search": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate", "exists", "kind", "order", "selected"],
+      "properties": {
+        "candidate": {"type": "string", "minLength": 1, "maxLength": 1048576},
+        "exists": {"type": "boolean"},
+        "kind": {"enum": ["current", "quote", "include", "framework", "system", "after", "compiler"]},
+        "order": {"type": "integer", "minimum": 0},
+        "selected": {"type": "boolean"}
+      }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "alternatives",
+        "classification",
+        "delimiter",
+        "evidence",
+        "line",
+        "location_evidence",
+        "parent",
+        "requested",
+        "resolved",
+        "search"
+      ],
+      "properties": {
+        "alternatives": {
+          "type": "array",
+          "maxItems": 32768,
+          "items": {"type": "string", "minLength": 1, "maxLength": 1048576}
+        },
+        "classification": {"enum": ["project", "vendor", "generated", "system", "missing", "unresolved"]},
+        "delimiter": {"enum": ["quote", "angle", "unknown"]},
+        "evidence": {"enum": ["estimated", "compiler-measured"]},
+        "line": {"type": "integer", "minimum": 0},
+        "location_evidence": {"enum": ["source-scan", "compiler-diagnostic", "unavailable"]},
+        "parent": {"type": "string", "minLength": 1, "maxLength": 1048576},
+        "requested": {"type": "string", "minLength": 1, "maxLength": 1048576},
+        "resolved": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "string", "minLength": 1, "maxLength": 1048576}
+          ]
+        },
+        "search": {
+          "type": "array",
+          "maxItems": 32768,
+          "items": {"$ref": "#/$defs/search"}
+        }
+      }
+    },
+    "analysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "diagnostics", "duration_ms", "edges", "evidence"],
+      "properties": {
+        "command": {
+          "type": "array",
+          "maxItems": 32768,
+          "items": {"type": "string", "maxLength": 1048576}
+        },
+        "diagnostics": {
+          "type": "array",
+          "maxItems": 32772,
+          "items": {"$ref": "#/$defs/diagnostic"}
+        },
+        "duration_ms": {"type": "integer", "minimum": 0},
+        "edges": {
+          "type": "array",
+          "maxItems": 100000,
+          "items": {"$ref": "#/$defs/edge"}
+        },
+        "evidence": {"enum": ["unavailable", "estimated", "compiler-measured"]}
+      }
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "arguments",
+        "command",
+        "diagnostics",
+        "directory",
+        "file",
+        "include_analysis",
+        "normalized",
+        "output",
+        "state"
+      ],
+      "properties": {
+        "arguments": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32768,
+              "prefixItems": [{"type": "string", "minLength": 1, "maxLength": 1048576}],
+              "items": {"type": "string", "maxLength": 1048576}
+            }
+          ]
+        },
+        "command": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "string", "minLength": 1, "maxLength": 4194304}
+          ]
+        },
+        "diagnostics": {
+          "type": "array",
+          "maxItems": 32772,
+          "items": {"$ref": "#/$defs/diagnostic"}
+        },
+        "directory": {"type": "string", "minLength": 1, "maxLength": 1048576},
+        "file": {"type": "string", "minLength": 1, "maxLength": 1048576},
+        "include_analysis": {"$ref": "#/$defs/analysis"},
+        "normalized": {"$ref": "#/$defs/normalized"},
+        "output": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "string", "minLength": 1, "maxLength": 1048576}
+          ]
+        },
+        "state": {"$ref": "#/$defs/state"}
+      },
+      "anyOf": [
+        {"properties": {"arguments": {"type": "array"}}},
+        {"properties": {"command": {"type": "string", "minLength": 1}}}
+      ]
+    }
+  }
+}

@@ -15,6 +15,7 @@ from buildscope.normalize import annotate_entry_sets, normalize_entry
 
 SCHEMA_VERSION_V1 = "buildscope.snapshot/v1"
 SCHEMA_VERSION = "buildscope.snapshot/v2"
+SCHEMA_VERSION_V3 = "buildscope.snapshot/v3"
 MAX_DATABASE_BYTES = 64 * 1024 * 1024
 MAX_SNAPSHOT_BYTES = 256 * 1024 * 1024
 MAX_ENTRIES = 100_000
@@ -176,7 +177,15 @@ def dumps_snapshot(snapshot: dict[str, Any], *, pretty: bool = False) -> str:
 def snapshot_for_schema(snapshot: dict[str, Any], schema: str) -> dict[str, Any]:
     """Project the normalized snapshot onto a supported public contract."""
 
+    if schema == "v3":
+        if snapshot.get("schema_version") != SCHEMA_VERSION_V3:
+            raise SnapshotError("v3 snapshots require include analysis")
+        return snapshot
     if schema == "v2":
+        if snapshot.get("schema_version") == SCHEMA_VERSION_V3:
+            for entry in snapshot["entries"]:
+                entry.pop("include_analysis", None)
+            snapshot["schema_version"] = SCHEMA_VERSION
         return snapshot
     if schema != "v1":
         raise SnapshotError(f"unsupported snapshot schema: {schema}")

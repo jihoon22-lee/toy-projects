@@ -130,6 +130,24 @@ void CompilationModelTest::normalizedGroupingExposesTreeContract() {
     second.diagnostics.append(
         {QStringLiteral("Wshadow"), QStringLiteral("shadowed declaration"),
          QStringLiteral("warning")});
+    second.hasIncludeAnalysis = true;
+    second.includeAnalysis.evidence = QStringLiteral("compiler-measured");
+    second.includeAnalysis.command =
+        QStringList{QStringLiteral("/usr/bin/g++"), QStringLiteral("-H")};
+    buildscope::SnapshotIncludeEdge includeEdge;
+    includeEdge.parent = QStringLiteral("src/shared.cpp");
+    includeEdge.requested = QStringLiteral("common.hpp");
+    includeEdge.resolved = QStringLiteral("include/first/common.hpp");
+    includeEdge.classification = QStringLiteral("project");
+    includeEdge.delimiter = QStringLiteral("quote");
+    includeEdge.evidence = QStringLiteral("compiler-measured");
+    includeEdge.locationEvidence = QStringLiteral("source-scan");
+    includeEdge.line = 4;
+    includeEdge.alternatives =
+        QStringList{QStringLiteral("include/second/common.hpp")};
+    includeEdge.search.append({QStringLiteral("include/first/common.hpp"), true,
+                               QStringLiteral("include"), 0, true});
+    second.includeAnalysis.edges.append(includeEdge);
     const auto other = normalizedEntry(QStringLiteral("src/other.cpp"), digestA,
                                        QStringLiteral("present"), QStringLiteral("app"),
                                        QStringLiteral("clang++"));
@@ -233,6 +251,8 @@ void CompilationModelTest::normalizedGroupingExposesTreeContract() {
     QCOMPARE(secondView.rawCommand(), second.command);
     QVERIFY(secondView.searchText().contains(QStringLiteral("enabled")));
     QVERIFY(secondView.searchText().contains(QStringLiteral("shadowed declaration")));
+    QVERIFY(secondView.searchText().contains(QStringLiteral("compiler-measured")));
+    QVERIFY(secondView.searchText().contains(QStringLiteral("include/second/common.hpp")));
 
     QCOMPARE(otherIndex.data(Qt::DisplayRole).toString(), QStringLiteral("src/other.cpp (1)"));
     QCOMPARE(otherIndex.data(buildscope::EntryIndexRole).toLongLong(), 2LL);

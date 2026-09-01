@@ -5,6 +5,8 @@
 
 #include <memory>
 
+class QTreeWidgetItem;
+
 namespace Ui {
 class MainWindow;
 }
@@ -30,6 +32,9 @@ private slots:
     void chooseSnapshot();
     void showSelection(const QModelIndex &index);
     void applyFilter(const QString &text);
+    void showIncludeEdge(QTreeWidgetItem *item, int column);
+    void openIncludeLocation();
+    void showCompilationCommand();
 
 private:
     void clearDetails(const QString &message);
@@ -38,6 +43,8 @@ private:
     std::unique_ptr<Ui::MainWindow> ui_;
     std::unique_ptr<CompilationTreeModel> model_;
     std::unique_ptr<StatusFilterProxyModel> proxy_;
+    QString selectedIncludePath_;
+    qsizetype selectedIncludeLine_ = 0;
 };
 
 }  // namespace buildscope

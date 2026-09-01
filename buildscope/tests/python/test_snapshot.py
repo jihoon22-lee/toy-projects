@@ -23,6 +23,7 @@ from buildscope.normalize import annotate_entry_sets
 from buildscope.snapshot import (
     SCHEMA_VERSION,
     SCHEMA_VERSION_V1,
+    SCHEMA_VERSION_V3,
     SnapshotError,
     dumps_snapshot,
     load_compilation_database,
@@ -183,6 +184,78 @@ class SnapshotTests(unittest.TestCase):
         self.assertNotIn("normalized", snapshot["entries"][0])
         self.assertEqual(snapshot["entries"][0]["arguments"][0], "c++")
         self.assertIsNone(snapshot["entries"][0]["command"])
+
+    def test_cli_emits_v3_estimated_include_explanations(self) -> None:
+        project = self._project_layout()
+        source = project / "src" / "main.cpp"
+        header = project / "include" / "feature.hpp"
+        source.write_text('#include "feature.hpp"\nint feature;\n', encoding="utf-8")
+        header.write_text("#define FEATURE 1\n", encoding="utf-8")
+        database = self._write_database(
+            [
+                {
+                    "directory": str(project / "build"),
+                    "file": str(source),
+                    "arguments": [
+                        "c++",
+                        "-I",
+                        str(project / "include"),
+                        "-c",
+                        str(source),
+                    ],
+                }
+            ],
+            path=project / "build" / "compile_commands.json",
+        )
+        output = self.root / "snapshot-v3.json"
+
+        self.assertEqual(
+            main(
+                [
+                    str(database),
+                    "--project-root",
+                    str(project),
+                    "--include-analysis",
+                    "estimate",
+                    "--output",
+                    str(output),
+                ]
+            ),
+            0,
+        )
+
+        snapshot = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(snapshot["schema_version"], SCHEMA_VERSION_V3)
+        analysis = snapshot["entries"][0]["include_analysis"]
+        self.assertEqual(analysis["evidence"], "estimated")
+        edge = analysis["edges"][0]
+        self.assertEqual(edge["resolved"], "include/feature.hpp")
+        self.assertEqual(edge["classification"], "project")
+        self.assertEqual(edge["location_evidence"], "source-scan")
+
+    def test_cli_rejects_include_analysis_with_a_legacy_schema(self) -> None:
+        database = self._write_database(
+            [{"directory": "/work", "file": "/work/main.cpp", "arguments": ["c++"]}]
+        )
+        output = self.root / "legacy.json"
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr):
+            result = main(
+                [
+                    str(database),
+                    "--include-analysis",
+                    "estimate",
+                    "--schema-version",
+                    "v2",
+                    "--output",
+                    str(output),
+                ]
+            )
+
+        self.assertEqual(result, 2)
+        self.assertFalse(output.exists())
+        self.assertIn("requires --schema-version v3", stderr.getvalue())
 
     def test_cli_reports_errors_without_creating_output(self) -> None:
         output = self.root / "snapshot.json"

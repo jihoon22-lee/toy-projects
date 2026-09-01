@@ -186,23 +186,33 @@ QStringList requiredStringArray(const QJsonObject &object, const QString &key,
     return result;
 }
 
-ParsedRawEntry parseRawEntry(const QJsonValue &value, qsizetype index, bool v2) {
+ParsedRawEntry parseRawEntry(const QJsonValue &value, qsizetype index, bool normalized,
+                             bool v3) {
     const auto location = QStringLiteral("entries[") + QString::number(index) + "]";
     if (!value.isObject()) {
         throw ContractError(location + " must be an object");
     }
     const auto object = value.toObject();
-    if (v2) {
+    if (normalized) {
         rejectUnknownKeys(object,
                           {QStringLiteral("arguments"), QStringLiteral("command"),
                            QStringLiteral("diagnostics"), QStringLiteral("directory"),
-                           QStringLiteral("file"), QStringLiteral("normalized"),
+                           QStringLiteral("file"), QStringLiteral("include_analysis"),
+                           QStringLiteral("normalized"),
                            QStringLiteral("output"), QStringLiteral("state")},
                           location);
-        for (const auto &key : {QStringLiteral("arguments"), QStringLiteral("command"),
-                                QStringLiteral("diagnostics"), QStringLiteral("directory"),
-                                QStringLiteral("file"), QStringLiteral("normalized"),
-                                QStringLiteral("output"), QStringLiteral("state")}) {
+        auto required = QStringList{
+            QStringLiteral("arguments"), QStringLiteral("command"),
+            QStringLiteral("diagnostics"), QStringLiteral("directory"),
+            QStringLiteral("file"),      QStringLiteral("normalized"),
+            QStringLiteral("output"),    QStringLiteral("state")};
+        if (v3) {
+            required.append(QStringLiteral("include_analysis"));
+        } else if (object.contains(QStringLiteral("include_analysis"))) {
+            throw ContractError(location +
+                                ".include_analysis is unsupported before snapshot v3");
+        }
+        for (const auto &key : required) {
             if (!object.contains(key)) {
                 throw ContractError(location + "." + key + " is required");
             }
@@ -212,27 +222,29 @@ ParsedRawEntry parseRawEntry(const QJsonValue &value, qsizetype index, bool v2) 
     ParsedRawEntry entry;
     entry.file = requiredString(object, QStringLiteral("file"), location);
     entry.directory = requiredString(object, QStringLiteral("directory"), location);
-    entry.arguments = optionalArguments(object, location, v2);
+    entry.arguments = optionalArguments(object, location, normalized);
     entry.command = optionalString(object, QStringLiteral("command"), location);
     entry.output = optionalString(object, QStringLiteral("output"), location);
     entry.hasArguments = isPresent(object.value(QStringLiteral("arguments")));
     entry.hasCommand = isPresent(object.value(QStringLiteral("command")));
-    if ((!v2 && entry.hasArguments == entry.hasCommand) ||
-        (v2 && !entry.hasArguments && !entry.hasCommand)) {
+    if ((!normalized && entry.hasArguments == entry.hasCommand) ||
+        (normalized && !entry.hasArguments && !entry.hasCommand)) {
         throw ContractError(location + " must contain " +
-                            (v2 ? QStringLiteral("at least one") : QStringLiteral("exactly one")) +
+                            (normalized ? QStringLiteral("at least one")
+                                        : QStringLiteral("exactly one")) +
                             QStringLiteral(" of arguments or command"));
     }
     return entry;
 }
 
-bool isV2Schema(const QString &schemaVersion) {
+int schemaGeneration(const QString &schemaVersion) {
     const bool v1 = schemaVersion == QString::fromLatin1(kSnapshotSchemaV1);
     const bool v2 = schemaVersion == QString::fromLatin1(kSnapshotSchemaV2);
-    if (!v1 && !v2) {
+    const bool v3 = schemaVersion == QString::fromLatin1(kSnapshotSchemaV3);
+    if (!v1 && !v2 && !v3) {
         throw ContractError("root.schema_version is unsupported: " + schemaVersion);
     }
-    return v2;
+    return v3 ? 3 : (v2 ? 2 : 1);
 }
 
 void validateV2Root(const QJsonObject &root, bool v2) {
@@ -353,13 +365,18 @@ void validateV2EntrySets(const Snapshot &snapshot) {
     }
 }
 
-void parseEntriesInto(Snapshot &snapshot, const QJsonArray &entryArray, bool v2) {
+void parseEntriesInto(Snapshot &snapshot, const QJsonArray &entryArray, int generation) {
     snapshot.entries.reserve(entryArray.size());
     for (qsizetype index = 0; index < entryArray.size(); ++index) {
-        snapshot.entries.append(v2 ? parseV2Entry(entryArray.at(index), index)
-                                   : parseV1Entry(entryArray.at(index), index));
+        if (generation == 3) {
+            snapshot.entries.append(parseV3Entry(entryArray.at(index), index));
+        } else if (generation == 2) {
+            snapshot.entries.append(parseV2Entry(entryArray.at(index), index));
+        } else {
+            snapshot.entries.append(parseV1Entry(entryArray.at(index), index));
+        }
     }
-    if (v2) {
+    if (generation >= 2) {
         validateV2EntrySets(snapshot);
     }
 }
@@ -371,11 +388,12 @@ Snapshot parseSnapshotDocument(const QJsonDocument &document) {
     const auto root = document.object();
     Snapshot snapshot;
     snapshot.schemaVersion = requiredString(root, QStringLiteral("schema_version"), "root");
-    const bool v2 = isV2Schema(snapshot.schemaVersion);
-    validateV2Root(root, v2);
-    parseProducer(root, v2, snapshot);
-    const auto sourceObject = parseSource(root, v2, snapshot);
-    parseEntriesInto(snapshot, parseEntries(root, sourceObject), v2);
+    const int generation = schemaGeneration(snapshot.schemaVersion);
+    const bool normalized = generation >= 2;
+    validateV2Root(root, normalized);
+    parseProducer(root, normalized, snapshot);
+    const auto sourceObject = parseSource(root, normalized, snapshot);
+    parseEntriesInto(snapshot, parseEntries(root, sourceObject), generation);
     return snapshot;
 }
 
