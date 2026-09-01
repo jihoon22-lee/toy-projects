@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 env:
-  ICI_VERSION: v0.7.1
+  ICI_VERSION: v0.8.0
 
 jobs:
   # ci/projects.json is the only project list. Both verification and GUI jobs
@@ -494,6 +494,67 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  # BuildScope keeps 100k compilation entries in one owned Snapshot but exposes
+  # configuration rows through QModelIndex identities instead of allocating a
+  # second tree of child objects. Exercise that production-size boundary on
+  # every PR so the "lazy model" claim remains measured rather than anecdotal.
+  buildscope-benchmark-smoke:
+    name: BuildScope 100k model benchmark
+    needs: discover
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Qt6
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qt6-base-dev qmake6 pkg-config
+
+      - name: Build and measure the 100k-entry model
+        run: |
+          set -euo pipefail
+          benchmark_root="$RUNNER_TEMP/buildscope-benchmark"
+          build_dir="$benchmark_root/build"
+          artifact_dir="$benchmark_root/artifact"
+          mkdir -p "$build_dir" "$artifact_dir"
+          cmake -S buildscope -B "$build_dir" -DCMAKE_BUILD_TYPE=Release \
+            -DBUILDSCOPE_BUILD_BENCHMARKS=ON \
+            -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON
+          cmake --build "$build_dir" --parallel --target buildscope-model-benchmark
+          "$build_dir/buildscope-model-benchmark" 100000 10000 \
+            | tee "$artifact_dir/summary.json"
+          python3 - "$artifact_dir/summary.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          summary = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          if summary.get("entries") != 100_000 or summary.get("sources") != 25_000:
+              raise SystemExit(f"unexpected benchmark scale: {summary!r}")
+          if summary.get("correct") is not True:
+              raise SystemExit(f"model correctness failed: {summary!r}")
+          if summary.get("filtered_sources") != 1:
+              raise SystemExit(f"model filter failed: {summary!r}")
+          if summary.get("model_build_ms", 10_001) > summary.get("budget_ms", 10_000):
+              raise SystemExit(f"model budget exceeded: {summary!r}")
+          if summary.get("filter_ms", 10_001) > summary.get("budget_ms", 10_000):
+              raise SystemExit(f"filter budget exceeded: {summary!r}")
+          PY
+
+      - name: Upload BuildScope benchmark report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: buildscope-benchmark-smoke
+          path: ${{ runner.temp }}/buildscope-benchmark/artifact
+          if-no-files-found: warn
+          retention-days: 14
+
   # One comment for the whole run, not one per project. It always starts after
   # both matrices have reached a terminal result, including failures, so a PR
   # never loses the report job behind a skipped dependency.
@@ -702,7 +763,7 @@ jobs:
   merge-gate:
     name: Merge Gate
     if: ${{ always() }}
-    needs: [discover, verify, gui-build, benchmark-smoke, diskmap-benchmark-smoke, report-pr]
+    needs: [discover, verify, gui-build, benchmark-smoke, diskmap-benchmark-smoke, buildscope-benchmark-smoke, report-pr]
     runs-on: ubuntu-latest
     steps:
       - name: Require every quality job
@@ -713,6 +774,7 @@ jobs:
           GUI_RESULT: ${{ needs.gui-build.result }}
           BENCHMARK_SMOKE_RESULT: ${{ needs.benchmark-smoke.result }}
           DISKMAP_BENCHMARK_SMOKE_RESULT: ${{ needs.diskmap-benchmark-smoke.result }}
+          BUILDSCOPE_BENCHMARK_SMOKE_RESULT: ${{ needs.buildscope-benchmark-smoke.result }}
           GUI_COUNT: ${{ needs.discover.outputs.gui_count }}
           REPORT_RESULT: ${{ needs.report-pr.result }}
         run: |
@@ -721,6 +783,7 @@ jobs:
           test "$VERIFY_RESULT" = success
           test "$BENCHMARK_SMOKE_RESULT" = success
           test "$DISKMAP_BENCHMARK_SMOKE_RESULT" = success
+          test "$BUILDSCOPE_BENCHMARK_SMOKE_RESULT" = success
           if [ "$GUI_RESULT" != success ]; then
             test "$GUI_COUNT" = 0
             test "$GUI_RESULT" = skipped

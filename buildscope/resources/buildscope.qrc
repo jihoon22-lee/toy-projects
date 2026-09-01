@@ -1,5 +1,9 @@
 <RCC>
   <qresource prefix="/icons">
     <file alias="buildscope.svg">icons/buildscope.svg</file>
+    <file alias="status-missing.svg">icons/status-missing.svg</file>
+    <file alias="status-present.svg">icons/status-present.svg</file>
+    <file alias="status-stale.svg">icons/status-stale.svg</file>
+    <file alias="status-unknown.svg">icons/status-unknown.svg</file>
   </qresource>
 </RCC>

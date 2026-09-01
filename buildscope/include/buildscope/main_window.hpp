@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QModelIndex>
 
 #include <memory>
 
@@ -9,6 +10,10 @@ class MainWindow;
 }
 
 namespace buildscope {
+
+class CompilationEntryView;
+class CompilationTreeModel;
+class StatusFilterProxyModel;
 
 class MainWindow final : public QMainWindow {
     Q_OBJECT
@@ -23,9 +28,16 @@ public:
 
 private slots:
     void chooseSnapshot();
+    void showSelection(const QModelIndex &index);
+    void applyFilter(const QString &text);
 
 private:
+    void clearDetails(const QString &message);
+    void showEntry(const CompilationEntryView &view);
+
     std::unique_ptr<Ui::MainWindow> ui_;
+    std::unique_ptr<CompilationTreeModel> model_;
+    std::unique_ptr<StatusFilterProxyModel> proxy_;
 };
 
 }  // namespace buildscope

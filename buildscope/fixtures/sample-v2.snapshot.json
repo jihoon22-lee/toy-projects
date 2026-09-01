@@ -1,0 +1,155 @@
+{
+  "entries": [
+    {
+      "arguments": [
+        "/usr/bin/c++",
+        "-DFEATURE=hello world",
+        "-std=c++20",
+        "-Iinclude",
+        "-c",
+        "src/main.cpp"
+      ],
+      "command": "/usr/bin/c++ -DFEATURE='hello world' -std=c++20 -Iinclude -c src/main.cpp",
+      "directory": "/project/build",
+      "diagnostics": [
+        {
+          "code": "Wshadow",
+          "message": "declaration shadows a parameter",
+          "severity": "warning"
+        }
+      ],
+      "file": "/project/src/main.cpp",
+      "normalized": {
+        "argv": [
+          "/usr/bin/c++",
+          "-DFEATURE=hello world",
+          "-std=c++20",
+          "-Iinclude",
+          "-c",
+          "src/main.cpp"
+        ],
+        "command_style": "posix",
+        "compiler": {
+          "family": "gcc",
+          "name": "c++",
+          "path": "/usr/bin/c++",
+          "wrappers": []
+        },
+        "configuration": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "defines": [
+          {
+            "action": "define",
+            "name": "FEATURE",
+            "value": "hello world"
+          }
+        ],
+        "directory": {
+          "exists": true,
+          "path": "build",
+          "scope": "project",
+          "style": "posix"
+        },
+        "include_paths": [
+          {
+            "exists": true,
+            "kind": "include",
+            "order": 0,
+            "path": "include",
+            "scope": "project",
+            "style": "posix"
+          }
+        ],
+        "invocation_source": "arguments",
+        "language": "c++",
+        "output": null,
+        "source": {
+          "exists": true,
+          "path": "src/main.cpp",
+          "scope": "project",
+          "style": "posix"
+        },
+        "standard": "c++20",
+        "sysroot": null,
+        "target": {
+          "build_target": "buildscope-app",
+          "triple": "x86_64-linux-gnu"
+        }
+      },
+      "output": null,
+      "state": {
+        "duplicate": false,
+        "entry_index": 0,
+        "source_configuration_count": 1,
+        "source_status": "present"
+      }
+    },
+    {
+      "arguments": [
+        "/usr/bin/c++",
+        "-std=c++20",
+        "-c",
+        "src/missing.cpp"
+      ],
+      "command": "/usr/bin/c++ -std=c++20 -c src/missing.cpp",
+      "directory": "/project/build",
+      "diagnostics": [],
+      "file": "/project/src/missing.cpp",
+      "normalized": {
+        "argv": [
+          "/usr/bin/c++",
+          "-std=c++20",
+          "-c",
+          "src/missing.cpp"
+        ],
+        "command_style": "posix",
+        "compiler": {
+          "family": "gcc",
+          "name": "c++",
+          "path": "/usr/bin/c++",
+          "wrappers": []
+        },
+        "configuration": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "defines": [],
+        "directory": {
+          "exists": true,
+          "path": "build",
+          "scope": "project",
+          "style": "posix"
+        },
+        "include_paths": [],
+        "invocation_source": "arguments",
+        "language": "c++",
+        "output": null,
+        "source": {
+          "exists": false,
+          "path": "src/missing.cpp",
+          "scope": "project",
+          "style": "posix"
+        },
+        "standard": "c++20",
+        "sysroot": null,
+        "target": {
+          "build_target": "buildscope-app",
+          "triple": "x86_64-linux-gnu"
+        }
+      },
+      "output": null,
+      "state": {
+        "duplicate": false,
+        "entry_index": 1,
+        "source_configuration_count": 1,
+        "source_status": "missing"
+      }
+    }
+  ],
+  "producer": {
+    "name": "buildscope",
+    "version": "0.3.0"
+  },
+  "schema_version": "buildscope.snapshot/v2",
+  "source": {
+    "entry_count": 2,
+    "path": "compile_commands.json",
+    "project_root": "/project"
+  }
+}

@@ -1,6 +1,7 @@
 #include "buildscope/contract.hpp"
 
 #include "contract_json_guard.hpp"
+#include "contract_loader.hpp"
 #include "contract_parser.hpp"
 
 #include <QDateTime>
@@ -153,7 +154,8 @@ void verifySnapshotUnchanged(const QString &path, QFile &file,
 
 ContractError::ContractError(const QString &message) : std::runtime_error(message.toStdString()) {}
 
-Snapshot loadSnapshotFile(const QString &path) {
+Snapshot detail::loadSnapshotFileWithPostReadHook(
+    const QString &path, const SnapshotPostReadHook &postReadHook) {
     constexpr qint64 kMaxSnapshotBytes = 256LL * 1024LL * 1024LL;
     QFile file;
     const auto opened = openSnapshot(path, file);
@@ -167,6 +169,9 @@ Snapshot loadSnapshotFile(const QString &path) {
     if (payload.size() > kMaxSnapshotBytes) {
         throw ContractError("snapshot exceeds 268435456 byte limit");
     }
+    if (postReadHook) {
+        postReadHook(file);
+    }
     verifySnapshotUnchanged(path, file, opened);
     QJsonParseError parseError;
     const auto document = QJsonDocument::fromJson(payload, &parseError);
@@ -176,6 +181,10 @@ Snapshot loadSnapshotFile(const QString &path) {
     }
     detail::rejectDuplicateJsonKeys(payload);
     return detail::parseSnapshotDocument(document);
+}
+
+Snapshot loadSnapshotFile(const QString &path) {
+    return detail::loadSnapshotFileWithPostReadHook(path, {});
 }
 
 QString invocationText(const SnapshotEntry &entry) {
