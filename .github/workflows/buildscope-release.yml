@@ -1,0 +1,815 @@
+name: BuildScope Release
+
+on:
+  push:
+    tags:
+      - "buildscope-v*.*.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: buildscope-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  ICI_VERSION: "v0.10.2"
+  # Public ici v0.10.2 asset digest. Both the published checksum file and a
+  # fresh digest are checked against this literal before ici can run.
+  ICI_PYZ_SHA256: "8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4"
+
+jobs:
+  provenance:
+    name: Validate BuildScope release provenance
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      checks: read
+    outputs:
+      tag: ${{ steps.provenance.outputs.tag }}
+      version: ${{ steps.provenance.outputs.version }}
+      target_sha: ${{ steps.provenance.outputs.target_sha }}
+      main_sha: ${{ steps.provenance.outputs.main_sha }}
+      merge_gate_url: ${{ steps.provenance.outputs.merge_gate_url }}
+
+    steps:
+      - name: Checkout tag ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate annotated tag, exact main, and green Merge Gate
+        id: provenance
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          test "$GITHUB_REF_TYPE" = tag
+          tag="$GITHUB_REF_NAME"
+          if ! printf '%s' "$tag" | grep -Eq '^buildscope-v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Invalid BuildScope release tag: $tag" >&2
+            exit 1
+          fi
+
+          git fetch --force --tags origin
+          git fetch --force --no-tags origin refs/heads/main:refs/remotes/origin/main
+          tag_ref="refs/tags/$tag"
+          if [ "$(git cat-file -t "$tag_ref" 2>/dev/null || true)" != "tag" ]; then
+            echo "BuildScope releases require an annotated tag: $tag" >&2
+            exit 1
+          fi
+          target_sha="$(git rev-parse --verify "${tag_ref}^{commit}")"
+          main_sha="$(git rev-parse --verify refs/remotes/origin/main)"
+          if [ "$target_sha" != "$main_sha" ]; then
+            echo "Tag $tag must point at exact origin/main ($main_sha), got $target_sha" >&2
+            exit 1
+          fi
+          git checkout --detach "$target_sha"
+          test "$(git rev-parse HEAD)" = "$target_sha"
+
+          version="${tag#buildscope-v}"
+          python3 - "$version" <<'PY'
+          from __future__ import annotations
+
+          import re
+          import sys
+          from pathlib import Path
+
+          version = sys.argv[1]
+          root = Path("buildscope")
+
+          def assignment(path: Path, pattern: str, label: str) -> str:
+              matches = re.findall(pattern, path.read_text(encoding="utf-8"), re.MULTILINE)
+              if len(matches) != 1:
+                  raise SystemExit(f"{path}: expected one {label}, found {len(matches)}")
+              return matches[0]
+
+          values = {
+              "python": assignment(
+                  root / "python/buildscope/__init__.py",
+                  r'^__version__\s*=\s*["\']([^"\']+)["\']$',
+                  "Python version",
+              ),
+              "pyproject": assignment(
+                  root / "pyproject.toml",
+                  r'^version\s*=\s*["\']([^"\']+)["\']$',
+                  "project version",
+              ),
+              "cmake": assignment(
+                  root / "CMakeLists.txt",
+                  r'^project\(buildscope VERSION ([^ )]+)',
+                  "CMake version",
+              ),
+              "ici": assignment(
+                  root / "ici.toml",
+                  r'^version\s*=\s*["\']([^"\']+)["\']$',
+                  "ici project version",
+              ),
+          }
+          mismatched = {name: value for name, value in values.items() if value != version}
+          if mismatched or any(value != version for value in values.values()):
+              raise SystemExit(f"version surfaces disagree: expected {version!r}, values={values!r}")
+
+          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          pattern = re.compile(
+              rf"^(?:## \[{re.escape(version)}\][^\n]*|### BuildScope {re.escape(version)}[^\n]*)$",
+              re.MULTILINE,
+          )
+          headings = pattern.findall(changelog)
+          if len(headings) != 1:
+              raise SystemExit(
+                  f"CHANGELOG.md must contain one BuildScope {version} release heading, found {len(headings)}"
+              )
+          print(f"validated BuildScope {version} metadata: {values}")
+          PY
+
+          gate_ok=false
+          gate_url=""
+          for attempt in $(seq 1 120); do
+            if ! check_runs="$(gh api \
+              -H 'Accept: application/vnd.github+json' \
+              "repos/${GITHUB_REPOSITORY}/commits/${target_sha}/check-runs?per_page=100&filter=latest")"; then
+              echo "Merge Gate API attempt $attempt/120 failed; retrying" >&2
+              sleep 10
+              continue
+            fi
+            gate_status="$(printf '%s' "$check_runs" | jq -r --arg sha "$target_sha" '
+              [.check_runs[] | select(.name == "Merge Gate" and .head_sha == $sha)]
+              | sort_by(.completed_at // "") | last // {} | .status // "missing"')"
+            gate_conclusion="$(printf '%s' "$check_runs" | jq -r --arg sha "$target_sha" '
+              [.check_runs[] | select(.name == "Merge Gate" and .head_sha == $sha)]
+              | sort_by(.completed_at // "") | last // {} | .conclusion // "pending"')"
+            gate_url="$(printf '%s' "$check_runs" | jq -r --arg sha "$target_sha" '
+              [.check_runs[] | select(.name == "Merge Gate" and .head_sha == $sha)]
+              | sort_by(.completed_at // "") | last // {} | .details_url // ""')"
+            echo "Merge Gate attempt $attempt/120: status=$gate_status conclusion=$gate_conclusion"
+            if [ "$gate_status" = "completed" ] && [ "$gate_conclusion" = "success" ]; then
+              gate_ok=true
+              break
+            fi
+            sleep 10
+          done
+          if [ "$gate_ok" != true ]; then
+            echo "Exact main commit has no successful Merge Gate: $target_sha" >&2
+            exit 1
+          fi
+
+          {
+            echo "## BuildScope release provenance"
+            echo
+            echo "- tag: $tag"
+            echo "- exact main commit: $target_sha"
+            echo "- Merge Gate: ${gate_url:-not reported}"
+            echo "- ici dependency: $ICI_VERSION (literal SHA-256 pin validated in build job)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          {
+            printf 'tag=%s\n' "$tag"
+            printf 'version=%s\n' "$version"
+            printf 'target_sha=%s\n' "$target_sha"
+            printf 'main_sha=%s\n' "$main_sha"
+            printf 'merge_gate_url=%s\n' "$gate_url"
+          } >> "$GITHUB_OUTPUT"
+
+  python-tests:
+    name: Python ${{ matrix.python-version }} tests
+    needs: provenance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.10 is the supported floor; 3.14 is the latest stable interpreter
+        # available on the release runner at the time of this release.
+        python-version: ["3.10", "3.14"]
+
+    steps:
+      - name: Checkout validated release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.provenance.outputs.target_sha }}
+          persist-credentials: false
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run Python test suite
+        working-directory: buildscope
+        env:
+          PYTHONPATH: python:.
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --no-input \
+            mypy==2.3.1 pytest==9.1.1 ruff==0.16.5
+          python -m pytest -q
+          ruff check python tests tools
+          ruff format --check python tests tools
+          MYPYPATH=python mypy --python-version 3.10 python/buildscope tools/build_standalone.py
+
+  qt-build:
+    name: Qt${{ matrix.qt-major }} Release build and CTest
+    needs: provenance
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        qt-major: [5, 6]
+
+    steps:
+      - name: Checkout validated release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.provenance.outputs.target_sha }}
+          persist-credentials: false
+
+      - name: Install Qt${{ matrix.qt-major }} toolchain
+        env:
+          QT_MAJOR: ${{ matrix.qt-major }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake g++ pkg-config
+          if [ "$QT_MAJOR" = "5" ]; then
+            sudo apt-get install -y --no-install-recommends qtbase5-dev qt5-qmake
+          elif [ "$QT_MAJOR" = "6" ]; then
+            sudo apt-get install -y --no-install-recommends qt6-base-dev qmake6
+          else
+            echo "unsupported Qt major: $QT_MAJOR" >&2
+            exit 1
+          fi
+
+      - name: Configure, build, inspect generated paths, and run CTest
+        working-directory: buildscope
+        env:
+          QT_MAJOR: ${{ matrix.qt-major }}
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set -euo pipefail
+          build_dir="$RUNNER_TEMP/buildscope-qt$QT_MAJOR"
+          mkdir -p "$build_dir"
+          if [ "$QT_MAJOR" = "5" ]; then
+            qt_guard=(-DCMAKE_DISABLE_FIND_PACKAGE_Qt6=ON)
+          else
+            qt_guard=(-DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON)
+          fi
+          cmake -S . -B "$build_dir" -DCMAKE_BUILD_TYPE=Release "${qt_guard[@]}" \
+            2>&1 | tee "$build_dir/configure.log"
+          selected_major="$(sed -n 's/^-- .*using Qt\([56]\) .*/\1/p' "$build_dir/configure.log" | tail -1)"
+          test "$selected_major" = "$QT_MAJOR"
+          cmake --build "$build_dir" --parallel
+          ctest --test-dir "$build_dir" --output-on-failure
+
+          autogen="$build_dir/buildscope_gui_autogen"
+          ui_header="$(find "$autogen" -type f -name ui_main_window.h -print -quit)"
+          qrc_source="$(find "$autogen" -type f -name qrc_buildscope.cpp -print -quit)"
+          moc_source="$(find "$autogen" -type f -name moc_main_window.cpp -print -quit)"
+          test -n "$ui_header" && test -f "$ui_header"
+          test -n "$qrc_source" && test -f "$qrc_source"
+          test -n "$moc_source" && test -f "$moc_source"
+          grep -Fq 'mocs_compilation.cpp' "$build_dir/compile_commands.json"
+          grep -Fq 'qrc_buildscope.cpp' "$build_dir/compile_commands.json"
+          grep -Fq 'buildscope_gui_autogen/include' "$build_dir/compile_commands.json"
+          echo "Qt$QT_MAJOR generated UIC: $ui_header"
+          echo "Qt$QT_MAJOR generated RCC: $qrc_source"
+          echo "Qt$QT_MAJOR generated MOC: $moc_source"
+
+      - name: GUI offscreen smoke
+        working-directory: buildscope
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_MAJOR: ${{ matrix.qt-major }}
+        run: |
+          set -euo pipefail
+          gui="$RUNNER_TEMP/buildscope-qt$QT_MAJOR/src/gui/buildscope-gui"
+          test -x "$gui"
+          "$gui" "$GITHUB_WORKSPACE/buildscope/fixtures/sample.snapshot.json" &
+          gui_pid=$!
+          cleanup() {
+            kill "$gui_pid" 2>/dev/null || true
+            wait "$gui_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          for _ in 1 2 3 4 5 6; do
+            sleep 1
+            if ! kill -0 "$gui_pid" 2>/dev/null; then
+              echo "GUI exited during Qt$QT_MAJOR smoke" >&2
+              exit 1
+            fi
+          done
+          echo "Qt$QT_MAJOR GUI remained alive during offscreen smoke"
+
+  package-and-deep-check:
+    name: Package, native handoff, and ici deep check
+    needs: [provenance, python-tests, qt-build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout validated release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.provenance.outputs.target_sha }}
+          persist-credentials: false
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
+      - name: Install Qt6, build, and deep-analysis tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake g++ binutils file pkg-config qt6-base-dev qmake6 clang-tidy clazy
+          tool_env="$RUNNER_TEMP/buildscope-python-tools"
+          python_bin="$(python -c 'import sys; print(sys.executable)')"
+          uv venv --python "$python_bin" "$tool_env"
+          uv pip install --python "$tool_env/bin/python" \
+            build==1.3.0 \
+            coverage==7.15.4 \
+            mypy==2.3.1 \
+            pytest==9.1.1 \
+            ruff==0.16.5
+          echo "ICI_PYTHON=$tool_env/bin/python" >> "$GITHUB_ENV"
+          echo "$tool_env/bin" >> "$GITHUB_PATH"
+          "$tool_env/bin/python" -m build --version
+          clazy-standalone --version 2>/dev/null || clazy --version
+          clang-tidy --version
+
+      - name: Download public ici v0.10.2 and validate its literal SHA twice
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ici_root="$RUNNER_TEMP/buildscope-ici"
+          mkdir -p "$ici_root"
+          base="https://github.com/jihoon22-lee/ici/releases/download/${ICI_VERSION}"
+          curl -fsSL --retry 3 -o "$ici_root/ici.pyz" "$base/ici.pyz"
+          curl -fsSL --retry 3 -o "$ici_root/ici.pyz.sha256" "$base/ici.pyz.sha256"
+          manifest_hash="$(awk 'NR == 1 {print $1}' "$ici_root/ici.pyz.sha256")"
+          manifest_name="$(awk 'NR == 1 {print $2}' "$ici_root/ici.pyz.sha256")"
+          test "$manifest_name" = "ici.pyz"
+          test "$manifest_hash" = "$ICI_PYZ_SHA256"
+          (cd "$ici_root" && sha256sum --check ici.pyz.sha256)
+          downloaded_hash="$(sha256sum "$ici_root/ici.pyz" | awk '{print $1}')"
+          test "$downloaded_hash" = "$ICI_PYZ_SHA256"
+          api_digest="$(curl -fsSL --retry 3 \
+            "https://api.github.com/repos/jihoon22-lee/ici/releases/tags/${ICI_VERSION}" \
+            | jq -r '.assets[] | select(.name == "ici.pyz") | .digest')"
+          test "$api_digest" = "sha256:$ICI_PYZ_SHA256"
+          chmod +x "$ici_root/ici.pyz"
+          test -x "$ici_root/ici.pyz"
+          case "$ici_root/ici.pyz" in
+            /*) ;;
+            *) echo "::error::ICI_PYZ must be absolute" >&2; exit 1 ;;
+          esac
+          echo "ICI_PYZ=$ici_root/ici.pyz" >> "$GITHUB_ENV"
+          echo "validated ici ${ICI_VERSION}: manifest=$manifest_hash downloaded=$downloaded_hash api=$api_digest"
+
+      - name: Build pure wheel, sdist, and reproducible standalone pyz
+        env:
+          VERSION: ${{ needs.provenance.outputs.version }}
+        run: |
+          set -euo pipefail
+          artifact="$RUNNER_TEMP/buildscope-release-assets"
+          package_dir="$artifact/package"
+          mkdir -p "$package_dir"
+          "$ICI_PYTHON" -m build --sdist --wheel --outdir "$package_dir" buildscope
+          "$ICI_PYTHON" buildscope/tools/build_standalone.py \
+            --project-root "$GITHUB_WORKSPACE/buildscope" \
+            --output "$artifact/.buildscope-first.pyz"
+          "$ICI_PYTHON" buildscope/tools/build_standalone.py \
+            --project-root "$GITHUB_WORKSPACE/buildscope" \
+            --output "$artifact/.buildscope-second.pyz"
+          first_hash="$(sha256sum "$artifact/.buildscope-first.pyz" | awk '{print $1}')"
+          second_hash="$(sha256sum "$artifact/.buildscope-second.pyz" | awk '{print $1}')"
+          test "$first_hash" = "$second_hash"
+          mv "$artifact/.buildscope-first.pyz" "$artifact/buildscope.pyz"
+          rm -f "$artifact/.buildscope-second.pyz"
+          (cd "$artifact" && sha256sum buildscope.pyz) > "$artifact/buildscope.pyz.sha256"
+          wheel="$(find "$package_dir" -maxdepth 1 -type f -name "buildscope-${VERSION}-*.whl" -print -quit)"
+          sdist="$(find "$package_dir" -maxdepth 1 -type f -name "buildscope-${VERSION}.tar.gz" -print -quit)"
+          test -n "$wheel" && test -f "$wheel"
+          test -n "$sdist" && test -f "$sdist"
+          expected_wheel="buildscope-${VERSION}-py3-none-any.whl"
+          test "$(basename "$wheel")" = "$expected_wheel"
+          "$ICI_PYTHON" - "$wheel" "$sdist" <<'PY'
+          from __future__ import annotations
+
+          import sys
+          import tarfile
+          import zipfile
+          from pathlib import Path
+
+          wheel, sdist = map(Path, sys.argv[1:])
+          bad_suffixes = (".so", ".pyd", ".dylib", ".dll")
+          with zipfile.ZipFile(wheel) as archive:
+              names = archive.namelist()
+              bad = [name for name in names if name.lower().endswith(bad_suffixes)]
+              dist_info = next(
+                  name[:-len("WHEEL")] for name in names if name.endswith(".dist-info/WHEEL")
+              )
+              wheel_metadata = archive.read(dist_info + "WHEEL").decode("utf-8")
+              if "Root-Is-Purelib: true" not in wheel_metadata.splitlines():
+                  raise SystemExit("wheel does not declare Root-Is-Purelib: true")
+              schema_names = sorted(
+                  name.rsplit("/", 1)[-1]
+                  for name in names
+                  if name.startswith("buildscope/schemas/")
+                  and name.endswith(".schema.json")
+              )
+              expected_schemas = [
+                  "buildscope-diff-v1.schema.json",
+                  "buildscope-snapshot-v1.schema.json",
+                  "buildscope-snapshot-v2.schema.json",
+                  "buildscope-snapshot-v3.schema.json",
+              ]
+              if schema_names != expected_schemas:
+                  raise SystemExit(f"unexpected wheel schemas: {schema_names!r}")
+              entry_points = next(
+                  archive.read(name).decode("utf-8")
+                  for name in names
+                  if name.endswith(".dist-info/entry_points.txt")
+              )
+              for entry in (
+                  "buildscope = buildscope.__main__:main",
+                  "buildscope-diff = buildscope.diff_cli:main",
+              ):
+                  if entry not in entry_points.splitlines():
+                      raise SystemExit(f"missing console entry point: {entry}")
+          if bad:
+              raise SystemExit(f"native extension leaked into wheel: {bad!r}")
+          with tarfile.open(sdist, "r:gz") as archive:
+              bad = [name for name in archive.getnames() if name.lower().endswith(bad_suffixes)]
+          if bad:
+              raise SystemExit(f"native extension leaked into sdist: {bad!r}")
+          print(f"pure artifacts: {wheel.name}, {sdist.name}")
+          PY
+          mv "$wheel" "$artifact/$(basename "$wheel")"
+          mv "$sdist" "$artifact/$(basename "$sdist")"
+          wheel="$artifact/$(basename "$wheel")"
+          sdist="$artifact/$(basename "$sdist")"
+          {
+            echo "WHEEL_PATH=$wheel"
+            echo "SDIST_PATH=$sdist"
+            echo "ARTIFACT_DIR=$artifact"
+          } >> "$GITHUB_ENV"
+
+      - name: Build and install the Qt6 native release bundle
+        working-directory: buildscope
+        env:
+          VERSION: ${{ needs.provenance.outputs.version }}
+        run: |
+          set -euo pipefail
+          artifact="$RUNNER_TEMP/buildscope-release-assets"
+          bundle_name="buildscope-${VERSION}-linux-x86_64"
+          bundle="$artifact/$bundle_name"
+          native_build="$RUNNER_TEMP/buildscope-native-qt6"
+          mkdir -p "$artifact"
+          cmake -S . -B "$native_build" -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON \
+            -DCMAKE_INSTALL_PREFIX="$bundle"
+          cmake --build "$native_build" --parallel
+          ctest --test-dir "$native_build" --output-on-failure
+          cmake --install "$native_build"
+          test -x "$bundle/bin/buildscope-cli"
+          test -x "$bundle/bin/buildscope-gui"
+          test -f "$bundle/share/doc/buildscope/README.md"
+          test -f "$bundle/share/doc/buildscope/quickstart.md"
+          test -f "$bundle/share/buildscope/examples/cmake/CMakeLists.txt"
+          test -f "$bundle/share/buildscope/examples/qmake/example.pro"
+          for binary in "$bundle/bin/buildscope-cli" "$bundle/bin/buildscope-gui"; do
+            file "$binary" | grep -Eq 'ELF 64-bit.*x86-64'
+          done
+          cp "$artifact/buildscope.pyz" "$bundle/"
+          cp "$WHEEL_PATH" "$bundle/"
+          cp "$SDIST_PATH" "$bundle/"
+          qt_version="$(qmake6 -query QT_VERSION)"
+          glibc_floor="$(objdump -T "$bundle/bin/buildscope-gui" \
+            | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1 | cut -d_ -f2)"
+          cat > "$bundle/README.runtime.md" <<EOF
+          # BuildScope ${VERSION} — Linux x86_64 runtime
+
+          This bundle contains the installed BuildScope native CLI and Qt GUI,
+          the pure Python wheel/sdist, the standalone buildscope.pyz, local
+          schemas, and CMake/qmake examples.
+
+          - bin/buildscope-cli needs glibc ${glibc_floor:-2.35}+ on this build host.
+          - bin/buildscope-gui needs Qt ${qt_version} Widgets and the same glibc floor.
+          - Headless smoke tests use QT_QPA_PLATFORM=offscreen; desktop users
+            should leave that variable unset.
+          - Start the GUI with bin/buildscope-gui /path/to/snapshot.json after
+            producing a snapshot with the Python artifact.
+
+          See share/doc/buildscope/quickstart.md and
+          share/buildscope/examples/ for producer/consumer examples.
+          EOF
+          echo "BUNDLE_NAME=$bundle_name" >> "$GITHUB_ENV"
+
+      - name: Run installed wheel and pyz through native CLI
+        env:
+          VERSION: ${{ needs.provenance.outputs.version }}
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set -euo pipefail
+          artifact="$RUNNER_TEMP/buildscope-release-assets"
+          wheel_env="$RUNNER_TEMP/buildscope-wheel-env"
+          python -m venv "$wheel_env"
+          "$wheel_env/bin/python" -m pip install --disable-pip-version-check --no-input --no-deps \
+            "$WHEEL_PATH"
+          database="$GITHUB_WORKSPACE/buildscope/fixtures/compile_commands.json"
+          wheel_snapshot="$artifact/wheel.snapshot.json"
+          pyz_snapshot="$artifact/pyz.snapshot.json"
+          "$wheel_env/bin/buildscope" "$database" \
+            --project-root "$GITHUB_WORKSPACE/buildscope" \
+            --output "$wheel_snapshot"
+          "$artifact/buildscope.pyz" "$database" \
+            --project-root "$GITHUB_WORKSPACE/buildscope" \
+            --output "$pyz_snapshot"
+          cmp "$wheel_snapshot" "$pyz_snapshot"
+          native_cli="$artifact/$BUNDLE_NAME/bin/buildscope-cli"
+          "$native_cli" "$wheel_snapshot" | tee "$artifact/native-wheel-consumer.txt"
+          "$native_cli" "$pyz_snapshot" | tee "$artifact/native-pyz-consumer.txt"
+          grep -Fq 'contract: buildscope.snapshot/v2' "$artifact/native-wheel-consumer.txt"
+          grep -Fq 'contract: buildscope.snapshot/v2' "$artifact/native-pyz-consumer.txt"
+
+      - name: Run Qt6 ici v0.10.2 deep checker and enforce B5 report
+        working-directory: buildscope
+        env:
+          QT_QPA_PLATFORM: offscreen
+          ICI_REQUIRE_STATIC_ANALYSIS_TOOLS: "1"
+        run: |
+          set -euo pipefail
+          report_dir="$GITHUB_WORKSPACE/buildscope/release-reports"
+          mkdir -p "$report_dir"
+          checker="$GITHUB_WORKSPACE/ci/check_buildscope_b5_report.py"
+          test -f "$checker"
+          "$ICI_PYZ" verify \
+            --profile deep \
+            --no-cache \
+            --max-findings 0 \
+            --report \
+            --html release-reports/buildscope-ici-deep.html \
+            --github-summary
+          mv verify_report.json "$report_dir/buildscope-ici-deep.json"
+          "$ICI_PYTHON" "$checker" "$report_dir/buildscope-ici-deep.json" \
+            --expected-qt-major 6
+          cp "$report_dir/buildscope-ici-deep.json" "$RUNNER_TEMP/buildscope-release-assets/buildscope-ici-deep.json"
+          cp "$report_dir/buildscope-ici-deep.html" "$RUNNER_TEMP/buildscope-release-assets/buildscope-ici-deep.html"
+
+      - name: Assemble provenance, deterministic bundle archive, and SHA256SUMS
+        env:
+          TAG: ${{ needs.provenance.outputs.tag }}
+          VERSION: ${{ needs.provenance.outputs.version }}
+          TARGET_SHA: ${{ needs.provenance.outputs.target_sha }}
+          MAIN_SHA: ${{ needs.provenance.outputs.main_sha }}
+          MERGE_GATE_URL: ${{ needs.provenance.outputs.merge_gate_url }}
+        run: |
+          set -euo pipefail
+          artifact="$RUNNER_TEMP/buildscope-release-assets"
+          "$ICI_PYTHON" - "$artifact/buildscope-provenance.json" <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          destination = Path(sys.argv[1])
+          payload = {
+              "product": "buildscope",
+              "version": os.environ["VERSION"],
+              "tag": os.environ["TAG"],
+              "target_commit": os.environ["TARGET_SHA"],
+              "exact_main_commit": os.environ["MAIN_SHA"],
+              "merge_gate_check": os.environ.get("MERGE_GATE_URL", ""),
+              "workflow": {
+                  "name": "BuildScope Release",
+                  "run_id": os.environ["GITHUB_RUN_ID"],
+                  "server": os.environ["GITHUB_SERVER_URL"],
+                  "repository": os.environ["GITHUB_REPOSITORY"],
+              },
+              "runner": {"os": "linux", "architecture": "x86_64"},
+              "ici": {
+                  "version": os.environ["ICI_VERSION"],
+                  "asset": "ici.pyz",
+                  "sha256": os.environ["ICI_PYZ_SHA256"],
+              },
+          }
+          destination.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+          (cd "$artifact" && sha256sum buildscope.pyz) > "$artifact/buildscope.pyz.sha256"
+          tar_file="$artifact/$BUNDLE_NAME.tar"
+          tar --sort=name --mtime='UTC 1970-01-01 00:00:00Z' \
+            --owner=0 --group=0 --numeric-owner -cf "$tar_file" \
+            -C "$artifact" "$BUNDLE_NAME"
+          gzip -n -f "$tar_file"
+          (
+            cd "$artifact"
+            sha256sum \
+              buildscope.pyz \
+              buildscope.pyz.sha256 \
+              "buildscope-${VERSION}-py3-none-any.whl" \
+              "buildscope-${VERSION}.tar.gz" \
+              buildscope-ici-deep.json \
+              buildscope-ici-deep.html \
+              buildscope-provenance.json \
+              "$BUNDLE_NAME.tar.gz"
+          ) > "$artifact/SHA256SUMS"
+          (cd "$artifact" && sha256sum --check SHA256SUMS)
+          find "$artifact" -maxdepth 2 -type f -print | sort
+
+      - name: Upload BuildScope release candidate assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: buildscope-release-assets
+          path: ${{ runner.temp }}/buildscope-release-assets
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish BuildScope GitHub Release
+    needs: [provenance, python-tests, qt-build, package-and-deep-check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout exact validated main commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.provenance.outputs.target_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Download and verify release assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: buildscope-release-assets
+          path: dist
+
+      - name: Confirm exact commit and artifact manifest
+        env:
+          TAG: ${{ needs.provenance.outputs.tag }}
+          TARGET_SHA: ${{ needs.provenance.outputs.target_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          git fetch --force --tags origin
+          test "$(git cat-file -t "refs/tags/$TAG" 2>/dev/null || true)" = tag
+          test "$(git rev-parse --verify "refs/tags/${TAG}^{commit}")" = "$TARGET_SHA"
+          remote_target="$(git ls-remote --tags origin "refs/tags/${TAG}^{}" | awk 'NR == 1 {print $1}')"
+          test "$remote_target" = "$TARGET_SHA"
+          (cd dist && sha256sum --check SHA256SUMS)
+          test -s dist/buildscope-provenance.json
+          test -s dist/buildscope-ici-deep.json
+          test -s dist/buildscope-ici-deep.html
+
+      - name: Extract BuildScope release notes
+        env:
+          VERSION: ${{ needs.provenance.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 - "$VERSION" > RELEASE_NOTES.md <<'PY'
+          from __future__ import annotations
+
+          import re
+          import sys
+          from pathlib import Path
+
+          version = sys.argv[1]
+          text = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          pattern = re.compile(
+              rf"^### BuildScope {re.escape(version)}[^\n]*\n(.*?)(?=\n(?:## |### BuildScope )|\Z)",
+              re.MULTILINE | re.DOTALL,
+          )
+          match = pattern.search(text)
+          if match is None:
+              pattern = re.compile(
+                  rf"^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=\n(?:## |### BuildScope )|\Z)",
+                  re.MULTILINE | re.DOTALL,
+              )
+              match = pattern.search(text)
+          if match is None:
+              raise SystemExit(f"no CHANGELOG release body for BuildScope {version}")
+          print(match.group(1).strip())
+          print()
+          print("---")
+          print()
+          print("Release assets were built from the exact green `main` commit; see `buildscope-provenance.json`.")
+          PY
+
+      - name: Create GitHub Release and upload BuildScope assets
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          tag_name: ${{ needs.provenance.outputs.tag }}
+          name: "BuildScope ${{ needs.provenance.outputs.version }}"
+          body_path: RELEASE_NOTES.md
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
+          files: |
+            dist/buildscope.pyz
+            dist/buildscope.pyz.sha256
+            dist/buildscope-${{ needs.provenance.outputs.version }}-py3-none-any.whl
+            dist/buildscope-${{ needs.provenance.outputs.version }}.tar.gz
+            dist/buildscope-ici-deep.json
+            dist/buildscope-ici-deep.html
+            dist/buildscope-provenance.json
+            dist/buildscope-${{ needs.provenance.outputs.version }}-linux-x86_64.tar.gz
+            dist/SHA256SUMS
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Audit immutable tag and exact public release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.provenance.outputs.tag }}
+          TARGET_SHA: ${{ needs.provenance.outputs.target_sha }}
+          VERSION: ${{ needs.provenance.outputs.version }}
+        run: |
+          set -euo pipefail
+          remote_target="$(git ls-remote --tags origin "refs/tags/${TAG}^{}" | awk 'NR == 1 {print $1}')"
+          test "$remote_target" = "$TARGET_SHA"
+
+          audit_ok=false
+          for attempt in $(seq 1 12); do
+            if ! gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+              > "$RUNNER_TEMP/buildscope-release.json"; then
+              echo "Release API attempt $attempt/12 failed; retrying" >&2
+              sleep 5
+              continue
+            fi
+            if python3 - "$RUNNER_TEMP/buildscope-release.json" dist "$TAG" "$VERSION" <<'PY'
+          from __future__ import annotations
+
+          import hashlib
+          import json
+          import sys
+          from pathlib import Path
+
+          release_path, dist_path, tag, version = sys.argv[1:]
+          release = json.loads(Path(release_path).read_text(encoding="utf-8"))
+          if release.get("tag_name") != tag:
+              raise SystemExit(f"release tag mismatch: {release.get('tag_name')!r}")
+          if release.get("draft") is not False or release.get("prerelease") is not False:
+              raise SystemExit("BuildScope product release must be final, not draft/prerelease")
+
+          expected = {
+              "buildscope.pyz",
+              "buildscope.pyz.sha256",
+              f"buildscope-{version}-py3-none-any.whl",
+              f"buildscope-{version}.tar.gz",
+              "buildscope-ici-deep.json",
+              "buildscope-ici-deep.html",
+              "buildscope-provenance.json",
+              f"buildscope-{version}-linux-x86_64.tar.gz",
+              "SHA256SUMS",
+          }
+          assets = release.get("assets")
+          if not isinstance(assets, list):
+              raise SystemExit("release assets are unavailable")
+          by_name = {asset.get("name"): asset for asset in assets}
+          actual = set(by_name)
+          if actual != expected:
+              raise SystemExit(
+                  f"public asset set mismatch: missing={sorted(expected - actual)!r} "
+                  f"extra={sorted(actual - expected)!r}"
+              )
+
+          dist = Path(dist_path)
+          for name in sorted(expected):
+              asset = by_name[name]
+              local = dist / name
+              if asset.get("state") != "uploaded":
+                  raise SystemExit(f"asset is not uploaded: {name}")
+              if not local.is_file() or local.stat().st_size != asset.get("size"):
+                  raise SystemExit(f"asset size mismatch: {name}")
+              digest = "sha256:" + hashlib.sha256(local.read_bytes()).hexdigest()
+              if asset.get("digest") != digest:
+                  raise SystemExit(
+                      f"asset digest mismatch: {name}: {asset.get('digest')!r} != {digest!r}"
+                  )
+          print(f"audited final BuildScope {version}: exact 9 assets and digests")
+          PY
+            then
+              audit_ok=true
+              break
+            fi
+            echo "Release API asset audit attempt $attempt/12 is not ready"
+            sleep 5
+          done
+          test "$audit_ok" = true

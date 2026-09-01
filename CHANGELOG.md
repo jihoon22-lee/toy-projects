@@ -2,7 +2,21 @@
 
 ## Unreleased
 
-### BuildScope 0.5.0 — B4 semantic configuration diff (implementation candidate, unreleased)
+### Release discipline — deliberate per-project version cadence
+
+- Documented that portfolio direction, B-stage progress, ici pin changes, and CI/runner-only changes
+  do not automatically bump a toy product version. Each toy product versions independently.
+- Reserved `patch` for defect/security/compatibility regressions in an already-public stable product,
+  and `minor` for a cohesive user-usable checkpoint backed by native tests, released-ici verification,
+  PR and exact-main CI/Pages, docs/limitations, and reproducible release assets.
+- Clarified that candidate, pre-release, and unreleased states are not stable releases. BuildScope
+  `0.5.0` remains justified as the bundled B3/B4/B5 first usable release boundary; later work stays
+  under `Unreleased` until a comparable checkpoint is complete.
+- Added the PR naming rule that product/technical outcomes are primary and plan codes such as `T0`/`B1`/
+  `D2` are secondary body or label metadata only. Historical evidence is preserved; an operational
+  ici pin change remains independent from the toy product version.
+
+### BuildScope 0.5.0 — B4 semantic configuration diff + B5 release candidate groundwork (unreleased)
 
 - Added a shell-free semantic diff for two raw `compile_commands.json` arrays. Snapshot v1/v2/v3
   compatibility remains on the producer boundary; the diff output is the separate strict
@@ -30,7 +44,7 @@
   compile DB `12/12` production units and `27` configurations, and TEM `4.95/5.0`. The
   Zero-CDN HTML is 1,235,505 bytes with SHA-256
   `0c98a38b27e928df2c60dcadff9ecc3daa1072cb620354d9f4a9fe8d9b987f80`; this remains separate
-  from the current remote CI evidence.
+  from the B4 remote CI evidence.
 - B4 implementation and PR/remote/hosted evidence are complete on [PR #36](https://github.com/jihoon22-lee/toy-projects/pull/36),
   head `ce64613263f0c4358579012aab135e0b23341a0e`. [Run `33485837830`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33485837830)
   used ici `v0.9.1` and completed all `16/16` checks successfully. BuildScope was `WARN`
@@ -49,7 +63,66 @@
   completed with all 14 prerequisite jobs and `Merge Gate` successful; the PR-only publisher was
   skipped as expected. [Dependency Graph run `33488174425`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33488174425)
   also succeeded on the same head.
-- The `0.5.0` product release artifact and B5 hybrid integration remain pending/not started.
+- At the B4 merge boundary, the `0.5.0` product release artifact and B5 hybrid integration were
+  pending/not started; the following entries record the later B5 local candidate work.
+- Added the B5 local release-candidate slice: `tools/build_standalone.py` validates all public
+  version surfaces and creates an atomic, fixed-metadata standalone `buildscope.pyz`; direct tests
+  verify reproducibility, execution, schema inventory, and symlink refusal. CMake install rules now
+  lay out native CLI/GUI binaries, docs, schemas, and the CMake/qmake examples for a bundle.
+- Added `examples/cmake`, `examples/qmake`, and [docs/quickstart.md](buildscope/docs/quickstart.md)
+  covering CMake/qmake compile-database inputs, Python artifact → JSON → native CLI/GUI handoff,
+  diff inspection, and qmake capture limitations.
+- Local B5 deep/no-cache evidence used public ici `v0.10.0` with the literal SHA-256 pin
+  `6d5f8c008b3b5393a61b2c1a418124eb66393c9eaab0abbb7d1c7922162bed9b` and
+  `ICI_PYTHON=/tmp/toy-b5-py310/bin/python`: `Suite WARN`, 14 engines = `11 PASS / 3 WARN / 0 FAIL /
+  0 ERROR / 0 SKIP`, tests `96/96`, line/function/branch `93.4% / 99.0% / 76.7%`, TEM `4.95`, and
+  compile DB `12/12` production units across `27` configurations with `0` issues. Qt codegen was
+  exact for 3 inputs (MOC `1`, UIC `1`, RCC `1`) with 12 Qt6 compile units. The JSON report is
+  2,873,207 bytes / SHA-256 `ea5fce118e6edad8fa5af24c821663e4290805570377e9b7c190de8da1029612`;
+  the Zero-CDN HTML is 1,264,867 bytes / SHA-256
+  `4e12e77ee11f98b2d5bb146bd3d08252b088083726e6f11235e25a449471a565`, exact title
+  `ici Verification Report — buildscope`, with 0 external references. `clang-tidy` and `clazy`
+  were unavailable locally, so tool-backed deep evidence remains pending on the release runner.
+- Added the `buildscope-release.yml` contract: annotated `buildscope-vX.Y.Z` tag at exact `origin/main`
+  with a green `Merge Gate`, Python `3.10/3.14` and Qt `5/6` release matrices, generated MOC/UIC/RCC
+  checks, pure wheel/sdist checks, wheel/pyz-to-native handoff, and deterministic bundle plus
+  `SHA256SUMS` assets. The workflow is tag-only, allows up to 20 minutes for the exact-main gate,
+  revalidates the remote annotated tag before and after publication, fails on unmatched asset paths,
+  and audits the exact nine public names, sizes, states, and API digests. No B5 PR/remote CI/Pages
+  run, annotated tag, or GitHub Release exists yet; the `0.5.0` product release remains pending.
+- Hardened both release API polling loops so transient GitHub 404/5xx/API failures are retried
+  inside their existing bounded windows instead of being terminated early by shell `errexit`.
+- Updated the current CI, release workflow, and B5 report contract to the corrective public ici
+  `v0.10.1` artifact, pinned by literal SHA-256
+  `9e262730b49420c59ee115cf389881dbfbb944b6a96ca1d397a1ecb247ec17ca`. The v0.10.0
+  local measurements below remain historical evidence; this dependency correction does not change
+  the BuildScope `0.5.0` product version.
+- The Qt5/Qt6 deep legs temporarily build the exact final ici diagnostic-correction candidate
+  `27f4e5cf820ceb36b24711be927f19076472c822` while the ordinary portfolio jobs continue to
+  exercise the public v0.10.1 checksum pin. Candidate
+  `e5096e10e9ce0069d5cea951dbdb28f87ee60e14` passed all 21 jobs in run `33536526972`, including
+  both deep legs and the release contract; the single sticky comment pointed to three independently
+  audited HTTP 200, exact-title, Zero-CDN Pages reports. The earlier candidate
+  `040e61e64df20d64923df80a6c7ea29993e5c3ac` remains recorded by run `33531285208`: both deep
+  legs exposed Clang tooling selecting GCC 14 libstdc++ headers for the GCC 13 compile database.
+  This is cross-repository candidate evidence, not a stable ici release or a BuildScope version
+  change; the final branch will return to a released ici artifact after the candidate gate succeeds.
+- The first B5 PR deep matrix exposed a Qt5-only sanitizer failure in `test_main_window`: all 12
+  test functions passed (14 QtTest lifecycle result entries), then LeakSanitizer found 1,288 bytes
+  retained by deferred Qt5 offscreen/fontconfig/widget work at process shutdown. The test now drains
+  deferred-delete and event work after every case, removing the test-owned portion. A rebuilt local
+  Qt5 ASan/UBSan tree passes `9/9` with the original `detect_leaks=1` policy, while the hosted
+  Ubuntu 24.04 image still reports smaller process-global offscreen-plugin allocations. The Qt5 deep
+  workflow suppresses only residual stacks through the known `libqoffscreen.so` platform plugin
+  using `LSAN_OPTIONS` with `detect_leaks=1`; Qt6 remains unsuppressed. The control fixture
+  `ci/fixtures/outside/project_leak.cpp` runs with the same options and must still produce a
+  nonzero LeakSanitizer result, proving project-owned leaks remain visible.
+- Replaced the temporary source-pinned ici diagnostic candidate in the Qt5/Qt6 deep legs with the
+  checksummed public ici `v0.10.2`, pinned by literal SHA-256
+  `8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4`. Both deep legs validate
+  the sidecar, literal digest, and downloaded bytes before executing the pyz from an absolute
+  runner-temp path; the B5 checker now requires producer version `0.10.2`, while BuildScope remains
+  product version `0.5.0`.
 
 ### BuildScope 0.4.0 — B3 implementation + remote evidence (main candidate, unreleased)
 
