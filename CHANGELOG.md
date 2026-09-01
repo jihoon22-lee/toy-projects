@@ -76,6 +76,12 @@
   revalidates the remote annotated tag before and after publication, fails on unmatched asset paths,
   and audits the exact nine public names, sizes, states, and API digests. No B5 PR/remote CI/Pages
   run, annotated tag, or GitHub Release exists yet; the `0.5.0` product release remains pending.
+- The first B5 PR deep matrix exposed a Qt5-only sanitizer failure in `test_main_window`: all 14
+  QtTest assertions passed, then LeakSanitizer found 1,288 bytes retained by deferred Qt5
+  offscreen/fontconfig/widget work at process shutdown. The test now drains deferred-delete and
+  event work after every case. The same Qt5 ASan/UBSan binary passes with the original
+  `detect_leaks=1` policy, and the full sanitizer CTest tree is `9/9`; no leak suppression or
+  sanitizer weakening was added.
 
 ### BuildScope 0.4.0 — B3 implementation + remote evidence (main candidate, unreleased)
 
