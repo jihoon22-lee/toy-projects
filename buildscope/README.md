@@ -1,10 +1,11 @@
 # BuildScope
 
-BuildScope 0.5.0 is the unreleased B4 configuration-diff candidate developed on
-`feat/buildscope-config-diff` and shipped to `main` by PR #36. B4 implementation plus
-PR/remote/hosted/merged-main evidence is complete; local B5 release-candidate groundwork is now on
-`feat/buildscope-b5-release`, while the product release remains pending. B0 established
-the producer/consumer boundary:
+BuildScope 0.5.0 is the release-ready first usable checkpoint that combines include explanation,
+semantic configuration diff, and reproducible hybrid packaging. Implementation, PR/remote CI,
+public ici `v0.10.2` integration, Python `3.10/3.14` and Qt `5/6` matrices, wheel/pyz/native
+handoff, release-contract acceptance, and trusted `main` Pages evidence are complete. The public
+annotated tag, GitHub Release, and final nine-asset digest audit are still pending, so this document
+does not claim a stable public release. B0 established the producer/consumer boundary:
 Python 3.10+ reads a `compile_commands.json` without executing its commands and emits a
 deterministic `buildscope.snapshot/v1` document; a C++20/Qt CLI and GUI validate and consume that
 document. B1 adds the Python compile-database normalization core and emits the additive
@@ -14,13 +15,14 @@ commands remain separate from structured JSON argv. The B1 public ici v0.7.1 col
 the B2 public ici v0.8.0 evidence recorded here remain separate from the hosted evidence below:
 B1 was verified in [PR #31](https://github.com/jihoon22-lee/toy-projects/pull/31), and B2 was
 verified in [PR #32](https://github.com/jihoon22-lee/toy-projects/pull/32). B3 adds optional
-include explanation while keeping v2 as the default. B3 implementation and remote evidence are
-complete on `main`; B5 hybrid release integration remains before the product version is released.
-B4 adds semantic comparison of two raw compile databases. The implementation, native contract tests,
-PR/remote CI, sticky report, hosted Pages evidence, and merged-main CI are complete on `main`; the
-0.5.0 release artifact and B5 hybrid release boundary remain pending. The B5 candidate adds
+include explanation while keeping v2 as the default. The include-explanation slice was developed as
+the historical `0.4.0` candidate and is now included in the `0.5.0` boundary; it was not published
+as a separate stable release. Semantic comparison of two raw compile databases is also complete.
+The implementation, native contract tests, PR/remote CI, sticky reports, hosted Pages evidence, and
+merged-main CI are complete on `main`. The release-boundary work tracked in the roadmap as B5 adds
 reproducible standalone packaging, installable native/docs/example assets, and a release workflow
-contract; none of those remote release gates has run yet.
+contract; its CI preflight acceptance and trusted `main` Pages verification are complete, while the
+tag-only workflow, public release, and nine-asset post-release audit remain.
 
 ## B0 scope
 
@@ -52,10 +54,11 @@ bounded/core/cross-entry v2 validation; B2 completes the normalized C++ model/UI
 The B0 `v1` snapshot remains the raw compatibility boundary. B1 normalization is implemented in
 the Python producer, while B2 presents the normalized view and retains the raw compatibility fields.
 B1 owns contract acceptance; B2 owns the normalized C++ model/UI transition and is complete. B3's
-include explanation is implemented and remotely verified in the `0.4.0` main candidate. B4's
-configuration diff implementation and PR/remote/hosted/merged-main evidence are recorded below, while the 0.5.0
-release artifact and hybrid release integration (B5) remain pending and the ici I3 target-by-target
-comparison is complete.
+include explanation is implemented and remotely verified in the historical `0.4.0` main candidate.
+B4's configuration diff implementation and PR/remote/hosted/merged-main evidence are recorded below;
+the `0.5.0` release-readiness implementation and remote acceptance are also complete; only the
+public release remains pending, and the ici I3 target-by-target comparison is complete and recorded
+at its current boundary.
 
 ## B1 compile-database normalization (`buildscope.snapshot/v2`)
 
@@ -181,13 +184,13 @@ source nodes and a 10,000 ms budget:
 The benchmark checks entry/source counts, parent-child data, the final source role, and the
 filtered-source count in addition to both timing budgets.
 
-## B3 include explanation (`0.4.0` main candidate, unreleased)
+## Include explanation (historical `0.4.0` candidate; included in `0.5.0`)
 
 B3 adds an optional include graph to the normalized snapshot. The input is still a bounded
 `compile_commands.json`; no external `ici` context is required. The producer can either explain
-the include paths lexically or ask the compiler for its actual include trace. B3 is implemented and
-remote-verified on `main`; it is not a released BuildScope version because B5 hybrid release
-integration remains pending.
+the include paths lexically or ask the compiler for its actual include trace. This slice was
+developed as the historical `0.4.0` candidate, was implemented and remote-verified on `main`, and
+is included in the `0.5.0` boundary rather than being published as a separate stable version.
 
 ### CLI modes and compatibility
 
@@ -289,7 +292,7 @@ or using **Open Source Location**, opens the recorded parent source location; **
 jumps back to the structured/raw command view. v1/v2 snapshots continue to show that include
 analysis is unavailable rather than being treated as measured data.
 
-### B3 historical local candidate evidence (2026-09-01; before PR #34)
+### Historical local candidate evidence (2026-09-01; before PR #34)
 
 The implementation and local checks currently recorded for this branch are:
 
@@ -324,7 +327,7 @@ validation passed.
 This historical local evidence is separate from the B3 PR/remote Pages evidence below and does not
 by itself claim B5 release integration or ici I3 completion.
 
-### B3 remote integration and main evidence (2026-09-01)
+### Remote integration and main evidence (2026-09-01)
 
 [PR #34](https://github.com/jihoon22-lee/toy-projects/pull/34) carried feature head
 `c3835cd4b0c859c38ae0f4afbdb20aae970515dc`. Its [CI run
@@ -353,12 +356,12 @@ applicable jobs, including `Merge Gate` (PR publish correctly skipped on push). 
 `33459594605`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33459594605) also succeeded on
 the same head.
 
-B3 implementation and remote evidence are complete and the code is shipped to `main`; `0.4.0` remains
-unreleased until B5 hybrid release integration. ici I3 cross-repository comparison is complete, and
-B4 configuration diff is the `0.5.0` main candidate with implementation and
-remote/merged-main evidence complete.
+B3 implementation and remote evidence are complete and the code is shipped to `main`; `0.4.0` was
+not published as a separate stable version and is represented in the `0.5.0` boundary. ici I3
+cross-repository comparison is complete, and the configuration-diff implementation plus
+remote/merged-main evidence is complete.
 
-## B4 semantic configuration diff (`0.5.0` candidate, unreleased)
+## Semantic configuration diff (`0.5.0` release boundary)
 
 B4 compares two **raw** `compile_commands.json` arrays. The diff command does not accept
 `buildscope.snapshot/v1`, `v2`, or `v3` documents as inputs and never executes a compiler, shell, or
@@ -445,7 +448,7 @@ was 1,235,505 bytes, SHA-256
 `ici Verification Report — buildscope`. This historical local result is separate from the current
 B4 v0.9.1 remote evidence below.
 
-### B4 PR #36 and merged-main remote integration evidence (2026-09-01)
+### PR #36 and merged-main remote integration evidence (2026-09-01)
 
 B4 implementation and PR/remote/hosted evidence are complete on [PR #36](https://github.com/jihoon22-lee/toy-projects/pull/36),
 head `ce64613263f0c4358579012aab135e0b23341a0e`. [Run `33485837830`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33485837830)
@@ -465,7 +468,8 @@ The three hosted Pages reports were HTTP 200 with exact titles and zero external
 | diskmap | [diskmap/pr/36](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/36/) | 337,554 | `39a52d1e3d5b9eed6bbc1ec5253f1bf837deb4a7bb33ed2f2ef3b32df0f90e0e` |
 | loglens | [loglens/pr/36](https://jihoon22-lee.github.io/toy-projects/loglens/pr/36/) | 492,746 | `0480f07aea266c0777403ac37ebf90d4acd10f84b04e49aa2a9ccf99a6153007` |
 
-The `0.5.0` product release artifact and B5 hybrid integration remain pending/not started.
+At the time of PR #36, the `0.5.0` product release artifact and the release-boundary integration
+tracked as B5 were still pending; the follow-up release-readiness evidence is recorded below.
 
 PR #36 was squash-merged to `main` as
 `590899a0a9430e9ce35162b301bfef5d7dfc78a4`, and its feature branch was deleted. Exact-main
@@ -474,10 +478,13 @@ with all 14 prerequisite jobs and `Merge Gate` successful; the PR-only publisher
 [Dependency Graph run `33488174425`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33488174425)
 also succeeded on the same head.
 
-## B5 release candidate (`0.5.0`, local groundwork; unreleased)
+## BuildScope 0.5.0 release readiness (remote acceptance complete; public release pending)
 
-B5 connects the B4 producer/consumer contract to a releasable, inspectable bundle. The current local
-slice is intentionally bounded:
+The release-boundary work tracked in the roadmap as B5 connects the configuration-diff
+producer/consumer contract to a releasable, inspectable bundle. Local packaging and workflow
+implementation are complete, PR #38 accepted the remote integration/matrix/handoff/release gates,
+and PR #39 verified trusted `main` Pages publication. Version `0.5.0` remains release-ready but
+unreleased until the annotated tag, GitHub Release, and exact nine-asset post-release audit complete.
 
 - `tools/build_standalone.py` validates the Python, pyproject, CMake, and ici version surfaces,
   writes a fixed-metadata zipapp containing the package and all four public schemas, and atomically
@@ -491,9 +498,9 @@ slice is intentionally bounded:
   Linux x86_64 native bundle, and standalone pyz; it compares wheel/pyz snapshots through the native
   CLI before publishing any asset.
 
-### Local B5 ici candidate evidence (2026-09-01)
+### Historical local ici candidate evidence (2026-09-01)
 
-The local deep/no-cache run used public ici `v0.10.0`, pinned to literal
+The historical local deep/no-cache run used public ici `v0.10.0`, pinned to literal
 `6d5f8c008b3b5393a61b2c1a418124eb66393c9eaab0abbb7d1c7922162bed9b`, with
 `ICI_PYTHON=/tmp/toy-b5-py310/bin/python`. It reported `Suite WARN`: 14 engines = `11 PASS / 3 WARN /
 0 FAIL / 0 ERROR / 0 SKIP`, tests `96/96`, line/function/branch `93.4% / 99.0% / 76.7%`, and TEM
@@ -531,7 +538,7 @@ legs use public ici v0.10.2, pinned to literal SHA-256
 sidecar, literal hash, and downloaded bytes before executing the pyz from an absolute runner-temp
 path, and no ici source checkout/build remains in the workflow.
 
-### B5 release contract (defined, not published)
+### Release contract (accepted remotely; publication pending)
 
 `buildscope-release.yml` runs only for an annotated `buildscope-vX.Y.Z` tag, requires that it point
 to exact `origin/main` with a successful `Merge Gate`, and checks all public version surfaces plus
@@ -545,8 +552,47 @@ The eventual release publishes `buildscope.pyz`, `buildscope.pyz.sha256`,
 `buildscope-ici-deep.json`, `buildscope-ici-deep.html`, `buildscope-provenance.json`,
 `buildscope-<version>-linux-x86_64.tar.gz`, and `SHA256SUMS`. Publication fails closed on a missing
 path and audits the remote annotated-tag target plus the exact nine uploaded names, sizes, and API
-digests after release creation. No BuildScope B5 PR/remote CI/Pages run, annotated tag, or GitHub
-Release exists yet; `0.5.0` remains unreleased and B5 acceptance is pending those gates.
+digests after release creation. The equivalent CI preflight acceptance is recorded in PR #38 below;
+the tag-only release workflow has not run, and the annotated tag, GitHub Release, exact nine uploaded
+names, and post-release digest audit do not exist yet, so `0.5.0` remains unreleased.
+
+### Release-boundary remote acceptance (PR #38)
+
+[PR #38](https://github.com/jihoon22-lee/toy-projects/pull/38) final head
+`3ba645eae5181698e1272729dddaa8a72189b067` passed all 21 checks in [run
+`33545168957`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33545168957), including the
+Python/native handoff, Python `3.10/3.14` and Qt `5/6` Release/CTest matrix, generated Qt codegen
+and offscreen GUI smoke, hosted deep legs, release contract, `Publish Reports & Sticky Comment`, and
+`Merge Gate`. Its [sticky comment `#5494648837`](https://github.com/jihoon22-lee/toy-projects/pull/38#issuecomment-5494648837)
+records the ici verification result and the three project HTML report links. The deep legs used the
+public ici `v0.10.2` asset after validating sidecar, literal, and downloaded-byte SHA-256
+`8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4`; hosted tool-backed checks,
+including the configured `clang-tidy`/`clazy` legs, ran in that workflow.
+
+PR #38 was squash-merged to `main` as
+`069a3a86c0164a1d2a88710f9c3c48a398c8087e`, and its branch was deleted. The same exact head passed
+the applicable checks and `Merge Gate` in [main run
+`33546046566`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33546046566).
+
+### Trusted main Pages acceptance (PR #39)
+
+[PR #39](https://github.com/jihoon22-lee/toy-projects/pull/39) added the trusted `main` report
+publisher. Its final head `b861ff5b4cc0314aae5ec9f6dab905648233216d` passed [run
+`33548626203`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33548626203), whose [sticky
+comment `#5499184834`](https://github.com/jihoon22-lee/toy-projects/pull/39#issuecomment-5499184834)
+records the generated report links. PR #39 was squash-merged as
+`c80e922f0d0911019cfa8b5c67a8b654c556a68c`, its branch was deleted, and [exact-main run
+`33549475034`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33549475034) passed.
+
+At exact-main run `33549475034`, independent main Pages checks found HTTP 200 `text/html`, exact title
+`ici Verification Report — <project>`, Zero-CDN resources, and byte-identical content to that run's
+publisher output:
+
+| Project | Main report | Bytes | SHA-256 |
+|---|---|---:|---|
+| BuildScope | [buildscope/main](https://jihoon22-lee.github.io/toy-projects/buildscope/main/) | 1,349,088 | `dd7ec9b49281875f812b9a9c6b4e18a028051936a37441f19d907098c05dcc65` |
+| diskmap | [diskmap/main](https://jihoon22-lee.github.io/toy-projects/diskmap/main/) | 339,929 | `1bd6ebdce2206e4538fb28c20c17f2d504f1a160e15f5d8d4e2923b15b399e65` |
+| loglens | [loglens/main](https://jihoon22-lee.github.io/toy-projects/loglens/main/) | 495,237 | `11e4c78eed957e237bcea8ec5ea64c3894751eafbe639c454e47ab0acd70df96` |
 
 ## Run without installing into the repository
 
@@ -688,9 +734,10 @@ external dependencies:
 
 B1 implementation and PR #31 remote integration evidence are complete. B2 implementation and its
 local/public verification are recorded below. B3 implementation and remote evidence are recorded
-above; B4 implementation and PR/remote/hosted/merged-main evidence are recorded above, while the 0.5.0 release
-artifact and B5 hybrid release integration remain pending; the ici I3 target-by-target comparison is
-complete.
+above; B4 implementation and PR/remote/hosted/merged-main evidence are recorded above. At the time
+of this historical B1 record, the `0.5.0` release artifact and release-boundary integration were
+pending; current release-readiness evidence is recorded above, and the ici I3 target-by-target
+comparison is complete.
 
 ## B2 local, public, and remote verification evidence (2026-09-01)
 
@@ -726,5 +773,7 @@ titles and zero external resource references:
 | [loglens](https://jihoon22-lee.github.io/toy-projects/loglens/pr/32/) | 446,791 | `7b2669fb7de82ada30bfdf28a2d82533f5566ad92779ea08c90528e188ea582b` | `ici Verification Report — loglens` |
 
 B3 implementation and remote evidence are recorded above. B4 configuration diff implementation and
-PR/remote/hosted/merged-main evidence are recorded above; the 0.5.0 release artifact and B5 hybrid release
-integration remain future work, while the ici I3 target-by-target same-basename comparison is complete.
+PR/remote/hosted/merged-main evidence are recorded above. At the time of this historical B2 record,
+the `0.5.0` release artifact and release-boundary integration were future work; current
+release-readiness evidence is recorded above, while the ici I3 target-by-target same-basename
+comparison is complete.
