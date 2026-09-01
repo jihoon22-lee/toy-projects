@@ -58,7 +58,12 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+    effective_argv = list(sys.argv[1:] if argv is None else argv)
+    if effective_argv and effective_argv[0] == "diff":
+        from buildscope.diff_cli import main as diff_main
+
+        return diff_main(effective_argv[1:])
+    args = _parser().parse_args(effective_argv)
     try:
         database = args.database.absolute()
         schema = args.schema_version or ("v3" if args.include_analysis else "v2")

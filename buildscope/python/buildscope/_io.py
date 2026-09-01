@@ -6,6 +6,7 @@ import os
 import secrets
 import stat
 import tempfile
+from collections.abc import Sequence
 from contextlib import suppress
 from pathlib import Path
 
@@ -132,6 +133,11 @@ def _reject_protected_alias(destination: Path, source: Path) -> None:
         raise SnapshotIoError("snapshot output must not overwrite the compilation database")
 
 
+def _reject_protected_aliases(destination: Path, sources: tuple[Path, ...]) -> None:
+    for source in sources:
+        _reject_protected_alias(destination, source)
+
+
 def _open_directory_component(current: int, component: str, flags: int) -> int:
     following = os.open(component, flags, dir_fd=current)
     try:
@@ -185,6 +191,15 @@ def _reject_protected_alias_at(
         raise SnapshotIoError("snapshot output must not overwrite the compilation database")
 
 
+def _reject_protected_aliases_at(
+    parent_descriptor: int,
+    destination_name: str,
+    sources: tuple[Path, ...],
+) -> None:
+    for source in sources:
+        _reject_protected_alias_at(parent_descriptor, destination_name, source)
+
+
 def _temporary_at(parent_descriptor: int, destination_name: str) -> tuple[str, int]:
     flags = (
         os.O_WRONLY
@@ -206,11 +221,11 @@ def _write_anchored(
     parent_descriptor: int,
     destination_name: str,
     text: str,
-    source: Path,
+    sources: tuple[Path, ...],
 ) -> None:
     temporary_name: str | None = None
     try:
-        _reject_protected_alias_at(parent_descriptor, destination_name, source)
+        _reject_protected_aliases_at(parent_descriptor, destination_name, sources)
         temporary_name, descriptor = _temporary_at(parent_descriptor, destination_name)
         try:
             stream = os.fdopen(descriptor, mode="w", encoding="utf-8")
@@ -222,7 +237,7 @@ def _write_anchored(
             stream.write(text)
             stream.flush()
             os.fsync(stream.fileno())
-        _reject_protected_alias_at(parent_descriptor, destination_name, source)
+        _reject_protected_aliases_at(parent_descriptor, destination_name, sources)
         os.rename(
             temporary_name,
             destination_name,
@@ -236,7 +251,7 @@ def _write_anchored(
                 os.unlink(temporary_name, dir_fd=parent_descriptor)
 
 
-def _write_portable(destination: Path, text: str, source: Path) -> None:
+def _write_portable(destination: Path, text: str, sources: tuple[Path, ...]) -> None:
     """Best-effort fallback for platforms without directory-relative operations."""
 
     try:
@@ -244,7 +259,7 @@ def _write_portable(destination: Path, text: str, source: Path) -> None:
     except (OSError, RuntimeError) as error:
         raise SnapshotIoError(f"cannot resolve snapshot output directory: {error}") from error
     anchored_destination = parent / destination.name
-    _reject_protected_alias(anchored_destination, source)
+    _reject_protected_aliases(anchored_destination, sources)
     parent_before = parent.stat()
     temporary: Path | None = None
     temporary_identity: tuple[int, int, int] | None = None
@@ -270,7 +285,7 @@ def _write_portable(destination: Path, text: str, source: Path) -> None:
             temporary_after.st_mode
         ):
             raise SnapshotIoError("snapshot temporary file changed while writing")
-        _reject_protected_alias(anchored_destination, source)
+        _reject_protected_aliases(anchored_destination, sources)
         temporary.replace(anchored_destination)
     finally:
         if temporary is not None:
@@ -278,20 +293,23 @@ def _write_portable(destination: Path, text: str, source: Path) -> None:
                 temporary.unlink(missing_ok=True)
 
 
-def write_atomic_text(target: Path, text: str, *, protected: Path) -> None:
-    """Atomically write text while refusing to replace the source database."""
+def write_atomic_text(target: Path, text: str, *, protected: Path | Sequence[Path]) -> None:
+    """Atomically write text while refusing to replace any protected input."""
 
     destination = Path(target).absolute()
-    source = Path(protected).absolute()
+    raw_sources = (protected,) if isinstance(protected, Path) else tuple(protected)
+    sources = tuple(Path(source).absolute() for source in raw_sources)
     try:
-        if destination == source:
+        if not sources:
+            raise SnapshotIoError("at least one protected input is required")
+        if destination in sources:
             raise SnapshotIoError("snapshot output must not overwrite the compilation database")
         parent_descriptor = _open_parent_no_follow(destination.parent)
         if parent_descriptor is None:
-            _write_portable(destination, text, source)
+            _write_portable(destination, text, sources)
             return
         try:
-            _write_anchored(parent_descriptor, destination.name, text, source)
+            _write_anchored(parent_descriptor, destination.name, text, sources)
         finally:
             os.close(parent_descriptor)
     except SnapshotIoError:

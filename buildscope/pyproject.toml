@@ -14,6 +14,7 @@ dependencies = []
 
 [project.scripts]
 buildscope = "buildscope.__main__:main"
+buildscope-diff = "buildscope.diff_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["python/buildscope"]
