@@ -61,6 +61,12 @@ HTML checker, and event-specific `Merge Gate` assertions into the discovery job.
 Records the trusted publication boundary under `Unreleased`; no product version is advanced for a
 CI/Pages repair.
 
+### `/home/jihoon/projects/toy-projects/README.md`
+
+Synchronizes the current CI contract with the three discovery suites, public ici `v0.10.2`, the
+read-only PR quality boundary, separate PR/main publishers, complete quality dependencies, and the
+byte-identical stable Pages requirement. Historical run descriptions remain unchanged.
+
 ## Verification
 
 Local verification commands:

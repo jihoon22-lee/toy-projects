@@ -697,22 +697,26 @@ discovery 단계에서 자동으로 Qt5·Qt6 두 major로 확장된다. 따라�
 한쪽 matrix만 수정하는 실수를 허용하지 않는다. GUI가 없는 순수 CLI 프로젝트는
 `gui.enabled = false`를 명시해야 하며, 그 경우에도 ici verify에는 포함된다.
 
-discovery contract 자체는 의존성 없는 `python3 -m unittest ci/test_check_manifest.py`로
-현재 프로젝트와 새 GUI 프로젝트 fixture의 양 major 확장을 검증한다. `gui-build`는
-repository-level `contents: read` 권한만 상속하며, PR 소스를 체크아웃하는 빌드 job에는
-write token이 없다. write 권한이 필요한 `report-pr`는 소스를 체크아웃하지 않고 체크섬을
-검증한 ici release asset과 verify artifact만 처리한다.
+discovery contract 자체는 의존성 없는 Python unit suite로 manifest expansion, 공개 HTML의
+exact-title/Zero-CDN 규칙, PR/main publisher event split과 exact-SHA/digest/path/byte 검증 불변식을
+검사한다. `gui-build`를 비롯해 PR 소스를 체크아웃하는 품질 job은 repository-level
+`contents: read`만 상속한다. write 권한이 필요한 `report-pr`는 소스를 체크아웃하지 않고
+체크섬을 검증한 ici release asset과 verify artifact만 처리한다. 별도 `publish-main`은 모든
+품질 job이 성공한 push에서만 exact `main` 소스를 체크아웃한다.
 
 PR의 `report-pr`는 verify·GUI matrix가 성공 또는 실패로 끝난 뒤 항상 평가된다. 성공한
-실행에서는 checksum을 확인한 ici `v0.6.0` release asset으로 모든 report artifact를
+실행에서는 checksum을 확인한 ici `v0.10.2` release asset으로 모든 report artifact를
 `gh-pages`에 순차 게시하고, repository 단위 concurrency로 Pages 쓰기 경합을 막는다. 이어서
 실제 sticky 댓글을 API로 읽어 manifest 프로젝트 수만큼의 HTML 링크가 정확히 있는지 확인하고,
 각 링크가 Pages에서 `text/html` 응답을 반환할 때까지 기다린다.
 
 `Merge Gate`는 branch protection에서 required check로 설정해야 한다. 이 stable check가
-manifest discovery, 모든 ici verify matrix leg, 모든 GUI matrix leg와 PR report 검증을 함께
-요구한다. `push` 실행에서는 report 게시를 건너뛸 수 있지만, verify와 GUI 결과는 항상
-성공해야 한다.
+manifest discovery, 모든 ici verify·GUI matrix leg, benchmark smoke, BuildScope deep Qt5/Qt6,
+Python quality, release contract와 event별 게시 경계를 함께 요구한다. PR에서는 sticky 댓글과
+`<project>/pr/<number>/` Pages가 필수이고 `publish-main`은 건너뛴다. `main` push에서는 반대로
+PR publisher를 건너뛰고, exact current SHA와 public ici checksum을 다시 확인한 뒤
+`<project>/main/`에 명시적 label로 게시해야 한다. 공개 응답은 local artifact와 byte-identical,
+exact-title, Zero-CDN HTML이어야 `Merge Gate`가 성공한다.
 
 ## 검증
 
@@ -729,7 +733,11 @@ meta-object로 기존 `pollSource` slot을 동기 호출해 구동한다.
 
 ```bash
 # manifest/discovery
-python3 -m unittest ci/test_check_manifest.py -v
+python3 -m unittest \
+  ci/test_check_manifest.py \
+  ci/test_check_published_html.py \
+  ci/test_ci_workflow_contract.py \
+  -v
 
 # loglens — Qt 6 and Qt 5 CMake legs
 cd loglens
