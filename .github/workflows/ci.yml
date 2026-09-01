@@ -14,8 +14,8 @@ permissions:
   contents: read
 
 env:
-  ICI_VERSION: v0.10.0
-  ICI_SHA256: "6d5f8c008b3b5393a61b2c1a418124eb66393c9eaab0abbb7d1c7922162bed9b"
+  ICI_VERSION: v0.10.1
+  ICI_SHA256: "9e262730b49420c59ee115cf389881dbfbb944b6a96ca1d397a1ecb247ec17ca"
 
 jobs:
   # ci/projects.json is the only project list. Both verification and GUI jobs
@@ -648,7 +648,7 @@ jobs:
           cmake --build "$build_dir" --parallel
           QT_QPA_PLATFORM=offscreen ctest --test-dir "$build_dir" --output-on-failure
 
-      - name: Fetch and double-check public ici v0.10.0
+      - name: Fetch and double-check public ici v0.10.1
         run: |
           set -euo pipefail
           base="https://github.com/jihoon22-lee/ici/releases/download/${ICI_VERSION}"

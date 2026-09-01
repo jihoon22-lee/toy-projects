@@ -13,10 +13,10 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  ICI_VERSION: "v0.10.0"
-  # Public ici v0.10.0 asset digest. Both the published checksum file and a
+  ICI_VERSION: "v0.10.1"
+  # Public ici v0.10.1 asset digest. Both the published checksum file and a
   # fresh digest are checked against this literal before ici can run source.
-  ICI_PYZ_SHA256: "6d5f8c008b3b5393a61b2c1a418124eb66393c9eaab0abbb7d1c7922162bed9b"
+  ICI_PYZ_SHA256: "9e262730b49420c59ee115cf389881dbfbb944b6a96ca1d397a1ecb247ec17ca"
 
 jobs:
   provenance:
@@ -348,7 +348,7 @@ jobs:
           clazy-standalone --version 2>/dev/null || clazy --version
           clang-tidy --version
 
-      - name: Download public ici v0.10.0 and validate its literal SHA twice
+      - name: Download public ici v0.10.1 and validate its literal SHA twice
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -540,7 +540,7 @@ jobs:
           grep -Fq 'contract: buildscope.snapshot/v2' "$artifact/native-wheel-consumer.txt"
           grep -Fq 'contract: buildscope.snapshot/v2' "$artifact/native-pyz-consumer.txt"
 
-      - name: Run Qt6 ici v0.10.0 deep checker and enforce B5 report
+      - name: Run Qt6 ici v0.10.1 deep checker and enforce B5 report
         working-directory: buildscope
         env:
           QT_QPA_PLATFORM: offscreen

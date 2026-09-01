@@ -2,7 +2,7 @@
 """Check the BuildScope B5 ici-report contract.
 
 The checker intentionally uses only the Python standard library.  It is run
-after a public ``ici v0.10.0`` deep/no-cache verification and fails closed when
+after a public ``ici v0.10.1`` deep/no-cache verification and fails closed when
 the report does not contain the evidence required by the B5 release gate.
 """
 
@@ -16,7 +16,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-EXPECTED_ICI_VERSION = "0.10.0"
+EXPECTED_ICI_VERSION = "0.10.1"
 EXPECTED_SCHEMA_VERSION = "ici.result/v3"
 EXPECTED_PROFILE = "deep"
 EXPECTED_CODEGEN_COUNTS = {
