@@ -251,11 +251,11 @@ shape으로 기록한다.
 
 B3 implementation과 remote evidence는 complete이고 code는 `main`에 shipped됐다. `0.4.0`은
 B5 hybrid release integration 전까지 unreleased로 유지한다. ici I3 cross-repository comparison은
-완료됐으며 B4 configuration diff 구현과 PR/remote/hosted evidence도 feature branch에서 완료됐다.
+완료됐으며 B4 configuration diff 구현과 PR/remote/hosted/merged-main evidence도 `main`에서 완료됐다.
 
-## 완료: BuildScope B4 semantic configuration diff (implementation + remote evidence, 2026-09-01)
+## 완료: BuildScope B4 semantic configuration diff (implementation + remote + merged-main evidence, 2026-09-01)
 
-`feat/buildscope-config-diff`의 B4 implementation은 두 raw `compile_commands.json`을 비교하는
+`feat/buildscope-config-diff`에서 개발된 B4 implementation은 두 raw `compile_commands.json`을 비교하는
 strict `buildscope.diff/v1` contract, native C++/Qt consumption, and Python-to-C++ hybrid fixture를
 제공한다. B4는 [PR #36](https://github.com/jihoon22-lee/toy-projects/pull/36)의 head
 `ce64613263f0c4358579012aab135e0b23341a0e`에서 remote/hosted evidence까지 완료됐다.
@@ -276,8 +276,13 @@ marker 1개와 hosted report link 3개를 포함한다.
 | loglens | [loglens/pr/36](https://jihoon22-lee.github.io/toy-projects/loglens/pr/36/) | 492,746 | `0480f07aea266c0777403ac37ebf90d4acd10f84b04e49aa2a9ccf99a6153007` |
 
 세 Pages report는 HTTP 200, exact title, external resource reference 0개였다. B4는 implementation과
-PR/remote/hosted evidence까지 완료됐지만 `0.5.0` product release artifact와 B5 hybrid release
-integration은 pending/not started이다.
+PR/remote/hosted evidence까지 완료됐다. PR #36는 `main`에
+`590899a0a9430e9ce35162b301bfef5d7dfc78a4`로 squash-merge됐고 feature branch는 삭제됐다. Exact-main
+[CI run `33488169769`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33488169769)는 14개
+선행 job과 `Merge Gate`가 모두 성공했으며 PR-only publisher는 expected skip이었다.
+[Dependency Graph run `33488174425`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33488174425)도
+같은 head에서 성공했다. 따라서 B4는 `main`에 shipped됐지만 `0.5.0` product release artifact와
+B5 hybrid release integration은 pending/not started이다.
 
 ## 배경
 

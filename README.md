@@ -12,7 +12,7 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 |---|---|---|
 | [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D2 cancellable/latest-generation scan complete (PR #28) · identity-safe scan · D3 next |
 | [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · L2 1 GiB benchmark merged in PR #26 · default capacity 8192 |
-| [buildscope](buildscope/) | compile DB explorer | B4 semantic configuration diff implementation + PR/remote/hosted evidence complete on `feat/buildscope-config-diff` · 0.5.0 release/B5 pending |
+| [buildscope](buildscope/) | compile DB explorer | B4 semantic configuration diff implementation + PR/remote/hosted/merged-main evidence complete on `main` (PR #36) · 0.5.0 release/B5 pending |
 
 ### buildscope B0 hybrid skeleton — release-backed evidence
 
@@ -151,7 +151,7 @@ Graph [run 33459594605](https://github.com/jihoon22-lee/toy-projects/actions/run
 on that head; on push, PR publish was correctly skipped while applicable jobs and `Merge Gate` passed.
 
 B3 implementation and remote evidence are complete, ici I3 cross-repository comparison is complete,
-and B4 configuration diff implementation/local evidence is now on the feature branch. B4 compares
+and B4 configuration diff implementation/local evidence is now on `main` after PR #36. B4 compares
 raw `compile_commands.json` pairs without executing commands, normalizes relocation noise while
 retaining ordered defines/includes and compiler/standard/language/target drift, and exports strict
 `buildscope.diff/v1` JSON. Exit `0` means no visible drift, `1` means visible drift, and `2` means
@@ -182,9 +182,16 @@ has exactly one marker and three hosted-report links.
 | loglens | [loglens/pr/36](https://jihoon22-lee.github.io/toy-projects/loglens/pr/36/) | 492,746 | `0480f07aea266c0777403ac37ebf90d4acd10f84b04e49aa2a9ccf99a6153007` |
 
 All three Pages responses were HTTP 200 with the exact `ici Verification Report — <project>` title
-and zero external resource references. B4 implementation plus remote/hosted evidence is complete on
-the feature branch; the `0.5.0` product release artifact and B5 hybrid release integration remain
+and zero external resource references. B4 implementation plus remote/hosted/merged-main evidence is complete on
+`main` after PR #36; the `0.5.0` product release artifact and B5 hybrid release integration remain
 pending/not started.
+
+PR #36 was squash-merged to `main` as
+`590899a0a9430e9ce35162b301bfef5d7dfc78a4`, and its feature branch was deleted. Exact-main CI
+[run `33488169769`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33488169769) completed
+with all 14 prerequisite jobs and `Merge Gate` successful; the PR-only publisher was skipped as expected.
+[Dependency Graph run `33488174425`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33488174425)
+also succeeded on the same head.
 
 ## 공통 구조 규칙
 

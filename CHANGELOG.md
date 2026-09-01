@@ -43,8 +43,13 @@
   and zero external resource references: BuildScope `1,319,378` bytes / SHA-256
   `5dc517d3ec8324cb1aedb6e611120ac9ae2951e27851cbc6b0e28303d02c5d43`, diskmap `337,554` bytes /
   `39a52d1e3d5b9eed6bbc1ec5253f1bf837deb4a7bb33ed2f2ef3b32df0f90e0e`, and loglens `492,746` bytes /
-  `0480f07aea266c0777403ac37ebf90d4acd10f84b04e49aa2a9ccf99a6153007`. The `0.5.0` product
-  release artifact and B5 hybrid integration remain pending/not started.
+  `0480f07aea266c0777403ac37ebf90d4acd10f84b04e49aa2a9ccf99a6153007`.
+- PR #36 was squash-merged to `main` as `590899a0a9430e9ce35162b301bfef5d7dfc78a4`, and its
+  feature branch was deleted. Exact-main [CI run `33488169769`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33488169769)
+  completed with all 14 prerequisite jobs and `Merge Gate` successful; the PR-only publisher was
+  skipped as expected. [Dependency Graph run `33488174425`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33488174425)
+  also succeeded on the same head.
+- The `0.5.0` product release artifact and B5 hybrid integration remain pending/not started.
 
 ### BuildScope 0.4.0 — B3 implementation + remote evidence (main candidate, unreleased)
 

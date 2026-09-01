@@ -16,15 +16,23 @@
 > `0480f07aea266c0777403ac37ebf90d4acd10f84b04e49aa2a9ccf99a6153007`. The `0.5.0` product
 > release artifact and B5 hybrid integration remain pending/not started.
 
+> **Post-merge update (2026-09-01):** PR #36 was squash-merged to `main` as
+> `590899a0a9430e9ce35162b301bfef5d7dfc78a4`, and its feature branch was deleted. Exact-main
+> [CI run `33488169769`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33488169769) completed
+> with all 14 prerequisite jobs and `Merge Gate` successful; the PR-only publisher was skipped as expected.
+> [Dependency Graph run `33488174425`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33488174425)
+> also succeeded on the same head. B4 is now shipped on `main`; the `0.5.0` product release artifact
+> and B5 hybrid integration remain pending/not started.
+
 ## Overview
 
-BuildScope B4 documents the `0.5.0` semantic configuration-diff candidate on
-`feat/buildscope-config-diff`. It compares two raw compile databases without executing build
+BuildScope B4 documents the `0.5.0` semantic configuration-diff candidate originally developed on
+`feat/buildscope-config-diff` and now shipped on `main` via PR #36. It compares two raw compile databases without executing build
 commands, preserves meaningful compiler/configuration order, and exports a strict diff contract that
 the Python CLI, native C++ consumer, and Qt UI share. This workthrough records the implementation,
 adversarial hardening, documentation updates, and checksum-verified local release evidence available
-before PR, remote CI, and release-artifact publication; the post-green update above records the later
-remote evidence.
+before PR, remote CI, and release-artifact publication; the post-green and post-merge updates above
+record the later remote and merged-main evidence.
 
 ## Context
 
