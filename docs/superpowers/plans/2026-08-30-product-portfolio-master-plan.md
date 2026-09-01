@@ -767,8 +767,8 @@ symlink도 읽기 전에 거부한다. 공개 Draft 2020-12
 `buildscope-snapshot-v1.schema.json` 및 `buildscope-snapshot-v2.schema.json`은 source tree와
 pure wheel에 함께 포함된다. v2 `producer.version`의 schema `maxLength` 1 MiB와 native reader
 문자열 bound도 일치한다. v2 normalized model/UI 전환은 B2 범위다. B1 구현과 PR #31
-remote integration evidence는 complete이며, B2~B5와 ici I3
-비교는 미완료다.
+remote integration evidence는 complete이며, B2 구현/local verification도 아래와 같이
+완료됐다. B2 remote integration evidence, B3~B5와 ici I3 비교는 미완료다.
 
 **B1 final local/public evidence (2026-09-01):** public
 `ici v0.7.1` cold verification은 표준 `sha256sum --check ici.pyz.sha256`가 통과했고 suite
@@ -805,20 +805,44 @@ marker 1개와 정확히 3개 project link를 포함하고 BuildScope `11 PASS /
 | diskmap | [diskmap/pr/31](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/31/) | 311,846 | `a8806808638c584312943d2551c1668a407c45830311de07cb0eed30d15e6924` | `ici Verification Report — diskmap` |
 | loglens | [loglens/pr/31](https://jihoon22-lee.github.io/toy-projects/loglens/pr/31/) | 446,796 | `56f3b2d54ed2a05ebf100313b4d9447553e9c6fb9c85f7e7adce8eccc838dc4f` | `ici Verification Report — loglens` |
 
-B1 implementation과 PR #31 remote integration evidence는 complete다. B2/B3/B4/B5와 ici I3
-target-by-target comparison은 아직 pending이다.
+B1 implementation과 PR #31 remote integration evidence는 complete다. B2 implementation/local
+verification도 complete이며 remote integration evidence는 아직 pending이다. B3/B4/B5와 ici
+I3 target-by-target comparison은 아직 pending이다.
 
-### B2. C++ model과 Qt UI
+### B2. C++ model과 Qt UI — implementation/local verification 완료
 
 **브랜치:** `feat/buildscope-qt-explorer`
 
-- [ ] B1 legacy-v1/core 및 v2 bounded/core/cross-entry reader가 수락한 결과와 validation error location을 normalized
+- [x] B1 legacy-v1/core 및 v2 bounded/core/cross-entry reader가 수락한 결과와 validation error location을 normalized
   C++ model/UI에 연결한다.
-- [ ] source/target tree, command detail, define/include tables를 제공한다.
-- [ ] filter/search와 missing/stale entry 표시를 제공한다.
-- [ ] `.ui`로 MainWindow layout, `.qrc`로 local icons/theme asset을 사용한다.
-- [ ] QAbstractItemModelTester와 MainWindow shell test를 추가한다.
-- [ ] 10만 entry synthetic DB를 lazy model로 처리하고 성능을 측정한다.
+- [x] source/target tree, command detail, define/include tables를 제공한다.
+- [x] filter/search와 missing/stale entry 표시를 제공한다.
+- [x] `.ui`로 MainWindow layout, `.qrc`로 local icons/theme asset을 사용한다.
+- [x] QAbstractItemModelTester와 MainWindow shell test를 추가한다.
+- [x] 10만 entry synthetic DB를 lazy model로 처리하고 성능을 측정한다.
+
+**B2 local candidate (2026-09-01):** BuildScope `0.3.0`은 v2 snapshot을 소스별로 묶는
+`QAbstractItemModel`과 configuration child index를 제공한다. child object tree를 복제하지
+않고 snapshot entry index를 `QModelIndex` identity로 사용한다. source status는
+missing > stale > present > unknown 순으로 집계하고 target/compiler/standard/configuration,
+structured JSON argv, 별도의 raw command, defines/includes/diagnostics를 detail pane에 표시한다.
+recursive case-insensitive filter는 source와 모든 구조화 필드를 검색한다. Qt `.ui` splitter/tab
+layout과 `.qrc`의 네 로컬 status SVG를 사용하며 외부 UI resource가 없다. v1 snapshot은 raw
+compatibility view를 유지한다.
+
+읽는 동안 파일이 삭제·교체·변경되거나 열린 descriptor가 닫히는 경계를 deterministic hook으로
+재현해 B1의 post-read identity attestation도 보강했다. public `ici v0.8.0` release asset 검증은
+suite WARN(type/dup only), `46/46` tests, line/function/branch
+`94.5% / 99.5% / 83.9%`, TEM `4.98`, compile DB `8/8` production units·`19`
+configurations, complexity max `14`/`196` functions·0 issues였다. `contract.cpp` module coverage는
+`89.9%`로 올라 검사 finding을 닫았다. HTML은 558,384 bytes, SHA-256
+`cdaefa06c52de696e0340b698e37b88dde199bc5a7bd2bbba27421618f44e444`, title은
+`ici Verification Report — buildscope`, external resource reference는 0개다.
+
+Qt5 5.15.18과 Qt6 6.10.2의 전체 CTest는 benchmark를 포함해 각각 6/6 PASS였다. Qt6 Release
+100,000-entry/25,000-source 측정은 model build 45 ms, recursive filter 1,071 ms, peak RSS
+132,612 KiB로 각 10,000 ms budget을 통과했다. 이 수치는 local candidate evidence이며 PR CI,
+sticky comment와 세 Pages URL의 remote evidence가 확인돼야 B2 전체를 닫는다.
 
 ### B3. include explanation
 

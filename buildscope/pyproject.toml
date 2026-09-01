@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "buildscope"
-version = "0.2.0"
+version = "0.3.0"
 description = "Offline explorer for C and C++ compilation databases"
 readme = "README.md"
 requires-python = ">=3.10"

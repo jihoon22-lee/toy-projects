@@ -2,65 +2,87 @@
 <ui version="4.0">
  <class>MainWindow</class>
  <widget class="QMainWindow" name="MainWindow">
-  <property name="geometry">
-   <rect>
-    <x>0</x>
-    <y>0</y>
-    <width>1100</width>
-    <height>680</height>
-   </rect>
-  </property>
-  <property name="windowTitle">
-   <string>BuildScope — Compilation Explorer</string>
-  </property>
+  <property name="geometry"><rect><x>0</x><y>0</y><width>1320</width><height>820</height></rect></property>
+  <property name="windowTitle"><string>BuildScope — Compilation Explorer</string></property>
   <widget class="QWidget" name="centralWidget">
    <layout class="QVBoxLayout" name="verticalLayout">
     <item>
      <layout class="QHBoxLayout" name="pathLayout">
-      <item>
-       <widget class="QLineEdit" name="pathEdit">
-        <property name="readOnly">
-         <bool>true</bool>
-        </property>
-        <property name="placeholderText">
-         <string>Open a BuildScope snapshot generated from compile_commands.json</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QPushButton" name="openButton">
-        <property name="text">
-         <string>Open Snapshot…</string>
-        </property>
-       </widget>
-      </item>
+      <item><widget class="QLineEdit" name="pathEdit"><property name="readOnly"><bool>true</bool></property><property name="placeholderText"><string>Open a BuildScope snapshot generated from compile_commands.json</string></property></widget></item>
+      <item><widget class="QPushButton" name="openButton"><property name="text"><string>Open Snapshot…</string></property></widget></item>
      </layout>
     </item>
     <item>
-     <widget class="QLabel" name="statusLabel">
-      <property name="text">
-       <string>No snapshot loaded</string>
-      </property>
-     </widget>
+     <layout class="QHBoxLayout" name="filterLayout">
+      <item><widget class="QLabel" name="filterLabel"><property name="text"><string>Filter</string></property></widget></item>
+      <item><widget class="QLineEdit" name="filterEdit"><property name="clearButtonEnabled"><bool>true</bool></property><property name="placeholderText"><string>Source, target, compiler, define, include, status…</string></property></widget></item>
+     </layout>
     </item>
+    <item><widget class="QLabel" name="statusLabel"><property name="text"><string>No snapshot loaded</string></property></widget></item>
     <item>
-     <widget class="QTreeWidget" name="entryTree">
-      <property name="alternatingRowColors">
-       <bool>true</bool>
-      </property>
-      <property name="rootIsDecorated">
-       <bool>false</bool>
-      </property>
-      <column>
-       <property name="text">
-        <string>Source</string>
-       </property>
-      </column>
+     <widget class="QSplitter" name="explorerSplitter">
+      <property name="orientation"><enum>Qt::Horizontal</enum></property>
+      <widget class="QTreeView" name="sourceTree">
+       <property name="minimumSize"><size><width>520</width><height>0</height></size></property>
+       <property name="alternatingRowColors"><bool>true</bool></property>
+       <property name="rootIsDecorated"><bool>true</bool></property>
+       <property name="uniformRowHeights"><bool>true</bool></property>
+      </widget>
+      <widget class="QWidget" name="detailPane">
+       <layout class="QVBoxLayout" name="detailLayout">
+        <item><widget class="QLabel" name="selectionLabel"><property name="text"><string>Select a source or configuration</string></property><property name="textInteractionFlags"><set>Qt::TextSelectableByMouse</set></property></widget></item>
+        <item>
+         <widget class="QTabWidget" name="detailTabs">
+          <widget class="QWidget" name="overviewTab">
+           <attribute name="title"><string>Overview</string></attribute>
+           <layout class="QFormLayout" name="overviewForm">
+            <item row="0" column="0"><widget class="QLabel" name="sourceCaption"><property name="text"><string>Source</string></property></widget></item>
+            <item row="0" column="1"><widget class="QLabel" name="sourceValue"><property name="text"><string>—</string></property><property name="textInteractionFlags"><set>Qt::TextSelectableByMouse</set></property></widget></item>
+            <item row="1" column="0"><widget class="QLabel" name="directoryCaption"><property name="text"><string>Directory</string></property></widget></item>
+            <item row="1" column="1"><widget class="QLabel" name="directoryValue"><property name="text"><string>—</string></property><property name="textInteractionFlags"><set>Qt::TextSelectableByMouse</set></property></widget></item>
+            <item row="2" column="0"><widget class="QLabel" name="sourceStatusCaption"><property name="text"><string>Status</string></property></widget></item>
+            <item row="2" column="1"><widget class="QLabel" name="sourceStatusValue"><property name="text"><string>—</string></property></widget></item>
+            <item row="3" column="0"><widget class="QLabel" name="targetCaption"><property name="text"><string>Target</string></property></widget></item>
+            <item row="3" column="1"><widget class="QLabel" name="targetValue"><property name="text"><string>—</string></property><property name="textInteractionFlags"><set>Qt::TextSelectableByMouse</set></property></widget></item>
+            <item row="4" column="0"><widget class="QLabel" name="compilerCaption"><property name="text"><string>Compiler</string></property></widget></item>
+            <item row="4" column="1"><widget class="QLabel" name="compilerValue"><property name="text"><string>—</string></property><property name="textInteractionFlags"><set>Qt::TextSelectableByMouse</set></property></widget></item>
+            <item row="5" column="0"><widget class="QLabel" name="standardCaption"><property name="text"><string>Standard</string></property></widget></item>
+            <item row="5" column="1"><widget class="QLabel" name="standardValue"><property name="text"><string>—</string></property></widget></item>
+            <item row="6" column="0"><widget class="QLabel" name="configurationCaption"><property name="text"><string>Configuration</string></property></widget></item>
+            <item row="6" column="1"><widget class="QLabel" name="configurationValue"><property name="text"><string>—</string></property><property name="textInteractionFlags"><set>Qt::TextSelectableByMouse</set></property></widget></item>
+           </layout>
+          </widget>
+          <widget class="QWidget" name="commandTab">
+           <attribute name="title"><string>Command</string></attribute>
+           <layout class="QVBoxLayout" name="commandLayout">
+            <item><widget class="QLabel" name="invocationSourceValue"><property name="text"><string>Invocation source: —</string></property></widget></item>
+            <item><widget class="QLabel" name="argumentsCaption"><property name="text"><string>Structured argv (JSON; token boundaries preserved)</string></property></widget></item>
+            <item><widget class="QPlainTextEdit" name="argumentsEdit"><property name="readOnly"><bool>true</bool></property><property name="lineWrapMode"><enum>QPlainTextEdit::NoWrap</enum></property></widget></item>
+            <item><widget class="QLabel" name="rawCommandCaption"><property name="text"><string>Raw command string (when provided)</string></property></widget></item>
+            <item><widget class="QPlainTextEdit" name="rawCommandEdit"><property name="readOnly"><bool>true</bool></property><property name="lineWrapMode"><enum>QPlainTextEdit::NoWrap</enum></property></widget></item>
+           </layout>
+          </widget>
+          <widget class="QWidget" name="definesTab">
+           <attribute name="title"><string>Defines</string></attribute>
+           <layout class="QVBoxLayout" name="definesLayout"><item><widget class="QTableWidget" name="defineTable"><property name="alternatingRowColors"><bool>true</bool></property><property name="editTriggers"><set>QAbstractItemView::NoEditTriggers</set></property><column><property name="text"><string>Action</string></property></column><column><property name="text"><string>Name</string></property></column><column><property name="text"><string>Value</string></property></column></widget></item></layout>
+          </widget>
+          <widget class="QWidget" name="includesTab">
+           <attribute name="title"><string>Includes</string></attribute>
+           <layout class="QVBoxLayout" name="includesLayout"><item><widget class="QTableWidget" name="includeTable"><property name="alternatingRowColors"><bool>true</bool></property><property name="editTriggers"><set>QAbstractItemView::NoEditTriggers</set></property><column><property name="text"><string>Order</string></property></column><column><property name="text"><string>Kind</string></property></column><column><property name="text"><string>Scope</string></property></column><column><property name="text"><string>Exists</string></property></column><column><property name="text"><string>Path</string></property></column></widget></item></layout>
+          </widget>
+          <widget class="QWidget" name="diagnosticsTab">
+           <attribute name="title"><string>Diagnostics</string></attribute>
+           <layout class="QVBoxLayout" name="diagnosticsLayout"><item><widget class="QTreeWidget" name="diagnosticTree"><property name="alternatingRowColors"><bool>true</bool></property><property name="rootIsDecorated"><bool>false</bool></property><column><property name="text"><string>Severity</string></property></column><column><property name="text"><string>Code</string></property></column><column><property name="text"><string>Message</string></property></column></widget></item></layout>
+          </widget>
+         </widget>
+        </item>
+       </layout>
+      </widget>
      </widget>
     </item>
    </layout>
   </widget>
  </widget>
- <resources/>
+ <resources><include location="../resources/buildscope.qrc"/></resources>
  <connections/>
 </ui>

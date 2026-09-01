@@ -1,4 +1,5 @@
 #include "buildscope/contract.hpp"
+#include "contract_loader.hpp"
 
 #include <QFile>
 #include <QJsonArray>
@@ -6,6 +7,12 @@
 #include <QJsonObject>
 #include <QTemporaryDir>
 #include <QtTest>
+
+#include <utility>
+
+#if defined(Q_OS_UNIX)
+#include <sys/stat.h>
+#endif
 
 class ContractTest final : public QObject {
     Q_OBJECT
@@ -23,6 +30,13 @@ private slots:
     void rejectsFinalSymlink();
     void rejectsOversizedFile();
     void rejectsTooManyEntries();
+#if defined(Q_OS_UNIX)
+    void rejectsNonRegularFile();
+    void rejectsClosedDescriptorDuringRead();
+    void rejectsRemovedPathDuringRead();
+    void rejectsReplacedPathDuringRead();
+    void rejectsContentChangeDuringRead();
+#endif
 };
 
 namespace {
@@ -76,6 +90,19 @@ QByteArray validV2Payload() {
       }]
     })json";
 }
+
+#if defined(Q_OS_UNIX)
+template <typename Hook>
+void expectPostOpenContractError(const QString &path, Hook hook,
+                                 const QString &message) {
+    try {
+        buildscope::detail::loadSnapshotFileWithPostReadHook(path, std::move(hook));
+        QFAIL("expected buildscope::ContractError");
+    } catch (const buildscope::ContractError &error) {
+        QVERIFY2(QString::fromUtf8(error.what()).contains(message), error.what());
+    }
+}
+#endif
 
 template <typename Mutator>
 QByteArray mutateV2Entry(Mutator mutator) {
@@ -843,6 +870,89 @@ void ContractTest::rejectsTooManyEntries() {
 
     expectContractError(payload, QStringLiteral("root.entries exceeds 100000 entry limit"));
 }
+
+#if defined(Q_OS_UNIX)
+void ContractTest::rejectsNonRegularFile() {
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const auto path = temporary.filePath(QStringLiteral("snapshot.fifo"));
+    const auto encodedPath = QFile::encodeName(path);
+    QCOMPARE(::mkfifo(encodedPath.constData(), 0600), 0);
+
+    QVERIFY_EXCEPTION_THROWN(buildscope::loadSnapshotFile(path), buildscope::ContractError);
+}
+
+void ContractTest::rejectsClosedDescriptorDuringRead() {
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const auto path = temporary.filePath(QStringLiteral("snapshot.json"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    const auto payload = validV2Payload();
+    QCOMPARE(file.write(payload), payload.size());
+    file.close();
+
+    expectPostOpenContractError(
+        path, [](QFile &opened) { opened.close(); },
+        QStringLiteral("cannot re-inspect open snapshot"));
+}
+
+void ContractTest::rejectsRemovedPathDuringRead() {
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const auto path = temporary.filePath(QStringLiteral("snapshot.json"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    const auto payload = validV2Payload();
+    QCOMPARE(file.write(payload), payload.size());
+    file.close();
+
+    expectPostOpenContractError(
+        path, [&path](QFile &) { QVERIFY(QFile::remove(path)); },
+        QStringLiteral("snapshot path changed while reading"));
+}
+
+void ContractTest::rejectsReplacedPathDuringRead() {
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const auto path = temporary.filePath(QStringLiteral("snapshot.json"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    const auto payload = validV2Payload();
+    QCOMPARE(file.write(payload), payload.size());
+    file.close();
+
+    expectPostOpenContractError(
+        path,
+        [&path](QFile &) {
+            QVERIFY(QFile::remove(path));
+            QFile replacement(path);
+            QVERIFY(replacement.open(QIODevice::WriteOnly));
+            QCOMPARE(replacement.write("{}"), qint64(2));
+        },
+        QStringLiteral("snapshot path identity changed while reading"));
+}
+
+void ContractTest::rejectsContentChangeDuringRead() {
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const auto path = temporary.filePath(QStringLiteral("snapshot.json"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    const auto payload = validV2Payload();
+    QCOMPARE(file.write(payload), payload.size());
+    file.close();
+
+    expectPostOpenContractError(
+        path,
+        [&path](QFile &) {
+            QFile writer(path);
+            QVERIFY(writer.open(QIODevice::Append));
+            QCOMPARE(writer.write("\n"), qint64(1));
+        },
+        QStringLiteral("snapshot content changed while reading"));
+}
+#endif
 
 QTEST_APPLESS_MAIN(ContractTest)
 
