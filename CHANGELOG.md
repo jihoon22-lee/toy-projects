@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Trusted main report publication
+
+- Added a separate exact-`main` publisher for the BuildScope, DiskMap, and LogLens ici HTML reports.
+  It runs only after every quality job succeeds, rejects a stale checkout or superseded `main` SHA,
+  downloads the checksum-pinned public ici `v0.10.2` artifact, and publishes explicit
+  `<project>/main/index.html` destinations without relying on the PR-only sticky-comment job.
+- Added a bounded standard-library HTML contract checker and Python 3.10-compatible unit coverage.
+  Each public Pages response must be byte-identical to its local artifact, have the exact project
+  title, and have no external script, stylesheet, image, frame, media, form, SVG-use, or CSS resource
+  dependency.
+- Extended `Merge Gate` so PR runs require the sticky-comment publisher while `main` pushes require
+  the trusted main publisher. A skipped event-specific publisher can no longer leave a green push
+  with missing stable report URLs. Static workflow contract tests prevent the event split, exact-SHA
+  checks, checksum pin, explicit destination labels, or byte-level public audit from regressing.
+
 ### Release discipline — deliberate per-project version cadence
 
 - Documented that portfolio direction, B-stage progress, ici pin changes, and CI/runner-only changes
