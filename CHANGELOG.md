@@ -98,10 +98,12 @@
   local measurements below remain historical evidence; this dependency correction does not change
   the BuildScope `0.5.0` product version.
 - The Qt5/Qt6 deep legs temporarily build the exact ici diagnostic-correction candidate
-  `040e61e64df20d64923df80a6c7ea29993e5c3ac` while the ordinary portfolio jobs continue to
-  exercise the public v0.10.1 checksum pin. This is cross-repository candidate evidence, not a
-  stable ici release or a BuildScope version change; the final branch will return to a released
-  ici artifact after the candidate gate succeeds.
+  `e5096e10e9ce0069d5cea951dbdb28f87ee60e14` while the ordinary portfolio jobs continue to
+  exercise the public v0.10.1 checksum pin. The preceding candidate
+  `040e61e64df20d64923df80a6c7ea29993e5c3ac` remains recorded by run `33531285208`: both deep
+  legs exposed Clang tooling selecting GCC 14 libstdc++ headers for the GCC 13 compile database.
+  This is cross-repository candidate evidence, not a stable ici release or a BuildScope version
+  change; the final branch will return to a released ici artifact after the candidate gate succeeds.
 - The first B5 PR deep matrix exposed a Qt5-only sanitizer failure in `test_main_window`: all 12
   test functions passed (14 QtTest lifecycle result entries), then LeakSanitizer found 1,288 bytes
   retained by deferred Qt5 offscreen/fontconfig/widget work at process shutdown. The test now drains

@@ -520,7 +520,7 @@ suppression. Its `ci/fixtures/outside/project_leak.cpp` control runs under the s
 still return nonzero with a LeakSanitizer diagnostic, so project-owned leaks remain visible.
 
 For the corrective ici integration rerun, only the Qt5/Qt6 deep legs build exact ici commit
-`040e61e64df20d64923df80a6c7ea29993e5c3ac`; the ordinary portfolio jobs still download and verify
+`e5096e10e9ce0069d5cea951dbdb28f87ee60e14`; the ordinary portfolio jobs still download and verify
 the public v0.10.1 checksum. This temporary source-pinned candidate distinguishes pre-release
 evidence from a stable dependency. It is replaced by a released ici checksum before BuildScope is
 merged or tagged.
