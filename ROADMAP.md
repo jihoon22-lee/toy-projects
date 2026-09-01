@@ -281,8 +281,55 @@ PR/remote/hosted evidence까지 완료됐다. PR #36는 `main`에
 [CI run `33488169769`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33488169769)는 14개
 선행 job과 `Merge Gate`가 모두 성공했으며 PR-only publisher는 expected skip이었다.
 [Dependency Graph run `33488174425`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33488174425)도
-같은 head에서 성공했다. 따라서 B4는 `main`에 shipped됐지만 `0.5.0` product release artifact와
-B5 hybrid release integration은 pending/not started이다.
+같은 head에서 성공했다. 이 문단이 기록하는 B4 merge 시점에는 `0.5.0` product release artifact와
+B5 hybrid release integration이 pending/not started였다. 이후의 local B5 작업은 다음 절에 기록한다.
+
+## BuildScope B5 release-candidate groundwork (local implementation, 2026-09-01; pending)
+
+B5는 B4의 producer/consumer contract를 실제 배포 경계까지 연결하는 단계다. 현재
+`feat/buildscope-b5-release`에는 로컬 candidate packaging, install layout, examples/tutorial,
+release-gate 정의가 들어갔지만 제품 release 자체는 아직 만들지 않았다.
+
+- [x] `buildscope/tools/build_standalone.py`가 Python/pyproject/CMake/ici version surface를
+  일치시키고 fixed zip metadata와 정렬된 package/schema payload로 `buildscope.pyz`를 생성한다.
+  direct tests는 두 산출물의 byte identity, 실행, schema inventory와 symlink refusal을 확인한다.
+- [x] `buildscope/CMakeLists.txt` install rule이 native CLI/GUI, `share/doc/buildscope/`,
+  `share/buildscope/examples/`, `share/buildscope/schemas/` layout을 제공한다.
+- [x] `buildscope/examples/cmake`, `buildscope/examples/qmake` sample compile database와
+  [quickstart](buildscope/docs/quickstart.md)를 제공한다. quickstart는 pyz/wheel → JSON →
+  native CLI/GUI 흐름과 qmake가 compile DB를 자동 생성하지 않는 제한을 명시한다.
+- [x] local ici report에서 CMake compile DB `12/12` production units·`27` configurations·`0`
+  issues와 Qt codegen exact inputs `3`, MOC `1`, UIC `1`, RCC `1`, Qt6 compile units `12`를
+  확인한다.
+- [ ] `clang-tidy`/`clazy`가 설치된 환경의 tool-backed deep evidence. 현재 local tool env에서는
+  둘 다 unavailable이다.
+- [ ] Python `3.10/3.14` 및 Qt `5/6` Release/CTest matrix와 generated MOC/UIC/RCC path,
+  offscreen GUI smoke의 release-workflow 실행.
+- [ ] wheel/pyz가 같은 snapshot을 만들고 native CLI가 두 결과를 소비하는 handoff와 Linux
+  x86_64 bundle의 실제 release asset 게시.
+- [ ] annotated `buildscope-vX.Y.Z` tag, exact-main/green Merge Gate provenance, PR/remote/Pages
+  evidence와 GitHub Release.
+
+### B5 local ici evidence
+
+public ici `v0.10.0` asset의 literal SHA-256 pin
+`6d5f8c008b3b5393a61b2c1a418124eb66393c9eaab0abbb7d1c7922162bed9b`과
+`ICI_PYTHON=/tmp/toy-b5-py310/bin/python`으로 deep/no-cache를 실행했다. 결과는 `Suite WARN`,
+14 engines = `11 PASS / 3 WARN / 0 FAIL / 0 ERROR / 0 SKIP`, tests `96/96`,
+line/function/branch `93.4% / 99.0% / 76.7%`, TEM `4.95`다. JSON은 2,873,207 bytes /
+SHA-256 `ea5fce118e6edad8fa5af24c821663e4290805570377e9b7c190de8da1029612`, Zero-CDN HTML은
+1,264,867 bytes / SHA-256 `4e12e77ee11f98b2d5bb146bd3d08252b088083726e6f11235e25a449471a565`이며,
+exact title은 `ici Verification Report — buildscope`, external refs는 `0`이다. `clang-tidy`와
+`clazy`는 local에서 실행되지 않아 tool-backed evidence가 아니라 unavailable로 기록됐다.
+
+`.github/workflows/buildscope-release.yml`은 annotated tag가 exact `origin/main`과 green Merge Gate를
+가리키는 provenance를 먼저 확인하고, Python `3.10/3.14`, Qt `5/6`, pure wheel/sdist, reproducible
+pyz, Qt6 Linux x86_64 bundle, native handoff, ici v0.10.0 sidecar/download/API digest와
+`SHA256SUMS`를 검사하도록 정의돼 있다. 예정된 asset 이름은 `buildscope.pyz`,
+`buildscope.pyz.sha256`, `buildscope-<version>-py3-none-any.whl`,
+`buildscope-<version>.tar.gz`, `buildscope-ici-deep.{json,html}`, `buildscope-provenance.json`,
+`buildscope-<version>-linux-x86_64.tar.gz`, `SHA256SUMS`다. workflow는 정의만 되었고 아직 PR/remote/
+Pages run, tag, GitHub Release가 없으므로 B5와 `0.5.0` release는 pending이다.
 
 ## 배경
 
@@ -361,8 +408,10 @@ PR 소스를 실행하지 않는 별도 집계 job으로 유지한다.
 이 역사적 단계의 `A` 표기는 현재 마스터 계획의 `abilens` A stream과 다르다.
 
 **원래 목적은 이미 달성됐다.** 이 단계는 A-2·A-3 을 실측하기 위한 것이었는데 둘 다 처리됐다.
-남은 미충족 조건은 하나뿐이다 — **`.qrc`/`.ui` 생성 단계(`AUTOUIC`/`AUTORCC`)** 가 어느
-프로젝트에도 없어 검증되지 않았다. `AUTOMOC` 만 실측됐다.
+이 문장은 당시 T0의 역사적 상태다. 그 이후 BuildScope CMake에는 `.qrc`/`.ui`와
+`AUTOMOC`/`AUTOUIC`/`AUTORCC`가 들어갔고, B5 local ici report에서 exact input `3`, MOC `1`,
+UIC `1`, RCC `1`과 Qt6 compile units `12`를 실측했다. 다른 프로젝트의 generated-asset 범위는
+이 BuildScope B5 evidence와 별도다.
 
 그 조건 하나를 위해 새 프로젝트를 만들 가치가 있는지는 다시 판단해야 한다. 더 싼 방법이
 있다 — 기존 프로젝트에 아이콘 `.qrc` 하나를 넣으면 같은 것이 실측된다. 도구 자체가 갖고

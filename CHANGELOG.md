@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-### BuildScope 0.5.0 — B4 semantic configuration diff (implementation candidate, unreleased)
+### BuildScope 0.5.0 — B4 semantic configuration diff + B5 release candidate groundwork (unreleased)
 
 - Added a shell-free semantic diff for two raw `compile_commands.json` arrays. Snapshot v1/v2/v3
   compatibility remains on the producer boundary; the diff output is the separate strict
@@ -30,7 +30,7 @@
   compile DB `12/12` production units and `27` configurations, and TEM `4.95/5.0`. The
   Zero-CDN HTML is 1,235,505 bytes with SHA-256
   `0c98a38b27e928df2c60dcadff9ecc3daa1072cb620354d9f4a9fe8d9b987f80`; this remains separate
-  from the current remote CI evidence.
+  from the B4 remote CI evidence.
 - B4 implementation and PR/remote/hosted evidence are complete on [PR #36](https://github.com/jihoon22-lee/toy-projects/pull/36),
   head `ce64613263f0c4358579012aab135e0b23341a0e`. [Run `33485837830`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33485837830)
   used ici `v0.9.1` and completed all `16/16` checks successfully. BuildScope was `WARN`
@@ -49,7 +49,31 @@
   completed with all 14 prerequisite jobs and `Merge Gate` successful; the PR-only publisher was
   skipped as expected. [Dependency Graph run `33488174425`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33488174425)
   also succeeded on the same head.
-- The `0.5.0` product release artifact and B5 hybrid integration remain pending/not started.
+- At the B4 merge boundary, the `0.5.0` product release artifact and B5 hybrid integration were
+  pending/not started; the following entries record the later B5 local candidate work.
+- Added the B5 local release-candidate slice: `tools/build_standalone.py` validates all public
+  version surfaces and creates an atomic, fixed-metadata standalone `buildscope.pyz`; direct tests
+  verify reproducibility, execution, schema inventory, and symlink refusal. CMake install rules now
+  lay out native CLI/GUI binaries, docs, schemas, and the CMake/qmake examples for a bundle.
+- Added `examples/cmake`, `examples/qmake`, and [docs/quickstart.md](buildscope/docs/quickstart.md)
+  covering CMake/qmake compile-database inputs, Python artifact → JSON → native CLI/GUI handoff,
+  diff inspection, and qmake capture limitations.
+- Local B5 deep/no-cache evidence used public ici `v0.10.0` with the literal SHA-256 pin
+  `6d5f8c008b3b5393a61b2c1a418124eb66393c9eaab0abbb7d1c7922162bed9b` and
+  `ICI_PYTHON=/tmp/toy-b5-py310/bin/python`: `Suite WARN`, 14 engines = `11 PASS / 3 WARN / 0 FAIL /
+  0 ERROR / 0 SKIP`, tests `96/96`, line/function/branch `93.4% / 99.0% / 76.7%`, TEM `4.95`, and
+  compile DB `12/12` production units across `27` configurations with `0` issues. Qt codegen was
+  exact for 3 inputs (MOC `1`, UIC `1`, RCC `1`) with 12 Qt6 compile units. The JSON report is
+  2,873,207 bytes / SHA-256 `ea5fce118e6edad8fa5af24c821663e4290805570377e9b7c190de8da1029612`;
+  the Zero-CDN HTML is 1,264,867 bytes / SHA-256
+  `4e12e77ee11f98b2d5bb146bd3d08252b088083726e6f11235e25a449471a565`, exact title
+  `ici Verification Report — buildscope`, with 0 external references. `clang-tidy` and `clazy`
+  were unavailable locally, so tool-backed deep evidence remains pending on the release runner.
+- Added the `buildscope-release.yml` contract: annotated `buildscope-vX.Y.Z` tag at exact `origin/main`
+  with a green `Merge Gate`, Python `3.10/3.14` and Qt `5/6` release matrices, generated MOC/UIC/RCC
+  checks, pure wheel/sdist checks, wheel/pyz-to-native handoff, and deterministic bundle plus
+  `SHA256SUMS` assets. No B5 PR/remote CI/Pages run, annotated tag, or GitHub Release exists yet;
+  the `0.5.0` product release remains pending.
 
 ### BuildScope 0.4.0 — B3 implementation + remote evidence (main candidate, unreleased)
 

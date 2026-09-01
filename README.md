@@ -12,7 +12,7 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 |---|---|---|
 | [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D2 cancellable/latest-generation scan complete (PR #28) · identity-safe scan · D3 next |
 | [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · L2 1 GiB benchmark merged in PR #26 · default capacity 8192 |
-| [buildscope](buildscope/) | compile DB explorer | B4 semantic configuration diff implementation + PR/remote/hosted/merged-main evidence complete on `main` (PR #36) · 0.5.0 release/B5 pending |
+| [buildscope](buildscope/) | compile DB explorer | B4 shipped on `main` · B5 local release-candidate packaging/examples and gate groundwork · 0.5.0 release pending |
 
 ### buildscope B0 hybrid skeleton — release-backed evidence
 
@@ -192,6 +192,38 @@ PR #36 was squash-merged to `main` as
 with all 14 prerequisite jobs and `Merge Gate` successful; the PR-only publisher was skipped as expected.
 [Dependency Graph run `33488174425`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33488174425)
 also succeeded on the same head.
+
+### buildscope B5 release candidate — local packaging and integration groundwork (pending)
+
+B5의 현재 범위는 구현된 B4를 배포 가능한 경계까지 연결하는 로컬 candidate slice다. `tools/build_standalone.py`는
+Python/CMake/ici 버전 surface를 일치시키고 고정 zip metadata·정렬된 payload·schema inventory로
+재현 가능한 `buildscope.pyz`를 만들며, direct test는 두 번의 산출물이 byte-identical인지 확인한다.
+`CMakeLists.txt`의 install rule은 native `buildscope-cli`/`buildscope-gui`, 문서, examples, schemas를
+하나의 Linux bundle layout으로 설치한다. [B5 quickstart](buildscope/docs/quickstart.md)는
+`buildscope.pyz` 또는 `buildscope-0.5.0-py3-none-any.whl`로 compile DB를 JSON으로 만들고
+native CLI/GUI에서 소비하는 흐름, CMake/qmake examples와 qmake capture 제한을 설명한다.
+
+2026-09-01 로컬 B5 실측은 public ici `v0.10.0` asset을 literal
+`ICI_PYZ_SHA256=6d5f8c008b3b5393a61b2c1a418124eb66393c9eaab0abbb7d1c7922162bed9b`로 고정하고,
+`ICI_PYTHON=/tmp/toy-b5-py310/bin/python` tool environment에서 deep/no-cache로 실행했다. 결과는
+`Suite WARN`, 14 engines = `11 PASS / 3 WARN / 0 FAIL / 0 ERROR / 0 SKIP`, tests `96/96`,
+line/function/branch `93.4% / 99.0% / 76.7%`, TEM `4.95`, compile DB `12/12` production units·`27`
+configurations·`0` issues였다. Qt codegen은 exact input `3`, MOC `1`, UIC `1`, RCC `1`, Qt6
+compile units `12`를 기록했다. HTML은 1,264,867 bytes / SHA-256
+`4e12e77ee11f98b2d5bb146bd3d08252b088083726e6f11235e25a449471a565`, JSON은 2,873,207 bytes /
+SHA-256 `ea5fce118e6edad8fa5af24c821663e4290805570377e9b7c190de8da1029612`이며 title은
+`ici Verification Report — buildscope`, external refs는 `0`이다. 다만 로컬에는 `clang-tidy`와
+`clazy`가 설치되지 않아 unavailable로 남았고, tool-backed deep gate는 release runner에서 아직
+검증되지 않았다.
+
+`.github/workflows/buildscope-release.yml`은 annotated `buildscope-vX.Y.Z` tag가 exact `origin/main`
+및 green `Merge Gate`를 가리키는지 확인하고, Python `3.10/3.14`와 Qt `5/6` Release/CTest matrix,
+MOC/UIC/RCC generated-path 검사, Qt6 native bundle, wheel/pyz-to-native-CLI handoff, ici v0.10.0
+literal SHA/API digest 검증을 정의한다. 예정된 top-level release assets는
+`buildscope.pyz`, `buildscope.pyz.sha256`, pure `buildscope-<version>-py3-none-any.whl`, sdist,
+`buildscope-ici-deep.{json,html}`, `buildscope-provenance.json`,
+`buildscope-<version>-linux-x86_64.tar.gz`, `SHA256SUMS`다. 아직 이 workflow의 PR/remote/Pages 실행,
+annotated tag, GitHub Release는 없으므로 B5와 `0.5.0` 제품 release는 pending이다.
 
 ## 공통 구조 규칙
 

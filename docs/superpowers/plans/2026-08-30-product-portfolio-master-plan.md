@@ -978,7 +978,7 @@ native extension은 없다. checksum-validated pre-PR historical local ici v0.9.
 suite는 `WARN`, 14 engines = 11 PASS / 3 WARN / 0 FAIL / 0 ERROR / 0 SKIP, `92/92` tests,
 line/function/branch `93.5% / 99.0% / 76.7%`, sanitizer PASS, compile DB `12/12` production
 units와 `27` configurations, TEM `4.95/5.0`이다. Zero-CDN HTML은 1,235,505 bytes, SHA-256
-`0c98a38b27e928df2c60dcadff9ecc3daa1072cb620354d9f4a9fe8d9b987f80`이다. 이는 현재 v0.9.1
+`0c98a38b27e928df2c60dcadff9ecc3daa1072cb620354d9f4a9fe8d9b987f80`이다. 이는 B4 당시 v0.9.1
 remote evidence와 별개인 historical local evidence다.
 
 **B4 remote evidence (2026-09-01):** [PR #36](https://github.com/jihoon22-lee/toy-projects/pull/36)의
@@ -1003,23 +1003,52 @@ implementation과 PR/remote/hosted evidence는 complete다. PR #36는 `main`에
 [CI run `33488169769`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33488169769)는 14개
 선행 job과 `Merge Gate`가 모두 성공했으며 PR-only publisher는 expected skip이었다.
 [Dependency Graph run `33488174425`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33488174425)도
-같은 head에서 성공했다. 따라서 B4는 `main`에 shipped됐지만 `0.5.0` product release artifact와
-B5 hybrid release integration은 pending/not started다.
+같은 head에서 성공했다. 이 B4 merge 시점에는 `0.5.0` product release artifact와 B5 hybrid
+release integration이 pending/not started였고, 이후 local B5 candidate는 다음 절에 기록한다.
 
-### B5. hybrid integration과 release (B4 이후 대기)
+### B5. hybrid integration과 release (local candidate groundwork; release pending)
 
 **선행 조건:** B3/B4 implementation과 ici I3 compile-context 기능이 public release로 제공되어야
-한다. B4 implementation과 PR/remote/hosted/merged-main evidence는 complete지만 `0.5.0` product release
-artifact가 아직 없으므로 B5 hybrid integration과 제품 release는 아직 시작하지 않았다.
-clang-tidy/clazy deep-profile 완료 조건은 ici I4의 tool-backed analyzer가 검증·릴리스된 뒤에
-닫는다.
+한다. B4 implementation과 PR/remote/hosted/merged-main evidence는 complete다. 2026-09-01 현재
+`feat/buildscope-b5-release`에는 standalone packaging, native install layout, sample/tutorial과
+release workflow contract가 추가됐지만 `0.5.0` product artifact는 아직 없고 B5 remote acceptance도
+아직 시작하지 않았다. clang-tidy/clazy deep-profile 완료 조건은 ici I4의 tool-backed analyzer가
+검증·릴리스된 뒤에 닫는다.
 
-- [ ] Python analyzer → JSON → C++ consumer contract를 ici integration engine으로 검증
-- [ ] CMake compile DB가 모든 production TU를 포함하는지 ici가 검증
-- [ ] clang-tidy/clazy가 설치된 환경에서 deep profile 실측
-- [ ] Qt5/Qt6, Python 3.10/latest matrix 통과
-- [ ] sample CMake/qmake databases와 tutorial 제공
-- [ ] standalone Python CLI와 GUI release artifact 제공
+- [x] standalone builder가 Python/pyproject/CMake/ici version surface와 schema inventory를
+  검증하고 fixed-metadata `buildscope.pyz`를 재현 가능하게 생성한다.
+- [x] CMake install rule이 native CLI/GUI, docs, examples, schemas를 bundle layout으로 설치한다.
+- [x] sample CMake/qmake databases와 [quickstart](../../../buildscope/docs/quickstart.md)를
+  제공한다. quickstart는 Python pyz/wheel → JSON → native GUI/CLI 흐름과 qmake capture 제한을
+  설명한다.
+- [x] local ici report에서 CMake compile DB `12/12` production TU·`27` configurations·`0` issues와
+  Qt codegen exact inputs `3`, MOC `1`, UIC `1`, RCC `1`, Qt6 units `12`를 확인한다.
+- [ ] Python analyzer → JSON → C++ consumer release handoff를 remote ici integration gate로 검증
+- [ ] clang-tidy/clazy가 설치된 환경에서 tool-backed deep profile 실측 (현재 local은 unavailable)
+- [ ] Qt5/Qt6, Python `3.10/3.14` release matrix와 generated MOC/UIC/RCC/offscreen smoke 통과
+- [ ] wheel/pyz/native Linux x86_64 bundle release artifact를 게시
+- [ ] annotated `buildscope-vX.Y.Z` tag, exact-main/green Merge Gate provenance, PR/remote/Pages
+  evidence와 GitHub Release
+
+**B5 local ici evidence (2026-09-01):** public ici `v0.10.0` asset의 literal SHA-256 pin
+`6d5f8c008b3b5393a61b2c1a418124eb66393c9eaab0abbb7d1c7922162bed9b`과
+`ICI_PYTHON=/tmp/toy-b5-py310/bin/python`으로 deep/no-cache를 실행했다. `Suite WARN`, 14 engines =
+`11 PASS / 3 WARN / 0 FAIL / 0 ERROR / 0 SKIP`, tests `96/96`, line/function/branch
+`93.4% / 99.0% / 76.7%`, TEM `4.95`였다. JSON은 2,873,207 bytes / SHA-256
+`ea5fce118e6edad8fa5af24c821663e4290805570377e9b7c190de8da1029612`, Zero-CDN HTML은
+1,264,867 bytes / SHA-256 `4e12e77ee11f98b2d5bb146bd3d08252b088083726e6f11235e25a449471a565`,
+exact title `ici Verification Report — buildscope`, external refs `0`였다. local clang-tidy/clazy는
+설치되지 않아 unavailable이며, 이 도구-backed 조건은 release runner에서 검증해야 한다.
+
+**B5 release contract (defined, not executed):** `.github/workflows/buildscope-release.yml`은
+annotated `buildscope-vX.Y.Z` tag가 exact `origin/main`과 green `Merge Gate`를 가리키는지 확인하고,
+Python `3.10/3.14` 및 Qt `5/6` Release/CTest matrix, generated MOC/UIC/RCC path checks, Qt6 Linux
+x86_64 bundle, wheel/pyz → native CLI handoff, ici v0.10.0 sidecar/download/API digest와
+`SHA256SUMS`를 검사한다. 예정된 assets는 `buildscope.pyz`, `buildscope.pyz.sha256`,
+`buildscope-<version>-py3-none-any.whl`, `buildscope-<version>.tar.gz`,
+`buildscope-ici-deep.{json,html}`, `buildscope-provenance.json`,
+`buildscope-<version>-linux-x86_64.tar.gz`, `SHA256SUMS`다. workflow는 정의만 되었고 아직 PR/remote/
+Pages run, tag, GitHub Release가 없으므로 B5와 제품 release는 pending이다.
 
 ---
 

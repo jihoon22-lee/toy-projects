@@ -1,8 +1,9 @@
 # BuildScope
 
-BuildScope 0.5.0 is the current unreleased B4 configuration-diff candidate on
-`main`, developed on `feat/buildscope-config-diff` and shipped by PR #36. B4 implementation plus
-PR/remote/hosted/merged-main evidence is complete; the product release remains pending. B0 established
+BuildScope 0.5.0 is the unreleased B4 configuration-diff candidate developed on
+`feat/buildscope-config-diff` and shipped to `main` by PR #36. B4 implementation plus
+PR/remote/hosted/merged-main evidence is complete; local B5 release-candidate groundwork is now on
+`feat/buildscope-b5-release`, while the product release remains pending. B0 established
 the producer/consumer boundary:
 Python 3.10+ reads a `compile_commands.json` without executing its commands and emits a
 deterministic `buildscope.snapshot/v1` document; a C++20/Qt CLI and GUI validate and consume that
@@ -17,7 +18,9 @@ include explanation while keeping v2 as the default. B3 implementation and remot
 complete on `main`; B5 hybrid release integration remains before the product version is released.
 B4 adds semantic comparison of two raw compile databases. The implementation, native contract tests,
 PR/remote CI, sticky report, hosted Pages evidence, and merged-main CI are complete on `main`; the
-0.5.0 release artifact and B5 hybrid release boundary remain pending.
+0.5.0 release artifact and B5 hybrid release boundary remain pending. The B5 candidate adds
+reproducible standalone packaging, installable native/docs/example assets, and a release workflow
+contract; none of those remote release gates has run yet.
 
 ## B0 scope
 
@@ -352,7 +355,7 @@ the same head.
 
 B3 implementation and remote evidence are complete and the code is shipped to `main`; `0.4.0` remains
 unreleased until B5 hybrid release integration. ici I3 cross-repository comparison is complete, and
-B4 configuration diff is the current `0.5.0` main candidate with implementation and
+B4 configuration diff is the `0.5.0` main candidate with implementation and
 remote/merged-main evidence complete.
 
 ## B4 semantic configuration diff (`0.5.0` candidate, unreleased)
@@ -440,7 +443,7 @@ historical local evidence: suite `WARN`, 14 engines = 11 PASS / 3 WARN / 0 FAIL 
 was 1,235,505 bytes, SHA-256
 `0c98a38b27e928df2c60dcadff9ecc3daa1072cb620354d9f4a9fe8d9b987f80`, with title
 `ici Verification Report — buildscope`. This historical local result is separate from the current
-v0.9.1 remote evidence below.
+B4 v0.9.1 remote evidence below.
 
 ### B4 PR #36 and merged-main remote integration evidence (2026-09-01)
 
@@ -470,6 +473,59 @@ PR #36 was squash-merged to `main` as
 with all 14 prerequisite jobs and `Merge Gate` successful; the PR-only publisher was skipped as expected.
 [Dependency Graph run `33488174425`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33488174425)
 also succeeded on the same head.
+
+## B5 release candidate (`0.5.0`, local groundwork; unreleased)
+
+B5 connects the B4 producer/consumer contract to a releasable, inspectable bundle. The current local
+slice is intentionally bounded:
+
+- `tools/build_standalone.py` validates the Python, pyproject, CMake, and ici version surfaces,
+  writes a fixed-metadata zipapp containing the package and all four public schemas, and atomically
+  installs it. `tests/python/test_standalone.py` covers version/output, schema inventory, execution,
+  reproducibility, and symlink refusal.
+- `CMakeLists.txt` installs `buildscope-cli` and `buildscope-gui` under `bin/`, documentation under
+  `share/doc/buildscope/`, and schemas/examples under `share/buildscope/`. The checked-in
+  `examples/cmake` and `examples/qmake` projects plus [quickstart.md](docs/quickstart.md) provide
+  reproducible producer inputs and the pyz/wheel → JSON → native consumer flow.
+- The release workflow builds a pure `buildscope-<version>-py3-none-any.whl`, sdist, deterministic
+  Linux x86_64 native bundle, and standalone pyz; it compares wheel/pyz snapshots through the native
+  CLI before publishing any asset.
+
+### Local B5 ici candidate evidence (2026-09-01)
+
+The local deep/no-cache run used public ici `v0.10.0`, pinned to literal
+`6d5f8c008b3b5393a61b2c1a418124eb66393c9eaab0abbb7d1c7922162bed9b`, with
+`ICI_PYTHON=/tmp/toy-b5-py310/bin/python`. It reported `Suite WARN`: 14 engines = `11 PASS / 3 WARN /
+0 FAIL / 0 ERROR / 0 SKIP`, tests `96/96`, line/function/branch `93.4% / 99.0% / 76.7%`, and TEM
+`4.95`. `compile_db` covered `12/12` production units and `27` configurations with `0` issues.
+Qt code generation was exact for 3 inputs: MOC `1`, UIC `1`, and RCC `1`; the report recorded
+12 Qt6 compile units. The JSON report is 2,873,207 bytes with SHA-256
+`ea5fce118e6edad8fa5af24c821663e4290805570377e9b7c190de8da1029612`; the Zero-CDN HTML is
+1,264,867 bytes with SHA-256
+`4e12e77ee11f98b2d5bb146bd3d08252b088083726e6f11235e25a449471a565`, exact title
+`ici Verification Report — buildscope`, and 0 external references. Local `clang-tidy` and `clazy`
+were unavailable, so tool-backed static-analysis evidence remains a release-runner requirement.
+
+The focused Python suite now contains 87 tests, and the standalone builder's two direct outputs are
+byte-identical. Existing Qt5 5.15.18 and Qt6 6.10.2 Release CMake/CTest evidence remains the B4
+historical/local baseline (`9/9`, or `10/10` with the opt-in benchmark); the B5 release workflow
+defines fresh Python `3.10/3.14` and Qt `5/6` legs but has not run remotely.
+
+### B5 release contract (defined, not published)
+
+`buildscope-release.yml` accepts an annotated `buildscope-vX.Y.Z` tag (or an explicit manual tag),
+requires that it point to exact `origin/main` with a successful `Merge Gate`, and checks all public
+version surfaces plus one matching `CHANGELOG.md` heading. Its Qt legs inspect generated
+`ui_main_window.h`, `qrc_buildscope.cpp`, and `moc_main_window.cpp`, then run CTest and a six-second
+offscreen GUI smoke. The package/deep leg requires `clang-tidy` and `clazy`, validates the ici sidecar,
+downloaded digest, and API digest against the literal pin, and checks wheel/sdist purity.
+
+The eventual release publishes `buildscope.pyz`, `buildscope.pyz.sha256`,
+`buildscope-<version>-py3-none-any.whl`, `buildscope-<version>.tar.gz`,
+`buildscope-ici-deep.json`, `buildscope-ici-deep.html`, `buildscope-provenance.json`,
+`buildscope-<version>-linux-x86_64.tar.gz`, and `SHA256SUMS`. No BuildScope B5 PR/remote CI/Pages
+run, annotated tag, or GitHub Release exists yet; `0.5.0` remains unreleased and B5 acceptance is
+pending those gates.
 
 ## Run without installing into the repository
 
@@ -543,7 +599,7 @@ QT_QPA_PLATFORM=offscreen \
   "$repo_root/buildscope/fixtures/sample.snapshot.json"
 
 # Historical ici 0.9.0 public-release verification. Provision this interpreter outside the repo;
-# current PR CI uses ici v0.9.1.
+# the current B5 candidate workflow pins ici v0.10.0 with a literal SHA-256 and verifies it twice.
 # beforehand with pytest, coverage, and mypy, then point ici at it.
 (
   cd "$repo_root/buildscope"
