@@ -1,0 +1,552 @@
+{
+  "diagnostics": [],
+  "inputs": {
+    "after": {
+      "configuration_count": 3,
+      "label": "after",
+      "semantic_digest": "sha256:e8764c520833b73eac5c401910b01385b893ff93bc277a7ca7c4d5aab8f1e26e",
+      "source_count": 3
+    },
+    "before": {
+      "configuration_count": 3,
+      "label": "before",
+      "semantic_digest": "sha256:cbb2488b73c0bdfcafc9c1465b1f2f420e46c9de47667355872a742d73c5159f",
+      "source_count": 3
+    }
+  },
+  "policy": {
+    "ignored_fields": [
+      "raw command spelling",
+      "compilation directory",
+      "output path and filename",
+      "entry index and duplicate annotation",
+      "filesystem existence and stale status",
+      "snapshot diagnostics and include-analysis observations",
+      "absolute compiler path when family/name are unchanged"
+    ],
+    "suppression_rules": [],
+    "version": "buildscope.diff-policy/v1"
+  },
+  "producer": {
+    "name": "buildscope",
+    "version": "0.4.0"
+  },
+  "schema_version": "buildscope.diff/v1",
+  "summary": {
+    "added": 1,
+    "change_count": 11,
+    "changed": 1,
+    "moved": 1,
+    "removed": 1,
+    "suppressed_changes": 0,
+    "suppressed_units": 0,
+    "unchanged": 0,
+    "visible_changes": 11,
+    "visible_units": 4
+  },
+  "units": [
+    {
+      "after": {
+        "entry_index": 1,
+        "semantic": {
+          "compiler": {
+            "command_style": "posix",
+            "family": "gcc",
+            "name": "g++",
+            "wrappers": []
+          },
+          "defines": [
+            {
+              "action": "define",
+              "name": "KEEP",
+              "value": "1"
+            }
+          ],
+          "flags": [],
+          "include_paths": [
+            {
+              "kind": "include",
+              "path": "include"
+            }
+          ],
+          "language": "c++",
+          "launcher": [],
+          "standard": "c++20",
+          "sysroot": "",
+          "target": {
+            "build_target": "app",
+            "triple": ""
+          }
+        },
+        "semantic_digest": "sha256:9b26ce88924e29c5d40465188ff9449eab1bdcfbe5ccc8e0b9b790c8f39debbe"
+      },
+      "before": {
+        "entry_index": 1,
+        "semantic": {
+          "compiler": {
+            "command_style": "posix",
+            "family": "gcc",
+            "name": "g++",
+            "wrappers": []
+          },
+          "defines": [
+            {
+              "action": "define",
+              "name": "KEEP",
+              "value": "1"
+            }
+          ],
+          "flags": [],
+          "include_paths": [
+            {
+              "kind": "include",
+              "path": "include"
+            }
+          ],
+          "language": "c++",
+          "launcher": [],
+          "standard": "c++20",
+          "sysroot": "",
+          "target": {
+            "build_target": "app",
+            "triple": ""
+          }
+        },
+        "semantic_digest": "sha256:9b26ce88924e29c5d40465188ff9449eab1bdcfbe5ccc8e0b9b790c8f39debbe"
+      },
+      "changes": [
+        {
+          "after": "renamed/move.cpp",
+          "before": "src/move.cpp",
+          "category": "moved",
+          "suppressed": false,
+          "suppression": null
+        }
+      ],
+      "kind": "moved",
+      "source": {
+        "after": "renamed/move.cpp",
+        "before": "src/move.cpp",
+        "style": "posix"
+      },
+      "suppressed": false
+    },
+    {
+      "after": {
+        "entry_index": 2,
+        "semantic": {
+          "compiler": {
+            "command_style": "posix",
+            "family": "gcc",
+            "name": "g++",
+            "wrappers": []
+          },
+          "defines": [
+            {
+              "action": "define",
+              "name": "ADDED",
+              "value": "1"
+            }
+          ],
+          "flags": [],
+          "include_paths": [
+            {
+              "kind": "include",
+              "path": "include"
+            }
+          ],
+          "language": "c++",
+          "launcher": [],
+          "standard": "c++20",
+          "sysroot": "",
+          "target": {
+            "build_target": "app",
+            "triple": ""
+          }
+        },
+        "semantic_digest": "sha256:7750286a45f4bb5869442ae93e70340295681baf2db5cb076769170be29af2a0"
+      },
+      "before": null,
+      "changes": [
+        {
+          "after": {
+            "compiler": {
+              "command_style": "posix",
+              "family": "gcc",
+              "name": "g++",
+              "wrappers": []
+            },
+            "defines": [
+              {
+                "action": "define",
+                "name": "ADDED",
+                "value": "1"
+              }
+            ],
+            "flags": [],
+            "include_paths": [
+              {
+                "kind": "include",
+                "path": "include"
+              }
+            ],
+            "language": "c++",
+            "launcher": [],
+            "standard": "c++20",
+            "sysroot": "",
+            "target": {
+              "build_target": "app",
+              "triple": ""
+            }
+          },
+          "before": null,
+          "category": "added",
+          "suppressed": false,
+          "suppression": null
+        }
+      ],
+      "kind": "added",
+      "source": {
+        "after": "src/add.cpp",
+        "before": null,
+        "style": "posix"
+      },
+      "suppressed": false
+    },
+    {
+      "after": {
+        "entry_index": 0,
+        "semantic": {
+          "compiler": {
+            "command_style": "posix",
+            "family": "clang",
+            "name": "clang++",
+            "wrappers": [
+              "env",
+              "ccache"
+            ]
+          },
+          "defines": [
+            {
+              "action": "define",
+              "name": "PLATFORM",
+              "value": "linux"
+            },
+            {
+              "action": "define",
+              "name": "API_LEVEL",
+              "value": "2"
+            }
+          ],
+          "flags": [
+            "-O2"
+          ],
+          "include_paths": [
+            {
+              "kind": "system",
+              "path": "/opt/sdk-v2/include"
+            },
+            {
+              "kind": "include",
+              "path": "include"
+            },
+            {
+              "kind": "include",
+              "path": "generated"
+            }
+          ],
+          "language": "c++",
+          "launcher": [
+            "env",
+            "MODE=release",
+            "ccache"
+          ],
+          "standard": "c++20",
+          "sysroot": "/opt/sdk-v2",
+          "target": {
+            "build_target": "app",
+            "triple": "arm64-linux-gnu"
+          }
+        },
+        "semantic_digest": "sha256:94d8398e21d19e9329812a8f1a092f39e542469a7126266c011ff522d769f00c"
+      },
+      "before": {
+        "entry_index": 0,
+        "semantic": {
+          "compiler": {
+            "command_style": "posix",
+            "family": "gcc",
+            "name": "g++",
+            "wrappers": [
+              "env",
+              "ccache"
+            ]
+          },
+          "defines": [
+            {
+              "action": "define",
+              "name": "API_LEVEL",
+              "value": "1"
+            },
+            {
+              "action": "define",
+              "name": "PLATFORM",
+              "value": "linux"
+            }
+          ],
+          "flags": [
+            "-O0"
+          ],
+          "include_paths": [
+            {
+              "kind": "include",
+              "path": "include"
+            },
+            {
+              "kind": "system",
+              "path": "/opt/sdk/include"
+            }
+          ],
+          "language": "c++",
+          "launcher": [
+            "env",
+            "MODE=debug",
+            "ccache"
+          ],
+          "standard": "c++17",
+          "sysroot": "/opt/sdk",
+          "target": {
+            "build_target": "app",
+            "triple": "x86_64-linux-gnu"
+          }
+        },
+        "semantic_digest": "sha256:8b245d3a70458fb564b8658f4f565dd4f8f2750026165c6cc73fe6b677f4b02c"
+      },
+      "changes": [
+        {
+          "after": {
+            "command_style": "posix",
+            "family": "clang",
+            "name": "clang++",
+            "wrappers": [
+              "env",
+              "ccache"
+            ]
+          },
+          "before": {
+            "command_style": "posix",
+            "family": "gcc",
+            "name": "g++",
+            "wrappers": [
+              "env",
+              "ccache"
+            ]
+          },
+          "category": "compiler",
+          "suppressed": false,
+          "suppression": null
+        },
+        {
+          "after": [
+            {
+              "action": "define",
+              "name": "PLATFORM",
+              "value": "linux"
+            },
+            {
+              "action": "define",
+              "name": "API_LEVEL",
+              "value": "2"
+            }
+          ],
+          "before": [
+            {
+              "action": "define",
+              "name": "API_LEVEL",
+              "value": "1"
+            },
+            {
+              "action": "define",
+              "name": "PLATFORM",
+              "value": "linux"
+            }
+          ],
+          "category": "define",
+          "suppressed": false,
+          "suppression": null
+        },
+        {
+          "after": [
+            "-O2"
+          ],
+          "before": [
+            "-O0"
+          ],
+          "category": "flag",
+          "suppressed": false,
+          "suppression": null
+        },
+        {
+          "after": [
+            {
+              "kind": "system",
+              "path": "/opt/sdk-v2/include"
+            },
+            {
+              "kind": "include",
+              "path": "include"
+            },
+            {
+              "kind": "include",
+              "path": "generated"
+            }
+          ],
+          "before": [
+            {
+              "kind": "include",
+              "path": "include"
+            },
+            {
+              "kind": "system",
+              "path": "/opt/sdk/include"
+            }
+          ],
+          "category": "include",
+          "suppressed": false,
+          "suppression": null
+        },
+        {
+          "after": [
+            "env",
+            "MODE=release",
+            "ccache"
+          ],
+          "before": [
+            "env",
+            "MODE=debug",
+            "ccache"
+          ],
+          "category": "launcher",
+          "suppressed": false,
+          "suppression": null
+        },
+        {
+          "after": "c++20",
+          "before": "c++17",
+          "category": "standard",
+          "suppressed": false,
+          "suppression": null
+        },
+        {
+          "after": "/opt/sdk-v2",
+          "before": "/opt/sdk",
+          "category": "sysroot",
+          "suppressed": false,
+          "suppression": null
+        },
+        {
+          "after": {
+            "build_target": "app",
+            "triple": "arm64-linux-gnu"
+          },
+          "before": {
+            "build_target": "app",
+            "triple": "x86_64-linux-gnu"
+          },
+          "category": "target",
+          "suppressed": false,
+          "suppression": null
+        }
+      ],
+      "kind": "changed",
+      "source": {
+        "after": "src/common.cpp",
+        "before": "src/common.cpp",
+        "style": "posix"
+      },
+      "suppressed": false
+    },
+    {
+      "after": null,
+      "before": {
+        "entry_index": 2,
+        "semantic": {
+          "compiler": {
+            "command_style": "posix",
+            "family": "gcc",
+            "name": "g++",
+            "wrappers": []
+          },
+          "defines": [
+            {
+              "action": "define",
+              "name": "REMOVED",
+              "value": "1"
+            }
+          ],
+          "flags": [],
+          "include_paths": [
+            {
+              "kind": "include",
+              "path": "include"
+            }
+          ],
+          "language": "c++",
+          "launcher": [],
+          "standard": "c++17",
+          "sysroot": "",
+          "target": {
+            "build_target": "app",
+            "triple": ""
+          }
+        },
+        "semantic_digest": "sha256:5e09036f69f1e07835ac8d41b6c84aa32717cd99d0a7357c7577912bf62defe8"
+      },
+      "changes": [
+        {
+          "after": null,
+          "before": {
+            "compiler": {
+              "command_style": "posix",
+              "family": "gcc",
+              "name": "g++",
+              "wrappers": []
+            },
+            "defines": [
+              {
+                "action": "define",
+                "name": "REMOVED",
+                "value": "1"
+              }
+            ],
+            "flags": [],
+            "include_paths": [
+              {
+                "kind": "include",
+                "path": "include"
+              }
+            ],
+            "language": "c++",
+            "launcher": [],
+            "standard": "c++17",
+            "sysroot": "",
+            "target": {
+              "build_target": "app",
+              "triple": ""
+            }
+          },
+          "category": "removed",
+          "suppressed": false,
+          "suppression": null
+        }
+      ],
+      "kind": "removed",
+      "source": {
+        "after": null,
+        "before": "src/remove.cpp",
+        "style": "posix"
+      },
+      "suppressed": false
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+[
+  {
+    "arguments": [
+      "env",
+      "MODE=release",
+      "ccache",
+      "/usr/bin/clang++",
+      "-std=c++20",
+      "-DPLATFORM=linux",
+      "-DAPI_LEVEL=2",
+      "-isystem",
+      "/opt/sdk-v2/include",
+      "-I/project/include",
+      "-I/project/generated",
+      "--sysroot=/opt/sdk-v2",
+      "--target=arm64-linux-gnu",
+      "-O2",
+      "-c",
+      "/project/src/common.cpp",
+      "-o",
+      "CMakeFiles/app.dir/src/common-new.o"
+    ],
+    "directory": "/project/other-build",
+    "file": "/project/src/common.cpp",
+    "output": "CMakeFiles/app.dir/src/common-new.o"
+  },
+  {
+    "arguments": [
+      "/usr/bin/g++",
+      "-std=c++20",
+      "-DKEEP=1",
+      "-I/project/include",
+      "-c",
+      "/project/renamed/move.cpp",
+      "-o",
+      "CMakeFiles/app.dir/renamed/move-new.o"
+    ],
+    "directory": "/project/other-build",
+    "file": "/project/renamed/move.cpp",
+    "output": "CMakeFiles/app.dir/renamed/move-new.o"
+  },
+  {
+    "arguments": [
+      "/usr/bin/g++",
+      "-std=c++20",
+      "-DADDED=1",
+      "-I/project/include",
+      "-c",
+      "/project/src/add.cpp",
+      "-o",
+      "CMakeFiles/app.dir/src/add.cpp.o"
+    ],
+    "directory": "/project/other-build",
+    "file": "/project/src/add.cpp",
+    "output": "CMakeFiles/app.dir/src/add.cpp.o"
+  }
+]
