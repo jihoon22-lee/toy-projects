@@ -14,6 +14,7 @@ import argparse
 import errno
 import hashlib
 import json
+import math
 import os
 import re
 import stat
@@ -215,9 +216,40 @@ def _read_release_json(path: Path) -> dict[str, Any]:
         raise BuildScopeReleaseAssetError(
             f"release metadata is not valid UTF-8: {exc}"
         ) from exc
+
+    def bounded_int(raw: str) -> int:
+        if len(raw) > 20:
+            raise ValueError("JSON integer exceeds 20 decimal digits")
+        return int(raw)
+
+    def bounded_float(raw: str) -> float:
+        if len(raw) > 100:
+            raise ValueError("JSON float exceeds 100 characters")
+        value = float(raw)
+        if not math.isfinite(value):
+            raise ValueError("JSON float must be finite")
+        return value
+
+    def reject_constant(raw: str) -> None:
+        raise ValueError(f"non-standard JSON constant: {raw}")
+
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        value: dict[str, Any] = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError(f"duplicate JSON key: {key}")
+            value[key] = item
+        return value
+
     try:
-        release = json.loads(text)
-    except json.JSONDecodeError as exc:
+        release = json.loads(
+            text,
+            parse_int=bounded_int,
+            parse_float=bounded_float,
+            parse_constant=reject_constant,
+            object_pairs_hook=unique_object,
+        )
+    except (json.JSONDecodeError, ValueError) as exc:
         raise BuildScopeReleaseAssetError(
             f"release metadata is not valid JSON: {exc}"
         ) from exc

@@ -295,6 +295,23 @@ class BuildScopeReleaseAssetTests(unittest.TestCase):
         with self.assertRaisesRegex(BuildScopeReleaseAssetError, "regular file"):
             self._check()
 
+    def test_rejects_duplicate_keys_huge_numbers_and_nonstandard_constants(
+        self,
+    ) -> None:
+        invalid_payloads = (
+            '{"id": 500, "id": 501}',
+            '{"id": 123456789012345678901}',
+            '{"id": 500, "unexpected": NaN}',
+            '{"id": 500, "unexpected": 1e999}',
+        )
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload):
+                self.release_json.write_text(payload, encoding="utf-8")
+                with self.assertRaisesRegex(
+                    BuildScopeReleaseAssetError, "not valid JSON"
+                ):
+                    self._check()
+
     def test_rejects_fifo_and_path_replacement_during_descriptor_audit(self) -> None:
         fifo = self.dist / expected_asset_names(VERSION)[0]
         fifo.unlink()
