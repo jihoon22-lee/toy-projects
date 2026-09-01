@@ -513,9 +513,9 @@ defines fresh Python `3.10/3.14` and Qt `5/6` legs but has not run remotely.
 
 ### B5 release contract (defined, not published)
 
-`buildscope-release.yml` accepts an annotated `buildscope-vX.Y.Z` tag (or an explicit manual tag),
-requires that it point to exact `origin/main` with a successful `Merge Gate`, and checks all public
-version surfaces plus one matching `CHANGELOG.md` heading. Its Qt legs inspect generated
+`buildscope-release.yml` runs only for an annotated `buildscope-vX.Y.Z` tag, requires that it point
+to exact `origin/main` with a successful `Merge Gate`, and checks all public version surfaces plus
+one matching `CHANGELOG.md` heading. Its Qt legs inspect generated
 `ui_main_window.h`, `qrc_buildscope.cpp`, and `moc_main_window.cpp`, then run CTest and a six-second
 offscreen GUI smoke. The package/deep leg requires `clang-tidy` and `clazy`, validates the ici sidecar,
 downloaded digest, and API digest against the literal pin, and checks wheel/sdist purity.
@@ -523,9 +523,10 @@ downloaded digest, and API digest against the literal pin, and checks wheel/sdis
 The eventual release publishes `buildscope.pyz`, `buildscope.pyz.sha256`,
 `buildscope-<version>-py3-none-any.whl`, `buildscope-<version>.tar.gz`,
 `buildscope-ici-deep.json`, `buildscope-ici-deep.html`, `buildscope-provenance.json`,
-`buildscope-<version>-linux-x86_64.tar.gz`, and `SHA256SUMS`. No BuildScope B5 PR/remote CI/Pages
-run, annotated tag, or GitHub Release exists yet; `0.5.0` remains unreleased and B5 acceptance is
-pending those gates.
+`buildscope-<version>-linux-x86_64.tar.gz`, and `SHA256SUMS`. Publication fails closed on a missing
+path and audits the remote annotated-tag target plus the exact nine uploaded names, sizes, and API
+digests after release creation. No BuildScope B5 PR/remote CI/Pages run, annotated tag, or GitHub
+Release exists yet; `0.5.0` remains unreleased and B5 acceptance is pending those gates.
 
 ## Run without installing into the repository
 

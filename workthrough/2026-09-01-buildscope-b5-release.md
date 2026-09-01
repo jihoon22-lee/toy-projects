@@ -61,6 +61,10 @@ pyz, and native CLI must exchange byte-identical snapshots; and the Qt6 Linux
 x86_64 bundle must contain its runtime docs, schemas, and examples. The asset
 set is `buildscope.pyz`, its sidecar checksum, the pure wheel, sdist, deep JSON
 and HTML reports, provenance JSON, the Linux bundle, and `SHA256SUMS`.
+The workflow is intentionally tag-only: it revalidates the remote annotated
+tag immediately before and after publication, fails on unmatched paths, and
+audits that the final release exposes exactly those nine names with matching
+sizes and GitHub API SHA-256 digests.
 
 Until that workflow runs successfully and the PR/remote/tag/release artifacts
 exist, B5 acceptance and the 0.5.0 product release remain pending.

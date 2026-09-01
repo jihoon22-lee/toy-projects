@@ -4,22 +4,6 @@ on:
   push:
     tags:
       - "buildscope-v*.*.*"
-  workflow_dispatch:
-    inputs:
-      version_tag:
-        description: "Existing annotated BuildScope tag (for example buildscope-v0.5.0)"
-        required: true
-        type: string
-      draft:
-        description: "Create a draft GitHub Release"
-        required: false
-        default: false
-        type: boolean
-      prerelease:
-        description: "Mark the GitHub Release as a pre-release"
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -38,7 +22,7 @@ jobs:
   provenance:
     name: Validate BuildScope release provenance
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     permissions:
       contents: read
       checks: read
@@ -60,15 +44,11 @@ jobs:
         id: provenance
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          MANUAL_TAG: ${{ inputs.version_tag }}
         run: |
           set -euo pipefail
 
-          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
-            tag="$GITHUB_REF_NAME"
-          else
-            tag="$MANUAL_TAG"
-          fi
+          test "$GITHUB_REF_TYPE" = tag
+          tag="$GITHUB_REF_NAME"
           if ! printf '%s' "$tag" | grep -Eq '^buildscope-v[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "Invalid BuildScope release tag: $tag" >&2
             exit 1
@@ -148,7 +128,7 @@ jobs:
 
           gate_ok=false
           gate_url=""
-          for attempt in $(seq 1 36); do
+          for attempt in $(seq 1 120); do
             check_runs="$(gh api \
               -H 'Accept: application/vnd.github+json' \
               "repos/${GITHUB_REPOSITORY}/commits/${target_sha}/check-runs?per_page=100&filter=latest")"
@@ -161,7 +141,7 @@ jobs:
             gate_url="$(printf '%s' "$check_runs" | jq -r --arg sha "$target_sha" '
               [.check_runs[] | select(.name == "Merge Gate" and .head_sha == $sha)]
               | sort_by(.completed_at // "") | last // {} | .details_url // ""')"
-            echo "Merge Gate attempt $attempt/36: status=$gate_status conclusion=$gate_conclusion"
+            echo "Merge Gate attempt $attempt/120: status=$gate_status conclusion=$gate_conclusion"
             if [ "$gate_status" = "completed" ] && [ "$gate_conclusion" = "success" ]; then
               gate_ok=true
               break
@@ -674,10 +654,16 @@ jobs:
 
       - name: Confirm exact commit and artifact manifest
         env:
+          TAG: ${{ needs.provenance.outputs.tag }}
           TARGET_SHA: ${{ needs.provenance.outputs.target_sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          git fetch --force --tags origin
+          test "$(git cat-file -t "refs/tags/$TAG" 2>/dev/null || true)" = tag
+          test "$(git rev-parse --verify "refs/tags/${TAG}^{commit}")" = "$TARGET_SHA"
+          remote_target="$(git ls-remote --tags origin "refs/tags/${TAG}^{}" | awk 'NR == 1 {print $1}')"
+          test "$remote_target" = "$TARGET_SHA"
           (cd dist && sha256sum --check SHA256SUMS)
           test -s dist/buildscope-provenance.json
           test -s dist/buildscope-ici-deep.json
@@ -723,8 +709,9 @@ jobs:
           tag_name: ${{ needs.provenance.outputs.tag }}
           name: "BuildScope ${{ needs.provenance.outputs.version }}"
           body_path: RELEASE_NOTES.md
-          draft: ${{ inputs.draft || false }}
-          prerelease: ${{ inputs.prerelease || false }}
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
           files: |
             dist/buildscope.pyz
             dist/buildscope.pyz.sha256
@@ -737,3 +724,79 @@ jobs:
             dist/SHA256SUMS
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Audit immutable tag and exact public release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.provenance.outputs.tag }}
+          TARGET_SHA: ${{ needs.provenance.outputs.target_sha }}
+          VERSION: ${{ needs.provenance.outputs.version }}
+        run: |
+          set -euo pipefail
+          remote_target="$(git ls-remote --tags origin "refs/tags/${TAG}^{}" | awk 'NR == 1 {print $1}')"
+          test "$remote_target" = "$TARGET_SHA"
+
+          audit_ok=false
+          for attempt in $(seq 1 12); do
+            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+              > "$RUNNER_TEMP/buildscope-release.json"
+            if python3 - "$RUNNER_TEMP/buildscope-release.json" dist "$TAG" "$VERSION" <<'PY'
+          from __future__ import annotations
+
+          import hashlib
+          import json
+          import sys
+          from pathlib import Path
+
+          release_path, dist_path, tag, version = sys.argv[1:]
+          release = json.loads(Path(release_path).read_text(encoding="utf-8"))
+          if release.get("tag_name") != tag:
+              raise SystemExit(f"release tag mismatch: {release.get('tag_name')!r}")
+          if release.get("draft") is not False or release.get("prerelease") is not False:
+              raise SystemExit("BuildScope product release must be final, not draft/prerelease")
+
+          expected = {
+              "buildscope.pyz",
+              "buildscope.pyz.sha256",
+              f"buildscope-{version}-py3-none-any.whl",
+              f"buildscope-{version}.tar.gz",
+              "buildscope-ici-deep.json",
+              "buildscope-ici-deep.html",
+              "buildscope-provenance.json",
+              f"buildscope-{version}-linux-x86_64.tar.gz",
+              "SHA256SUMS",
+          }
+          assets = release.get("assets")
+          if not isinstance(assets, list):
+              raise SystemExit("release assets are unavailable")
+          by_name = {asset.get("name"): asset for asset in assets}
+          actual = set(by_name)
+          if actual != expected:
+              raise SystemExit(
+                  f"public asset set mismatch: missing={sorted(expected - actual)!r} "
+                  f"extra={sorted(actual - expected)!r}"
+              )
+
+          dist = Path(dist_path)
+          for name in sorted(expected):
+              asset = by_name[name]
+              local = dist / name
+              if asset.get("state") != "uploaded":
+                  raise SystemExit(f"asset is not uploaded: {name}")
+              if not local.is_file() or local.stat().st_size != asset.get("size"):
+                  raise SystemExit(f"asset size mismatch: {name}")
+              digest = "sha256:" + hashlib.sha256(local.read_bytes()).hexdigest()
+              if asset.get("digest") != digest:
+                  raise SystemExit(
+                      f"asset digest mismatch: {name}: {asset.get('digest')!r} != {digest!r}"
+                  )
+          print(f"audited final BuildScope {version}: exact 9 assets and digests")
+          PY
+            then
+              audit_ok=true
+              break
+            fi
+            echo "Release API asset audit attempt $attempt/12 is not ready"
+            sleep 5
+          done
+          test "$audit_ok" = true

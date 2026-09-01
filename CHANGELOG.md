@@ -72,8 +72,10 @@
 - Added the `buildscope-release.yml` contract: annotated `buildscope-vX.Y.Z` tag at exact `origin/main`
   with a green `Merge Gate`, Python `3.10/3.14` and Qt `5/6` release matrices, generated MOC/UIC/RCC
   checks, pure wheel/sdist checks, wheel/pyz-to-native handoff, and deterministic bundle plus
-  `SHA256SUMS` assets. No B5 PR/remote CI/Pages run, annotated tag, or GitHub Release exists yet;
-  the `0.5.0` product release remains pending.
+  `SHA256SUMS` assets. The workflow is tag-only, allows up to 20 minutes for the exact-main gate,
+  revalidates the remote annotated tag before and after publication, fails on unmatched asset paths,
+  and audits the exact nine public names, sizes, states, and API digests. No B5 PR/remote CI/Pages
+  run, annotated tag, or GitHub Release exists yet; the `0.5.0` product release remains pending.
 
 ### BuildScope 0.4.0 — B3 implementation + remote evidence (main candidate, unreleased)
 
