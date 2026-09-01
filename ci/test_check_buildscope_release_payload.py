@@ -63,13 +63,17 @@ class BuildScopeReleasePayloadTests(unittest.TestCase):
         entries: Sequence[ZipEntry],
         *,
         prefix: bytes = b"",
+        write_after_prefix: bool = False,
         mode: int | None = None,
     ) -> None:
         buffer = io.BytesIO()
+        if write_after_prefix:
+            buffer.write(prefix)
         with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             for name, payload in entries:
                 archive.writestr(name, payload)
-        path.write_bytes(prefix + buffer.getvalue())
+        payload = buffer.getvalue()
+        path.write_bytes(payload if write_after_prefix else prefix + payload)
         if mode is not None:
             path.chmod(mode)
 
@@ -647,6 +651,21 @@ class BuildScopeReleasePayloadTests(unittest.TestCase):
             ),
         ):
             check_pyz(pyz, VERSION)
+
+    def test_accepts_pyz_written_to_a_stream_after_the_shebang(self) -> None:
+        pyz = self.dist / "buildscope.pyz"
+        self._write_zip(
+            pyz,
+            self._pyz_entries(),
+            prefix=PYZ_SHEBANG,
+            write_after_prefix=True,
+            mode=0o755,
+        )
+
+        package = check_pyz(pyz, VERSION)
+
+        self.assertIn("package/__init__.py", package)
+        self.assertIn("schema/buildscope-snapshot-v3.schema.json", package)
 
     def test_rejects_sdist_traversal_duplicate_links_and_special_members(self) -> None:
         sdist = self.dist / f"buildscope-{VERSION}.tar.gz"

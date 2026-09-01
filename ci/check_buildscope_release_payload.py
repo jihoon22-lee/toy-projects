@@ -335,7 +335,16 @@ def _zip_preflight(
                 f"{MAX_ZIP_CENTRAL_DIRECTORY_BYTES} bytes"
             )
 
-        central_position = len(prefix) + central_offset
+        # A self-extracting ZIP can be produced in either of two valid ways:
+        # writing the prefix before opening ``ZipFile`` records absolute
+        # offsets, while prepending it to a completed ZIP leaves offsets
+        # relative to the archive start.  Accept only those two exact layouts.
+        archive_offset = eocd_position - central_size - central_offset
+        if archive_offset not in {0, len(prefix)}:
+            raise BuildScopeReleasePayloadError(
+                f"{label} ZIP prefix offset is inconsistent"
+            )
+        central_position = archive_offset + central_offset
         central_end = central_position + central_size
         if (
             central_position < len(prefix)
@@ -448,7 +457,7 @@ def _zip_preflight(
                 uncompressed_size,
                 label,
             )
-            local_position = len(prefix) + local_offset
+            local_position = archive_offset + local_offset
             if local_position < len(prefix) or local_position + 30 > central_position:
                 raise BuildScopeReleasePayloadError(
                     f"{label} member local-header offset is inconsistent"
