@@ -45,6 +45,7 @@ class BuildScopeReleaseAssetTests(unittest.TestCase):
             (self.dist / name).write_bytes(payload)
             assets.append(
                 {
+                    "id": 1_000 + index,
                     "name": name,
                     "state": "uploaded",
                     "size": len(payload),
@@ -52,9 +53,12 @@ class BuildScopeReleaseAssetTests(unittest.TestCase):
                 }
             )
         release: dict[str, object] = {
+            "id": 500,
             "tag_name": TAG,
+            "name": "BuildScope 0.5.0",
             "draft": False,
             "prerelease": False,
+            "published_at": "2026-09-02T00:00:00Z",
             "assets": assets,
         }
         self._write_release(release)
@@ -76,6 +80,21 @@ class BuildScopeReleaseAssetTests(unittest.TestCase):
         self.assertEqual(
             main([str(self.release_json), str(self.dist), TAG, VERSION]), 0
         )
+
+    def test_accepts_draft_only_when_the_draft_stage_is_explicit(self) -> None:
+        self.release["draft"] = True
+        self.release["published_at"] = None
+        self._write_release(self.release)
+
+        check_release_assets(
+            self.release_json,
+            self.dist,
+            TAG,
+            VERSION,
+            stage="draft",
+        )
+        with self.assertRaisesRegex(BuildScopeReleaseAssetError, "draft=False"):
+            self._check()
 
     def test_rejects_wrong_count_and_extra_asset(self) -> None:
         assets = self.release["assets"]
@@ -157,7 +176,31 @@ class BuildScopeReleaseAssetTests(unittest.TestCase):
         self.release = self._write_valid_release()
         self.release["prerelease"] = True
         self._write_release(self.release)
-        with self.assertRaisesRegex(BuildScopeReleaseAssetError, "final"):
+        with self.assertRaisesRegex(BuildScopeReleaseAssetError, "prerelease"):
+            self._check()
+
+    def test_rejects_invalid_release_identity_and_publication_metadata(self) -> None:
+        invalid_cases = (
+            ("id", 0, "release id"),
+            ("name", "BuildScope nightly", "name mismatch"),
+            ("published_at", None, "published_at"),
+        )
+        for key, value, message in invalid_cases:
+            with self.subTest(key=key):
+                self.release = self._write_valid_release()
+                self.release[key] = value
+                self._write_release(self.release)
+                with self.assertRaisesRegex(BuildScopeReleaseAssetError, message):
+                    self._check()
+
+        self.release = self._write_valid_release()
+        assets = self.release["assets"]
+        assert isinstance(assets, list)
+        assets[1]["id"] = assets[0]["id"]
+        self._write_release(self.release)
+        with self.assertRaisesRegex(
+            BuildScopeReleaseAssetError, "duplicate public asset ids"
+        ):
             self._check()
 
     def test_rejects_wrong_state_size_and_digest(self) -> None:

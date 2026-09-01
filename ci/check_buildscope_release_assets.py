@@ -158,23 +158,57 @@ def _validate_version(version: str, tag: str) -> None:
         )
 
 
-def check_release_assets(
-    release_json: Path, dist: Path, tag: str, version: str
-) -> None:
-    """Raise unless the final release and all nine local assets agree exactly."""
+def load_release_assets(
+    release_json: Path,
+    tag: str,
+    version: str,
+    *,
+    stage: str = "final",
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    """Load and validate release metadata before any asset bytes are trusted."""
 
     _validate_version(version, tag)
+    if stage not in {"draft", "final"}:
+        raise BuildScopeReleaseAssetError(f"invalid release stage: {stage!r}")
     release = _read_release_json(release_json)
-    _require_regular_directory(dist, "release asset directory")
 
+    release_id = release.get("id")
+    if (
+        isinstance(release_id, bool)
+        or not isinstance(release_id, int)
+        or release_id <= 0
+    ):
+        raise BuildScopeReleaseAssetError(f"release id is invalid: {release_id!r}")
     release_tag = release.get("tag_name")
     if release_tag != tag:
         raise BuildScopeReleaseAssetError(
             f"release tag mismatch: {release_tag!r} != {tag!r}"
         )
-    if release.get("draft") is not False or release.get("prerelease") is not False:
+    release_name = release.get("name")
+    expected_name = f"BuildScope {version}"
+    if release_name != expected_name:
         raise BuildScopeReleaseAssetError(
-            "BuildScope product release must be final, not draft/prerelease"
+            f"release name mismatch: {release_name!r} != {expected_name!r}"
+        )
+
+    expected_draft = stage == "draft"
+    if release.get("draft") is not expected_draft:
+        raise BuildScopeReleaseAssetError(
+            f"BuildScope {stage} audit requires draft={expected_draft!r}"
+        )
+    if release.get("prerelease") is not False:
+        raise BuildScopeReleaseAssetError(
+            "BuildScope product release must not be a prerelease"
+        )
+    published_at = release.get("published_at")
+    if stage == "draft":
+        if published_at is not None:
+            raise BuildScopeReleaseAssetError(
+                f"draft release must not have published_at: {published_at!r}"
+            )
+    elif not isinstance(published_at, str) or not published_at.strip():
+        raise BuildScopeReleaseAssetError(
+            f"final release must have published_at: {published_at!r}"
         )
 
     assets = release.get("assets")
@@ -184,9 +218,10 @@ def check_release_assets(
         )
 
     expected = set(expected_asset_names(version))
-    names: list[str] = []
-    seen: set[str] = set()
+    by_name: dict[str, dict[str, Any]] = {}
     duplicates: set[str] = set()
+    asset_ids: set[int] = set()
+    duplicate_ids: set[int] = set()
     for index, asset in enumerate(assets):
         if not isinstance(asset, dict):
             raise BuildScopeReleaseAssetError(
@@ -203,28 +238,60 @@ def check_release_assets(
             raise BuildScopeReleaseAssetError(
                 f"public asset entry {index} has an invalid name: {name!r}"
             )
-        names.append(name)
-        if name in seen:
+        if name in by_name:
             duplicates.add(name)
-        seen.add(name)
+        by_name[name] = asset
+
+        asset_id = asset.get("id")
+        if isinstance(asset_id, bool) or not isinstance(asset_id, int) or asset_id <= 0:
+            raise BuildScopeReleaseAssetError(
+                f"public asset entry {index} has an invalid id: {asset_id!r}"
+            )
+        if asset_id in asset_ids:
+            duplicate_ids.add(asset_id)
+        asset_ids.add(asset_id)
 
     if duplicates:
         raise BuildScopeReleaseAssetError(
             f"duplicate public asset names: {sorted(duplicates)!r}"
         )
+    if duplicate_ids:
+        raise BuildScopeReleaseAssetError(
+            f"duplicate public asset ids: {sorted(duplicate_ids)!r}"
+        )
     if len(assets) != len(expected):
         raise BuildScopeReleaseAssetError(
             f"public asset count mismatch: expected={len(expected)} actual={len(assets)}"
         )
-    actual = set(names)
+    actual = set(by_name)
     if actual != expected:
         raise BuildScopeReleaseAssetError(
             "public asset set mismatch: "
             f"missing={sorted(expected - actual)!r} extra={sorted(actual - expected)!r}"
         )
+    return release, by_name
 
-    for name in sorted(expected):
-        asset = next(item for item in assets if item["name"] == name)
+
+def check_release_assets(
+    release_json: Path,
+    dist: Path,
+    tag: str,
+    version: str,
+    *,
+    stage: str = "final",
+) -> None:
+    """Raise unless the requested release stage and all nine assets agree exactly."""
+
+    _, by_name = load_release_assets(
+        release_json,
+        tag,
+        version,
+        stage=stage,
+    )
+    _require_regular_directory(dist, "release asset directory")
+
+    for name in sorted(by_name):
+        asset = by_name[name]
         state = asset.get("state")
         if state != "uploaded":
             raise BuildScopeReleaseAssetError(
@@ -266,12 +333,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("dist", type=Path)
     parser.add_argument("tag")
     parser.add_argument("version")
+    parser.add_argument(
+        "--stage",
+        choices=("draft", "final"),
+        default="final",
+        help="release visibility required by the audit (default: final)",
+    )
     args = parser.parse_args(argv)
     try:
-        check_release_assets(args.release_json, args.dist, args.tag, args.version)
+        check_release_assets(
+            args.release_json,
+            args.dist,
+            args.tag,
+            args.version,
+            stage=args.stage,
+        )
     except BuildScopeReleaseAssetError as exc:
         parser.exit(1, f"BuildScope release asset audit failed: {exc}{os.linesep}")
-    print(f"audited final BuildScope {args.version}: exact 9 assets and digests")
+    print(f"audited {args.stage} BuildScope {args.version}: exact 9 assets and digests")
     return 0
 
 
