@@ -17,9 +17,10 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
   이때 native tests, released-ici verification, PR 및 exact-main CI/Pages, 문서와 limitations,
   재현 가능한 release assets를 모두 확인하고 기록한다.
 - candidate, pre-release, unreleased 상태는 stable release로 간주하지 않는다.
-- BuildScope `0.5.0`은 B3/B4/B5를 묶은 첫 usable release boundary로 release-ready 상태다.
-  현재 공개 tag/GitHub Release 경계만 남아 있으며, 그 이후의 작업은 같은 수준의 checkpoint가
-  마련될 때까지 `Unreleased`에 쌓는다.
+- BuildScope `0.5.0`은 B3/B4/B5를 묶은 첫 usable release boundary로 release-ready 상태지만
+  아직 미출시다. 고정 annotated tag 대상, GitHub Release 생성, 최종 9개 공개 asset byte audit이
+  모두 끝나기 전까지 public stable release로 주장하지 않으며, 그 이후의 작업은 같은 수준의
+  checkpoint가 마련될 때까지 `Unreleased`에 쌓는다.
 
 ## 프로젝트
 
@@ -27,7 +28,7 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 |---|---|---|
 | [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D2 cancellable/latest-generation scan complete (PR #28) · identity-safe scan · D3 next |
 | [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · L2 1 GiB benchmark merged in PR #26 · default capacity 8192 |
-| [buildscope](buildscope/) | compile DB explorer | 0.5.0 release-ready · public tag/GitHub Release pending |
+| [buildscope](buildscope/) | compile DB explorer | 0.5.0 release-ready · fixed tag/GitHub Release pending |
 
 ### buildscope B0 hybrid skeleton — release-backed evidence
 
@@ -210,13 +211,16 @@ with all 14 prerequisite jobs and `Merge Gate` successful; the PR-only publisher
 [Dependency Graph run `33488174425`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33488174425)
 also succeeded on the same head.
 
-### BuildScope 0.5.0 release evidence — reproducible hybrid packaging and public validation
+### BuildScope 0.5.0 release evidence — reproducible packaging and guarded publication
 
 이 절은 구현된 B4를 배포 가능한 경계까지 연결한 BuildScope `0.5.0`의 release evidence를
-기록한다. 현재 상태는 release-ready이며, public tag/GitHub Release만 남아 있다.
+기록한다. 현재 상태는 release-ready이지만 미출시이며, 고정 annotated tag와 GitHub Release를
+실제로 만들고 최종 공개 asset을 독립적으로 검증하는 단계가 남아 있다. 이 문서는 그 완료를
+주장하지 않는다.
 `tools/build_standalone.py`는
 Python/CMake/ici 버전 surface를 일치시키고 고정 zip metadata·정렬된 payload·schema inventory로
-재현 가능한 `buildscope.pyz`를 만들며, direct test는 두 번의 산출물이 byte-identical인지 확인한다.
+재현 가능한 `buildscope.pyz`를 만들며, direct test는 두 번의 산출물이 byte-identical인지와
+`buildscope.pyz --version`이 `buildscope 0.5.0`을 보고하는지 확인한다.
 `CMakeLists.txt`의 install rule은 native `buildscope-cli`/`buildscope-gui`, 문서, examples, schemas를
 하나의 Linux bundle layout으로 설치한다. [B5 quickstart](buildscope/docs/quickstart.md)는
 `buildscope.pyz` 또는 `buildscope-0.5.0-py3-none-any.whl`로 compile DB를 JSON으로 만들고
@@ -234,15 +238,46 @@ SHA-256 `ea5fce118e6edad8fa5af24c821663e4290805570377e9b7c190de8da1029612`이며
 `ici Verification Report — buildscope`, external refs는 `0`이다. 당시 로컬에는 `clang-tidy`와
 `clazy`가 설치되지 않아 unavailable로 남았지만, 이 제한은 아래 원격 PR gate에서 보완됐다.
 
-`.github/workflows/buildscope-release.yml`은 annotated `buildscope-vX.Y.Z` tag가 exact `origin/main`
-및 green `Merge Gate`를 가리키는지 확인하고, Python `3.10/3.14`와 Qt `5/6` Release/CTest matrix,
-MOC/UIC/RCC generated-path 검사, Qt6 native bundle, wheel/pyz-to-native-CLI handoff, ici v0.10.2
-literal SHA/API digest 검증을 정의한다. 예정된 top-level release assets는
+`.github/workflows/buildscope-release.yml`은 고정 annotated `buildscope-vX.Y.Z` tag의 peeled
+commit이 exact `origin/main`과 green `Merge Gate`를 가리키는지 확인하고, Python `3.10/3.14`와
+Qt `5/6` Release/CTest matrix, MOC/UIC/RCC generated-path 검사, Qt6 native bundle,
+wheel/pyz-to-native-CLI handoff, ici v0.10.2 literal SHA/API digest 검증을 정의한다. 최신
+`ci/check_buildscope_merge_gate.py`는 exact SHA의 `Merge Gate` 중 가장 최신 check-run ID를
+고르고 GitHub Actions app, 완료/성공 상태를 요구한 뒤 Actions run의 ID, repository/head repository,
+SHA, workflow name/path/event/status/conclusion과 canonical URL을 독립 검증한다. GitHub Release API의
+`target_commitish`는 비교하지 않으며 annotated tag의 peeled SHA가 authoritative proof다. 예정된 top-level release assets는
 `buildscope.pyz`, `buildscope.pyz.sha256`, pure `buildscope-<version>-py3-none-any.whl`, sdist,
 `buildscope-ici-deep.{json,html}`, `buildscope-provenance.json`,
-`buildscope-<version>-linux-x86_64.tar.gz`, `SHA256SUMS`다. 동등한 CI preflight와 exact-main
-검증은 완료됐지만 tag-only workflow 자체는 아직 실행되지 않았다. Annotated tag와 GitHub
-Release는 최종 release boundary 실행 전까지 pending이다.
+`buildscope-<version>-linux-x86_64.tar.gz`, `SHA256SUMS`의 정확히 9개다.
+
+게시 단계는 softprops의 기존 release 갱신 경로를 사용하지 않는다. 인증된 paginated release-slot
+검사가 fail-closed로 동작해 빈 슬롯에서만 direct private draft를 만들고, 기존 final release는
+변경 없이 audit-only로 처리하며, 기존 draft·중복·모호한 슬롯은 중단한다. 새 draft는 고정 numeric
+release ID를 끝까지 사용하고, 정확한 9개 경로를 `--clobber` 없이 fixed upload endpoint에
+업로드한다. 생성 draft의 body는 repository/run/target SHA를 담은 terminal current-run owner marker로
+끝나야 하며, POST가 모호할 때의 recovery는 그 marker와 exact tag/version, expected body digest를
+가진 zero-asset private draft 하나에만 허용된다. workflow는 `RELEASE_NOTES.md`를 UTF-8 기준으로 한 번 normalize한 뒤
+expected final body와 owner-marker가 붙은 expected draft body를 각각 고정 파일로 만들고, 두 body의
+정확한 SHA-256을 계산한다. draft digest는 create/upload/prepublish/failure-report에서, final digest는
+publish/final audit에서 반복 확인된다. 업로드는 numeric release ID, binary body, HTTPS/TLS, 20초 connect 및
+300초 transfer bound, HTTP 201과 uploaded/id/size/digest 응답을 요구한다. bounded downloader가
+draft asset을 fresh directory로 내려받은 뒤 manifest/sidecar, payload/archive와 schema bytes,
+provenance, B5 JSON, HTML Zero-CDN, pyz version을 검사하고, ZIP은 `ZipFile` 이전에 bounded
+EOCD/central-directory preflight를 거친다. 공개 직전 같은 draft를 재감사한다.
+PATCH가 모호하면 동일 release ID를 재조회해 exact final은 성공, exact private draft는 재시도,
+그 외 상태는 실패로 판정한다. write-token publish 단계에서는 다운로드한 원격 BuildScope pyz를
+실행하지 않고 payload data로만 검사한다. 공개 후에도 9개 final asset을 다시 내려받아 모든 파일을
+현재 `dist`와 byte-compare하며, 기존 final audit-only 경로에서도 이 비교를 수행한다. 다운로드
+후에는 ID/tag별 release metadata와 asset records 및 peeled tag를 다시 fetch해 안정성을 확인한다.
+실패한 current-run-owned draft는 명시적 수동 검토를 위해 보존하며 remote draft를 자동 삭제하지
+않는다. empty-slot failure-report 단계는 create output ID가 유실돼도 paginated listing에서 exact
+current-run-owned zero-asset draft 중 expected body digest까지 일치하는 항목만 복구해 보고·보존한다.
+동등한 CI preflight와 exact-main 검증은 완료됐지만 tag-only workflow 자체는 아직 실행되지
+않았고, public tag/GitHub Release도 생성됐다고 주장하지 않는다.
+
+현재 dependency-free CI helper discovery suite는 Python `3.10`/`3.14` 각각 `145/145` PASS이며,
+`actionlint`, Ruff check/format, mypy도 통과했다. 이는 현재 구현의 사전 검증 기록이며 새 PR, tag,
+release를 의미하지 않는다.
 
 #### Release-boundary verification
 
@@ -272,8 +307,8 @@ Zero-CDN이며 그 실행의 local artifact와 byte-match됐다.
 | loglens | [loglens/main](https://jihoon22-lee.github.io/toy-projects/loglens/main/) | 495,237 | `11e4c78eed957e237bcea8ec5ea64c3894751eafbe639c454e47ab0acd70df96` |
 
 `0.5.0`은 B3 include explanation, B4 semantic configuration diff, B5 hybrid packaging/integration을
-한데 묶는 첫 usable BuildScope release boundary로 release-ready 상태다. B5의 historical local
-candidate 기록이나 ici pin 변경만으로 stable release 또는 다음 버전 bump를 만들지 않으며,
+한데 묶는 첫 usable BuildScope release boundary로 release-ready지만 아직 미출시다. B5의 historical
+local candidate 기록이나 ici pin 변경만으로 stable release 또는 다음 버전 bump를 만들지 않으며,
 `0.5.0` 이후의 기능은 다음 comparable checkpoint가 마련될 때까지 `Unreleased`에 기록한다.
 
 ## 공통 구조 규칙

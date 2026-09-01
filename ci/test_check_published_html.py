@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 CI_DIR = Path(__file__).resolve().parent
 if str(CI_DIR) not in sys.path:
@@ -83,6 +85,30 @@ class PublishedHtmlTests(unittest.TestCase):
         self.report.write_text(_html("buildscope"), encoding="utf-8")
         with self.assertRaisesRegex(PublishedHtmlError, "invalid project"):
             check_report(self.report, "../buildscope")
+
+    def test_rejects_symlink_fifo_invalid_utf8_and_oversized_reports(self) -> None:
+        target = self.root / "target.html"
+        target.write_text(_html("buildscope"), encoding="utf-8")
+        self.report.symlink_to(target)
+        with self.assertRaisesRegex(PublishedHtmlError, "safely"):
+            check_report(self.report, "buildscope")
+
+        self.report.unlink()
+        os.mkfifo(self.report, 0o600)
+        with self.assertRaisesRegex(PublishedHtmlError, "regular file"):
+            check_report(self.report, "buildscope")
+
+        self.report.unlink()
+        self.report.write_bytes(b"\xff")
+        with self.assertRaisesRegex(PublishedHtmlError, "UTF-8"):
+            check_report(self.report, "buildscope")
+
+        self.report.write_bytes(b"x" * 32)
+        with (
+            patch("check_published_html.MAX_HTML_BYTES", 16),
+            self.assertRaisesRegex(PublishedHtmlError, "accepted range"),
+        ):
+            check_report(self.report, "buildscope")
 
 
 if __name__ == "__main__":

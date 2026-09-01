@@ -77,6 +77,21 @@ class StandaloneReleaseTests(unittest.TestCase):
         self.assertEqual(payload["producer"]["version"], "0.5.0")
         self.assertEqual(payload["source"]["entry_count"], 2)
 
+    def test_archive_reports_its_version_without_a_database_argument(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = Path(temporary) / "buildscope.pyz"
+            self._build(archive)
+            result = subprocess.run(
+                [sys.executable, str(archive), "--version"],
+                cwd=temporary,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(result.stdout, "buildscope 0.5.0\n")
+        self.assertEqual(result.stderr, "")
+
     def test_builder_cli_reports_the_version_output_and_digest(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / "buildscope.pyz"

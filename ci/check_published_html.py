@@ -39,6 +39,17 @@ class PublishedHtmlError(ValueError):
     """The downloaded report violates the trusted Pages contract."""
 
 
+def _stat_signature(info: os.stat_result) -> tuple[int, ...]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        stat.S_IFMT(info.st_mode),
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
 class _ReportParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -98,19 +109,49 @@ def check_report(path: Path, project: str) -> None:
 
     if not project or project in {".", ".."} or "/" in project or "\\" in project:
         raise PublishedHtmlError(f"invalid project label: {project!r}")
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None:
+        raise PublishedHtmlError("this platform cannot safely refuse report symlinks")
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= nofollow
+    flags |= getattr(os, "O_NONBLOCK", 0)
     try:
-        info = path.lstat()
+        descriptor = os.open(path, flags)
     except OSError as exc:
-        raise PublishedHtmlError(f"cannot inspect report: {exc}") from exc
-    if not stat.S_ISREG(info.st_mode):
-        raise PublishedHtmlError("report must be a regular file")
-    if info.st_size <= 0 or info.st_size > MAX_HTML_BYTES:
-        raise PublishedHtmlError(
-            f"report size is outside the accepted range: {info.st_size}"
-        )
+        raise PublishedHtmlError(f"cannot open report safely: {exc}") from exc
     try:
-        payload = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as exc:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode):
+            raise PublishedHtmlError("report must be a regular file")
+        if opened.st_size <= 0 or opened.st_size > MAX_HTML_BYTES:
+            raise PublishedHtmlError(
+                f"report size is outside the accepted range: {opened.st_size}"
+            )
+        with os.fdopen(descriptor, "rb", closefd=True) as stream:
+            descriptor = -1
+            raw_payload = stream.read(MAX_HTML_BYTES + 1)
+            after = os.fstat(stream.fileno())
+        try:
+            named = path.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise PublishedHtmlError(f"report path cannot be rechecked: {exc}") from exc
+        if _stat_signature(opened) != _stat_signature(after) or _stat_signature(
+            opened
+        ) != _stat_signature(named):
+            raise PublishedHtmlError("report changed while it was read")
+    except PublishedHtmlError:
+        raise
+    except OSError as exc:
+        raise PublishedHtmlError(f"cannot read report safely: {exc}") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if len(raw_payload) > MAX_HTML_BYTES:
+        raise PublishedHtmlError("report exceeds the accepted read bound")
+    try:
+        payload = raw_payload.decode("utf-8")
+    except UnicodeError as exc:
         raise PublishedHtmlError(f"cannot read report as UTF-8: {exc}") from exc
 
     parser = _ReportParser()
