@@ -1,6 +1,7 @@
 #include "buildscope/main_window.hpp"
 
 #include <QApplication>
+#include <QEvent>
 #include <QFileDialog>
 #include <QFile>
 #include <QLabel>
@@ -39,6 +40,7 @@ class MainWindowTest final : public QObject {
 
 private slots:
     void initTestCase();
+    void cleanup();
     void generatedQtArtifactsAreLinked();
     void loadsSampleSnapshot();
     void reportsMissingSnapshot();
@@ -55,6 +57,12 @@ private slots:
 
 void MainWindowTest::initTestCase() {
     QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
+}
+
+void MainWindowTest::cleanup() {
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QApplication::processEvents();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
 }
 
 void MainWindowTest::generatedQtArtifactsAreLinked() {
