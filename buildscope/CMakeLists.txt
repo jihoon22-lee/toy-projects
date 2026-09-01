@@ -105,6 +105,16 @@ target_compile_definitions(test_diff PRIVATE
 )
 add_test(NAME test_diff COMMAND test_diff)
 
+add_executable(test_diff_validation tests/cpp/test_diff_validation.cpp)
+target_link_libraries(test_diff_validation PRIVATE
+    buildscope_contract
+    Qt${QT_VERSION_MAJOR}::Test
+)
+target_compile_definitions(test_diff_validation PRIVATE
+    BUILDSCOPE_SAMPLE_DIFF="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/sample-diff.json"
+)
+add_test(NAME test_diff_validation COMMAND test_diff_validation)
+
 add_executable(test_main_window tests/cpp/test_main_window.cpp)
 target_link_libraries(test_main_window PRIVATE buildscope_gui Qt${QT_VERSION_MAJOR}::Test)
 target_compile_definitions(test_main_window PRIVATE
