@@ -19,8 +19,17 @@ MAX_RELEASE_PAGES = 1_000
 MAX_RELEASES_PER_PAGE = 100
 MAX_RELEASE_ID = (1 << 63) - 1
 MAX_TAG_BYTES = 255
+MAX_RELEASE_BODY_BYTES = 1_000_000
 VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+OWNER_MARKER_PREFIX = "<!-- buildscope-release-owner:"
+OWNER_MARKER_PATTERN = re.compile(
+    r"<!-- buildscope-release-owner:"
+    r"(?P<owner_repo>[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,99})/"
+    r"[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,99}))"
+    r":(?P<run_id>[1-9][0-9]{0,19})"
+    r":(?P<target_sha>[0-9a-f]{40}) -->"
+)
 
 
 class BuildScopeReleaseStateError(ValueError):
@@ -131,6 +140,64 @@ def _validate_inputs(tag: str, version: str, target_sha: str) -> None:
         )
 
 
+def _validate_run_id(run_id: object) -> int:
+    if (
+        isinstance(run_id, bool)
+        or not isinstance(run_id, int)
+        or run_id <= 0
+        or run_id > MAX_RELEASE_ID
+    ):
+        raise BuildScopeReleaseStateError(f"release run id is invalid: {run_id!r}")
+    return run_id
+
+
+def _validate_owner_marker(owner_marker: object, target_sha: str) -> str:
+    if not isinstance(owner_marker, str):
+        raise BuildScopeReleaseStateError("owner marker must be a string")
+    match = OWNER_MARKER_PATTERN.fullmatch(owner_marker)
+    if match is None:
+        raise BuildScopeReleaseStateError(
+            "owner marker has an invalid exact HTML comment format"
+        )
+    try:
+        marker_run_id = _validate_run_id(int(match.group("run_id")))
+    except BuildScopeReleaseStateError as exc:
+        raise BuildScopeReleaseStateError(
+            f"owner marker run id is invalid: {match.group('run_id')}"
+        ) from exc
+    if str(marker_run_id) != match.group("run_id"):
+        raise BuildScopeReleaseStateError("owner marker run id is not canonical")
+    if match.group("target_sha") != target_sha:
+        raise BuildScopeReleaseStateError(
+            "owner marker target SHA does not match the requested target"
+        )
+    return owner_marker
+
+
+def _validate_owner_marker_body(
+    release: dict[str, Any], expected_owner_marker: str
+) -> None:
+    body = release.get("body")
+    if not isinstance(body, str):
+        raise BuildScopeReleaseStateError("release body must be a string")
+    try:
+        body_size = len(body.encode("utf-8"))
+    except UnicodeEncodeError as exc:
+        raise BuildScopeReleaseStateError(
+            f"release body is not valid UTF-8: {exc}"
+        ) from exc
+    if body_size > MAX_RELEASE_BODY_BYTES:
+        raise BuildScopeReleaseStateError("release body exceeds the accepted bound")
+    if (
+        body.count(OWNER_MARKER_PREFIX) != 1
+        or body.count(expected_owner_marker) != 1
+        or not body.endswith(expected_owner_marker)
+    ):
+        raise BuildScopeReleaseStateError(
+            "release body must end with the exact current-run owner marker"
+        )
+
+
 def _release_id(release: dict[str, Any]) -> int:
     release_id = release.get("id")
     if (
@@ -152,6 +219,7 @@ def _validate_release_state(
     *,
     expected_release_id: int | None = None,
     expected_asset_count: int | None = None,
+    expected_owner_marker: str | None = None,
 ) -> int:
     if stage not in {"draft", "final"}:
         raise BuildScopeReleaseStateError(f"invalid release stage: {stage!r}")
@@ -163,7 +231,6 @@ def _validate_release_state(
     expected = {
         "tag_name": tag,
         "name": f"BuildScope {version}",
-        "target_commitish": target_sha,
         "prerelease": False,
         "draft": stage == "draft",
     }
@@ -189,45 +256,17 @@ def _validate_release_state(
             raise BuildScopeReleaseStateError(
                 f"release asset count mismatch: {actual!r} != {expected_asset_count}"
             )
+    if expected_owner_marker is not None:
+        expected_owner_marker = _validate_owner_marker(
+            expected_owner_marker, target_sha
+        )
+        _validate_owner_marker_body(release, expected_owner_marker)
     return release_id
 
 
-def check_release_state(
-    release_json: Path,
-    tag: str,
-    version: str,
-    target_sha: str,
-    stage: str,
-    *,
-    expected_release_id: int | None = None,
-    expected_asset_count: int | None = None,
-) -> int:
-    """Validate one release response and return its positive numeric ID."""
-
-    _validate_inputs(tag, version, target_sha)
-    release = _read_json(release_json, "release metadata")
-    if not isinstance(release, dict):
-        raise BuildScopeReleaseStateError("release metadata must be a JSON object")
-    return _validate_release_state(
-        release,
-        tag,
-        version,
-        target_sha,
-        stage,
-        expected_release_id=expected_release_id,
-        expected_asset_count=expected_asset_count,
-    )
-
-
-def inspect_release_slot(
-    release_pages_json: Path,
-    tag: str,
-    version: str,
-    target_sha: str,
-) -> ReleaseSlot:
-    """Return an empty/final slot and reject every pre-existing draft."""
-
-    _validate_inputs(tag, version, target_sha)
+def _matching_release_entries(
+    release_pages_json: Path, tag: str
+) -> list[dict[str, Any]]:
     pages = _read_json(release_pages_json, "paginated release listing")
     if not isinstance(pages, list) or len(pages) > MAX_RELEASE_PAGES:
         raise BuildScopeReleaseStateError("paginated release listing has invalid pages")
@@ -252,6 +291,48 @@ def inspect_release_slot(
                 )
             if listed_tag == tag:
                 matches.append(release)
+    return matches
+
+
+def check_release_state(
+    release_json: Path,
+    tag: str,
+    version: str,
+    target_sha: str,
+    stage: str,
+    *,
+    expected_release_id: int | None = None,
+    expected_asset_count: int | None = None,
+    expected_owner_marker: str | None = None,
+) -> int:
+    """Validate one release response and return its positive numeric ID."""
+
+    _validate_inputs(tag, version, target_sha)
+    release = _read_json(release_json, "release metadata")
+    if not isinstance(release, dict):
+        raise BuildScopeReleaseStateError("release metadata must be a JSON object")
+    return _validate_release_state(
+        release,
+        tag,
+        version,
+        target_sha,
+        stage,
+        expected_release_id=expected_release_id,
+        expected_asset_count=expected_asset_count,
+        expected_owner_marker=expected_owner_marker,
+    )
+
+
+def inspect_release_slot(
+    release_pages_json: Path,
+    tag: str,
+    version: str,
+    target_sha: str,
+) -> ReleaseSlot:
+    """Return an empty/final slot and reject every pre-existing draft."""
+
+    _validate_inputs(tag, version, target_sha)
+    matches = _matching_release_entries(release_pages_json, tag)
     if not matches:
         return ReleaseSlot(mode="empty", release_id=None)
     if len(matches) != 1:
@@ -272,6 +353,64 @@ def inspect_release_slot(
         "final",
     )
     return ReleaseSlot(mode="final", release_id=release_id)
+
+
+def _validate_owned_draft(
+    release: dict[str, Any],
+    tag: str,
+    version: str,
+    expected_owner_marker: str,
+) -> int:
+    release_id = _release_id(release)
+    expected = {
+        "tag_name": tag,
+        "name": f"BuildScope {version}",
+        "draft": True,
+        "prerelease": False,
+        "published_at": None,
+    }
+    for key, expected_value in expected.items():
+        if release.get(key) != expected_value:
+            raise BuildScopeReleaseStateError(
+                f"owned draft {key} mismatch: {release.get(key)!r} != {expected_value!r}"
+            )
+    assets = release.get("assets")
+    if not isinstance(assets, list) or assets:
+        actual = len(assets) if isinstance(assets, list) else "not-an-array"
+        raise BuildScopeReleaseStateError(
+            f"owned draft must have zero assets: {actual!r}"
+        )
+    _validate_owner_marker_body(release, expected_owner_marker)
+    return release_id
+
+
+def recover_owned_draft(
+    release_pages_json: Path,
+    tag: str,
+    version: str,
+    target_sha: str,
+    owner_marker: str,
+) -> int:
+    """Recover one private draft created by this exact workflow run.
+
+    The owner marker is a terminal HTML comment with the strict form
+    ``<!-- buildscope-release-owner:<owner/repo>:<run_id>:<40hexsha> -->``.
+    The annotated tag's peeled SHA is authoritative; the API's
+    ``target_commitish`` field is intentionally not part of this check.
+    """
+
+    _validate_inputs(tag, version, target_sha)
+    owner_marker = _validate_owner_marker(owner_marker, target_sha)
+    matches = _matching_release_entries(release_pages_json, tag)
+    if not matches:
+        raise BuildScopeReleaseStateError(
+            f"no private draft found for recovery at {tag}"
+        )
+    if len(matches) != 1:
+        raise BuildScopeReleaseStateError(
+            f"release slot contains {len(matches)} entries for {tag}"
+        )
+    return _validate_owned_draft(matches[0], tag, version, owner_marker)
 
 
 def _positive_id(value: str) -> int:
@@ -295,6 +434,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     slot_parser.add_argument("version")
     slot_parser.add_argument("target_sha")
 
+    recover_parser = subparsers.add_parser(
+        "recover-owned-draft",
+        help="recover one current-run-owned zero-asset private draft",
+    )
+    recover_parser.add_argument("release_pages_json", type=Path)
+    recover_parser.add_argument("tag")
+    recover_parser.add_argument("version")
+    recover_parser.add_argument("target_sha")
+    recover_parser.add_argument("owner_marker")
+
     state_parser = subparsers.add_parser("state", help="validate one release response")
     state_parser.add_argument("release_json", type=Path)
     state_parser.add_argument("tag")
@@ -303,6 +452,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     state_parser.add_argument("--stage", choices=("draft", "final"), required=True)
     state_parser.add_argument("--expected-release-id", type=_positive_id)
     state_parser.add_argument("--expected-asset-count", type=int)
+    state_parser.add_argument("--expected-owner-marker")
 
     args = parser.parse_args(argv)
     try:
@@ -320,6 +470,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                     sort_keys=True,
                 )
             )
+        elif args.command == "recover-owned-draft":
+            release_id = recover_owned_draft(
+                args.release_pages_json,
+                args.tag,
+                args.version,
+                args.target_sha,
+                args.owner_marker,
+            )
+            print(release_id)
         else:
             release_id = check_release_state(
                 args.release_json,
@@ -329,6 +488,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.stage,
                 expected_release_id=args.expected_release_id,
                 expected_asset_count=args.expected_asset_count,
+                expected_owner_marker=args.expected_owner_marker,
             )
             print(release_id)
     except BuildScopeReleaseStateError as exc:

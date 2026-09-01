@@ -26,6 +26,7 @@ from check_buildscope_release_state import (
     check_release_state,
     inspect_release_slot,
     main,
+    recover_owned_draft,
 )
 
 VERSION = "0.5.0"
@@ -33,6 +34,8 @@ TAG = f"buildscope-v{VERSION}"
 TARGET_SHA = "a" * 40
 RELEASE_ID = 123456
 ASSET_COUNT = 9
+OWNER_REPO = "openai/buildscope"
+RUN_ID = 987654321
 
 
 class BuildScopeReleaseStateTests(unittest.TestCase):
@@ -50,6 +53,7 @@ class BuildScopeReleaseStateTests(unittest.TestCase):
         release_id: object = RELEASE_ID,
         published_at: object = "2026-09-02T00:00:00Z",
         assets: object | None = None,
+        body: object = "release notes",
     ) -> dict[str, object]:
         if assets is None:
             assets = [{} for _ in range(ASSET_COUNT)]
@@ -62,6 +66,7 @@ class BuildScopeReleaseStateTests(unittest.TestCase):
             "prerelease": False,
             "published_at": None if draft else published_at,
             "assets": assets,
+            "body": body,
         }
 
     def _write(self, path: Path, value: object) -> None:
@@ -84,6 +89,30 @@ class BuildScopeReleaseStateTests(unittest.TestCase):
             stage,
             expected_release_id=expected_release_id,
             expected_asset_count=expected_asset_count,
+        )
+
+    def _owner_marker(
+        self,
+        *,
+        owner_repo: str = OWNER_REPO,
+        run_id: int = RUN_ID,
+        target_sha: str = TARGET_SHA,
+    ) -> str:
+        return f"<!-- buildscope-release-owner:{owner_repo}:{run_id}:{target_sha} -->"
+
+    def _recover(
+        self,
+        release: dict[str, object],
+        *,
+        owner_marker: str | None = None,
+    ) -> int:
+        self._write(self.pages_json, [[release]])
+        return recover_owned_draft(
+            self.pages_json,
+            TAG,
+            VERSION,
+            TARGET_SHA,
+            self._owner_marker() if owner_marker is None else owner_marker,
         )
 
     def test_empty_and_matching_final_release_slots_succeed(self) -> None:
@@ -186,7 +215,24 @@ class BuildScopeReleaseStateTests(unittest.TestCase):
                 self._release(), stage="final", expected_release_id=RELEASE_ID + 1
             )
 
-    def test_rejects_state_target_name_published_and_asset_count_mismatches(
+    def test_accepts_arbitrary_or_missing_api_target_commitish(self) -> None:
+        release = self._release()
+        release["target_commitish"] = "refs/heads/release-candidate"
+        self.assertEqual(self._state(release, stage="final"), RELEASE_ID)
+
+        release = self._release()
+        del release["target_commitish"]
+        self.assertEqual(self._state(release, stage="final"), RELEASE_ID)
+
+        release = self._release()
+        del release["target_commitish"]
+        self._write(self.pages_json, [[release]])
+        self.assertEqual(
+            inspect_release_slot(self.pages_json, TAG, VERSION, TARGET_SHA),
+            ReleaseSlot(mode="final", release_id=RELEASE_ID),
+        )
+
+    def test_rejects_state_name_published_and_asset_count_mismatches(
         self,
     ) -> None:
         state_cases = (
@@ -199,11 +245,6 @@ class BuildScopeReleaseStateTests(unittest.TestCase):
                 self.assertRaisesRegex(BuildScopeReleaseStateError, message),
             ):
                 self._state(self._release(draft=draft), stage=stage)
-
-        release = self._release()
-        release["target_commitish"] = "b" * 40
-        with self.assertRaisesRegex(BuildScopeReleaseStateError, "target_commitish"):
-            self._state(release, stage="final")
 
         release = self._release()
         release["name"] = "BuildScope nightly"
@@ -233,6 +274,144 @@ class BuildScopeReleaseStateTests(unittest.TestCase):
                     self._release(assets=assets),
                     stage="final",
                     expected_asset_count=ASSET_COUNT,
+                )
+
+    def test_recovers_one_exact_current_run_owned_zero_asset_draft(self) -> None:
+        marker = self._owner_marker()
+        release = self._release(
+            draft=True,
+            assets=[],
+            body=f"release notes\n\n{marker}",
+        )
+        self.assertEqual(self._recover(release), RELEASE_ID)
+
+    def test_recovery_accepts_missing_or_arbitrary_api_target_commitish(self) -> None:
+        marker = self._owner_marker()
+        for target_commitish in (None, "refs/heads/main"):
+            with self.subTest(target_commitish=target_commitish):
+                release = self._release(
+                    draft=True,
+                    assets=[],
+                    body=marker,
+                )
+                if target_commitish is None:
+                    del release["target_commitish"]
+                else:
+                    release["target_commitish"] = target_commitish
+                self.assertEqual(self._recover(release), RELEASE_ID)
+
+    def test_recovery_rejects_duplicate_or_missing_matching_releases(self) -> None:
+        owned = self._release(
+            draft=True,
+            assets=[],
+            body=self._owner_marker(),
+        )
+        self._write(self.pages_json, [[owned], [owned.copy()]])
+        with self.assertRaisesRegex(BuildScopeReleaseStateError, "contains 2 entries"):
+            recover_owned_draft(
+                self.pages_json,
+                TAG,
+                VERSION,
+                TARGET_SHA,
+                self._owner_marker(),
+            )
+
+        self._write(self.pages_json, [[]])
+        with self.assertRaisesRegex(BuildScopeReleaseStateError, "no private draft"):
+            recover_owned_draft(
+                self.pages_json,
+                TAG,
+                VERSION,
+                TARGET_SHA,
+                self._owner_marker(),
+            )
+
+    def test_recovery_rejects_wrong_state_name_assets_and_id(self) -> None:
+        marker = self._owner_marker()
+        published_release = self._release(draft=True, assets=[], body=marker)
+        published_release["published_at"] = "2026-09-02T00:00:00Z"
+        invalid_releases: tuple[tuple[dict[str, object], str], ...] = (
+            (self._release(body=marker), "draft mismatch"),
+            (
+                self._release(draft=True, assets=[], body=marker, release_id=0),
+                "release id",
+            ),
+            (
+                self._release(draft=True, assets=[{}], body=marker),
+                "zero assets",
+            ),
+            (
+                published_release,
+                "published_at",
+            ),
+        )
+        for release, message in invalid_releases:
+            with (
+                self.subTest(release=release, message=message),
+                self.assertRaisesRegex(BuildScopeReleaseStateError, message),
+            ):
+                self._recover(release)
+
+        release = self._release(draft=True, assets=[], body=marker)
+        release["name"] = "BuildScope nightly"
+        with self.assertRaisesRegex(BuildScopeReleaseStateError, "name mismatch"):
+            self._recover(release)
+
+    def test_recovery_requires_one_exact_terminal_owner_marker(self) -> None:
+        expected = self._owner_marker()
+        invalid_bodies = (
+            "release notes",
+            f"{expected}\n",
+            f"{expected} trailing text",
+            f"<!-- buildscope-release-owner:other/repo:{RUN_ID}:{TARGET_SHA} -->",
+            f"<!-- buildscope-release-owner:{OWNER_REPO}:{RUN_ID + 1}:{TARGET_SHA} -->",
+            f"<!-- buildscope-release-owner:{OWNER_REPO}:{RUN_ID}:{'b' * 40} -->",
+            f"{expected}\n{expected}",
+            f"<!-- buildscope-release-owner:{OWNER_REPO}:0:{TARGET_SHA} -->",
+            f"<!-- buildscope-release-owner:{OWNER_REPO}:{RUN_ID}:{'A' * 40} -->",
+        )
+        for body in invalid_bodies:
+            with (
+                self.subTest(body=body),
+                self.assertRaisesRegex(BuildScopeReleaseStateError, "owner marker"),
+            ):
+                self._recover(self._release(draft=True, assets=[], body=body))
+
+    def test_recovery_rejects_invalid_owner_marker_inputs(self) -> None:
+        self._write(
+            self.pages_json,
+            [
+                [
+                    self._release(
+                        draft=True,
+                        assets=[],
+                        body=self._owner_marker(),
+                    )
+                ]
+            ],
+        )
+        invalid_markers = (
+            "owner/repo",
+            f"<!-- buildscope-release-owner:owner:{RUN_ID}:{TARGET_SHA} -->",
+            f"<!-- buildscope-release-owner:owner/repo/extra:{RUN_ID}:{TARGET_SHA} -->",
+            f"<!-- buildscope-release-owner:owner repo:{RUN_ID}:{TARGET_SHA} -->",
+            f"<!-- buildscope-release-owner:é/repo:{RUN_ID}:{TARGET_SHA} -->",
+            f"<!-- buildscope-release-owner:{OWNER_REPO}:0:{TARGET_SHA} -->",
+            f"<!-- buildscope-release-owner:{OWNER_REPO}:{MAX_RELEASE_ID + 1}:{TARGET_SHA} -->",
+            f"<!-- buildscope-release-owner:{OWNER_REPO}:{RUN_ID}:{'A' * 40} -->",
+            f"<!-- buildscope-release-owner:{OWNER_REPO}:{RUN_ID}:{'b' * 40} -->",
+        )
+        for owner_marker in invalid_markers:
+            with (
+                self.subTest(owner_marker=owner_marker),
+                self.assertRaisesRegex(BuildScopeReleaseStateError, "owner marker"),
+            ):
+                recover_owned_draft(
+                    self.pages_json,
+                    TAG,
+                    VERSION,
+                    TARGET_SHA,
+                    owner_marker,
                 )
 
     def test_rejects_duplicate_json_keys_and_huge_integers(self) -> None:
@@ -327,6 +506,59 @@ class BuildScopeReleaseStateTests(unittest.TestCase):
                         str(RELEASE_ID),
                         "--expected-asset-count",
                         str(ASSET_COUNT),
+                    ]
+                ),
+                0,
+            )
+        self.assertEqual(stdout.getvalue(), f"{RELEASE_ID}\n")
+
+        self._write(
+            self.release_json,
+            self._release(body=f"release notes\n{self._owner_marker()}"),
+        )
+        stdout = StringIO()
+        with redirect_stdout(stdout):
+            self.assertEqual(
+                main(
+                    [
+                        "state",
+                        str(self.release_json),
+                        TAG,
+                        VERSION,
+                        TARGET_SHA,
+                        "--stage",
+                        "final",
+                        "--expected-owner-marker",
+                        self._owner_marker(),
+                    ]
+                ),
+                0,
+            )
+        self.assertEqual(stdout.getvalue(), f"{RELEASE_ID}\n")
+
+        self._write(
+            self.pages_json,
+            [
+                [
+                    self._release(
+                        draft=True,
+                        assets=[],
+                        body=self._owner_marker(),
+                    )
+                ]
+            ],
+        )
+        stdout = StringIO()
+        with redirect_stdout(stdout):
+            self.assertEqual(
+                main(
+                    [
+                        "recover-owned-draft",
+                        str(self.pages_json),
+                        TAG,
+                        VERSION,
+                        TARGET_SHA,
+                        self._owner_marker(),
                     ]
                 ),
                 0,
