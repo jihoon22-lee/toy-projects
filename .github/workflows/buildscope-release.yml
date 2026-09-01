@@ -15,7 +15,7 @@ concurrency:
 env:
   ICI_VERSION: "v0.10.2"
   # Public ici v0.10.2 asset digest. Both the published checksum file and a
-  # fresh digest are checked against this literal before ici can run source.
+  # fresh digest are checked against this literal before ici can run.
   ICI_PYZ_SHA256: "8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4"
 
 jobs:
