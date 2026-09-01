@@ -510,9 +510,11 @@ The focused Python suite now contains 87 tests, and the standalone builder's two
 byte-identical. Existing Qt5 5.15.18 and Qt6 6.10.2 Release CMake/CTest evidence remains the B4
 historical/local baseline (`9/9`, or `10/10` with the opt-in benchmark); the B5 release workflow
 defines fresh Python `3.10/3.14` and Qt `5/6` legs. The first PR deep run exposed a Qt5-only
-LeakSanitizer failure after all 14 `test_main_window` assertions passed. Draining deferred-delete
+LeakSanitizer failure after all 12 `test_main_window` test functions passed (14 QtTest lifecycle
+result entries). Draining deferred-delete
 and event work in the QtTest `cleanup()` hook removes the retained Qt5 offscreen/fontconfig/widget
-state: the same instrumented binary and the full `9/9` CTest tree pass with `detect_leaks=1` still
+state: a rebuilt instrumented binary using the same toolchain and configuration, plus the full
+`9/9` CTest tree, pass with `detect_leaks=1` still
 enabled. No sanitizer suppression was introduced; final B5 evidence requires the corrected PR rerun.
 
 ### B5 release contract (defined, not published)

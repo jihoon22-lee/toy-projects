@@ -3,10 +3,12 @@
 ## Overview
 
 BuildScope B5 PR #38의 첫 deep matrix에서 Qt6 sanitizer는 통과했지만 Qt5의
-`test_main_window`만 CTest return code 8로 실패했다. report artifact에는 14개 QtTest
-assertion의 원시 출력이 없어서 동일 Qt5.15.18, offscreen, ASan/UBSan 환경으로 직접 재현했다.
+`test_main_window`만 CTest return code 8로 실패했다. report artifact에는 12개 test function과
+QtTest lifecycle을 합친 14개 결과 entry의 원시 출력이 없어서 동일 Qt5.15.18, offscreen,
+ASan/UBSan 환경으로 직접 재현했다.
 
-실패는 assertion, crash, undefined behavior가 아니었다. 14개 case가 모두 통과한 뒤 Qt5
+실패는 assertion, crash, undefined behavior가 아니었다. 12개 test function과 QtTest
+lifecycle 결과 entry 14개가 모두 통과한 뒤 Qt5
 offscreen/fontconfig와 QLineEdit animation/deferred object가 process 종료 때 남아 LSan이
 1,288 bytes / 18 allocations를 보고한 것이었다.
 
@@ -20,7 +22,7 @@ offscreen/fontconfig와 QLineEdit animation/deferred object가 process 종료 �
 
 ## Verification Results
 
-수정 전 동일 instrumented binary:
+수정 전 instrumented binary:
 
 ```text
 Totals: 14 passed, 0 failed, 0 skipped
@@ -29,7 +31,8 @@ SUMMARY: AddressSanitizer: 1288 byte(s) leaked in 18 allocation(s)
 exit 1
 ```
 
-수정 후 같은 Qt5.15.18 offscreen binary와 원래 LSan 정책:
+수정 후 같은 Qt5.15.18 toolchain/configuration으로 다시 빌드한 offscreen binary와 원래 LSan
+정책:
 
 ```text
 QT_QPA_PLATFORM=offscreen \
