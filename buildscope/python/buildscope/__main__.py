@@ -7,6 +7,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from buildscope import __version__
 from buildscope._io import write_atomic_text
 from buildscope.include_analysis import IncludeAnalysisError, annotate_snapshot
 from buildscope.snapshot import (
@@ -21,6 +22,11 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="buildscope",
         description="Convert compile_commands.json to a versioned BuildScope snapshot.",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
     parser.add_argument("database", type=Path, help="path to compile_commands.json")
     parser.add_argument(
