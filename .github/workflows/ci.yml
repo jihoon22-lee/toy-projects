@@ -40,7 +40,11 @@ jobs:
         id: manifest
         run: |
           set -euo pipefail
-          python3 -m unittest ci/test_check_manifest.py -v
+          python3 -m unittest \
+            ci/test_check_manifest.py \
+            ci/test_check_published_html.py \
+            ci/test_ci_workflow_contract.py \
+            -v
           python3 ci/check_manifest.py
 
   verify:
@@ -1242,13 +1246,210 @@ jobs:
             test "$GUI_RESULT" = skipped
           fi
 
+  # Main reports are a separate trusted publication boundary. PR publication
+  # updates one sticky comment; a main push writes stable <project>/main paths
+  # only after every quality job in the exact run has reached success.
+  publish-main:
+    name: Publish Main Portfolio Reports
+    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    needs:
+      - discover
+      - verify
+      - gui-build
+      - benchmark-smoke
+      - diskmap-benchmark-smoke
+      - buildscope-benchmark-smoke
+      - buildscope-ici-deep
+      - buildscope-python-quality
+      - buildscope-release-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: gh-pages-${{ github.repository }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pages: read
+
+    steps:
+      - name: Require every main quality result before publication
+        env:
+          DISCOVER_RESULT: ${{ needs.discover.result }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          GUI_RESULT: ${{ needs.gui-build.result }}
+          BENCHMARK_SMOKE_RESULT: ${{ needs.benchmark-smoke.result }}
+          DISKMAP_BENCHMARK_SMOKE_RESULT: ${{ needs.diskmap-benchmark-smoke.result }}
+          BUILDSCOPE_BENCHMARK_SMOKE_RESULT: ${{ needs.buildscope-benchmark-smoke.result }}
+          BUILDSCOPE_DEEP_RESULT: ${{ needs.buildscope-ici-deep.result }}
+          BUILDSCOPE_PYTHON_RESULT: ${{ needs.buildscope-python-quality.result }}
+          BUILDSCOPE_RELEASE_RESULT: ${{ needs.buildscope-release-contract.result }}
+          GUI_COUNT: ${{ needs.discover.outputs.gui_count }}
+        run: |
+          set -euo pipefail
+          test "$DISCOVER_RESULT" = success
+          test "$VERIFY_RESULT" = success
+          test "$BENCHMARK_SMOKE_RESULT" = success
+          test "$DISKMAP_BENCHMARK_SMOKE_RESULT" = success
+          test "$BUILDSCOPE_BENCHMARK_SMOKE_RESULT" = success
+          test "$BUILDSCOPE_DEEP_RESULT" = success
+          test "$BUILDSCOPE_PYTHON_RESULT" = success
+          test "$BUILDSCOPE_RELEASE_RESULT" = success
+          if [ "$GUI_RESULT" != success ]; then
+            test "$GUI_COUNT" = 0
+            test "$GUI_RESULT" = skipped
+          fi
+
+      - name: Checkout exact main source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Validate exact current main identity
+        env:
+          EXPECTED_REF: ${{ github.ref }}
+          EXPECTED_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "$EXPECTED_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          remote_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          test "$remote_main" = "$EXPECTED_SHA"
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+
+      - name: Fetch checksummed public ici release
+        run: |
+          set -euo pipefail
+          ici_root="$RUNNER_TEMP/toy-main-ici"
+          ici_pyz="$ici_root/ici.pyz"
+          mkdir -p "$ici_root"
+          base="https://github.com/jihoon22-lee/ici/releases/download/${ICI_VERSION}"
+          curl -fsSL --retry 3 -o "$ici_pyz" "${base}/ici.pyz"
+          curl -fsSL --retry 3 -o "$ici_root/ici.pyz.sha256" "${base}/ici.pyz.sha256"
+          manifest_hash="$(awk 'NR == 1 {print $1}' "$ici_root/ici.pyz.sha256")"
+          manifest_name="$(awk 'NR == 1 {print $2}' "$ici_root/ici.pyz.sha256")"
+          test "$manifest_name" = ici.pyz
+          test "$manifest_hash" = "$ICI_SHA256"
+          (cd "$ici_root" && sha256sum --check ici.pyz.sha256)
+          printf '%s  %s\n' "$ICI_SHA256" "$ici_pyz" | sha256sum --check -
+          test "$(sha256sum "$ici_pyz" | awk '{print $1}')" = "$ICI_SHA256"
+          chmod +x "$ici_pyz"
+          test -x "$ici_pyz"
+          case "$ici_pyz" in
+            /*) ;;
+            *) echo "::error::main ici path must be absolute" >&2; exit 1 ;;
+          esac
+          printf 'ICI_MAIN_BIN=%s\n' "$ici_pyz" >> "$GITHUB_ENV"
+          ICI_PYTHON=python3.10 "$ici_pyz" --version
+
+      - name: Download all project reports
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: ici-report-*
+          path: reports
+
+      - name: Normalise and validate the complete report set
+        env:
+          PROJECT_NAMES: ${{ needs.discover.outputs.names }}
+          EXPECTED_REPORTS: ${{ needs.discover.outputs.count }}
+        run: |
+          set -euo pipefail
+          for dir in reports/ici-report-*; do
+            [ -d "$dir" ] || continue
+            project="${dir##*/ici-report-}"
+            mv "$dir" "reports/$project"
+          done
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          names = [name for name in os.environ["PROJECT_NAMES"].split(",") if name]
+          expected = int(os.environ["EXPECTED_REPORTS"])
+          if len(names) != expected:
+              raise SystemExit(f"manifest count mismatch: {len(names)} != {expected}")
+          actual = sorted(path.name for path in Path("reports").iterdir() if path.is_dir())
+          if sorted(names) != actual:
+              raise SystemExit(
+                  f"artifact/project mismatch: expected={sorted(names)!r} actual={actual!r}"
+              )
+          for name in names:
+              directory = Path("reports") / name
+              for filename in ("verify_report.html", "verify_report.json"):
+                  if not (directory / filename).is_file():
+                      raise SystemExit(f"missing {directory / filename}")
+          PY
+          while IFS= read -r project; do
+            [ -n "$project" ] || continue
+            python3 ci/check_published_html.py \
+              "reports/$project/verify_report.html" --project "$project"
+          done < <(tr ',' '\n' <<< "$PROJECT_NAMES")
+
+      - name: Publish exact trusted main reports
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PROJECT_NAMES: ${{ needs.discover.outputs.names }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          remote_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          test "$remote_main" = "$EXPECTED_SHA"
+          args=()
+          while IFS= read -r project; do
+            [ -n "$project" ] || continue
+            args+=(--report-dir "$project=$GITHUB_WORKSPACE/reports/$project")
+          done < <(tr ',' '\n' <<< "$PROJECT_NAMES")
+          test "${#args[@]}" -gt 0
+          "$ICI_MAIN_BIN" publish "${args[@]}"
+
+      - name: Verify exact-title Zero-CDN main Pages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PROJECT_NAMES: ${{ needs.discover.outputs.names }}
+          EXPECTED_REPORTS: ${{ needs.discover.outputs.count }}
+        run: |
+          set -euo pipefail
+          pages_url="$(gh api "repos/${GITHUB_REPOSITORY}/pages" --jq '.html_url // empty')"
+          test -n "$pages_url"
+          pages_url="${pages_url%/}"
+          for attempt in $(seq 1 36); do
+            echo "checking trusted main Pages (attempt $attempt/36)"
+            passed=0
+            while IFS= read -r project; do
+              [ -n "$project" ] || continue
+              url="${pages_url}/${project}/main/?run=${GITHUB_RUN_ID}"
+              header_file="$RUNNER_TEMP/main-${project}.headers"
+              body_file="$RUNNER_TEMP/main-${project}.html"
+              if curl -fsSL --location --max-time 20 -D "$header_file" -o "$body_file" "$url" \
+                && grep -Eiq '^content-type:[[:space:]]*text/html' "$header_file" \
+                && cmp -s "reports/$project/verify_report.html" "$body_file" \
+                && python3 ci/check_published_html.py "$body_file" --project "$project"; then
+                passed=$((passed + 1))
+              else
+                echo "Pages not ready: ${pages_url}/${project}/main/"
+              fi
+            done < <(tr ',' '\n' <<< "$PROJECT_NAMES")
+            if [ "$passed" -eq "$EXPECTED_REPORTS" ]; then
+              echo "verified $passed trusted main report pages"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::trusted main Pages did not satisfy the HTML contract"
+          exit 1
+
   # A stable check name for branch protection. Matrix check names can change as
   # projects are added, but this job always requires every current matrix leg
-  # and the PR report contract. On push, report-pr is intentionally skipped.
+  # and the event-specific publication contract.
   merge-gate:
     name: Merge Gate
     if: ${{ always() }}
-    needs: [discover, verify, gui-build, benchmark-smoke, diskmap-benchmark-smoke, buildscope-benchmark-smoke, buildscope-ici-deep, buildscope-python-quality, buildscope-release-contract, report-pr]
+    needs: [discover, verify, gui-build, benchmark-smoke, diskmap-benchmark-smoke, buildscope-benchmark-smoke, buildscope-ici-deep, buildscope-python-quality, buildscope-release-contract, report-pr, publish-main]
     runs-on: ubuntu-latest
     steps:
       - name: Require every quality job
@@ -1265,6 +1466,7 @@ jobs:
           BUILDSCOPE_RELEASE_RESULT: ${{ needs.buildscope-release-contract.result }}
           GUI_COUNT: ${{ needs.discover.outputs.gui_count }}
           REPORT_RESULT: ${{ needs.report-pr.result }}
+          MAIN_PUBLISH_RESULT: ${{ needs.publish-main.result }}
         run: |
           set -euo pipefail
           test "$DISCOVER_RESULT" = success
@@ -1281,6 +1483,9 @@ jobs:
           fi
           if [ "$EVENT_NAME" = pull_request ]; then
             test "$REPORT_RESULT" = success
+            test "$MAIN_PUBLISH_RESULT" = skipped
           else
-            test "$REPORT_RESULT" = skipped || test "$REPORT_RESULT" = success
+            test "$EVENT_NAME" = push
+            test "$REPORT_RESULT" = skipped
+            test "$MAIN_PUBLISH_RESULT" = success
           fi
