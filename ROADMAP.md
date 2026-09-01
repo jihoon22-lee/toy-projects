@@ -130,8 +130,33 @@ marker 1개와 정확히 3개 project link를 포함하고 BuildScope `11 PASS /
 | diskmap | [diskmap/pr/31](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/31/) | 311,846 | `a8806808638c584312943d2551c1668a407c45830311de07cb0eed30d15e6924` | `ici Verification Report — diskmap` |
 | loglens | [loglens/pr/31](https://jihoon22-lee.github.io/toy-projects/loglens/pr/31/) | 446,796 | `56f3b2d54ed2a05ebf100313b4d9447553e9c6fb9c85f7e7adce8eccc838dc4f` | `ici Verification Report — loglens` |
 
-B1 implementation과 PR #31 remote integration evidence는 complete다. B2/B3/B4/B5와 ici I3
-target-by-target comparison은 아직 pending이다.
+B1 implementation과 PR #31 remote integration evidence는 complete다. B2 implementation/local
+verification도 complete이며 remote integration evidence는 아직 pending이다. B3/B4/B5와 ici
+I3 target-by-target comparison은 아직 pending이다.
+
+## BuildScope B2 Qt compilation explorer (implementation + local evidence, remote pending)
+
+BuildScope `0.3.0`은 v2 snapshot을 소스별로 묶는 `QAbstractItemModel`과 가상 configuration
+child index를 제공한다. snapshot entry를 다시 객체 트리로 복제하지 않고 index identity로
+참조해 10만 entry에서도 bounded하게 동작한다. source/target/compiler/standard/configuration
+tree, structured JSON argv와 별도의 raw command, define/include/diagnostic detail, recursive
+case-insensitive 검색, missing/stale/present/unknown 로컬 SVG 상태 표시를 Qt `.ui`/`.qrc`에
+연결했다. legacy v1은 raw compatibility view를 유지하며, malformed v2는 정확한 validation
+location을 GUI에 표시한다.
+
+`QAbstractItemModelTester`, MainWindow shell test와 파일 삭제·교체·변경·descriptor 종료를
+결정적으로 재현하는 contract race test를 추가했다. Qt5 5.15.18과 Qt6 6.10.2에서 benchmark를
+포함한 전체 CTest가 각각 6/6 PASS였다. Qt6 Release 100,000-entry/25,000-source benchmark는
+model build 45 ms, filter 1,071 ms, peak RSS 132,612 KiB로 각 10초 budget을 통과했다.
+
+public `ici v0.8.0` release asset 결과는 suite WARN(type/dup only), `46/46` tests,
+line/function/branch `94.5% / 99.5% / 83.9%`, TEM `4.98`, compile DB `8/8`
+production units·`19` configurations, complexity max `14`/`196` functions·0 issues다.
+HTML은 558,384 bytes, SHA-256
+`cdaefa06c52de696e0340b698e37b88dde199bc5a7bd2bbba27421618f44e444`, title은
+`ici Verification Report — buildscope`, external resource reference는 0개다. 구현과 local
+verification은 complete지만 PR CI, ici sticky comment와 BuildScope/diskmap/loglens Pages 독립
+감사가 끝나기 전에는 B2 remote integration을 complete로 표시하지 않는다.
 
 ## 배경
 

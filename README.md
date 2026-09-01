@@ -12,7 +12,7 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 |---|---|---|
 | [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D2 cancellable/latest-generation scan complete (PR #28) · identity-safe scan · D3 next |
 | [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · L2 1 GiB benchmark merged in PR #26 · default capacity 8192 |
-| [buildscope](buildscope/) | compile DB explorer | B0 released · ici v0.7.1 remote verified |
+| [buildscope](buildscope/) | compile DB explorer | B2 Qt explorer 0.3.0 · ici v0.8.0 local verified · PR remote pending |
 
 ### buildscope B0 hybrid skeleton — release-backed evidence
 
@@ -38,7 +38,28 @@ ici [PR #109](https://github.com/jihoon22-lee/ici/pull/109)의 sticky report와 
 [v0.7.1 release run `33420348698`](https://github.com/jihoon22-lee/ici/actions/runs/33420348698)이
 성공했다. [공개 v0.7.1 release asset](https://github.com/jihoon22-lee/ici/releases/tag/v0.7.1)은
 9개 asset을 제공하며 `sha256sum --check ici.pyz.sha256`가 통과했다. B1의
-compiler/configuration normalization과 ici I3 target comparison은 아직 완료로 표시하지 않는다.
+compiler/configuration normalization과 B2 Qt explorer는 아래에 별도로 기록한다. ici I3 target
+comparison은 아직 완료로 표시하지 않는다.
+
+### buildscope B2 normalized Qt explorer — 0.3.0
+
+[BuildScope 문서](buildscope/README.md)의 B2는 `buildscope.snapshot/v2`를 native Qt model과
+explorer UI로 연결한다. normalized source 아래에 configuration을 묶는 tree를 제공하고,
+`missing > stale > present > unknown` 우선순위로 source 상태를 집계한다. 검색은 source /
+status / target / compiler / standard / configuration / define / include를 대소문자 구분 없이
+재귀적으로 찾으며, 선택 즉시 overview와 define/include/diagnostic 상세 표를 채운다.
+
+Command 탭은 structured argv를 compact JSON array로 렌더링하고 공백·따옴표·빈 인자를
+보존한다. 원본 `command` 문자열은 별도 raw 영역에 남기므로 두 표현의 의미를 혼동하지 않는다.
+v1 raw projection도 계속 읽을 수 있다. 상태 표시는 네 개의 local SVG resource를 Qt resource에
+내장해 CDN이나 외부 네트워크에 의존하지 않는다.
+
+`BUILDSCOPE_BUILD_BENCHMARKS=ON` opt-in benchmark는 100,000 entries / 25,000 source groups를
+검증한다. Qt6 측정은 model build `45 ms`, `unit_024999` filter `1,071 ms`, peak RSS
+`132,612 KiB`, budget `10,000 ms`로 PASS했다. 로컬 Qt 5.15.18과 Qt 6.10.2 전체 CTest는
+각각 `6/6` PASS였다. 공개 `ici v0.8.0` 검증은 `46/46` tests, line/function/branch
+`94.5% / 99.5% / 83.9%`, TEM `4.98`, compile DB `8/8` production units·`19` configurations를
+기록했다.
 
 ## 공통 구조 규칙
 
@@ -211,7 +232,7 @@ Qt 셸을 `src/` 밖에 두면 "검증할 필요 없는 코드" 라는 뜻이 �
 못해 `Q_OBJECT` 클래스가 vtable 미해결로 링크되지 않았기 때문이다. **0.6.0 의 빌드 어댑터가
 그 전제를 없앴다.** 이제 GUI 는 다른 소스와 똑같이 빌드·단위 테스트·sanitize 된다.
 
-그래서 두 프로젝트 모두 GUI 를 **라이브러리와 실행 파일로 나눈다.** 실행 파일 하나뿐이면
+그래서 GUI 프로젝트는 모두 GUI 를 **라이브러리와 실행 파일로 나눈다.** 실행 파일 하나뿐이면
 테스트가 링크할 대상이 없다.
 
 ```toml
@@ -267,13 +288,14 @@ sticky comment/Pages evidence와 병합된 main full benchmark는 위 원격 증
 
 [`ci/check_manifest.py`](ci/check_manifest.py)의 `SUPPORTED_QT_MAJORS = (5, 6)`가
 `gui.enabled = true`인 각 manifest 항목을 자동으로 두 개의 discovery 항목으로 확장한다.
-따라서 현재 `diskmap`과 `loglens`는 다음 네 job이 되고, 새 GUI 프로젝트도 manifest에
-한 번만 추가하면 같은 양쪽 검증을 받는다.
+따라서 현재 `diskmap`, `loglens`, `buildscope`는 다음 여섯 job이 되고, 새 GUI 프로젝트도
+manifest에 한 번만 추가하면 같은 양쪽 검증을 받는다.
 
 | 프로젝트 | Qt5 | Qt6 |
 |---|---|---|
 | `diskmap` | `/usr/bin/qmake` · `make check` · headless smoke | `/usr/bin/qmake6` · `make check` · headless smoke |
 | `loglens` | CMake + Qt6 disable guard · CTest · headless smoke | CMake + Qt5 disable guard · CTest · headless smoke |
+| `buildscope` | CMake + Qt6 disable guard · CTest · headless smoke | CMake + Qt5 disable guard · CTest · headless smoke |
 
 각 matrix leg는 선택 major의 Core/Gui/Widgets/Concurrent/Test pkg-config 버전을 로그에
 출력하고 major prefix를 검증한다. CMake leg는 반대 major의 `CMAKE_DISABLE_FIND_PACKAGE_*`
@@ -436,8 +458,9 @@ background/Tail N 변경에 대한 것이며, 1 GiB benchmark는 PR26 병합과 
 
 GUI는 헤드리스 QtTest와 실제 fixture 파일을 사용해 상태 전이를 검증한다. `loglens`는
 Qt5/Qt6 CMake/CTest에서 같은 12개 CTest target을 실행했고, `diskmap`의 내비게이션 셸도
-T0-4에서 완료했다. T0-5의 CI matrix는 이 두 프로젝트를 Qt5와 Qt6로 각각 빌드·native
-test·실제 headless smoke까지 실행한다.
+T0-4에서 완료했다. `buildscope` B2는 Qt5/Qt6 CMake/CTest에서 각각 6/6을 통과했다. T0-5의
+CI matrix는 GUI 프로젝트를 Qt5와 Qt6로 각각 빌드·native test·실제 headless smoke까지
+실행한다.
 
 | 파일 | 상태 |
 |---|---|
@@ -447,6 +470,8 @@ test·실제 headless smoke까지 실행한다.
 | `loglens/src/gui/main_window.cpp` | `test_main_window` — Tail N/From start, open/growth/truncation, retryable missing/reappear, follow stop/resume, search/filter during load, stale sequence와 status |
 | `loglens/src/gui/timeline_widget.cpp` | `test_main_window` — empty/populated paint branch |
 | `diskmap/src/gui/main_window.cpp` | `test_main_window` — scan, breadcrumb, descend/up, leaf no-op |
+| `buildscope/src/core/compilation_model.cpp` | `test_compilation_model` — normalized grouping, roles, v1 projection, status aggregation, entry view, JSON argv rendering |
+| `buildscope/src/gui/main_window.cpp` | `test_main_window` — v2 tree/detail population, raw-vs-JSON command view, status/source/define filters, malformed-input location |
 
 `loglens` bounded foundation의 ici 0.6.0 실측은 line 93.9% / function 96.9% /
 branch 83.1% / TEM 4.85이다.
