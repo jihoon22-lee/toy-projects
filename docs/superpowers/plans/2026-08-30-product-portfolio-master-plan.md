@@ -894,11 +894,11 @@ filter `1,527 ms`, summary JSON SHA-256
 | diskmap | [diskmap/pr/32](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/32/) | 311,846 | `752f07251bc38285ea1633f5df879985131963e4b99f90532722eaedc9be1802` | `ici Verification Report — diskmap` |
 | loglens | [loglens/pr/32](https://jihoon22-lee.github.io/toy-projects/loglens/pr/32/) | 446,791 | `7b2669fb7de82ada30bfdf28a2d82533f5566ad92779ea08c90528e188ea582b` | `ici Verification Report — loglens` |
 
-### B3. include explanation (implementation + remote evidence complete; main candidate, unreleased)
+### B3. include explanation (historical candidate folded into the 0.5.0 boundary)
 
 **브랜치:** `feat/buildscope-include-explain`
 
-BuildScope `0.4.0` main candidate는 normalized compile DB entry를 바탕으로 include
+BuildScope의 historical `0.4.0` main candidate는 normalized compile DB entry를 바탕으로 include
 explanation을 선택적으로 생성한다. CLI는 `--include-analysis estimate|compiler`를 제공하며,
 analysis를 생략하면 기존 normalized `buildscope.snapshot/v2`가 기본이다. `--include-analysis`
 는 v3를 암시하고, `--schema-version v3`만 지정하면 `estimate`가 선택된다. v1/v2와 analysis
@@ -965,17 +965,17 @@ analysis를 생략하면 기존 normalized `buildscope.snapshot/v2`가 기본이
   [Dependency Graph run `33459594605`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33459594605)가
   성공했다. Push에서는 PR publish가 올바르게 skip됐고 applicable jobs와 `Merge Gate`는 성공했다.
 
-B3 implementation과 remote evidence는 complete이고 code는 `main`에 shipped됐다. `0.4.0`은
-B5 hybrid release integration 전까지 unreleased로 유지한다. ici I3 cross-repository comparison은
-완료됐으며 B4 configuration diff는 현재 `0.5.0` main candidate이고 implementation과
-PR/remote/hosted/merged-main evidence가 complete다.
+B3 implementation과 remote evidence는 complete이고 code는 `main`에 shipped됐다. Historical
+`0.4.0` candidate는 별도 stable release로 발행하지 않고 `0.5.0` boundary에 포함했다. ici I3
+cross-repository comparison은 완료됐으며 B4 configuration diff implementation과
+PR/remote/hosted/merged-main evidence도 complete다.
 
-### B4. configuration diff (implementation complete; 0.5.0 candidate, unreleased)
+### B4. configuration diff (implementation complete; included in the 0.5.0 boundary)
 
 **코드 기준 브랜치:** `main` (PR #36 squash-merge 완료; feature branch 삭제)
 
 **현재 상태:** B4 implementation은 `feat/buildscope-config-diff`에서 개발된 뒤 PR #36로 `main`의
-`0.5.0` candidate에 반영됐고 PR/remote/hosted/merged-main evidence까지 complete다. 입력은 두 개의
+`0.5.0` boundary에 반영됐고 PR/remote/hosted/merged-main evidence까지 complete다. 입력은 두 개의
 raw `compile_commands.json`만 받고,
 snapshot v1/v2/v3는 기존 producer compatibility 경계로 유지한다. 출력은 strict
 `buildscope.diff/v1`이며 Python producer, C++ parser/model, Qt GUI와 hybrid contract가 같은

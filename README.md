@@ -240,8 +240,9 @@ MOC/UIC/RCC generated-path 검사, Qt6 native bundle, wheel/pyz-to-native-CLI ha
 literal SHA/API digest 검증을 정의한다. 예정된 top-level release assets는
 `buildscope.pyz`, `buildscope.pyz.sha256`, pure `buildscope-<version>-py3-none-any.whl`, sdist,
 `buildscope-ici-deep.{json,html}`, `buildscope-provenance.json`,
-`buildscope-<version>-linux-x86_64.tar.gz`, `SHA256SUMS`다. PR과 exact-main 검증은 완료됐고,
-annotated tag와 GitHub Release는 최종 release boundary 실행 전까지 pending이다.
+`buildscope-<version>-linux-x86_64.tar.gz`, `SHA256SUMS`다. 동등한 CI preflight와 exact-main
+검증은 완료됐지만 tag-only workflow 자체는 아직 실행되지 않았다. Annotated tag와 GitHub
+Release는 최종 release boundary 실행 전까지 pending이다.
 
 #### Release-boundary verification
 
