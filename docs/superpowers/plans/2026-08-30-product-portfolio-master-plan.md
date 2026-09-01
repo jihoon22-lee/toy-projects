@@ -767,8 +767,8 @@ symlink도 읽기 전에 거부한다. 공개 Draft 2020-12
 `buildscope-snapshot-v1.schema.json` 및 `buildscope-snapshot-v2.schema.json`은 source tree와
 pure wheel에 함께 포함된다. v2 `producer.version`의 schema `maxLength` 1 MiB와 native reader
 문자열 bound도 일치한다. v2 normalized model/UI 전환은 B2 범위다. B1 구현과 PR #31
-remote integration evidence는 complete이며, B2 구현/local verification도 아래와 같이
-완료됐다. B2 remote integration evidence, B3~B5와 ici I3 비교는 미완료다.
+remote integration evidence는 complete이며, B2 구현/local/remote verification도 아래와 같이
+완료됐다. B3~B5와 ici I3 target-by-target same-basename 비교는 미완료다.
 
 **B1 final local/public evidence (2026-09-01):** public
 `ici v0.7.1` cold verification은 표준 `sha256sum --check ici.pyz.sha256`가 통과했고 suite
@@ -805,11 +805,11 @@ marker 1개와 정확히 3개 project link를 포함하고 BuildScope `11 PASS /
 | diskmap | [diskmap/pr/31](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/31/) | 311,846 | `a8806808638c584312943d2551c1668a407c45830311de07cb0eed30d15e6924` | `ici Verification Report — diskmap` |
 | loglens | [loglens/pr/31](https://jihoon22-lee.github.io/toy-projects/loglens/pr/31/) | 446,796 | `56f3b2d54ed2a05ebf100313b4d9447553e9c6fb9c85f7e7adce8eccc838dc4f` | `ici Verification Report — loglens` |
 
-B1 implementation과 PR #31 remote integration evidence는 complete다. B2 implementation/local
-verification도 complete이며 remote integration evidence는 아직 pending이다. B3/B4/B5와 ici
-I3 target-by-target comparison은 아직 pending이다.
+B1 implementation과 PR #31 remote integration evidence는 complete다. B2 implementation/local 및
+remote verification도 complete다. B3/B4/B5와 ici I3 target-by-target same-basename comparison은
+아직 pending이다.
 
-### B2. C++ model과 Qt UI — implementation/local verification 완료
+### B2. C++ model과 Qt UI — implementation/local/remote verification 완료
 
 **브랜치:** `feat/buildscope-qt-explorer`
 
@@ -841,8 +841,30 @@ configurations, complexity max `14`/`196` functions·0 issues였다. `contract.c
 
 Qt5 5.15.18과 Qt6 6.10.2의 전체 CTest는 benchmark를 포함해 각각 6/6 PASS였다. Qt6 Release
 100,000-entry/25,000-source 측정은 model build 45 ms, recursive filter 1,071 ms, peak RSS
-132,612 KiB로 각 10,000 ms budget을 통과했다. 이 수치는 local candidate evidence이며 PR CI,
-sticky comment와 세 Pages URL의 remote evidence가 확인돼야 B2 전체를 닫는다.
+132,612 KiB로 각 10,000 ms budget을 통과했다. 이 수치는 local candidate evidence이며, 아래
+PR/main 원격 증거로 B2 전체가 complete다.
+
+**B2 remote integration evidence (2026-09-01):** PR #32 head
+`41472a66e69477fde7a71fe78c3ae9e47ba7f292`는 main에
+`51a3480677a740475857dd92dd5a5a9373a287a4`로 squash-merge됐다. [PR run
+`33454143021`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33454143021)의 16개 check가
+모두 SUCCESS였고, [sticky comment #5486637533](https://github.com/jihoon22-lee/toy-projects/pull/32#issuecomment-5486637533)는
+marker 1개와 link 3개를 포함한다. PR BuildScope report는 `46/46`, branch `84.2%`, TEM `4.98`,
+compile DB `8/8` production units·`19` configurations, complexity max `14`/`196` functions였다.
+PR benchmark는 model `53 ms`, filter `1,518 ms`, summary JSON SHA-256
+`af7162b7603d558da6e7bc49d7bf5a80f546f412b7076992ded5e15739024db7`; exact-main run
+`33454634202`는 SUCCESS였고 Report job은 expected skipped였다. main benchmark는 model `58 ms`,
+filter `1,527 ms`, summary JSON SHA-256
+`247c0b33095e0a09e97a289af556eae30f47f4f5c4136c530e3d6ca0018ae2d2`다.
+
+세 hosted report는 HTTP 200·`text/html`, expected title, external resource reference 0개로
+독립 확인됐다.
+
+| Project | URL | Bytes | SHA-256 | Title |
+|---|---|---:|---|---|
+| BuildScope | [buildscope/pr/32](https://jihoon22-lee.github.io/toy-projects/buildscope/pr/32/) | 562,234 | `f15d18fe42ac172385e682ceb49e4b6d6f1d9bbfcc0ead301c11d1ee049c4c82` | `ici Verification Report — buildscope` |
+| diskmap | [diskmap/pr/32](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/32/) | 311,846 | `752f07251bc38285ea1633f5df879985131963e4b99f90532722eaedc9be1802` | `ici Verification Report — diskmap` |
+| loglens | [loglens/pr/32](https://jihoon22-lee.github.io/toy-projects/loglens/pr/32/) | 446,791 | `7b2669fb7de82ada30bfdf28a2d82533f5566ad92779ea08c90528e188ea582b` | `ici Verification Report — loglens` |
 
 ### B3. include explanation
 

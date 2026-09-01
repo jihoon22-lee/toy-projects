@@ -110,10 +110,33 @@ Local Qt 5.15.18 and Qt 6.10.2 complete suites each passed `6/6`. The Qt6 100k b
 with `100,000` entries / `25,000` source groups, model build `45 ms`, filter `1,071 ms`, peak RSS
 `132,612 KiB`, and a `10,000 ms` budget.
 
+## B2 remote integration evidence
+
+PR #32 head `41472a66e69477fde7a71fe78c3ae9e47ba7f292` was squash-merged to main as
+`51a3480677a740475857dd92dd5a5a9373a287a4`. [PR run
+`33454143021`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33454143021) passed all 16
+checks. [Sticky comment #5486637533](https://github.com/jihoon22-lee/toy-projects/pull/32#issuecomment-5486637533)
+contains one marker and three project links. The PR BuildScope report recorded `46/46` tests,
+branch `84.2%`, TEM `4.98`, compile DB `8/8` production units across `19` configurations, and
+complexity max `14` across `196` functions. The PR benchmark summary was model `53 ms`, filter
+`1,518 ms`, with summary JSON SHA-256
+`af7162b7603d558da6e7bc49d7bf5a80f546f412b7076992ded5e15739024db7`.
+Exact-main run `33454634202` succeeded with the report job expected skipped; the main benchmark was
+model `58 ms`, filter `1,527 ms`, summary JSON SHA-256
+`247c0b33095e0a09e97a289af556eae30f47f4f5c4136c530e3d6ca0018ae2d2`.
+
+The three hosted reports were independently confirmed as HTTP 200 `text/html`, with the expected
+titles and zero external resource references:
+
+| Project | Bytes | SHA-256 | Title |
+|---|---:|---|---|
+| [BuildScope](https://jihoon22-lee.github.io/toy-projects/buildscope/pr/32/) | 562,234 | `f15d18fe42ac172385e682ceb49e4b6d6f1d9bbfcc0ead301c11d1ee049c4c82` | `ici Verification Report — buildscope` |
+| [diskmap](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/32/) | 311,846 | `752f07251bc38285ea1633f5df879985131963e4b99f90532722eaedc9be1802` | `ici Verification Report — diskmap` |
+| [loglens](https://jihoon22-lee.github.io/toy-projects/loglens/pr/32/) | 446,791 | `7b2669fb7de82ada30bfdf28a2d82533f5566ad92779ea08c90528e188ea582b` | `ici Verification Report — loglens` |
+
 ## Scope after B2
 
-B2 normalized model, Qt explorer, local-resource packaging, focused tests, and benchmark evidence
-are complete for the 0.3.0 local candidate. Remote PR CI, the ici sticky comment, and independent
-audits of all three PR Pages reports remain required before B2 is marked complete. B3
-compiler-measured include explanation, B4 configuration diff, B5 hybrid release integration, and
-the ici I3 target-by-target comparison remain future work.
+B2 normalized model, Qt explorer, local-resource packaging, focused tests, benchmark evidence, and
+remote integration are complete for the 0.3.0 main state. B3 compiler-measured include explanation,
+B4 configuration diff, B5 hybrid release integration, and the ici I3 target-by-target same-basename
+comparison remain future work.

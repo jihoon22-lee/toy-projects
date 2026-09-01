@@ -12,7 +12,7 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 |---|---|---|
 | [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D2 cancellable/latest-generation scan complete (PR #28) · identity-safe scan · D3 next |
 | [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · L2 1 GiB benchmark merged in PR #26 · default capacity 8192 |
-| [buildscope](buildscope/) | compile DB explorer | B2 Qt explorer 0.3.0 · ici v0.8.0 local verified · PR remote pending |
+| [buildscope](buildscope/) | compile DB explorer | B2 Qt explorer 0.3.0 · ici v0.8.0 · PR #32/main remote verified |
 
 ### buildscope B0 hybrid skeleton — release-backed evidence
 
@@ -60,6 +60,26 @@ v1 raw projection도 계속 읽을 수 있다. 상태 표시는 네 개의 local
 각각 `6/6` PASS였다. 공개 `ici v0.8.0` 검증은 `46/46` tests, line/function/branch
 `94.5% / 99.5% / 83.9%`, TEM `4.98`, compile DB `8/8` production units·`19` configurations를
 기록했다.
+
+B2 remote integration도 완료됐다. PR #32 head `41472a66e69477fde7a71fe78c3ae9e47ba7f292`는
+main에 `51a3480677a740475857dd92dd5a5a9373a287a4`로 squash-merge됐고, [PR run
+`33454143021`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33454143021)의 16개
+check가 모두 성공했다. [sticky comment #5486637533](https://github.com/jihoon22-lee/toy-projects/pull/32#issuecomment-5486637533)는
+marker 1개와 project link 3개를 포함한다. PR BuildScope report는 `46/46`, branch `84.2%`,
+TEM `4.98`, compile DB `8/8` production units·`19` configurations, complexity max `14`/`196`
+functions였다. PR 100k benchmark는 model `53 ms`, filter `1,518 ms`, summary JSON SHA-256
+`af7162b7603d558da6e7bc49d7bf5a80f546f412b7076992ded5e15739024db7`였고, exact-main run
+`33454634202`도 성공했다(Report job은 expected skipped). main benchmark는 model `58 ms`, filter
+`1,527 ms`, summary JSON SHA-256
+`247c0b33095e0a09e97a289af556eae30f47f4f5c4136c530e3d6ca0018ae2d2`였다.
+
+세 hosted report는 모두 HTTP 200·`text/html`, 올바른 title, 외부 resource reference 0개였다.
+
+| Project | Bytes | SHA-256 | Title |
+|---|---:|---|---|
+| [BuildScope](https://jihoon22-lee.github.io/toy-projects/buildscope/pr/32/) | 562,234 | `f15d18fe42ac172385e682ceb49e4b6d6f1d9bbfcc0ead301c11d1ee049c4c82` | `ici Verification Report — buildscope` |
+| [diskmap](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/32/) | 311,846 | `752f07251bc38285ea1633f5df879985131963e4b99f90532722eaedc9be1802` | `ici Verification Report — diskmap` |
+| [loglens](https://jihoon22-lee.github.io/toy-projects/loglens/pr/32/) | 446,791 | `7b2669fb7de82ada30bfdf28a2d82533f5566ad92779ea08c90528e188ea582b` | `ici Verification Report — loglens` |
 
 ## 공통 구조 규칙
 
