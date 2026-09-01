@@ -17,7 +17,7 @@ BuildScope's ownership and is not present in the Qt6 leg.
   `source_dirs`. The Qt5 job compiles and runs it with the exact same LSAN options and requires a
   nonzero exit plus a `LeakSanitizer: detected memory leaks` diagnostic.
 - Added a temporary, source-pinned cross-repository candidate path for the Qt5/Qt6 deep jobs. It
-  checks out exact ici commit `e5096e10e9ce0069d5cea951dbdb28f87ee60e14`, verifies that identity,
+  checks out exact ici commit `27f4e5cf820ceb36b24711be927f19076472c822`, verifies that identity,
   builds its pyz reproducibly, and uses it only for deep BuildScope verification. Ordinary portfolio
   jobs remain on the checksummed public v0.10.1 release, and final integration returns to a released
   pin.
@@ -28,8 +28,15 @@ project-owned leak.
 The first source-candidate run (`33531285208`, commit
 `040e61e64df20d64923df80a6c7ea29993e5c3ac`) kept the report publisher and all ordinary ici jobs
 green but failed both deep legs. The runner compiled with GCC 13 while clazy selected the separately
-installed GCC 14 libstdc++ headers. The refreshed candidate above probes the exact selected GCC and
-projects its ordered C++-only include roots into clazy/clang-tidy before rerunning this matrix.
+installed GCC 14 libstdc++ headers. The next candidate
+`e5096e10e9ce0069d5cea951dbdb28f87ee60e14` probes the exact selected GCC and projects its ordered
+C++-only include roots into clazy/clang-tidy. Run `33536526972` passed all 21 jobs: Qt5 and Qt6 deep
+verification, the BuildScope release contract, every standard ici job, and report publication. The
+PR retained exactly one `<!-- ici-report -->` sticky comment pointing at that run. Independent
+fetches of the BuildScope, DiskMap, and LogLens PR Pages returned HTTP 200 and `text/html`, matched
+their exact `ici Verification Report — <project>` titles, and contained no external resource URLs.
+The final source-candidate rerun uses the exact ici PR head named above; after the corrective ici
+release, this source checkout is removed in favor of the released artifact and literal checksum.
 
 ## Local evidence
 

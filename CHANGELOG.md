@@ -97,9 +97,12 @@
   `9e262730b49420c59ee115cf389881dbfbb944b6a96ca1d397a1ecb247ec17ca`. The v0.10.0
   local measurements below remain historical evidence; this dependency correction does not change
   the BuildScope `0.5.0` product version.
-- The Qt5/Qt6 deep legs temporarily build the exact ici diagnostic-correction candidate
-  `e5096e10e9ce0069d5cea951dbdb28f87ee60e14` while the ordinary portfolio jobs continue to
-  exercise the public v0.10.1 checksum pin. The preceding candidate
+- The Qt5/Qt6 deep legs temporarily build the exact final ici diagnostic-correction candidate
+  `27f4e5cf820ceb36b24711be927f19076472c822` while the ordinary portfolio jobs continue to
+  exercise the public v0.10.1 checksum pin. Candidate
+  `e5096e10e9ce0069d5cea951dbdb28f87ee60e14` passed all 21 jobs in run `33536526972`, including
+  both deep legs and the release contract; the single sticky comment pointed to three independently
+  audited HTTP 200, exact-title, Zero-CDN Pages reports. The earlier candidate
   `040e61e64df20d64923df80a6c7ea29993e5c3ac` remains recorded by run `33531285208`: both deep
   legs exposed Clang tooling selecting GCC 14 libstdc++ headers for the GCC 13 compile database.
   This is cross-repository candidate evidence, not a stable ici release or a BuildScope version

@@ -584,7 +584,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: jihoon22-lee/ici
-          ref: e5096e10e9ce0069d5cea951dbdb28f87ee60e14
+          ref: 27f4e5cf820ceb36b24711be927f19076472c822
           path: ici-candidate
           persist-credentials: false
 
@@ -600,7 +600,7 @@ jobs:
         working-directory: ici-candidate
         run: |
           set -euo pipefail
-          expected_sha=e5096e10e9ce0069d5cea951dbdb28f87ee60e14
+          expected_sha=27f4e5cf820ceb36b24711be927f19076472c822
           test "$(git rev-parse HEAD)" = "$expected_sha"
           chmod +x scripts/build-pyz.sh scripts/launcher.sh
           ./scripts/build-pyz.sh

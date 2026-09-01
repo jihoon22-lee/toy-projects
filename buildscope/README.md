@@ -519,11 +519,15 @@ retains smaller process-global offscreen-plugin allocations, so its deep workflo
 suppression. Its `ci/fixtures/outside/project_leak.cpp` control runs under the same options and must
 still return nonzero with a LeakSanitizer diagnostic, so project-owned leaks remain visible.
 
-For the corrective ici integration rerun, only the Qt5/Qt6 deep legs build exact ici commit
-`e5096e10e9ce0069d5cea951dbdb28f87ee60e14`; the ordinary portfolio jobs still download and verify
-the public v0.10.1 checksum. This temporary source-pinned candidate distinguishes pre-release
-evidence from a stable dependency. It is replaced by a released ici checksum before BuildScope is
-merged or tagged.
+For the final corrective ici integration rerun, only the Qt5/Qt6 deep legs build exact ici commit
+`27f4e5cf820ceb36b24711be927f19076472c822`; the ordinary portfolio jobs still download and verify
+the public v0.10.1 checksum. The preceding candidate
+`e5096e10e9ce0069d5cea951dbdb28f87ee60e14` passed all 21 jobs in run `33536526972`, including both
+deep Qt legs and the release contract. Its single sticky comment was updated to that run, and the
+BuildScope, DiskMap, and LogLens PR Pages each returned HTTP 200 with the exact report title and no
+external resources. This temporary source-pinned candidate distinguishes pre-release evidence from
+a stable dependency. It is replaced by a released ici checksum before BuildScope is merged or
+tagged.
 
 ### B5 release contract (defined, not published)
 
