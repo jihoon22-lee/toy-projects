@@ -41,6 +41,8 @@ add_library(buildscope_contract STATIC
     src/core/contract_parser_v2.cpp
     src/core/diff_model.cpp
     src/core/diff_parser.cpp
+    src/core/diff_validation.cpp
+    src/core/diff_validation.hpp
     include/buildscope/compilation_model.hpp
     include/buildscope/contract.hpp
     include/buildscope/diff.hpp
@@ -56,6 +58,7 @@ set_target_properties(buildscope-cli PROPERTIES
 )
 
 add_library(buildscope_gui STATIC
+    src/gui/diff_window.cpp
     src/gui/main_window.cpp
     include/buildscope/main_window.hpp
     resources/buildscope.qrc

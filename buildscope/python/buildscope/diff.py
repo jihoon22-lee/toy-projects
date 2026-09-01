@@ -254,6 +254,52 @@ def _source_groups(records: list[dict[str, Any]]) -> dict[str, list[dict[str, An
     return groups
 
 
+def _source_group_units(
+    before: list[dict[str, Any]],
+    after: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], int, bool]:
+    if not before:
+        return [], [], after, 0, False
+    if not after:
+        return [], before, [], 0, False
+    units, unchanged, ambiguous = _same_source_units(before, after)
+    return units, [], [], unchanged, ambiguous
+
+
+def _compare_source_groups(
+    before_records: list[dict[str, Any]],
+    after_records: list[dict[str, Any]],
+) -> tuple[
+    list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], int, list[dict[str, str]]
+]:
+    before_groups = _source_groups(before_records)
+    after_groups = _source_groups(after_records)
+    units: list[dict[str, Any]] = []
+    removed: list[dict[str, Any]] = []
+    added: list[dict[str, Any]] = []
+    unchanged = 0
+    diagnostics: list[dict[str, str]] = []
+    for key in sorted(before_groups.keys() | after_groups.keys()):
+        first, second = before_groups.get(key, []), after_groups.get(key, [])
+        source_units, source_removed, source_added, source_unchanged, ambiguous = (
+            _source_group_units(first, second)
+        )
+        units.extend(source_units)
+        removed.extend(source_removed)
+        added.extend(source_added)
+        unchanged += source_unchanged
+        if ambiguous:
+            diagnostics.append(
+                {
+                    "code": "ambiguous-configuration-match",
+                    "message": "Multiple configurations could not be paired safely.",
+                    "severity": "warning",
+                    "source": first[0]["source"],
+                }
+            )
+    return units, removed, added, unchanged, diagnostics
+
+
 def _move_pairs(
     removed: list[dict[str, Any]],
     added: list[dict[str, Any]],
@@ -389,31 +435,9 @@ def compare_databases(
     except (DiffPolicyError, SnapshotError) as error:
         raise DiffError(str(error)) from error
 
-    before_groups, after_groups = _source_groups(before_records), _source_groups(after_records)
-    units: list[dict[str, Any]] = []
-    removed: list[dict[str, Any]] = []
-    added: list[dict[str, Any]] = []
-    unchanged = 0
-    diagnostics: list[dict[str, str]] = []
-    for key in sorted(before_groups.keys() | after_groups.keys()):
-        first, second = before_groups.get(key, []), after_groups.get(key, [])
-        if not first:
-            added.extend(second)
-        elif not second:
-            removed.extend(first)
-        else:
-            source_units, source_unchanged, ambiguous = _same_source_units(first, second)
-            units.extend(source_units)
-            unchanged += source_unchanged
-            if ambiguous:
-                diagnostics.append(
-                    {
-                        "code": "ambiguous-configuration-match",
-                        "message": "Multiple configurations could not be paired safely.",
-                        "severity": "warning",
-                        "source": first[0]["source"],
-                    }
-                )
+    units, removed, added, unchanged, diagnostics = _compare_source_groups(
+        before_records, after_records
+    )
     moved, removed, added, move_diagnostics = _move_pairs(removed, added)
     diagnostics.extend(move_diagnostics)
     units.extend(moved)

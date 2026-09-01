@@ -7,10 +7,15 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from buildscope.__main__ import main as buildscope_main
 from buildscope.diff import DIFF_SCHEMA_VERSION, DiffError, compare_databases, dumps_diff
-from buildscope.diff_policy import DiffPolicyError, parse_suppressions
+from buildscope.diff_policy import (
+    DiffPolicyError,
+    matching_suppression,
+    parse_suppressions,
+)
 
 
 class ConfigurationDiffTests(unittest.TestCase):
@@ -119,6 +124,37 @@ class ConfigurationDiffTests(unittest.TestCase):
         }
 
         report = self._compare([before], [after])
+
+        self.assertEqual(report["units"], [])
+        self.assertEqual(report["summary"]["unchanged"], 1)
+
+    def test_path_bearing_residual_options_rebase_without_hiding_drift(self) -> None:
+        before_root = self.root / "before"
+        after_root = self.root / "after"
+
+        def flags(root: Path) -> tuple[str, ...]:
+            return (
+                "-MF",
+                str(root / "build" / "deps.d"),
+                "-MT",
+                "object-target",
+                "-MQ",
+                "quoted-target",
+                "-include-pch",
+                str(root / "generated" / "prefix.pch"),
+                "-imacros",
+                str(root / "generated" / "macros.h"),
+                f"--gcc-toolchain={root / 'toolchain'}",
+                f"-resource-dir={root / 'resources'}",
+                f"-fsanitize-ignorelist={root / 'config' / 'ignore.txt'}",
+                f"-B{root / 'bin'}",
+                f"/FI{root / 'generated' / 'forced.h'}",
+            )
+
+        report = self._compare(
+            [self._entry(before_root, "src/a.cpp", *flags(before_root))],
+            [self._entry(after_root, "src/a.cpp", *flags(after_root))],
+        )
 
         self.assertEqual(report["units"], [])
         self.assertEqual(report["summary"]["unchanged"], 1)
@@ -298,6 +334,27 @@ class ConfigurationDiffTests(unittest.TestCase):
         self.assertEqual(report["summary"]["changed"], 1)
         self.assertEqual(report["units"][0]["changes"][0]["category"], "flag")
 
+    def test_ambiguous_same_source_configurations_emit_diagnostic(self) -> None:
+        before_root = self.root / "before"
+        after_root = self.root / "after"
+        before = [
+            self._entry(before_root, "src/a.cpp", "-O0"),
+            self._entry(before_root, "src/a.cpp", "-O1"),
+        ]
+        after = [
+            self._entry(after_root, "src/a.cpp", "-O2"),
+            self._entry(after_root, "src/a.cpp", "-O3"),
+        ]
+
+        report = self._compare(before, after)
+
+        self.assertEqual(report["summary"]["added"], 2)
+        self.assertEqual(report["summary"]["removed"], 2)
+        self.assertEqual(
+            report["diagnostics"][0]["code"],
+            "ambiguous-configuration-match",
+        )
+
     def test_suppression_is_visible_and_changes_exit_policy_only(self) -> None:
         before_root = self.root / "before"
         after_root = self.root / "after"
@@ -341,6 +398,26 @@ class ConfigurationDiffTests(unittest.TestCase):
         self.assertTrue(basename["units"][0]["suppressed"])
         self.assertTrue(recursive["units"][0]["suppressed"])
 
+    def test_suppression_glob_contract_covers_literals_question_and_inner_double_star(
+        self,
+    ) -> None:
+        rules = parse_suppressions(["flag:ignored/*.c", "standard:src/**/file?.cpp", "target:a**b"])
+
+        self.assertEqual(
+            matching_suppression(
+                rules,
+                "standard",
+                "",
+                "src/nested/file1.cpp",
+            ),
+            "standard:src/**/file?.cpp",
+        )
+        self.assertEqual(
+            matching_suppression(rules, "target", "axb", ""),
+            "target:a**b",
+        )
+        self.assertEqual(matching_suppression(rules, "compiler", "src/a.cpp", ""), "")
+
     def test_invalid_and_duplicate_suppressions_fail_closed(self) -> None:
         with self.assertRaisesRegex(DiffPolicyError, "unknown suppression category"):
             parse_suppressions(["typo:*"])
@@ -350,6 +427,12 @@ class ConfigurationDiffTests(unittest.TestCase):
             parse_suppressions(["standard:"])
         with self.assertRaisesRegex(DiffPolicyError, "supports only"):
             parse_suppressions(["standard:src/[ab].cpp"])
+        with self.assertRaisesRegex(DiffPolicyError, "suppression count"):
+            parse_suppressions(["standard:*"] * 257)
+        with self.assertRaisesRegex(DiffPolicyError, "non-empty bounded"):
+            parse_suppressions(["standard:\0bad"])
+        with self.assertRaisesRegex(DiffPolicyError, "non-empty bounded"):
+            parse_suppressions(["standard:" + "x" * 1025])
 
         before_root = self.root / "before"
         after_root = self.root / "after"
@@ -392,6 +475,15 @@ class ConfigurationDiffTests(unittest.TestCase):
         before["output"] = "CMakeFiles/other.dir/src/a.cpp.o"
         with self.assertRaisesRegex(DiffError, "output-mismatch"):
             self._compare([before], [after])
+
+        for option in ("-MF", "-resource-dir="):
+            malformed = self._entry(before_root, "src/a.cpp")
+            malformed["arguments"].append(option)
+            with self.subTest(option=option), self.assertRaises(DiffError):
+                self._compare(
+                    [malformed],
+                    [self._entry(after_root, "src/a.cpp")],
+                )
 
     def test_windows_source_identity_is_case_insensitive(self) -> None:
         before, _ = self._database(
@@ -470,6 +562,11 @@ class ConfigurationDiffTests(unittest.TestCase):
         self.assertEqual(json.loads(compact), report)
         self.assertEqual(compact, dumps_diff(json.loads(compact)))
         self.assertTrue(dumps_diff(report, pretty=True).endswith("\n"))
+        with (
+            patch("buildscope.diff.MAX_SNAPSHOT_BYTES", 1),
+            self.assertRaisesRegex(DiffError, "exceeds 1 byte"),
+        ):
+            dumps_diff(report)
 
     def test_changed_report_is_byte_identical_after_input_reordering(self) -> None:
         before_root = self.root / "before"

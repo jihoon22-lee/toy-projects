@@ -8,6 +8,7 @@ import re
 from typing import Any
 
 from buildscope._paths import normalize_lexical, project_relative_lexical
+from buildscope.diff_glob import glob_matches
 
 POLICY_VERSION = "buildscope.diff-policy/v1"
 MAX_SUPPRESSIONS = 256
@@ -311,6 +312,39 @@ def _path_residual_option(
     return None
 
 
+def _nonsemantic_option(
+    argv: list[str],
+    index: int,
+    entry: dict[str, Any],
+    *,
+    project_root: str,
+    database_parent: str,
+) -> tuple[list[str], int] | None:
+    token = argv[index]
+    if token in _NO_VALUE_OPTIONS:
+        return [], index + 1
+    if token in _VALUE_OPTIONS:
+        if index + 1 >= len(argv):
+            raise DiffPolicyError(f"compiler option {token} has no value")
+        return [], index + 2
+    path_option = _path_residual_option(
+        argv,
+        index,
+        entry,
+        project_root=project_root,
+        database_parent=database_parent,
+    )
+    if path_option is not None:
+        return path_option
+    output_index = _output_option(argv, index)
+    if output_index is not None:
+        return [], output_index
+    modeled_index = _modeled_option(argv, index)
+    if modeled_index is not None:
+        return [], modeled_index
+    return None
+
+
 def _residual_flags(
     entry: dict[str, Any],
     compiler_index: int,
@@ -337,33 +371,17 @@ def _residual_flags(
         ):
             index += 1
             continue
-        if not terminated and token in _NO_VALUE_OPTIONS:
-            index += 1
-            continue
-        if not terminated and token in _VALUE_OPTIONS:
-            if index + 1 >= len(argv):
-                raise DiffPolicyError(f"compiler option {token} has no value")
-            index += 2
-            continue
         if not terminated:
-            path_option = _path_residual_option(
+            option = _nonsemantic_option(
                 argv,
                 index,
                 entry,
                 project_root=project_root,
                 database_parent=database_parent,
             )
-            if path_option is not None:
-                values, index = path_option
+            if option is not None:
+                values, index = option
                 residual.extend(values)
-                continue
-            output_index = _output_option(argv, index)
-            if output_index is not None:
-                index = output_index
-                continue
-            modeled_index = _modeled_option(argv, index)
-            if modeled_index is not None:
-                index = modeled_index
                 continue
         residual.append(token)
         index += 1
@@ -500,42 +518,6 @@ def parse_suppressions(values: list[str] | tuple[str, ...]) -> tuple[dict[str, s
     )
 
 
-def _glob_regular_expression(pattern: str) -> str:
-    """Translate the versioned slash-aware suppression glob contract."""
-
-    pieces = [r"^(?:.*/)?"] if "/" not in pattern else ["^"]
-    index = 0
-    while index < len(pattern):
-        character = pattern[index]
-        if character == "*":
-            if index + 1 < len(pattern) and pattern[index + 1] == "*":
-                if index + 2 < len(pattern) and pattern[index + 2] == "/":
-                    pieces.append(r"(?:.*/)?")
-                    index += 3
-                else:
-                    pieces.append(r".*")
-                    index += 2
-            else:
-                pieces.append(r"[^/]*")
-                index += 1
-        elif character == "?":
-            pieces.append(r"[^/]")
-            index += 1
-        else:
-            pieces.append(re.escape(character))
-            index += 1
-    pieces.append("$")
-    return "".join(pieces)
-
-
-def _glob_matches(path: str, pattern: str, *, windows: bool) -> bool:
-    normalized = path.replace("\\", "/")
-    if windows:
-        normalized = normalized.casefold()
-        pattern = pattern.casefold()
-    return re.fullmatch(_glob_regular_expression(pattern), normalized) is not None
-
-
 def matching_suppression(
     rules: tuple[dict[str, str], ...],
     category: str,
@@ -548,7 +530,7 @@ def matching_suppression(
         if rule["category"] not in {"*", category}:
             continue
         for raw_path in (before, after):
-            if raw_path and _glob_matches(raw_path, rule["path"], windows=windows):
+            if raw_path and glob_matches(raw_path, rule["path"], windows=windows):
                 return f"{rule['category']}:{rule['path']}"
     return ""
 
