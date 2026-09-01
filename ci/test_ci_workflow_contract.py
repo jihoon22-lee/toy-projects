@@ -9,6 +9,12 @@ from pathlib import Path
 WORKFLOW = (
     Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml"
 ).read_text(encoding="utf-8")
+RELEASE_WORKFLOW = (
+    Path(__file__).resolve().parents[1]
+    / ".github"
+    / "workflows"
+    / "buildscope-release.yml"
+).read_text(encoding="utf-8")
 
 
 def _job_block(name: str) -> str:
@@ -81,6 +87,18 @@ class WorkflowPublicationContractTests(unittest.TestCase):
         block = _job_block("discover")
 
         self.assertIn("ci/test_ci_workflow_contract.py", block)
+
+    def test_buildscope_release_invokes_the_tested_asset_auditor(self) -> None:
+        self.assertIn("python3 ci/check_buildscope_release_assets.py", RELEASE_WORKFLOW)
+        self.assertIn(
+            '"$RUNNER_TEMP/buildscope-release.json" dist "$TAG" "$VERSION"',
+            RELEASE_WORKFLOW,
+        )
+        self.assertNotIn(
+            'if python3 - "$RUNNER_TEMP/buildscope-release.json"',
+            RELEASE_WORKFLOW,
+        )
+        self.assertIn("ci/test_check_buildscope_release_assets.py", WORKFLOW)
 
 
 if __name__ == "__main__":

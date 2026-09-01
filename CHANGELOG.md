@@ -104,9 +104,12 @@
   checks, pure wheel/sdist checks, wheel/pyz-to-native handoff, and deterministic bundle plus
   `SHA256SUMS` assets. The workflow is tag-only, allows up to 20 minutes for the exact-main gate,
   revalidates the remote annotated tag before and after publication, fails on unmatched asset paths,
-  and audits the exact nine public names, sizes, states, and API digests. The PR and exact-main
-  evidence for this contract is recorded below. The annotated tag and GitHub Release remain
-  intentionally pending until the final release boundary is executed.
+  and audits the exact nine public names, sizes, states, and API digests. Equivalent PR CI preflight
+  and exact-main evidence is recorded below.
+- Hardened the final public release audit to require exactly nine API assets, reject malformed or
+  duplicate asset names, and then verify the exact name set, uploaded states, sizes, and SHA-256
+  digests through a tested Python 3.10 helper. Bounded regular JSON input, nonempty regular local
+  files, symlink refusal, and streaming hashes avoid both hidden duplicates and full-bundle reads.
 - Hardened both release API polling loops so transient GitHub 404/5xx/API failures are retried
   inside their existing bounded windows instead of being terminated early by shell `errexit`.
 - Updated the current CI, release workflow, and B5 report contract to the corrective public ici
@@ -161,10 +164,10 @@
   | diskmap | [diskmap/main](https://jihoon22-lee.github.io/toy-projects/diskmap/main/) | 339,929 | `1bd6ebdce2206e4538fb28c20c17f2d504f1a160e15f5d8d4e2923b15b399e65` |
   | loglens | [loglens/main](https://jihoon22-lee.github.io/toy-projects/loglens/main/) | 495,237 | `11e4c78eed957e237bcea8ec5ea64c3894751eafbe639c454e47ab0acd70df96` |
 
-- Current status: BuildScope `0.5.0` is release-ready, with the public ici `v0.10.2` pin
-  (`8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4`) and the PR/main
-  verification boundary complete. Creating and publishing the annotated `buildscope-v0.5.0`
-  tag and GitHub Release is the only remaining boundary; no tag or release is claimed here.
+- BuildScope `0.5.0` combines the public ici `v0.10.2` pin
+  (`8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4`) with the completed
+  PR/main verification boundary. Publication is guarded by the exact-main annotated-tag check and
+  the exact nine-asset audit described above.
 
 ### BuildScope 0.4.0 — historical B3 implementation and remote evidence
 
