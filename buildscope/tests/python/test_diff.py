@@ -92,6 +92,37 @@ class ConfigurationDiffTests(unittest.TestCase):
             report["inputs"]["after"]["semantic_digest"],
         )
 
+    def test_absolute_source_operands_and_path_flags_rebase_with_project(self) -> None:
+        before_root = self.root / "before"
+        after_root = self.root / "after"
+        before = {
+            "arguments": [
+                str(before_root / "tools" / "g++"),
+                "-include",
+                str(before_root / "generated" / "config.h"),
+                "-c",
+                str(before_root / "src" / "a.cpp"),
+            ],
+            "directory": str(before_root),
+            "file": "src/a.cpp",
+        }
+        after = {
+            "arguments": [
+                str(after_root / "tools" / "g++"),
+                "-include",
+                str(after_root / "generated" / "config.h"),
+                "-c",
+                str(after_root / "src" / "a.cpp"),
+            ],
+            "directory": str(after_root),
+            "file": "src/a.cpp",
+        }
+
+        report = self._compare([before], [after])
+
+        self.assertEqual(report["units"], [])
+        self.assertEqual(report["summary"]["unchanged"], 1)
+
     def test_structured_fields_and_residual_flags_are_reported(self) -> None:
         before_root = self.root / "before"
         after_root = self.root / "after"
@@ -137,6 +168,45 @@ class ConfigurationDiffTests(unittest.TestCase):
         self.assertEqual(report["summary"]["changed"], 1)
         self.assertEqual(report["summary"]["visible_changes"], 7)
 
+    def test_versioned_and_target_prefixed_compilers_keep_their_family(self) -> None:
+        before_root = self.root / "before"
+        after_root = self.root / "after"
+        report = self._compare(
+            [self._entry(before_root, "src/a.cpp", compiler="x86_64-linux-gnu-g++-12")],
+            [self._entry(after_root, "src/a.cpp", compiler="clang++-18")],
+        )
+
+        change = report["units"][0]["changes"][0]
+        self.assertEqual(change["category"], "compiler")
+        self.assertEqual(change["before"]["family"], "gcc")
+        self.assertEqual(change["after"]["family"], "clang")
+
+    def test_external_compiler_path_change_is_reported(self) -> None:
+        before_root = self.root / "before"
+        after_root = self.root / "after"
+
+        report = self._compare(
+            [self._entry(before_root, "src/a.cpp", compiler="/opt/toolchain-v1/bin/g++")],
+            [self._entry(after_root, "src/a.cpp", compiler="/opt/toolchain-v2/bin/g++")],
+        )
+
+        compiler = report["units"][0]["changes"][0]
+        self.assertEqual(compiler["category"], "compiler")
+        self.assertEqual(compiler["before"]["path"], "/opt/toolchain-v1/bin/g++")
+        self.assertEqual(compiler["after"]["path"], "/opt/toolchain-v2/bin/g++")
+
+    def test_separated_standard_spelling_is_normalized(self) -> None:
+        before_root = self.root / "before"
+        after_root = self.root / "after"
+
+        report = self._compare(
+            [self._entry(before_root, "src/a.cpp", "-std", "c++17")],
+            [self._entry(after_root, "src/a.cpp")],
+        )
+
+        self.assertEqual(report["units"][0]["changes"][0]["category"], "standard")
+        self.assertEqual(report["units"][0]["changes"][0]["before"], "c++17")
+
     def test_added_removed_and_unique_move_are_classified_once(self) -> None:
         before_root = self.root / "before"
         after_root = self.root / "after"
@@ -162,16 +232,46 @@ class ConfigurationDiffTests(unittest.TestCase):
             {"before": "src/move.cpp", "after": "renamed/move.cpp", "style": "posix"},
         )
 
+    def test_directory_move_with_configuration_drift_retains_both_changes(self) -> None:
+        before_root = self.root / "before"
+        after_root = self.root / "after"
+
+        report = self._compare(
+            [self._entry(before_root, "src/a.cpp", "-std=c++17")],
+            [self._entry(after_root, "renamed/a.cpp", "-std=c++20")],
+        )
+
+        self.assertEqual(report["summary"]["moved"], 1)
+        self.assertEqual(report["summary"]["added"], 0)
+        self.assertEqual(report["summary"]["removed"], 0)
+        self.assertEqual(
+            [change["category"] for change in report["units"][0]["changes"]],
+            ["moved", "standard"],
+        )
+
+    def test_identical_configuration_does_not_invent_cross_basename_move(self) -> None:
+        before_root = self.root / "before"
+        after_root = self.root / "after"
+
+        report = self._compare(
+            [self._entry(before_root, "src/old.cpp", "-std=c++20")],
+            [self._entry(after_root, "src/new.cpp", "-std=c++20")],
+        )
+
+        self.assertEqual(report["summary"]["moved"], 0)
+        self.assertEqual(report["summary"]["added"], 1)
+        self.assertEqual(report["summary"]["removed"], 1)
+
     def test_ambiguous_moves_remain_conservative_added_and_removed(self) -> None:
         before_root = self.root / "before"
         after_root = self.root / "after"
         before = [
-            self._entry(before_root, "old/a.cpp", "-std=c++20"),
-            self._entry(before_root, "old/b.cpp", "-std=c++20"),
+            self._entry(before_root, "old/one/a.cpp", "-std=c++20"),
+            self._entry(before_root, "old/two/a.cpp", "-std=c++20"),
         ]
         after = [
-            self._entry(after_root, "new/a.cpp", "-std=c++20"),
-            self._entry(after_root, "new/b.cpp", "-std=c++20"),
+            self._entry(after_root, "new/one/a.cpp", "-std=c++20"),
+            self._entry(after_root, "new/two/a.cpp", "-std=c++20"),
         ]
 
         report = self._compare(before, after)
@@ -217,6 +317,30 @@ class ConfigurationDiffTests(unittest.TestCase):
             [{"category": "standard", "path": "src/*.cpp"}],
         )
 
+    def test_suppression_star_does_not_cross_path_segments(self) -> None:
+        before_root = self.root / "before"
+        after_root = self.root / "after"
+        report = self._compare(
+            [self._entry(before_root, "src/nested/a.cpp", "-std=c++17")],
+            [self._entry(after_root, "src/nested/a.cpp", "-std=c++20")],
+            suppressions=["standard:src/*.cpp"],
+        )
+
+        self.assertFalse(report["units"][0]["suppressed"])
+        self.assertEqual(report["summary"]["visible_units"], 1)
+
+    def test_suppression_glob_contract_handles_basename_and_double_star(self) -> None:
+        before_root = self.root / "before"
+        after_root = self.root / "after"
+        before = [self._entry(before_root, "src/nested/a.cpp", "-std=c++17")]
+        after = [self._entry(after_root, "src/nested/a.cpp", "-std=c++20")]
+
+        basename = self._compare(before, after, suppressions=["standard:*.cpp"])
+        recursive = self._compare(before, after, suppressions=["standard:**/*.cpp"])
+
+        self.assertTrue(basename["units"][0]["suppressed"])
+        self.assertTrue(recursive["units"][0]["suppressed"])
+
     def test_invalid_and_duplicate_suppressions_fail_closed(self) -> None:
         with self.assertRaisesRegex(DiffPolicyError, "unknown suppression category"):
             parse_suppressions(["typo:*"])
@@ -224,6 +348,8 @@ class ConfigurationDiffTests(unittest.TestCase):
             parse_suppressions(["standard:*", "standard:*"])
         with self.assertRaisesRegex(DiffPolicyError, "must not be empty"):
             parse_suppressions(["standard:"])
+        with self.assertRaisesRegex(DiffPolicyError, "supports only"):
+            parse_suppressions(["standard:src/[ab].cpp"])
 
         before_root = self.root / "before"
         after_root = self.root / "after"
@@ -249,6 +375,23 @@ class ConfigurationDiffTests(unittest.TestCase):
                 [self._entry(before_root, "src/a.cpp", "--", "@flags.rsp")],
                 [self._entry(after_root, "src/a.cpp", "--", "@flags.rsp")],
             )
+
+    def test_malformed_or_contradictory_invocations_fail_closed(self) -> None:
+        before_root = self.root / "before"
+        after_root = self.root / "after"
+        malformed = self._entry(before_root, "src/a.cpp")
+        malformed["arguments"].append("-I")
+        with self.assertRaisesRegex(DiffError, "missing-include"):
+            self._compare(
+                [malformed],
+                [self._entry(after_root, "src/a.cpp")],
+            )
+
+        before = self._entry(before_root, "src/a.cpp", output_target="declared")
+        after = self._entry(after_root, "src/a.cpp", output_target="declared")
+        before["output"] = "CMakeFiles/other.dir/src/a.cpp.o"
+        with self.assertRaisesRegex(DiffError, "output-mismatch"):
+            self._compare([before], [after])
 
     def test_windows_source_identity_is_case_insensitive(self) -> None:
         before, _ = self._database(
@@ -327,6 +470,23 @@ class ConfigurationDiffTests(unittest.TestCase):
         self.assertEqual(json.loads(compact), report)
         self.assertEqual(compact, dumps_diff(json.loads(compact)))
         self.assertTrue(dumps_diff(report, pretty=True).endswith("\n"))
+
+    def test_changed_report_is_byte_identical_after_input_reordering(self) -> None:
+        before_root = self.root / "before"
+        after_root = self.root / "after"
+        before = [
+            self._entry(before_root, "src/a.cpp", "-O0"),
+            self._entry(before_root, "src/b.cpp", "-std=c++20"),
+        ]
+        after = [
+            self._entry(after_root, "src/a.cpp", "-O2"),
+            self._entry(after_root, "src/b.cpp", "-std=c++20"),
+        ]
+
+        first = dumps_diff(self._compare(before, after))
+        second = dumps_diff(self._compare(list(reversed(before)), list(reversed(after))))
+
+        self.assertEqual(first, second)
 
     def test_cli_dispatch_exit_codes_and_dual_input_output_protection(self) -> None:
         before_root = self.root / "cli-before"

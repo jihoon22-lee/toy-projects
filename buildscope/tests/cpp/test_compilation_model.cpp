@@ -85,6 +85,7 @@ private slots:
     void normalizedGroupingExposesTreeContract();
     void legacyV1ProjectionUsesRawInvocation();
     void statusAggregationUsesStrongestState();
+    void groupingUsesPlatformAwareSourceIdentity();
 };
 
 void CompilationModelTest::renderArgumentVectorPreservesArguments() {
@@ -370,6 +371,33 @@ void CompilationModelTest::statusAggregationUsesStrongestState() {
         QCOMPARE(displayData(index, buildscope::CompilationTreeModel::StatusColumn).toString(),
                  testCase.second);
     }
+}
+
+void CompilationModelTest::groupingUsesPlatformAwareSourceIdentity() {
+    const auto digest = QStringLiteral(
+        "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd");
+    auto posix = normalizedEntry(QStringLiteral("Src/A.cpp"), digest,
+                                 QStringLiteral("present"), QStringLiteral("app"),
+                                 QStringLiteral("g++"));
+    auto windows = normalizedEntry(QStringLiteral("Src/A.cpp"), digest,
+                                   QStringLiteral("present"), QStringLiteral("app"),
+                                   QStringLiteral("cl"));
+    windows.normalized.commandStyle = QStringLiteral("windows");
+    windows.normalized.source.style = QStringLiteral("windows");
+    auto windowsCaseVariant = windows;
+    windowsCaseVariant.file = QStringLiteral("src/a.cpp");
+    windowsCaseVariant.normalized.source.path = QStringLiteral("src/a.cpp");
+
+    buildscope::CompilationTreeModel model;
+    model.setSnapshot(normalizedSnapshot({posix, windows, windowsCaseVariant}));
+
+    QCOMPARE(model.sourceCount(), 2);
+    const auto posixGroup = model.index(0, buildscope::CompilationTreeModel::SourceColumn);
+    const auto windowsGroup = model.index(1, buildscope::CompilationTreeModel::SourceColumn);
+    QCOMPARE(model.rowCount(posixGroup), 1);
+    QCOMPARE(model.rowCount(windowsGroup), 2);
+    QCOMPARE(posixGroup.data(Qt::DisplayRole).toString(), QStringLiteral("Src/A.cpp (1)"));
+    QCOMPARE(windowsGroup.data(Qt::DisplayRole).toString(), QStringLiteral("Src/A.cpp (2)"));
 }
 
 QTEST_MAIN(CompilationModelTest)

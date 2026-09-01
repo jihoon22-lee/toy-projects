@@ -10,6 +10,7 @@
      <layout class="QHBoxLayout" name="pathLayout">
       <item><widget class="QLineEdit" name="pathEdit"><property name="readOnly"><bool>true</bool></property><property name="placeholderText"><string>Open a BuildScope snapshot generated from compile_commands.json</string></property></widget></item>
       <item><widget class="QPushButton" name="openButton"><property name="text"><string>Open Snapshot…</string></property></widget></item>
+      <item><widget class="QPushButton" name="openDiffButton"><property name="text"><string>Open Diff…</string></property></widget></item>
      </layout>
     </item>
     <item>
@@ -84,6 +85,13 @@
           <widget class="QWidget" name="diagnosticsTab">
            <attribute name="title"><string>Diagnostics</string></attribute>
            <layout class="QVBoxLayout" name="diagnosticsLayout"><item><widget class="QTreeWidget" name="diagnosticTree"><property name="alternatingRowColors"><bool>true</bool></property><property name="rootIsDecorated"><bool>false</bool></property><column><property name="text"><string>Severity</string></property></column><column><property name="text"><string>Code</string></property></column><column><property name="text"><string>Message</string></property></column></widget></item></layout>
+          </widget>
+          <widget class="QWidget" name="diffTab">
+           <attribute name="title"><string>Configuration Diff</string></attribute>
+           <layout class="QVBoxLayout" name="diffLayout">
+            <item><widget class="QLabel" name="diffSummaryLabel"><property name="text"><string>Open a BuildScope diff report</string></property><property name="wordWrap"><bool>true</bool></property><property name="textInteractionFlags"><set>Qt::TextSelectableByMouse</set></property></widget></item>
+            <item><widget class="QTableWidget" name="diffChangeTable"><property name="alternatingRowColors"><bool>true</bool></property><property name="editTriggers"><set>QAbstractItemView::NoEditTriggers</set></property><property name="selectionBehavior"><enum>QAbstractItemView::SelectRows</enum></property><column><property name="text"><string>Category</string></property></column><column><property name="text"><string>Before</string></property></column><column><property name="text"><string>After</string></property></column><column><property name="text"><string>Suppression</string></property></column></widget></item>
+           </layout>
           </widget>
          </widget>
         </item>

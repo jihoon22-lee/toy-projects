@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter, defaultdict
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from buildscope import __version__
@@ -35,6 +35,16 @@ _CHANGE_FIELDS = (
     ("target", "target"),
 )
 _KIND_ORDER = {"changed": 0, "moved": 1, "added": 2, "removed": 3}
+_UNTRUSTED_DIAGNOSTIC_CODES = frozenset(
+    {
+        "invalid-define",
+        "missing-standard",
+        "missing-sysroot",
+        "missing-target",
+        "output-mismatch",
+        "unknown-language",
+    }
+)
 
 
 class DiffError(ValueError):
@@ -47,17 +57,57 @@ def _label(value: str, name: str) -> str:
     return value
 
 
-def _record(entry: dict[str, Any]) -> dict[str, Any]:
+def _record(entry: dict[str, Any], *, project_root: str, database_parent: str) -> dict[str, Any]:
     return {
         "key": source_key(entry),
         "source": source_path(entry),
         "style": str(entry["normalized"]["command_style"]),
-        "view": configuration_view(entry),
+        "view": configuration_view(
+            entry, project_root=project_root, database_parent=database_parent
+        ),
     }
 
 
 def _records(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
-    return [_record(entry) for entry in snapshot["entries"]]
+    project_root = str(snapshot["source"]["project_root"])
+    database_parent = str(Path(str(snapshot["source"]["path"])).parent)
+    records = [
+        _record(
+            entry,
+            project_root=project_root,
+            database_parent=database_parent,
+        )
+        for entry in snapshot["entries"]
+    ]
+    records.sort(
+        key=lambda record: (
+            record["key"],
+            record["view"]["semantic_digest"],
+            json.dumps(
+                record["view"]["semantic"],
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+        )
+    )
+    for stable_index, record in enumerate(records):
+        record["view"]["entry_index"] = stable_index
+    return records
+
+
+def _reject_untrusted_diagnostics(snapshot: dict[str, Any]) -> None:
+    for entry in snapshot["entries"]:
+        for diagnostic in entry["diagnostics"]:
+            code = str(diagnostic["code"])
+            message = str(diagnostic["message"])
+            if code in _UNTRUSTED_DIAGNOSTIC_CODES or (
+                code == "missing-include" and "flag has no value" in message
+            ):
+                raise DiffError(
+                    f"{entry['normalized']['source']['path']} cannot be compared exactly: "
+                    f"{code}: {message}"
+                )
 
 
 def _inventory_digest(records: list[dict[str, Any]]) -> str:
@@ -126,7 +176,9 @@ def _removed_unit(before: dict[str, Any]) -> dict[str, Any]:
 
 
 def _moved_unit(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
-    return _unit("moved", before, after, [_change("moved", before["source"], after["source"])])
+    changes = [_change("moved", before["source"], after["source"])]
+    changes.extend(_semantic_changes(before, after))
+    return _unit("moved", before, after, changes)
 
 
 def _pop_digest_matches(
@@ -205,26 +257,60 @@ def _source_groups(records: list[dict[str, Any]]) -> dict[str, list[dict[str, An
 def _move_pairs(
     removed: list[dict[str, Any]],
     added: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-    removed_counts = Counter(item["view"]["semantic_digest"] for item in removed)
-    added_counts = Counter(item["view"]["semantic_digest"] for item in added)
-    removed_by_digest = {item["view"]["semantic_digest"]: item for item in removed}
-    added_by_digest = {item["view"]["semantic_digest"]: item for item in added}
-    digests = sorted(
-        digest
-        for digest in removed_counts.keys() & added_counts.keys()
-        if removed_counts[digest] == added_counts[digest] == 1
-    )
+) -> tuple[
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    list[dict[str, str]],
+]:
+    def basename(record: dict[str, Any]) -> str:
+        name = PurePosixPath(record["source"].replace("\\", "/")).name
+        return name.casefold() if record["style"] == "windows" else name
+
+    def move_key(record: dict[str, Any]) -> str:
+        return basename(record) + "\0" + role_key(record["view"])
+
+    def exact_key(record: dict[str, Any]) -> str:
+        return move_key(record) + "\0" + record["view"]["semantic_digest"]
+
     paired_ids: set[int] = set()
     units = []
-    for digest in digests:
-        first, second = removed_by_digest[digest], added_by_digest[digest]
-        units.append(_moved_unit(first, second))
-        paired_ids.update((id(first), id(second)))
+    for key_function in (exact_key, move_key):
+        remaining_removed = [item for item in removed if id(item) not in paired_ids]
+        remaining_added = [item for item in added if id(item) not in paired_ids]
+        removed_counts = Counter(key_function(item) for item in remaining_removed)
+        added_counts = Counter(key_function(item) for item in remaining_added)
+        removed_by_key = {key_function(item): item for item in remaining_removed}
+        added_by_key = {key_function(item): item for item in remaining_added}
+        keys = sorted(
+            key
+            for key in removed_counts.keys() & added_counts.keys()
+            if key.strip("\0") and removed_counts[key] == added_counts[key] == 1
+        )
+        for key in keys:
+            first, second = removed_by_key[key], added_by_key[key]
+            units.append(_moved_unit(first, second))
+            paired_ids.update((id(first), id(second)))
+    remaining_removed = [item for item in removed if id(item) not in paired_ids]
+    remaining_added = [item for item in added if id(item) not in paired_ids]
+    ambiguous_keys = sorted(
+        set(move_key(item) for item in remaining_removed)
+        & set(move_key(item) for item in remaining_added)
+    )
+    diagnostics = [
+        {
+            "code": "ambiguous-move-match",
+            "message": "Potential source moves could not be paired safely.",
+            "severity": "warning",
+            "source": key.split("\0", 1)[0],
+        }
+        for key in ambiguous_keys
+    ]
     return (
         units,
-        [item for item in removed if id(item) not in paired_ids],
-        [item for item in added if id(item) not in paired_ids],
+        remaining_removed,
+        remaining_added,
+        diagnostics,
     )
 
 
@@ -297,6 +383,8 @@ def compare_databases(
         after_snapshot = load_compilation_database(
             Path(after_path), project_root=after_project_root
         )
+        _reject_untrusted_diagnostics(before_snapshot)
+        _reject_untrusted_diagnostics(after_snapshot)
         before_records, after_records = _records(before_snapshot), _records(after_snapshot)
     except (DiffPolicyError, SnapshotError) as error:
         raise DiffError(str(error)) from error
@@ -326,7 +414,8 @@ def compare_databases(
                         "source": first[0]["source"],
                     }
                 )
-    moved, removed, added = _move_pairs(removed, added)
+    moved, removed, added, move_diagnostics = _move_pairs(removed, added)
+    diagnostics.extend(move_diagnostics)
     units.extend(moved)
     units.extend(_removed_unit(item) for item in removed)
     units.extend(_added_unit(item) for item in added)

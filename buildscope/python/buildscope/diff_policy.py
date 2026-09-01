@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import fnmatch
 import hashlib
 import json
 import re
-from pathlib import PurePosixPath
 from typing import Any
+
+from buildscope._paths import normalize_lexical, project_relative_lexical
 
 POLICY_VERSION = "buildscope.diff-policy/v1"
 MAX_SUPPRESSIONS = 256
@@ -32,10 +32,9 @@ IGNORED_FIELDS = (
     "raw command spelling",
     "compilation directory",
     "output path and filename",
-    "entry index and duplicate annotation",
+    "original entry index and duplicate annotation",
     "filesystem existence and stale status",
     "snapshot diagnostics and include-analysis observations",
-    "absolute compiler path when family/name are unchanged",
 )
 
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
@@ -51,6 +50,21 @@ _NO_VALUE_OPTIONS = frozenset(
     }
 )
 _VALUE_OPTIONS = frozenset({"-MF", "-MT", "-MQ", "/sourceDependencies"})
+_PATH_VALUE_OPTIONS = {
+    "--gcc-toolchain": "--gcc-toolchain",
+    "-B": "-B",
+    "-include": "-include",
+    "-include-pch": "-include-pch",
+    "-imacros": "-imacros",
+    "-resource-dir": "-resource-dir",
+    "/FI": "/FI",
+}
+_PATH_EQUALS_OPTIONS = {
+    "--gcc-toolchain=": "--gcc-toolchain",
+    "-fsanitize-blacklist=": "-fsanitize-blacklist",
+    "-fsanitize-ignorelist=": "-fsanitize-ignorelist",
+    "-resource-dir=": "-resource-dir",
+}
 _MODELED_SEPARATED = frozenset(
     {
         "-D",
@@ -149,33 +163,87 @@ def _compiler_index(argv: list[str], compiler_path: str) -> int:
     raise DiffPolicyError("normalized compiler path is not present in argv")
 
 
-def _launcher_token(token: str) -> str:
+def _context_path(
+    value: str,
+    entry: dict[str, Any],
+    *,
+    project_root: str,
+    database_parent: str,
+) -> str:
+    style = str(entry["normalized"]["command_style"])
+    directory = normalize_lexical(str(entry["directory"]), database_parent, style)
+    path = project_relative_lexical(
+        value,
+        base=directory,
+        project_root=project_root,
+        style=style,
+    )
+    return path.casefold() if style == "windows" else path
+
+
+def _launcher_token(
+    token: str,
+    entry: dict[str, Any],
+    *,
+    project_root: str,
+    database_parent: str,
+) -> str:
     if token.startswith("-") or _ASSIGNMENT.fullmatch(token):
         return token
-    return PurePosixPath(token.replace("\\", "/")).name
+    if "/" in token or "\\" in token or token.startswith("."):
+        return _context_path(
+            token,
+            entry,
+            project_root=project_root,
+            database_parent=database_parent,
+        )
+    return token.casefold() if entry["normalized"]["command_style"] == "windows" else token
 
 
-def _source_spellings(entry: dict[str, Any]) -> frozenset[str]:
+def _source_spellings(
+    entry: dict[str, Any], *, project_root: str, database_parent: str
+) -> frozenset[str]:
     normalized = entry["normalized"]
-    values = {str(entry["file"]), str(normalized["source"]["path"])}
+    values = {
+        str(normalized["source"]["path"]),
+        _context_path(
+            str(entry["file"]),
+            entry,
+            project_root=project_root,
+            database_parent=database_parent,
+        ),
+    }
     if normalized["command_style"] == "windows":
         values.update(value.casefold() for value in tuple(values))
     return frozenset(values)
 
 
-def _is_source_operand(token: str, entry: dict[str, Any]) -> bool:
-    values = _source_spellings(entry)
-    if token in values:
-        return True
-    if entry["normalized"]["command_style"] == "windows":
-        return token.casefold() in values
-    return False
+def _is_source_operand(
+    token: str,
+    entry: dict[str, Any],
+    *,
+    project_root: str,
+    database_parent: str,
+) -> bool:
+    comparable = _context_path(
+        token,
+        entry,
+        project_root=project_root,
+        database_parent=database_parent,
+    )
+    return comparable in _source_spellings(
+        entry,
+        project_root=project_root,
+        database_parent=database_parent,
+    )
 
 
 def _modeled_option(argv: list[str], index: int) -> int | None:
     token = argv[index]
     if token in _MODELED_SEPARATED:
-        return min(index + 2, len(argv))
+        if index + 1 >= len(argv):
+            raise DiffPolicyError(f"modeled compiler option {token} has no value")
+        return index + 2
     if any(token.startswith(prefix) and token != prefix for prefix in _MODELED_PREFIXES):
         return index + 1
     return None
@@ -184,13 +252,72 @@ def _modeled_option(argv: list[str], index: int) -> int | None:
 def _output_option(argv: list[str], index: int) -> int | None:
     token = argv[index]
     if token == "-o" or token in {"/Fo", "/Fo:"}:
-        return min(index + 2, len(argv))
+        if index + 1 >= len(argv):
+            raise DiffPolicyError(f"compiler output option {token} has no value")
+        return index + 2
     if token.startswith(("/Fo:", "/Fo")) and token not in {"/Fo", "/Fo:"}:
         return index + 1
     return None
 
 
-def _residual_flags(entry: dict[str, Any], compiler_index: int) -> list[str]:
+def _path_residual_option(
+    argv: list[str],
+    index: int,
+    entry: dict[str, Any],
+    *,
+    project_root: str,
+    database_parent: str,
+) -> tuple[list[str], int] | None:
+    token = argv[index]
+    if token in _PATH_VALUE_OPTIONS:
+        if index + 1 >= len(argv):
+            raise DiffPolicyError(f"path-bearing compiler option {token} has no value")
+        return [
+            _PATH_VALUE_OPTIONS[token],
+            _context_path(
+                argv[index + 1],
+                entry,
+                project_root=project_root,
+                database_parent=database_parent,
+            ),
+        ], index + 2
+    for prefix, option in sorted(
+        _PATH_EQUALS_OPTIONS.items(), key=lambda item: len(item[0]), reverse=True
+    ):
+        if token.startswith(prefix):
+            raw_path = token[len(prefix) :]
+            if not raw_path:
+                raise DiffPolicyError(f"path-bearing compiler option {option} has no value")
+            return [
+                option,
+                _context_path(
+                    raw_path,
+                    entry,
+                    project_root=project_root,
+                    database_parent=database_parent,
+                ),
+            ], index + 1
+    for prefix in ("/FI", "-B"):
+        if token.startswith(prefix) and token != prefix:
+            return [
+                _PATH_VALUE_OPTIONS[prefix],
+                _context_path(
+                    token[len(prefix) :],
+                    entry,
+                    project_root=project_root,
+                    database_parent=database_parent,
+                ),
+            ], index + 1
+    return None
+
+
+def _residual_flags(
+    entry: dict[str, Any],
+    compiler_index: int,
+    *,
+    project_root: str,
+    database_parent: str,
+) -> list[str]:
     argv = list(entry["normalized"]["argv"])
     residual: list[str] = []
     index = compiler_index + 1
@@ -202,16 +329,34 @@ def _residual_flags(entry: dict[str, Any], compiler_index: int) -> list[str]:
             terminated = True
             index += 1
             continue
-        if _is_source_operand(token, entry):
+        if _is_source_operand(
+            token,
+            entry,
+            project_root=project_root,
+            database_parent=database_parent,
+        ):
             index += 1
             continue
         if not terminated and token in _NO_VALUE_OPTIONS:
             index += 1
             continue
         if not terminated and token in _VALUE_OPTIONS:
-            index = min(index + 2, len(argv))
+            if index + 1 >= len(argv):
+                raise DiffPolicyError(f"compiler option {token} has no value")
+            index += 2
             continue
         if not terminated:
+            path_option = _path_residual_option(
+                argv,
+                index,
+                entry,
+                project_root=project_root,
+                database_parent=database_parent,
+            )
+            if path_option is not None:
+                values, index = path_option
+                residual.extend(values)
+                continue
             output_index = _output_option(argv, index)
             if output_index is not None:
                 index = output_index
@@ -235,7 +380,9 @@ def _definitions(values: list[dict[str, Any]]) -> list[dict[str, str]]:
     return result
 
 
-def semantic_configuration(entry: dict[str, Any]) -> dict[str, Any]:
+def semantic_configuration(
+    entry: dict[str, Any], *, project_root: str, database_parent: str
+) -> dict[str, Any]:
     """Project a normalized entry onto the documented diff semantics."""
 
     normalized = entry["normalized"]
@@ -261,13 +408,32 @@ def semantic_configuration(entry: dict[str, Any]) -> dict[str, Any]:
             "command_style": str(normalized["command_style"]),
             "family": str(compiler["family"]),
             "name": compiler_name,
+            "path": _launcher_token(
+                str(compiler["path"]),
+                entry,
+                project_root=project_root,
+                database_parent=database_parent,
+            ),
             "wrappers": wrappers,
         },
         "defines": _definitions(normalized["defines"]),
-        "flags": _residual_flags(entry, compiler_index),
+        "flags": _residual_flags(
+            entry,
+            compiler_index,
+            project_root=project_root,
+            database_parent=database_parent,
+        ),
         "include_paths": includes,
         "language": str(normalized["language"]),
-        "launcher": [_launcher_token(token) for token in argv[:compiler_index]],
+        "launcher": [
+            _launcher_token(
+                token,
+                entry,
+                project_root=project_root,
+                database_parent=database_parent,
+            )
+            for token in argv[:compiler_index]
+        ],
         "standard": str(normalized["standard"]),
         "sysroot": _path_value(normalized["sysroot"]),
         "target": {
@@ -277,8 +443,12 @@ def semantic_configuration(entry: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def configuration_view(entry: dict[str, Any]) -> dict[str, Any]:
-    semantic = semantic_configuration(entry)
+def configuration_view(
+    entry: dict[str, Any], *, project_root: str, database_parent: str
+) -> dict[str, Any]:
+    semantic = semantic_configuration(
+        entry, project_root=project_root, database_parent=database_parent
+    )
     return {
         "entry_index": int(entry["state"]["entry_index"]),
         "semantic": semantic,
@@ -310,12 +480,60 @@ def parse_suppressions(values: list[str] | tuple[str, ...]) -> tuple[dict[str, s
         pattern = pattern if separator else "*"
         if not pattern:
             raise DiffPolicyError("suppression path glob must not be empty")
+        if any(character in pattern for character in ("\\", "[", "]")):
+            raise DiffPolicyError(
+                "suppression path glob supports only /, literal characters, *, **, and ?"
+            )
         identity = (category, pattern)
         if identity in seen:
             raise DiffPolicyError(f"duplicate suppression rule: {raw}")
         seen.add(identity)
         rules.append({"category": category, "path": pattern})
-    return tuple(sorted(rules, key=lambda rule: (rule["category"], rule["path"])))
+    return tuple(
+        sorted(
+            rules,
+            key=lambda rule: (
+                rule["category"].encode("utf-8"),
+                rule["path"].encode("utf-8"),
+            ),
+        )
+    )
+
+
+def _glob_regular_expression(pattern: str) -> str:
+    """Translate the versioned slash-aware suppression glob contract."""
+
+    pieces = [r"^(?:.*/)?"] if "/" not in pattern else ["^"]
+    index = 0
+    while index < len(pattern):
+        character = pattern[index]
+        if character == "*":
+            if index + 1 < len(pattern) and pattern[index + 1] == "*":
+                if index + 2 < len(pattern) and pattern[index + 2] == "/":
+                    pieces.append(r"(?:.*/)?")
+                    index += 3
+                else:
+                    pieces.append(r".*")
+                    index += 2
+            else:
+                pieces.append(r"[^/]*")
+                index += 1
+        elif character == "?":
+            pieces.append(r"[^/]")
+            index += 1
+        else:
+            pieces.append(re.escape(character))
+            index += 1
+    pieces.append("$")
+    return "".join(pieces)
+
+
+def _glob_matches(path: str, pattern: str, *, windows: bool) -> bool:
+    normalized = path.replace("\\", "/")
+    if windows:
+        normalized = normalized.casefold()
+        pattern = pattern.casefold()
+    return re.fullmatch(_glob_regular_expression(pattern), normalized) is not None
 
 
 def matching_suppression(
@@ -329,10 +547,8 @@ def matching_suppression(
     for rule in rules:
         if rule["category"] not in {"*", category}:
             continue
-        pattern = rule["path"].casefold() if windows else rule["path"]
         for raw_path in (before, after):
-            path = raw_path.casefold() if windows else raw_path
-            if path and fnmatch.fnmatchcase(path, pattern):
+            if raw_path and _glob_matches(raw_path, rule["path"], windows=windows):
                 return f"{rule['category']}:{rule['path']}"
     return ""
 

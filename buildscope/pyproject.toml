@@ -23,6 +23,7 @@ packages = ["python/buildscope"]
 "schemas/buildscope-snapshot-v1.schema.json" = "buildscope/schemas/buildscope-snapshot-v1.schema.json"
 "schemas/buildscope-snapshot-v2.schema.json" = "buildscope/schemas/buildscope-snapshot-v2.schema.json"
 "schemas/buildscope-snapshot-v3.schema.json" = "buildscope/schemas/buildscope-snapshot-v3.schema.json"
+"schemas/buildscope-diff-v1.schema.json" = "buildscope/schemas/buildscope-diff-v1.schema.json"
 
 [tool.pytest.ini_options]
 testpaths = ["tests/python"]

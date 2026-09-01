@@ -4,13 +4,13 @@
     "after": {
       "configuration_count": 3,
       "label": "after",
-      "semantic_digest": "sha256:e8764c520833b73eac5c401910b01385b893ff93bc277a7ca7c4d5aab8f1e26e",
+      "semantic_digest": "sha256:86e1cc1865520dfcd881c6c7946ff7945603b8ac8be133081c89135d3f7fbae1",
       "source_count": 3
     },
     "before": {
       "configuration_count": 3,
       "label": "before",
-      "semantic_digest": "sha256:cbb2488b73c0bdfcafc9c1465b1f2f420e46c9de47667355872a742d73c5159f",
+      "semantic_digest": "sha256:0c9249b52fa3affbddcb3376d25514ebca2772bfa20d763caf2191457e9a0901",
       "source_count": 3
     }
   },
@@ -19,10 +19,9 @@
       "raw command spelling",
       "compilation directory",
       "output path and filename",
-      "entry index and duplicate annotation",
+      "original entry index and duplicate annotation",
       "filesystem existence and stale status",
-      "snapshot diagnostics and include-analysis observations",
-      "absolute compiler path when family/name are unchanged"
+      "snapshot diagnostics and include-analysis observations"
     ],
     "suppression_rules": [],
     "version": "buildscope.diff-policy/v1"
@@ -34,25 +33,26 @@
   "schema_version": "buildscope.diff/v1",
   "summary": {
     "added": 1,
-    "change_count": 11,
+    "change_count": 12,
     "changed": 1,
     "moved": 1,
     "removed": 1,
     "suppressed_changes": 0,
     "suppressed_units": 0,
     "unchanged": 0,
-    "visible_changes": 11,
+    "visible_changes": 12,
     "visible_units": 4
   },
   "units": [
     {
       "after": {
-        "entry_index": 1,
+        "entry_index": 0,
         "semantic": {
           "compiler": {
             "command_style": "posix",
             "family": "gcc",
             "name": "g++",
+            "path": "/usr/bin/g++",
             "wrappers": []
           },
           "defines": [
@@ -71,14 +71,14 @@
           ],
           "language": "c++",
           "launcher": [],
-          "standard": "c++20",
+          "standard": "c++23",
           "sysroot": "",
           "target": {
             "build_target": "app",
             "triple": ""
           }
         },
-        "semantic_digest": "sha256:9b26ce88924e29c5d40465188ff9449eab1bdcfbe5ccc8e0b9b790c8f39debbe"
+        "semantic_digest": "sha256:17d953a46fcbd1afab3c68b9c0957f69f3536a3f3b830750a1063477881a7180"
       },
       "before": {
         "entry_index": 1,
@@ -87,6 +87,7 @@
             "command_style": "posix",
             "family": "gcc",
             "name": "g++",
+            "path": "/usr/bin/g++",
             "wrappers": []
           },
           "defines": [
@@ -112,13 +113,20 @@
             "triple": ""
           }
         },
-        "semantic_digest": "sha256:9b26ce88924e29c5d40465188ff9449eab1bdcfbe5ccc8e0b9b790c8f39debbe"
+        "semantic_digest": "sha256:34a98a9c9ec5602bb5411e4c0e46412e94c2a938cb638c79bab110928d7a87f7"
       },
       "changes": [
         {
           "after": "renamed/move.cpp",
           "before": "src/move.cpp",
           "category": "moved",
+          "suppressed": false,
+          "suppression": null
+        },
+        {
+          "after": "c++23",
+          "before": "c++20",
+          "category": "standard",
           "suppressed": false,
           "suppression": null
         }
@@ -133,12 +141,13 @@
     },
     {
       "after": {
-        "entry_index": 2,
+        "entry_index": 1,
         "semantic": {
           "compiler": {
             "command_style": "posix",
             "family": "gcc",
             "name": "g++",
+            "path": "/usr/bin/g++",
             "wrappers": []
           },
           "defines": [
@@ -164,7 +173,7 @@
             "triple": ""
           }
         },
-        "semantic_digest": "sha256:7750286a45f4bb5869442ae93e70340295681baf2db5cb076769170be29af2a0"
+        "semantic_digest": "sha256:8ac1c9c351eaf1de2d9c6e2acc383cda5ca18556e846003c1ea6efbd86af7759"
       },
       "before": null,
       "changes": [
@@ -174,6 +183,7 @@
               "command_style": "posix",
               "family": "gcc",
               "name": "g++",
+              "path": "/usr/bin/g++",
               "wrappers": []
             },
             "defines": [
@@ -215,12 +225,13 @@
     },
     {
       "after": {
-        "entry_index": 0,
+        "entry_index": 2,
         "semantic": {
           "compiler": {
             "command_style": "posix",
             "family": "clang",
             "name": "clang++",
+            "path": "/usr/bin/clang++",
             "wrappers": [
               "env",
               "ccache"
@@ -268,7 +279,7 @@
             "triple": "arm64-linux-gnu"
           }
         },
-        "semantic_digest": "sha256:94d8398e21d19e9329812a8f1a092f39e542469a7126266c011ff522d769f00c"
+        "semantic_digest": "sha256:312dce41b3835c111691572fc0c5d52aa10c7a14624095811453b8ebae262a2e"
       },
       "before": {
         "entry_index": 0,
@@ -277,6 +288,7 @@
             "command_style": "posix",
             "family": "gcc",
             "name": "g++",
+            "path": "/usr/bin/g++",
             "wrappers": [
               "env",
               "ccache"
@@ -320,7 +332,7 @@
             "triple": "x86_64-linux-gnu"
           }
         },
-        "semantic_digest": "sha256:8b245d3a70458fb564b8658f4f565dd4f8f2750026165c6cc73fe6b677f4b02c"
+        "semantic_digest": "sha256:22b6fb6a0540ffb6505e282d694194f455b93c7832b84e27a49da648897c1352"
       },
       "changes": [
         {
@@ -328,6 +340,7 @@
             "command_style": "posix",
             "family": "clang",
             "name": "clang++",
+            "path": "/usr/bin/clang++",
             "wrappers": [
               "env",
               "ccache"
@@ -337,6 +350,7 @@
             "command_style": "posix",
             "family": "gcc",
             "name": "g++",
+            "path": "/usr/bin/g++",
             "wrappers": [
               "env",
               "ccache"
@@ -475,6 +489,7 @@
             "command_style": "posix",
             "family": "gcc",
             "name": "g++",
+            "path": "/usr/bin/g++",
             "wrappers": []
           },
           "defines": [
@@ -500,7 +515,7 @@
             "triple": ""
           }
         },
-        "semantic_digest": "sha256:5e09036f69f1e07835ac8d41b6c84aa32717cd99d0a7357c7577912bf62defe8"
+        "semantic_digest": "sha256:833d4218bb26149b3e073356da07429a31006389e5e9318f06327e3c73f3dcfa"
       },
       "changes": [
         {
@@ -510,6 +525,7 @@
               "command_style": "posix",
               "family": "gcc",
               "name": "g++",
+              "path": "/usr/bin/g++",
               "wrappers": []
             },
             "defines": [

@@ -34,6 +34,18 @@ def normalize_lexical(value: str, base: str, style: str) -> str:
     return posixpath.normpath(posix_path.as_posix())
 
 
+def project_relative_lexical(value: str, *, base: str, project_root: str, style: str) -> str:
+    """Normalize a path without filesystem access and rebase project-local values."""
+
+    normalized = normalize_lexical(value, base, style)
+    root_style = "windows" if looks_windows_path(project_root) else "posix"
+    if root_style != style:
+        return normalized
+    normalized_root = normalize_lexical(project_root, project_root, root_style)
+    relative = _relative_path(normalized, normalized_root, style)
+    return relative if relative is not None else normalized
+
+
 def _relative_path(path: str, root: str, style: str) -> str | None:
     path_type = PureWindowsPath if style == "windows" else PurePosixPath
     path_parts = path_type(path).parts
