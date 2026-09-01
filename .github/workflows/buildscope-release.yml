@@ -736,6 +736,7 @@ jobs:
       - name: Extract BuildScope release notes
         env:
           VERSION: ${{ needs.provenance.outputs.version }}
+          TARGET_SHA: ${{ needs.provenance.outputs.target_sha }}
         run: |
           set -euo pipefail
           python3 - "$VERSION" > RELEASE_NOTES.md <<'PY'
@@ -765,6 +766,26 @@ jobs:
           print("---")
           print()
           print("Release assets were built from the exact green `main` commit; see `buildscope-provenance.json`.")
+          PY
+          owner_marker="<!-- buildscope-release-owner:${GITHUB_REPOSITORY}:${GITHUB_RUN_ID}:${TARGET_SHA} -->"
+          python3 - \
+            "$RUNNER_TEMP/buildscope-expected-final-body.md" \
+            "$RUNNER_TEMP/buildscope-expected-draft-body.md" \
+            "$owner_marker" <<'PY'
+          from __future__ import annotations
+
+          import sys
+          from pathlib import Path
+
+          final_path = Path(sys.argv[1])
+          draft_path = Path(sys.argv[2])
+          owner_marker = sys.argv[3]
+          notes = Path("RELEASE_NOTES.md").read_text(encoding="utf-8").rstrip()
+          draft = f"{notes}\n\n{owner_marker}"
+          if not notes or len(draft.encode("utf-8")) > 125_000:
+              raise SystemExit("release notes are empty or exceed GitHub's byte bound")
+          final_path.write_text(notes, encoding="utf-8")
+          draft_path.write_text(draft, encoding="utf-8")
           PY
 
       - name: Inspect the release slot without mutating an existing release
@@ -808,18 +829,17 @@ jobs:
           request="$RUNNER_TEMP/buildscope-create-release.json"
           response="$RUNNER_TEMP/buildscope-created-release.json"
           owner_marker="<!-- buildscope-release-owner:${GITHUB_REPOSITORY}:${GITHUB_RUN_ID}:${TARGET_SHA} -->"
-          python3 - "$request" "$TAG" "$VERSION" RELEASE_NOTES.md "$owner_marker" <<'PY'
+          expected_draft_body="$RUNNER_TEMP/buildscope-expected-draft-body.md"
+          draft_body_sha256="$(sha256sum "$expected_draft_body" | awk '{print $1}')"
+          python3 - "$request" "$TAG" "$VERSION" "$expected_draft_body" <<'PY'
           from __future__ import annotations
 
           import json
           import sys
           from pathlib import Path
 
-          destination, tag, version, notes_path, owner_marker = sys.argv[1:]
-          notes = Path(notes_path).read_text(encoding="utf-8")
-          body = f"{notes.rstrip()}\n\n{owner_marker}"
-          if not notes.strip() or len(body.encode("utf-8")) > 125_000:
-              raise SystemExit("release notes are empty or exceed GitHub's byte bound")
+          destination, tag, version, body_path = sys.argv[1:]
+          body = Path(body_path).read_text(encoding="utf-8")
           payload = {
               "tag_name": tag,
               "name": f"BuildScope {version}",
@@ -841,7 +861,8 @@ jobs:
             && release_id="$(python3 ci/check_buildscope_release_state.py \
               state "$response" "$TAG" "$VERSION" "$TARGET_SHA" \
               --stage draft --expected-asset-count 0 \
-              --expected-owner-marker "$owner_marker")";
+              --expected-owner-marker "$owner_marker" \
+              --expected-body-sha256 "$draft_body_sha256")";
           then
             echo "Created private draft release $release_id"
           else
@@ -881,6 +902,7 @@ jobs:
         run: |
           set -euo pipefail
           owner_marker="<!-- buildscope-release-owner:${GITHUB_REPOSITORY}:${GITHUB_RUN_ID}:${TARGET_SHA} -->"
+          draft_body_sha256="$(sha256sum "$RUNNER_TEMP/buildscope-expected-draft-body.md" | awk '{print $1}')"
           before="$RUNNER_TEMP/buildscope-before-upload.json"
           gh api -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
@@ -888,7 +910,8 @@ jobs:
           python3 ci/check_buildscope_release_state.py \
             state "$before" "$TAG" "$VERSION" "$TARGET_SHA" \
             --stage draft --expected-release-id "$RELEASE_ID" --expected-asset-count 0 \
-            --expected-owner-marker "$owner_marker"
+            --expected-owner-marker "$owner_marker" \
+            --expected-body-sha256 "$draft_body_sha256"
           upload_responses="$RUNNER_TEMP/buildscope-upload-responses"
           auth_header="$RUNNER_TEMP/buildscope-upload-authorization"
           test ! -e "$upload_responses"
@@ -948,6 +971,7 @@ jobs:
         run: |
           set -euo pipefail
           owner_marker="<!-- buildscope-release-owner:${GITHUB_REPOSITORY}:${GITHUB_RUN_ID}:${TARGET_SHA} -->"
+          draft_body_sha256="$(sha256sum "$RUNNER_TEMP/buildscope-expected-draft-body.md" | awk '{print $1}')"
           remote_peeled="$(git ls-remote --tags origin "refs/tags/${TAG}^{}")"
           test "$(printf '%s\n' "$remote_peeled" | sed '/^$/d' | wc -l)" -eq 1
           test "$(printf '%s\n' "$remote_peeled" | awk '{print $2}')" = "refs/tags/${TAG}^{}"
@@ -963,6 +987,7 @@ jobs:
                 state "$metadata" "$TAG" "$VERSION" "$TARGET_SHA" \
                 --stage draft --expected-release-id "$RELEASE_ID" \
                 --expected-asset-count 9 --expected-owner-marker "$owner_marker" \
+                --expected-body-sha256 "$draft_body_sha256" \
               && python3 ci/check_buildscope_release_assets.py \
                 "$metadata" dist "$TAG" "$VERSION" --stage draft;
             then
@@ -1023,6 +1048,7 @@ jobs:
         run: |
           set -euo pipefail
           owner_marker="<!-- buildscope-release-owner:${GITHUB_REPOSITORY}:${GITHUB_RUN_ID}:${TARGET_SHA} -->"
+          draft_body_sha256="$(sha256sum "$RUNNER_TEMP/buildscope-expected-draft-body.md" | awk '{print $1}')"
           metadata="$RUNNER_TEMP/buildscope-prepublish-release.json"
           gh api -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
@@ -1030,7 +1056,8 @@ jobs:
           python3 ci/check_buildscope_release_state.py \
             state "$metadata" "$TAG" "$VERSION" "$TARGET_SHA" \
             --stage draft --expected-release-id "$RELEASE_ID" --expected-asset-count 9 \
-            --expected-owner-marker "$owner_marker"
+            --expected-owner-marker "$owner_marker" \
+            --expected-body-sha256 "$draft_body_sha256"
           python3 ci/check_buildscope_release_assets.py \
             "$metadata" "$AUDITED_DRAFT_DIR" "$TAG" "$VERSION" --stage draft
           python3 ci/check_buildscope_release_manifest.py "$AUDITED_DRAFT_DIR" "$VERSION"
@@ -1053,17 +1080,22 @@ jobs:
           set -euo pipefail
           request="$RUNNER_TEMP/buildscope-publish-request.json"
           owner_marker="<!-- buildscope-release-owner:${GITHUB_REPOSITORY}:${GITHUB_RUN_ID}:${TARGET_SHA} -->"
-          python3 - "$request" "$TAG" "$VERSION" <<'PY'
+          expected_final_body="$RUNNER_TEMP/buildscope-expected-final-body.md"
+          final_body_sha256="$(sha256sum "$expected_final_body" | awk '{print $1}')"
+          draft_body_sha256="$(sha256sum "$RUNNER_TEMP/buildscope-expected-draft-body.md" | awk '{print $1}')"
+          python3 - "$request" "$TAG" "$VERSION" "$expected_final_body" <<'PY'
           from __future__ import annotations
 
           import json
           import sys
           from pathlib import Path
 
-          destination, tag, version = sys.argv[1:]
+          destination, tag, version, body_path = sys.argv[1:]
+          body = Path(body_path).read_text(encoding="utf-8")
           payload = {
               "tag_name": tag,
               "name": f"BuildScope {version}",
+              "body": body,
               "draft": False,
               "prerelease": False,
               "make_latest": "true",
@@ -1086,6 +1118,7 @@ jobs:
                 state "$response" "$TAG" "$VERSION" "$TARGET_SHA" \
                 --stage final --expected-release-id "$RELEASE_ID" \
                 --expected-asset-count 9 \
+                --expected-body-sha256 "$final_body_sha256" \
               && python3 ci/check_buildscope_release_assets.py \
                 "$response" "$AUDITED_DRAFT_DIR" "$TAG" "$VERSION" --stage final;
             then
@@ -1106,6 +1139,7 @@ jobs:
                 state "$reconcile" "$TAG" "$VERSION" "$TARGET_SHA" \
                 --stage final --expected-release-id "$RELEASE_ID" \
                 --expected-asset-count 9 \
+                --expected-body-sha256 "$final_body_sha256" \
               && python3 ci/check_buildscope_release_assets.py \
                 "$reconcile" "$AUDITED_DRAFT_DIR" "$TAG" "$VERSION" --stage final;
             then
@@ -1116,7 +1150,8 @@ jobs:
             python3 ci/check_buildscope_release_state.py \
               state "$reconcile" "$TAG" "$VERSION" "$TARGET_SHA" \
               --stage draft --expected-release-id "$RELEASE_ID" --expected-asset-count 9 \
-              --expected-owner-marker "$owner_marker"
+              --expected-owner-marker "$owner_marker" \
+              --expected-body-sha256 "$draft_body_sha256"
             python3 ci/check_buildscope_release_assets.py \
               "$reconcile" "$AUDITED_DRAFT_DIR" "$TAG" "$VERSION" --stage draft
             echo "Publish attempt $attempt/3 left the audited draft private; retrying" >&2
@@ -1157,6 +1192,7 @@ jobs:
           VERSION: ${{ needs.provenance.outputs.version }}
         run: |
           set -euo pipefail
+          final_body_sha256="$(sha256sum "$RUNNER_TEMP/buildscope-expected-final-body.md" | awk '{print $1}')"
           remote_peeled="$(git ls-remote --tags origin "refs/tags/${TAG}^{}")"
           test "$(printf '%s\n' "$remote_peeled" | sed '/^$/d' | wc -l)" -eq 1
           test "$(printf '%s\n' "$remote_peeled" | awk '{print $2}')" = "refs/tags/${TAG}^{}"
@@ -1176,10 +1212,12 @@ jobs:
                 state "$metadata" "$TAG" "$VERSION" "$TARGET_SHA" \
                 --stage final --expected-release-id "$RELEASE_ID" \
                 --expected-asset-count 9 \
+                --expected-body-sha256 "$final_body_sha256" \
               && python3 ci/check_buildscope_release_state.py \
                 state "$tag_metadata" "$TAG" "$VERSION" "$TARGET_SHA" \
                 --stage final --expected-release-id "$RELEASE_ID" \
-                --expected-asset-count 9;
+                --expected-asset-count 9 \
+                --expected-body-sha256 "$final_body_sha256";
             then
               audit_ok=true
               break
@@ -1242,10 +1280,12 @@ jobs:
                 state "$post_metadata" "$TAG" "$VERSION" "$TARGET_SHA" \
                 --stage final --expected-release-id "$RELEASE_ID" \
                 --expected-asset-count 9 \
+                --expected-body-sha256 "$final_body_sha256" \
               && python3 ci/check_buildscope_release_state.py \
                 state "$post_tag_metadata" "$TAG" "$VERSION" "$TARGET_SHA" \
                 --stage final --expected-release-id "$RELEASE_ID" \
                 --expected-asset-count 9 \
+                --expected-body-sha256 "$final_body_sha256" \
               && python3 ci/check_buildscope_release_assets.py \
                 "$post_metadata" "$final_download" "$TAG" "$VERSION" --stage final \
               && python3 ci/check_buildscope_release_assets.py \
@@ -1274,6 +1314,8 @@ jobs:
         run: |
           set -euo pipefail
           owner_marker="<!-- buildscope-release-owner:${GITHUB_REPOSITORY}:${GITHUB_RUN_ID}:${TARGET_SHA} -->"
+          draft_body_sha256="$(sha256sum "$RUNNER_TEMP/buildscope-expected-draft-body.md" | awk '{print $1}')"
+          final_body_sha256="$(sha256sum "$RUNNER_TEMP/buildscope-expected-final-body.md" | awk '{print $1}')"
           release_id="$RELEASE_ID"
           if [ -z "$release_id" ]; then
             listing="$RUNNER_TEMP/buildscope-failed-release-recovery.json"
@@ -1303,7 +1345,8 @@ jobs:
           if python3 ci/check_buildscope_release_state.py \
               state "$candidate" "$TAG" "$VERSION" "$TARGET_SHA" \
               --stage draft --expected-release-id "$release_id" \
-              --expected-owner-marker "$owner_marker";
+              --expected-owner-marker "$owner_marker" \
+              --expected-body-sha256 "$draft_body_sha256";
           then
             echo "::warning::Private draft release $release_id was preserved for explicit review; no automatic deletion is safe after a publication attempt."
             {
@@ -1314,7 +1357,8 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           elif python3 ci/check_buildscope_release_state.py \
               state "$candidate" "$TAG" "$VERSION" "$TARGET_SHA" \
-              --stage final --expected-release-id "$release_id" --expected-asset-count 9;
+              --stage final --expected-release-id "$release_id" --expected-asset-count 9 \
+              --expected-body-sha256 "$final_body_sha256";
           then
             echo "Release $release_id is already public; leaving it unchanged for audit-only rerun"
           else

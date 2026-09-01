@@ -167,6 +167,58 @@ class WorkflowPublicationContractTests(unittest.TestCase):
         self.assertIn("gh api --paginate --slurp", block)
         self.assertEqual(block.count("gh api --method POST"), 1)
 
+    def test_buildscope_release_pins_exact_draft_and_final_note_bodies(self) -> None:
+        extract = _release_step_block("Extract BuildScope release notes")
+        self.assertIn("buildscope-expected-final-body.md", extract)
+        self.assertIn("buildscope-expected-draft-body.md", extract)
+        self.assertIn('notes = Path("RELEASE_NOTES.md")', extract)
+        self.assertIn('.read_text(encoding="utf-8").rstrip()', extract)
+        self.assertIn('draft = f"{notes}\\n\\n{owner_marker}"', extract)
+
+        create = _release_step_block(
+            "Create a new private draft by exact tag and commit"
+        )
+        self.assertIn("buildscope-expected-draft-body.md", create)
+        self.assertIn('"body": body', create)
+        self.assertIn("draft_body_sha256=", create)
+        self.assertIn('--expected-body-sha256 "$draft_body_sha256"', create)
+
+        for step_name in (
+            "Upload exact assets only to the new private draft",
+            "Audit private draft metadata and independently downloaded assets",
+            "Re-audit the fixed draft immediately before publication",
+        ):
+            with self.subTest(step_name=step_name):
+                block = _release_step_block(step_name)
+                self.assertIn("draft_body_sha256=", block)
+                self.assertIn('--expected-body-sha256 "$draft_body_sha256"', block)
+
+        publish = _release_step_block(
+            "Publish the fully audited draft with reconciliation"
+        )
+        self.assertIn("buildscope-expected-final-body.md", publish)
+        self.assertIn('"body": body', publish)
+        self.assertIn("final_body_sha256=", publish)
+        self.assertIn("draft_body_sha256=", publish)
+        self.assertGreaterEqual(
+            publish.count('--expected-body-sha256 "$final_body_sha256"'), 2
+        )
+        self.assertIn('--expected-body-sha256 "$draft_body_sha256"', publish)
+
+        final_audit = _release_step_block(
+            "Independently download and audit the final public release"
+        )
+        self.assertIn("buildscope-expected-final-body.md", final_audit)
+        self.assertGreaterEqual(
+            final_audit.count('--expected-body-sha256 "$final_body_sha256"'), 4
+        )
+
+        failure = _release_step_block(
+            "Preserve a failed private draft for explicit review"
+        )
+        self.assertIn('--expected-body-sha256 "$draft_body_sha256"', failure)
+        self.assertIn('--expected-body-sha256 "$final_body_sha256"', failure)
+
     def test_buildscope_release_uploads_exactly_nine_assets_without_clobber(
         self,
     ) -> None:
