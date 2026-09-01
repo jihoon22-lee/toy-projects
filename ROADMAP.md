@@ -110,9 +110,10 @@ pure wheel에 함께 패키징된다. v2 `producer.version`의 schema `maxLength
 reader의 문자열 bound도 서로 일치한다.
 strict 외부 v1 consumer는 v1 raw document가 필요하다. B2는 이 계약을 받아 normalized C++
 model/UI로 전환하는 범위다. B1 구현 범위는 완료로 표시한다. B3 include explanation은 구현과
-원격 증거까지 완료되어 `main`의 `0.4.0` candidate로 기록하며, 제품 release는 B5 hybrid
-release integration까지 기다린다. **B1 checkpoint transition (historical):** 당시에는 B4
-configuration diff가 다음 toy-project stage였고, ici I3 target-by-target 외부 대조도 완료됐다.
+원격 증거까지 완료되어 당시 `main`의 `0.4.0` candidate로 기록됐다. 별도 `0.4.0` stable
+release 대신 이후 B5 release-boundary 작업을 `0.5.0`에 포함했으며, public release readiness와
+남은 tag/release audit은 아래에 기록한다. **B1 checkpoint transition (historical):** 당시에는
+B4 configuration diff가 다음 toy-project stage였고, ici I3 target-by-target 외부 대조도 완료됐다.
 
 **B1 final local/public evidence (2026-09-01):** public
 `ici v0.7.1` cold verification은 표준 `sha256sum --check ici.pyz.sha256`가 통과했고 suite
@@ -204,7 +205,7 @@ B3 implementation과 원격 evidence는 아래에 기록한다. **B2-era roadmap
 당시 B4 configuration diff는 next toy stage였고, B5 hybrid release integration은 pending이었다.
 ici I3 target-by-target same-basename comparison은 완료됐다.
 
-## BuildScope B3 include explanation (implementation + remote evidence complete; main candidate)
+## BuildScope include explanation (implementation + remote evidence complete; historical candidate)
 
 **브랜치:** `feat/buildscope-include-explain`
 
@@ -268,10 +269,11 @@ shape으로 기록한다.
   성공했다. Push에서는 PR publish가 올바르게 skip됐고 applicable jobs와 `Merge Gate`는 성공했다.
 
 B3 implementation과 remote evidence는 complete이고 code는 `main`에 shipped됐다. `0.4.0`은
-B5 hybrid release integration 전까지 unreleased로 유지한다. ici I3 cross-repository comparison은
-완료됐으며 B4 configuration diff 구현과 PR/remote/hosted/merged-main evidence도 `main`에서 완료됐다.
+별도 stable release로 발행하지 않고 include explanation을 `0.5.0` release boundary에 포함했다.
+ici I3 cross-repository comparison은 완료됐으며 B4 configuration diff 구현과
+PR/remote/hosted/merged-main evidence도 `main`에서 완료됐다.
 
-## 완료: BuildScope B4 semantic configuration diff (implementation + remote + merged-main evidence, 2026-09-01)
+## 완료: BuildScope semantic configuration diff (implementation + remote + merged-main evidence, 2026-09-01)
 
 `feat/buildscope-config-diff`에서 개발된 B4 implementation은 두 raw `compile_commands.json`을 비교하는
 strict `buildscope.diff/v1` contract, native C++/Qt consumption, and Python-to-C++ hybrid fixture를
@@ -302,11 +304,13 @@ PR/remote/hosted evidence까지 완료됐다. PR #36는 `main`에
 같은 head에서 성공했다. 이 문단이 기록하는 B4 merge 시점에는 `0.5.0` product release artifact와
 B5 hybrid release integration이 pending/not started였다. 이후의 local B5 작업은 다음 절에 기록한다.
 
-## BuildScope B5 release-candidate groundwork (local implementation, 2026-09-01; pending)
+## BuildScope 0.5.0 release readiness (remote acceptance complete; public release pending)
 
-B5는 B4의 producer/consumer contract를 실제 배포 경계까지 연결하는 단계다. 현재
-`feat/buildscope-b5-release`에는 로컬 candidate packaging, install layout, examples/tutorial,
-release-gate 정의가 들어갔지만 제품 release 자체는 아직 만들지 않았다.
+로드맵에서 B5로 추적한 release-boundary 작업은 B4 producer/consumer contract를 실제 배포
+경계까지 연결한다. standalone packaging, install layout, examples/tutorial, release-gate와
+공개 ici `v0.10.2` pin은 구현됐고, PR #38의 원격 검증 및 PR #39의 trusted `main` Pages
+검증까지 완료됐다. 따라서 `0.5.0`은 release-ready 상태지만 annotated tag, GitHub Release,
+9개 공개 asset의 사후 digest audit 전까지는 stable release로 주장하지 않는다.
 
 - [x] `buildscope/tools/build_standalone.py`가 Python/pyproject/CMake/ici version surface를
   일치시키고 fixed zip metadata와 정렬된 package/schema payload로 `buildscope.pyz`를 생성한다.
@@ -319,16 +323,18 @@ release-gate 정의가 들어갔지만 제품 release 자체는 아직 만들지
 - [x] local ici report에서 CMake compile DB `12/12` production units·`27` configurations·`0`
   issues와 Qt codegen exact inputs `3`, MOC `1`, UIC `1`, RCC `1`, Qt6 compile units `12`를
   확인한다.
-- [ ] `clang-tidy`/`clazy`가 설치된 환경의 tool-backed deep evidence. 현재 local tool env에서는
-  둘 다 unavailable이다.
-- [ ] Python `3.10/3.14` 및 Qt `5/6` Release/CTest matrix와 generated MOC/UIC/RCC path,
-  offscreen GUI smoke의 release-workflow 실행.
-- [ ] wheel/pyz가 같은 snapshot을 만들고 native CLI가 두 결과를 소비하는 handoff와 Linux
-  x86_64 bundle의 실제 release asset 게시.
-- [ ] annotated `buildscope-vX.Y.Z` tag, exact-main/green Merge Gate provenance, PR/remote/Pages
-  evidence와 GitHub Release.
+- [x] PR #38의 hosted deep legs에서 `clang-tidy`/`clazy`를 포함한 tool-backed 검증이 실행됐다.
+  local tool env에서 두 도구가 unavailable였던 기록은 별도의 local limitation으로 유지한다.
+- [x] PR #38 CI preflight에서 Python `3.10/3.14` 및 Qt `5/6` Release/CTest matrix,
+  generated MOC/UIC/RCC path와 offscreen GUI smoke가 실행됐다. Tag-only release workflow의
+  실제 실행은 public release 단계에 남아 있다.
+- [x] PR #38 release contract가 wheel/pyz가 같은 snapshot을 만들고 native CLI가 두 결과를
+  소비하는 handoff와 Linux x86_64 bundle build를 검증했다. 실제 공개 asset 게시만 release
+  audit 단계에 남아 있다.
+- [ ] annotated `buildscope-v0.5.0` tag, exact-main/green Merge Gate provenance를 가진
+  GitHub Release, 정확히 9개 asset 업로드와 사후 digest audit.
 
-### B5 local ici evidence
+### Historical local ici evidence
 
 public ici `v0.10.0` asset의 literal SHA-256 pin
 `6d5f8c008b3b5393a61b2c1a418124eb66393c9eaab0abbb7d1c7922162bed9b`과
@@ -343,16 +349,57 @@ exact title은 `ici Verification Report — buildscope`, external refs는 `0`이
 `.github/workflows/buildscope-release.yml`은 annotated tag가 exact `origin/main`과 green Merge Gate를
 가리키는 provenance를 먼저 확인하고, Python `3.10/3.14`, Qt `5/6`, pure wheel/sdist, reproducible
 pyz, Qt6 Linux x86_64 bundle, native handoff, ici v0.10.2 sidecar/download/API digest와
-`SHA256SUMS`를 검사하도록 정의돼 있다. 예정된 asset 이름은 `buildscope.pyz`,
-`buildscope.pyz.sha256`, `buildscope-<version>-py3-none-any.whl`,
-`buildscope-<version>.tar.gz`, `buildscope-ici-deep.{json,html}`, `buildscope-provenance.json`,
-`buildscope-<version>-linux-x86_64.tar.gz`, `SHA256SUMS`다. workflow는 정의만 되었고 아직 PR/remote/
-Pages run, tag, GitHub Release가 없으므로 B5와 `0.5.0` release는 pending이다.
+`SHA256SUMS`를 검사하도록 정의돼 있다. PR #38 CI의 동등한 preflight contract는 원격
+acceptance를 완료했지만 tag-only workflow 자체는 아직 실행되지 않았다. 예정된 asset 이름은
+`buildscope.pyz`, `buildscope.pyz.sha256`,
+`buildscope-<version>-py3-none-any.whl`, `buildscope-<version>.tar.gz`,
+`buildscope-ici-deep.{json,html}`, `buildscope-provenance.json`,
+`buildscope-<version>-linux-x86_64.tar.gz`, `SHA256SUMS`다.
 
-`0.5.0`은 B3 include explanation, B4 semantic configuration diff, B5 hybrid packaging/integration을
-묶은 첫 usable BuildScope release boundary로 남긴다. 이 candidate가 stable이 되기 전까지는
-release를 주장하지 않으며, 이후의 기능과 CI/ici pin 작업은 다음 comparable checkpoint까지
-`Unreleased`에 쌓는다.
+### Release-boundary remote evidence (PR #38)
+
+[PR #38](https://github.com/jihoon22-lee/toy-projects/pull/38)의 final head
+`3ba645eae5181698e1272729dddaa8a72189b067`에 대한 [CI run
+`33545168957`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33545168957)은 PR
+검증, Python/native handoff, Python `3.10/3.14`, Qt `5/6` matrix, deep legs, release contract,
+`Publish Reports & Sticky Comment`, `Merge Gate`를 포함한 21개 check를 모두 성공시켰다. [sticky
+comment `#5494648837`](https://github.com/jihoon22-lee/toy-projects/pull/38#issuecomment-5494648837)은
+해당 exact run의 ici 검증 결과와 세 프로젝트 HTML report 링크를 기록한다. deep legs는 공개 ici
+`v0.10.2`를 literal SHA-256
+`8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4`로 검증한 뒤 실행했고,
+Qt5/Qt6 hosted tool-backed evidence와 release handoff가 원격 환경에서 확인됐다.
+
+PR #38은 `main`에 `069a3a86c0164a1d2a88710f9c3c48a398c8087e`로 squash-merge됐고 branch는
+삭제됐다. 같은 exact head의 [main CI run
+`33546046566`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33546046566)에서도
+applicable jobs와 `Merge Gate`가 성공했다.
+
+### Trusted main Pages evidence (PR #39)
+
+PR #38 merge 뒤 main report가 독립적으로 안정적으로 게시되는지 검증하기 위해 [PR
+#39](https://github.com/jihoon22-lee/toy-projects/pull/39)에서 trusted `main` publisher를
+추가했다. final head `b861ff5b4cc0314aae5ec9f6dab905648233216d`의 [CI run
+`33548626203`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33548626203)은 성공했고,
+[sticky comment `#5499184834`](https://github.com/jihoon22-lee/toy-projects/pull/39#issuecomment-5499184834)은
+그 run의 ici report 링크와 결과를 기록한다. PR #39는 `main`에
+`c80e922f0d0911019cfa8b5c67a8b654c556a68c`로 squash-merge됐고 branch는 삭제됐다. 이후 [exact-main
+run `33549475034`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33549475034)도
+성공했다.
+
+Exact-main run `33549475034` 시점의 세 main report는 HTTP 200, `text/html`, exact title
+`ici Verification Report — <project>`, Zero-CDN을 만족했고 그 실행의 산출물과 byte-match됐다.
+
+| Project | Main report | Bytes | SHA-256 |
+|---|---|---:|---|
+| BuildScope | [buildscope/main](https://jihoon22-lee.github.io/toy-projects/buildscope/main/) | 1,349,088 | `dd7ec9b49281875f812b9a9c6b4e18a028051936a37441f19d907098c05dcc65` |
+| diskmap | [diskmap/main](https://jihoon22-lee.github.io/toy-projects/diskmap/main/) | 339,929 | `1bd6ebdce2206e4538fb28c20c17f2d504f1a160e15f5d8d4e2923b15b399e65` |
+| loglens | [loglens/main](https://jihoon22-lee.github.io/toy-projects/loglens/main/) | 495,237 | `11e4c78eed957e237bcea8ec5ea64c3894751eafbe639c454e47ab0acd70df96` |
+
+`0.5.0`은 include explanation, semantic configuration diff, hybrid packaging/integration을 묶은
+첫 usable BuildScope release boundary로 남긴다. 현재 remote integration, matrices, handoff,
+release contract, trusted main Pages는 complete다. annotated tag와 GitHub Release의 정확히 9개
+asset 및 사후 digest audit이 끝나기 전까지는 public stable release를 주장하지 않으며, 이후
+기능과 CI/ici pin 작업은 다음 comparable checkpoint까지 `Unreleased`에 쌓는다.
 
 ## 배경
 

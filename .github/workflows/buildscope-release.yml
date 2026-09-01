@@ -753,58 +753,8 @@ jobs:
               sleep 5
               continue
             fi
-            if python3 - "$RUNNER_TEMP/buildscope-release.json" dist "$TAG" "$VERSION" <<'PY'
-          from __future__ import annotations
-
-          import hashlib
-          import json
-          import sys
-          from pathlib import Path
-
-          release_path, dist_path, tag, version = sys.argv[1:]
-          release = json.loads(Path(release_path).read_text(encoding="utf-8"))
-          if release.get("tag_name") != tag:
-              raise SystemExit(f"release tag mismatch: {release.get('tag_name')!r}")
-          if release.get("draft") is not False or release.get("prerelease") is not False:
-              raise SystemExit("BuildScope product release must be final, not draft/prerelease")
-
-          expected = {
-              "buildscope.pyz",
-              "buildscope.pyz.sha256",
-              f"buildscope-{version}-py3-none-any.whl",
-              f"buildscope-{version}.tar.gz",
-              "buildscope-ici-deep.json",
-              "buildscope-ici-deep.html",
-              "buildscope-provenance.json",
-              f"buildscope-{version}-linux-x86_64.tar.gz",
-              "SHA256SUMS",
-          }
-          assets = release.get("assets")
-          if not isinstance(assets, list):
-              raise SystemExit("release assets are unavailable")
-          by_name = {asset.get("name"): asset for asset in assets}
-          actual = set(by_name)
-          if actual != expected:
-              raise SystemExit(
-                  f"public asset set mismatch: missing={sorted(expected - actual)!r} "
-                  f"extra={sorted(actual - expected)!r}"
-              )
-
-          dist = Path(dist_path)
-          for name in sorted(expected):
-              asset = by_name[name]
-              local = dist / name
-              if asset.get("state") != "uploaded":
-                  raise SystemExit(f"asset is not uploaded: {name}")
-              if not local.is_file() or local.stat().st_size != asset.get("size"):
-                  raise SystemExit(f"asset size mismatch: {name}")
-              digest = "sha256:" + hashlib.sha256(local.read_bytes()).hexdigest()
-              if asset.get("digest") != digest:
-                  raise SystemExit(
-                      f"asset digest mismatch: {name}: {asset.get('digest')!r} != {digest!r}"
-                  )
-          print(f"audited final BuildScope {version}: exact 9 assets and digests")
-          PY
+            if python3 ci/check_buildscope_release_assets.py \
+              "$RUNNER_TEMP/buildscope-release.json" dist "$TAG" "$VERSION";
             then
               audit_ok=true
               break

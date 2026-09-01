@@ -17,8 +17,9 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
   이때 native tests, released-ici verification, PR 및 exact-main CI/Pages, 문서와 limitations,
   재현 가능한 release assets를 모두 확인하고 기록한다.
 - candidate, pre-release, unreleased 상태는 stable release로 간주하지 않는다.
-- BuildScope `0.5.0`은 B3/B4/B5를 묶은 첫 usable release boundary로 계속 유효하다. 이 경계
-  이후의 작업은 같은 수준의 checkpoint가 마련될 때까지 `Unreleased`에 쌓는다.
+- BuildScope `0.5.0`은 B3/B4/B5를 묶은 첫 usable release boundary로 release-ready 상태다.
+  현재 공개 tag/GitHub Release 경계만 남아 있으며, 그 이후의 작업은 같은 수준의 checkpoint가
+  마련될 때까지 `Unreleased`에 쌓는다.
 
 ## 프로젝트
 
@@ -26,7 +27,7 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 |---|---|---|
 | [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D2 cancellable/latest-generation scan complete (PR #28) · identity-safe scan · D3 next |
 | [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · L2 1 GiB benchmark merged in PR #26 · default capacity 8192 |
-| [buildscope](buildscope/) | compile DB explorer | B4 shipped on `main` · B5 local release-candidate packaging/examples and gate groundwork · 0.5.0 release pending |
+| [buildscope](buildscope/) | compile DB explorer | 0.5.0 release-ready · public tag/GitHub Release pending |
 
 ### buildscope B0 hybrid skeleton — release-backed evidence
 
@@ -95,10 +96,11 @@ functions였다. PR 100k benchmark는 model `53 ms`, filter `1,518 ms`, summary 
 | [diskmap](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/32/) | 311,846 | `752f07251bc38285ea1633f5df879985131963e4b99f90532722eaedc9be1802` | `ici Verification Report — diskmap` |
 | [loglens](https://jihoon22-lee.github.io/toy-projects/loglens/pr/32/) | 446,791 | `7b2669fb7de82ada30bfdf28a2d82533f5566ad92779ea08c90528e188ea582b` | `ici Verification Report — loglens` |
 
-### buildscope B3 include explanation — 0.4.0 main candidate (implementation + remote evidence complete)
+### BuildScope 0.4.0 — historical include-resolution implementation and evidence
 
-BuildScope B3 구현은 PR #34에서 검증되어 `main`에 들어간 `0.4.0` main candidate다. 제품
-버전 `0.4.0`은 B5 hybrid release integration 전까지 release하지 않는다. 옵션을 생략하면
+BuildScope B3 구현에 대한 historical record다. PR #34에서 검증되어 `main`에 들어간 `0.4.0`
+main candidate였으며, 당시 제품 버전 `0.4.0`은 B5 hybrid release integration 전까지 release하지
+않았다. 옵션을 생략하면
 기존처럼 normalized `buildscope.snapshot/v2`를 만들고, `--schema-version v1`은 raw compatibility
 projection을 유지한다. `--include-analysis estimate|compiler`는 명시적으로 `v3`를 만들며,
 `--schema-version v3`만 쓰면 `estimate`가 기본이다. v3는 root/entry/analysis/edge/search/
@@ -196,9 +198,10 @@ has exactly one marker and three hosted-report links.
 | loglens | [loglens/pr/36](https://jihoon22-lee.github.io/toy-projects/loglens/pr/36/) | 492,746 | `0480f07aea266c0777403ac37ebf90d4acd10f84b04e49aa2a9ccf99a6153007` |
 
 All three Pages responses were HTTP 200 with the exact `ici Verification Report — <project>` title
-and zero external resource references. B4 implementation plus remote/hosted/merged-main evidence is complete on
-`main` after PR #36; the `0.5.0` product release artifact and B5 hybrid release integration remain
-pending/not started.
+and zero external resource references. Historical boundary note from PR #36: B4 implementation plus
+remote/hosted/merged-main evidence was complete on `main`, while the `0.5.0` product release artifact
+and B5 hybrid release integration were pending/not started. The later release-boundary evidence is
+recorded in the current section below.
 
 PR #36 was squash-merged to `main` as
 `590899a0a9430e9ce35162b301bfef5d7dfc78a4`, and its feature branch was deleted. Exact-main CI
@@ -207,9 +210,11 @@ with all 14 prerequisite jobs and `Merge Gate` successful; the PR-only publisher
 [Dependency Graph run `33488174425`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33488174425)
 also succeeded on the same head.
 
-### buildscope B5 release candidate — local packaging and integration groundwork (pending)
+### BuildScope 0.5.0 release evidence — reproducible hybrid packaging and public validation
 
-B5의 현재 범위는 구현된 B4를 배포 가능한 경계까지 연결하는 로컬 candidate slice다. `tools/build_standalone.py`는
+이 절은 구현된 B4를 배포 가능한 경계까지 연결한 BuildScope `0.5.0`의 release evidence를
+기록한다. 현재 상태는 release-ready이며, public tag/GitHub Release만 남아 있다.
+`tools/build_standalone.py`는
 Python/CMake/ici 버전 surface를 일치시키고 고정 zip metadata·정렬된 payload·schema inventory로
 재현 가능한 `buildscope.pyz`를 만들며, direct test는 두 번의 산출물이 byte-identical인지 확인한다.
 `CMakeLists.txt`의 install rule은 native `buildscope-cli`/`buildscope-gui`, 문서, examples, schemas를
@@ -217,7 +222,7 @@ Python/CMake/ici 버전 surface를 일치시키고 고정 zip metadata·정렬�
 `buildscope.pyz` 또는 `buildscope-0.5.0-py3-none-any.whl`로 compile DB를 JSON으로 만들고
 native CLI/GUI에서 소비하는 흐름, CMake/qmake examples와 qmake capture 제한을 설명한다.
 
-2026-09-01 로컬 B5 실측은 public ici `v0.10.0` asset을 literal
+2026-09-01의 historical local B5 실측은 public ici `v0.10.0` asset을 literal
 `ICI_PYZ_SHA256=6d5f8c008b3b5393a61b2c1a418124eb66393c9eaab0abbb7d1c7922162bed9b`로 고정하고,
 `ICI_PYTHON=/tmp/toy-b5-py310/bin/python` tool environment에서 deep/no-cache로 실행했다. 결과는
 `Suite WARN`, 14 engines = `11 PASS / 3 WARN / 0 FAIL / 0 ERROR / 0 SKIP`, tests `96/96`,
@@ -226,9 +231,8 @@ configurations·`0` issues였다. Qt codegen은 exact input `3`, MOC `1`, UIC `1
 compile units `12`를 기록했다. HTML은 1,264,867 bytes / SHA-256
 `4e12e77ee11f98b2d5bb146bd3d08252b088083726e6f11235e25a449471a565`, JSON은 2,873,207 bytes /
 SHA-256 `ea5fce118e6edad8fa5af24c821663e4290805570377e9b7c190de8da1029612`이며 title은
-`ici Verification Report — buildscope`, external refs는 `0`이다. 다만 로컬에는 `clang-tidy`와
-`clazy`가 설치되지 않아 unavailable로 남았고, tool-backed deep gate는 release runner에서 아직
-검증되지 않았다.
+`ici Verification Report — buildscope`, external refs는 `0`이다. 당시 로컬에는 `clang-tidy`와
+`clazy`가 설치되지 않아 unavailable로 남았지만, 이 제한은 아래 원격 PR gate에서 보완됐다.
 
 `.github/workflows/buildscope-release.yml`은 annotated `buildscope-vX.Y.Z` tag가 exact `origin/main`
 및 green `Merge Gate`를 가리키는지 확인하고, Python `3.10/3.14`와 Qt `5/6` Release/CTest matrix,
@@ -236,13 +240,41 @@ MOC/UIC/RCC generated-path 검사, Qt6 native bundle, wheel/pyz-to-native-CLI ha
 literal SHA/API digest 검증을 정의한다. 예정된 top-level release assets는
 `buildscope.pyz`, `buildscope.pyz.sha256`, pure `buildscope-<version>-py3-none-any.whl`, sdist,
 `buildscope-ici-deep.{json,html}`, `buildscope-provenance.json`,
-`buildscope-<version>-linux-x86_64.tar.gz`, `SHA256SUMS`다. 아직 이 workflow의 PR/remote/Pages 실행,
-annotated tag, GitHub Release는 없으므로 B5와 `0.5.0` 제품 release는 pending이다.
+`buildscope-<version>-linux-x86_64.tar.gz`, `SHA256SUMS`다. 동등한 CI preflight와 exact-main
+검증은 완료됐지만 tag-only workflow 자체는 아직 실행되지 않았다. Annotated tag와 GitHub
+Release는 최종 release boundary 실행 전까지 pending이다.
+
+#### Release-boundary verification
+
+현재 deep 검증은 public ici `v0.10.2`를 literal SHA-256
+`8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4`로 고정한다.
+[PR #38](https://github.com/jihoon22-lee/toy-projects/pull/38)의 head
+`3ba645eae5181698e1272729dddaa8a72189b067`는 [run `33545168957`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33545168957)에서
+통과했고, [sticky comment #5494648837](https://github.com/jihoon22-lee/toy-projects/pull/38#issuecomment-5494648837)에
+세 HTML report link가 게시됐다. PR은 `069a3a86c0164a1d2a88710f9c3c48a398c8087e`로
+squash-merge됐으며, exact-main [run `33546046566`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33546046566)도
+통과했다.
+
+정확한 `main` Pages publisher는 [PR #39](https://github.com/jihoon22-lee/toy-projects/pull/39)의 head
+`b861ff5b4cc0314aae5ec9f6dab905648233216d`에서 [run `33548626203`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33548626203)와
+[sticky comment #5499184834](https://github.com/jihoon22-lee/toy-projects/pull/39#issuecomment-5499184834)를
+통해 검증됐다. PR은 `c80e922f0d0911019cfa8b5c67a8b654c556a68c`로 squash-merge됐고,
+exact-main [run `33549475034`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33549475034)도
+통과했다.
+
+Exact-main run `33549475034` 시점의 stable `main` Pages 응답은 모두 HTTP 200, exact title,
+Zero-CDN이며 그 실행의 local artifact와 byte-match됐다.
+
+| Project | Hosted report | Bytes | SHA-256 |
+|---|---|---:|---|
+| BuildScope | [buildscope/main](https://jihoon22-lee.github.io/toy-projects/buildscope/main/) | 1,349,088 | `dd7ec9b49281875f812b9a9c6b4e18a028051936a37441f19d907098c05dcc65` |
+| diskmap | [diskmap/main](https://jihoon22-lee.github.io/toy-projects/diskmap/main/) | 339,929 | `1bd6ebdce2206e4538fb28c20c17f2d504f1a160e15f5d8d4e2923b15b399e65` |
+| loglens | [loglens/main](https://jihoon22-lee.github.io/toy-projects/loglens/main/) | 495,237 | `11e4c78eed957e237bcea8ec5ea64c3894751eafbe639c454e47ab0acd70df96` |
 
 `0.5.0`은 B3 include explanation, B4 semantic configuration diff, B5 hybrid packaging/integration을
-한데 묶는 첫 usable BuildScope release boundary로 유지한다. B5의 local candidate 기록이나 ici
-ici pin 변경만으로 stable release 또는 다음 버전 bump를 만들지 않으며, `0.5.0` 이후의
-기능은 위 checkpoint 증거가 다시 모일 때까지 `Unreleased`에 기록한다.
+한데 묶는 첫 usable BuildScope release boundary로 release-ready 상태다. B5의 historical local
+candidate 기록이나 ici pin 변경만으로 stable release 또는 다음 버전 bump를 만들지 않으며,
+`0.5.0` 이후의 기능은 다음 comparable checkpoint가 마련될 때까지 `Unreleased`에 기록한다.
 
 ## 공통 구조 규칙
 

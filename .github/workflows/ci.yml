@@ -43,6 +43,7 @@ jobs:
           python3 -m unittest \
             ci/test_check_manifest.py \
             ci/test_check_published_html.py \
+            ci/test_check_buildscope_release_assets.py \
             ci/test_ci_workflow_contract.py \
             -v
           python3 ci/check_manifest.py
