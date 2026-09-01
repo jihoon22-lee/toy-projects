@@ -7,10 +7,19 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
+from unittest import mock
+
+from tools.build_standalone import build_standalone, main
 
 
 class StandaloneReleaseTests(unittest.TestCase):
+    project_root: Path
+    builder: Path
+    database: Path
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.project_root = Path(__file__).resolve().parents[2]
@@ -18,15 +27,10 @@ class StandaloneReleaseTests(unittest.TestCase):
         cls.database = cls.project_root / "fixtures/compile_commands.json"
 
     def _build(self, output: Path) -> str:
-        result = subprocess.run(
-            [sys.executable, str(self.builder), "--output", str(output)],
-            cwd=self.project_root,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        self.assertIn("BuildScope 0.5.0", result.stdout)
-        return hashlib.sha256(output.read_bytes()).hexdigest()
+        version, digest = build_standalone(self.project_root, output)
+        self.assertEqual(version, "0.5.0")
+        self.assertEqual(digest, hashlib.sha256(output.read_bytes()).hexdigest())
+        return digest
 
     def test_archive_is_reproducible_and_contains_public_schemas(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -72,6 +76,43 @@ class StandaloneReleaseTests(unittest.TestCase):
         self.assertEqual(payload["schema_version"], "buildscope.snapshot/v2")
         self.assertEqual(payload["producer"]["version"], "0.5.0")
         self.assertEqual(payload["source"]["entry_count"], 2)
+
+    def test_builder_cli_reports_the_version_output_and_digest(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "buildscope.pyz"
+            stdout = StringIO()
+            with (
+                mock.patch.object(
+                    sys,
+                    "argv",
+                    [
+                        str(self.builder),
+                        "--project-root",
+                        str(self.project_root),
+                        "--output",
+                        str(output),
+                    ],
+                ),
+                redirect_stdout(stdout),
+            ):
+                self.assertEqual(main(), 0)
+
+            digest = hashlib.sha256(output.read_bytes()).hexdigest()
+
+        self.assertIn("built BuildScope 0.5.0", stdout.getvalue())
+        self.assertIn(f"sha256:{digest}", stdout.getvalue())
+
+    def test_builder_refuses_to_replace_a_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "buildscope.pyz"
+            try:
+                output.symlink_to(root / "redirected.pyz")
+            except OSError as error:
+                self.skipTest(f"symlink creation is unavailable: {error}")
+
+            with self.assertRaisesRegex(ValueError, "refusing to replace symlink"):
+                build_standalone(self.project_root, output)
 
 
 if __name__ == "__main__":
