@@ -944,15 +944,16 @@ analysis를 생략하면 기존 normalized `buildscope.snapshot/v2`가 기본이
 
 B3 implementation과 remote evidence는 complete이고 code는 `main`에 shipped됐다. `0.4.0`은
 B5 hybrid release integration 전까지 unreleased로 유지한다. ici I3 cross-repository comparison은
-완료됐으며 B4 configuration diff는 현재 `0.5.0` feature-branch candidate이고 implementation과
-PR/remote/hosted evidence가 complete다.
+완료됐으며 B4 configuration diff는 현재 `0.5.0` main candidate이고 implementation과
+PR/remote/hosted/merged-main evidence가 complete다.
 
 ### B4. configuration diff (implementation complete; 0.5.0 candidate, unreleased)
 
-**브랜치:** `feat/buildscope-config-diff`
+**코드 기준 브랜치:** `main` (PR #36 squash-merge 완료; feature branch 삭제)
 
-**현재 상태:** B4 implementation은 현재 feature branch의 `0.5.0` candidate에 반영됐고
-PR/remote/hosted evidence까지 complete다. 입력은 두 개의 raw `compile_commands.json`만 받고,
+**현재 상태:** B4 implementation은 `feat/buildscope-config-diff`에서 개발된 뒤 PR #36로 `main`의
+`0.5.0` candidate에 반영됐고 PR/remote/hosted/merged-main evidence까지 complete다. 입력은 두 개의
+raw `compile_commands.json`만 받고,
 snapshot v1/v2/v3는 기존 producer compatibility 경계로 유지한다. 출력은 strict
 `buildscope.diff/v1`이며 Python producer, C++ parser/model, Qt GUI와 hybrid contract가 같은
 의미론을 사용한다.
@@ -997,13 +998,18 @@ marker 1개와 current-run link 및 hosted report link 3개를 포함한다.
 | loglens | [loglens/pr/36](https://jihoon22-lee.github.io/toy-projects/loglens/pr/36/) | 492,746 | `0480f07aea266c0777403ac37ebf90d4acd10f84b04e49aa2a9ccf99a6153007` |
 
 세 Pages report는 HTTP 200, exact title, external resource reference 0개였다. 따라서 B4
-implementation과 PR/remote/hosted evidence는 complete이고, `0.5.0` product release artifact와
+implementation과 PR/remote/hosted evidence는 complete다. PR #36는 `main`에
+`590899a0a9430e9ce35162b301bfef5d7dfc78a4`로 squash-merge됐고 feature branch는 삭제됐다. Exact-main
+[CI run `33488169769`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33488169769)는 14개
+선행 job과 `Merge Gate`가 모두 성공했으며 PR-only publisher는 expected skip이었다.
+[Dependency Graph run `33488174425`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33488174425)도
+같은 head에서 성공했다. 따라서 B4는 `main`에 shipped됐지만 `0.5.0` product release artifact와
 B5 hybrid release integration은 pending/not started다.
 
 ### B5. hybrid integration과 release (B4 이후 대기)
 
 **선행 조건:** B3/B4 implementation과 ici I3 compile-context 기능이 public release로 제공되어야
-한다. B4 implementation과 PR/remote/hosted evidence는 complete지만 `0.5.0` product release
+한다. B4 implementation과 PR/remote/hosted/merged-main evidence는 complete지만 `0.5.0` product release
 artifact가 아직 없으므로 B5 hybrid integration과 제품 release는 아직 시작하지 않았다.
 clang-tidy/clazy deep-profile 완료 조건은 ici I4의 tool-backed analyzer가 검증·릴리스된 뒤에
 닫는다.
@@ -1327,7 +1333,7 @@ ici와 toy-projects가 함께 바뀌는 기능은 다음 순서를 따른다.
 8. benchmark 결과가 안정되면 ici Make/ABI I7와 함께 A0/A1 abilens를 시작한다.
 
 이 순서는 계획 수립 당시의 역사적 실행 순서다. 현재는 B0~B4 implementation과 B4
-PR/remote/hosted evidence가 완료됐고, `0.5.0` release boundary와 B5 hybrid integration은
+PR/remote/hosted/merged-main evidence가 완료됐고, `0.5.0` release boundary와 B5 hybrid integration은
 아직 열려 있다. 2026-09-01 기준 BuildScope의 다음 경계는 B5 configuration-diff hybrid
 release이며, ici I3 cross-repository comparison은 완료됐다. 이 순서를 다시 바꾸려면 제품
 dependency나 ici release boundary라는 구체적 근거를 문서에 남긴다.

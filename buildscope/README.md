@@ -1,8 +1,9 @@
 # BuildScope
 
 BuildScope 0.5.0 is the current unreleased B4 configuration-diff candidate on
-`feat/buildscope-config-diff`. B4 implementation plus PR/remote/hosted evidence is complete; the
-product release remains pending. B0 established the producer/consumer boundary:
+`main`, developed on `feat/buildscope-config-diff` and shipped by PR #36. B4 implementation plus
+PR/remote/hosted/merged-main evidence is complete; the product release remains pending. B0 established
+the producer/consumer boundary:
 Python 3.10+ reads a `compile_commands.json` without executing its commands and emits a
 deterministic `buildscope.snapshot/v1` document; a C++20/Qt CLI and GUI validate and consume that
 document. B1 adds the Python compile-database normalization core and emits the additive
@@ -15,8 +16,8 @@ verified in [PR #32](https://github.com/jihoon22-lee/toy-projects/pull/32). B3 a
 include explanation while keeping v2 as the default. B3 implementation and remote evidence are
 complete on `main`; B5 hybrid release integration remains before the product version is released.
 B4 adds semantic comparison of two raw compile databases. The implementation, native contract tests,
-PR/remote CI, sticky report, and hosted Pages evidence are complete on the feature branch; the 0.5.0
-release artifact and B5 hybrid release boundary remain pending.
+PR/remote CI, sticky report, hosted Pages evidence, and merged-main CI are complete on `main`; the
+0.5.0 release artifact and B5 hybrid release boundary remain pending.
 
 ## B0 scope
 
@@ -49,7 +50,7 @@ The B0 `v1` snapshot remains the raw compatibility boundary. B1 normalization is
 the Python producer, while B2 presents the normalized view and retains the raw compatibility fields.
 B1 owns contract acceptance; B2 owns the normalized C++ model/UI transition and is complete. B3's
 include explanation is implemented and remotely verified in the `0.4.0` main candidate. B4's
-configuration diff implementation and PR/remote/hosted evidence are recorded below, while the 0.5.0
+configuration diff implementation and PR/remote/hosted/merged-main evidence are recorded below, while the 0.5.0
 release artifact and hybrid release integration (B5) remain pending and the ici I3 target-by-target
 comparison is complete.
 
@@ -351,8 +352,8 @@ the same head.
 
 B3 implementation and remote evidence are complete and the code is shipped to `main`; `0.4.0` remains
 unreleased until B5 hybrid release integration. ici I3 cross-repository comparison is complete, and
-B4 configuration diff is the current `0.5.0` feature-branch candidate with implementation and remote
-evidence complete.
+B4 configuration diff is the current `0.5.0` main candidate with implementation and
+remote/merged-main evidence complete.
 
 ## B4 semantic configuration diff (`0.5.0` candidate, unreleased)
 
@@ -441,7 +442,7 @@ was 1,235,505 bytes, SHA-256
 `ici Verification Report — buildscope`. This historical local result is separate from the current
 v0.9.1 remote evidence below.
 
-### B4 PR #36 remote integration evidence (2026-09-01)
+### B4 PR #36 and merged-main remote integration evidence (2026-09-01)
 
 B4 implementation and PR/remote/hosted evidence are complete on [PR #36](https://github.com/jihoon22-lee/toy-projects/pull/36),
 head `ce64613263f0c4358579012aab135e0b23341a0e`. [Run `33485837830`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33485837830)
@@ -462,6 +463,13 @@ The three hosted Pages reports were HTTP 200 with exact titles and zero external
 | loglens | [loglens/pr/36](https://jihoon22-lee.github.io/toy-projects/loglens/pr/36/) | 492,746 | `0480f07aea266c0777403ac37ebf90d4acd10f84b04e49aa2a9ccf99a6153007` |
 
 The `0.5.0` product release artifact and B5 hybrid integration remain pending/not started.
+
+PR #36 was squash-merged to `main` as
+`590899a0a9430e9ce35162b301bfef5d7dfc78a4`, and its feature branch was deleted. Exact-main
+[CI run `33488169769`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33488169769) completed
+with all 14 prerequisite jobs and `Merge Gate` successful; the PR-only publisher was skipped as expected.
+[Dependency Graph run `33488174425`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33488174425)
+also succeeded on the same head.
 
 ## Run without installing into the repository
 
@@ -603,7 +611,7 @@ external dependencies:
 
 B1 implementation and PR #31 remote integration evidence are complete. B2 implementation and its
 local/public verification are recorded below. B3 implementation and remote evidence are recorded
-above; B4 implementation and PR/remote/hosted evidence are recorded above, while the 0.5.0 release
+above; B4 implementation and PR/remote/hosted/merged-main evidence are recorded above, while the 0.5.0 release
 artifact and B5 hybrid release integration remain pending; the ici I3 target-by-target comparison is
 complete.
 
@@ -641,5 +649,5 @@ titles and zero external resource references:
 | [loglens](https://jihoon22-lee.github.io/toy-projects/loglens/pr/32/) | 446,791 | `7b2669fb7de82ada30bfdf28a2d82533f5566ad92779ea08c90528e188ea582b` | `ici Verification Report — loglens` |
 
 B3 implementation and remote evidence are recorded above. B4 configuration diff implementation and
-PR/remote/hosted evidence are recorded above; the 0.5.0 release artifact and B5 hybrid release
+PR/remote/hosted/merged-main evidence are recorded above; the 0.5.0 release artifact and B5 hybrid release
 integration remain future work, while the ici I3 target-by-target same-basename comparison is complete.
