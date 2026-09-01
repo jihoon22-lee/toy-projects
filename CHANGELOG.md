@@ -97,13 +97,18 @@
   `9e262730b49420c59ee115cf389881dbfbb944b6a96ca1d397a1ecb247ec17ca`. The v0.10.0
   local measurements below remain historical evidence; this dependency correction does not change
   the BuildScope `0.5.0` product version.
+- The Qt5/Qt6 deep legs temporarily build the exact ici diagnostic-correction candidate
+  `040e61e64df20d64923df80a6c7ea29993e5c3ac` while the ordinary portfolio jobs continue to
+  exercise the public v0.10.1 checksum pin. This is cross-repository candidate evidence, not a
+  stable ici release or a BuildScope version change; the final branch will return to a released
+  ici artifact after the candidate gate succeeds.
 - The first B5 PR deep matrix exposed a Qt5-only sanitizer failure in `test_main_window`: all 12
   test functions passed (14 QtTest lifecycle result entries), then LeakSanitizer found 1,288 bytes
   retained by deferred Qt5 offscreen/fontconfig/widget work at process shutdown. The test now drains
-  deferred-delete and event work after every case. A rebuilt Qt5 ASan/UBSan binary using the same
-  toolchain and configuration passes with the original `detect_leaks=1` policy, and the full
-  sanitizer CTest tree is `9/9`; the cleanup does not weaken sanitizer policy. The Qt5 deep workflow
-  additionally suppresses only residual stacks through the known `libqoffscreen.so` platform plugin
+  deferred-delete and event work after every case, removing the test-owned portion. A rebuilt local
+  Qt5 ASan/UBSan tree passes `9/9` with the original `detect_leaks=1` policy, while the hosted
+  Ubuntu 24.04 image still reports smaller process-global offscreen-plugin allocations. The Qt5 deep
+  workflow suppresses only residual stacks through the known `libqoffscreen.so` platform plugin
   using `LSAN_OPTIONS` with `detect_leaks=1`; Qt6 remains unsuppressed. The control fixture
   `ci/fixtures/outside/project_leak.cpp` runs with the same options and must still produce a
   nonzero LeakSanitizer result, proving project-owned leaks remain visible.

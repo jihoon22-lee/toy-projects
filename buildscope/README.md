@@ -512,13 +512,18 @@ historical/local baseline (`9/9`, or `10/10` with the opt-in benchmark); the B5 
 defines fresh Python `3.10/3.14` and Qt `5/6` legs. The first PR deep run exposed a Qt5-only
 LeakSanitizer failure after all 12 `test_main_window` test functions passed (14 QtTest lifecycle
 result entries). Draining deferred-delete
-and event work in the QtTest `cleanup()` hook removes the retained Qt5 offscreen/fontconfig/widget
-state: a rebuilt instrumented binary using the same toolchain and configuration, plus the full
-`9/9` CTest tree, pass with `detect_leaks=1` still
-enabled. The Qt5 deep workflow now uses a narrow `LSAN_OPTIONS` suppression for residual
-`libqoffscreen.so` platform-plugin process-global state while retaining `detect_leaks=1`; Qt6 has no
+and event work in the QtTest `cleanup()` hook removes the test-owned portion: the rebuilt local
+instrumented `9/9` CTest tree passes with `detect_leaks=1`. The hosted Ubuntu 24.04 Qt5 image still
+retains smaller process-global offscreen-plugin allocations, so its deep workflow uses a narrow
+`LSAN_OPTIONS` suppression for `libqoffscreen.so` while retaining `detect_leaks=1`; Qt6 has no
 suppression. Its `ci/fixtures/outside/project_leak.cpp` control runs under the same options and must
 still return nonzero with a LeakSanitizer diagnostic, so project-owned leaks remain visible.
+
+For the corrective ici integration rerun, only the Qt5/Qt6 deep legs build exact ici commit
+`040e61e64df20d64923df80a6c7ea29993e5c3ac`; the ordinary portfolio jobs still download and verify
+the public v0.10.1 checksum. This temporary source-pinned candidate distinguishes pre-release
+evidence from a stable dependency. It is replaced by a released ici checksum before BuildScope is
+merged or tagged.
 
 ### B5 release contract (defined, not published)
 

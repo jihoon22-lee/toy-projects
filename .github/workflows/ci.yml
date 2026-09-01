@@ -558,7 +558,9 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  # B5 runs the public ici release against the native project once per Qt major.
+  # B5 normally runs the public ici release against the native project once per Qt major.
+  # While the exact diagnostic fix is under review, this branch builds that public commit as an
+  # explicit candidate for the deep legs; the ordinary portfolio jobs still exercise v0.10.1.
   # The build directory is deliberately the path discovered by BuildScope's ici
   # configuration, so compile-db, codegen, and tool-backed C++ evidence all
   # describe the exact matrix build rather than a checked-in fixture.
@@ -578,6 +580,14 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Checkout exact ici diagnostic candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: jihoon22-lee/ici
+          ref: 040e61e64df20d64923df80a6c7ea29993e5c3ac
+          path: ici-candidate
+          persist-credentials: false
+
       - name: Set up Python 3.10
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -585,6 +595,19 @@ jobs:
 
       - name: Set up uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
+      - name: Build exact ici diagnostic candidate
+        working-directory: ici-candidate
+        run: |
+          set -euo pipefail
+          expected_sha=040e61e64df20d64923df80a6c7ea29993e5c3ac
+          test "$(git rev-parse HEAD)" = "$expected_sha"
+          chmod +x scripts/build-pyz.sh scripts/launcher.sh
+          ./scripts/build-pyz.sh
+          test -x dist/ici.pyz
+          echo "ICI_DEEP_BIN=$PWD/dist/ici.pyz" >> "$GITHUB_ENV"
+          printf 'ici candidate %s  ' "$expected_sha"
+          sha256sum dist/ici.pyz
 
       - name: Install pinned Python analysis and test tools
         run: |
@@ -660,7 +683,7 @@ jobs:
           chmod +x ici.pyz
           ICI_PYTHON="$ICI_PYTHON" ./ici.pyz --version
 
-      - name: Verify BuildScope with deep no-cache ici
+      - name: Verify BuildScope with exact ici candidate
         env:
           QT_MAJOR: ${{ matrix.qt_major }}
           QT_QPA_PLATFORM: offscreen
@@ -675,10 +698,10 @@ jobs:
             suppression_file="$GITHUB_WORKSPACE/ci/fixtures/outside/qt5-offscreen-platform.supp"
             test -f "$suppression_file"
             LSAN_OPTIONS="detect_leaks=1:suppressions=$suppression_file" \
-              ../ici.pyz verify --profile deep --no-cache --report \
+              "$ICI_DEEP_BIN" verify --profile deep --no-cache --report \
                 --html verify_report.html --github-summary
           else
-            ../ici.pyz verify --profile deep --no-cache --report \
+            "$ICI_DEEP_BIN" verify --profile deep --no-cache --report \
               --html verify_report.html --github-summary
           fi
           cd "$GITHUB_WORKSPACE"
