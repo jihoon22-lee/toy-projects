@@ -105,19 +105,31 @@ class BuildScopeReleaseStateTests(unittest.TestCase):
     ) -> str:
         return f"<!-- buildscope-release-owner:{owner_repo}:{run_id}:{target_sha} -->"
 
+    def _body_sha256(self, body: object) -> str:
+        if not isinstance(body, str):
+            raise TypeError("test release body must be a string")
+        return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
     def _recover(
         self,
         release: dict[str, object],
         *,
         owner_marker: str | None = None,
+        expected_body_sha256: str | None = None,
     ) -> int:
         self._write(self.pages_json, [[release]])
+        body_sha256 = (
+            self._body_sha256(release.get("body"))
+            if expected_body_sha256 is None
+            else expected_body_sha256
+        )
         return recover_owned_draft(
             self.pages_json,
             TAG,
             VERSION,
             TARGET_SHA,
             self._owner_marker() if owner_marker is None else owner_marker,
+            body_sha256,
         )
 
     def test_empty_and_matching_final_release_slots_succeed(self) -> None:
@@ -306,6 +318,20 @@ class BuildScopeReleaseStateTests(unittest.TestCase):
         )
         self.assertEqual(self._recover(release), RELEASE_ID)
 
+    def test_recovery_rejects_a_body_changed_after_creation(self) -> None:
+        marker = self._owner_marker()
+        expected_body = f"release notes\n\n{marker}"
+        release = self._release(
+            draft=True,
+            assets=[],
+            body=f"edited release notes\n\n{marker}",
+        )
+        with self.assertRaisesRegex(BuildScopeReleaseStateError, "body SHA-256"):
+            self._recover(
+                release,
+                expected_body_sha256=self._body_sha256(expected_body),
+            )
+
     def test_recovery_accepts_missing_or_arbitrary_api_target_commitish(self) -> None:
         marker = self._owner_marker()
         for target_commitish in (None, "refs/heads/main"):
@@ -335,6 +361,7 @@ class BuildScopeReleaseStateTests(unittest.TestCase):
                 VERSION,
                 TARGET_SHA,
                 self._owner_marker(),
+                self._body_sha256(owned["body"]),
             )
 
         self._write(self.pages_json, [[]])
@@ -345,6 +372,7 @@ class BuildScopeReleaseStateTests(unittest.TestCase):
                 VERSION,
                 TARGET_SHA,
                 self._owner_marker(),
+                self._body_sha256(owned["body"]),
             )
 
     def test_recovery_rejects_wrong_state_name_assets_and_id(self) -> None:
@@ -433,6 +461,7 @@ class BuildScopeReleaseStateTests(unittest.TestCase):
                     VERSION,
                     TARGET_SHA,
                     owner_marker,
+                    self._body_sha256(self._owner_marker()),
                 )
 
     def test_rejects_duplicate_json_keys_and_huge_integers(self) -> None:
@@ -584,6 +613,7 @@ class BuildScopeReleaseStateTests(unittest.TestCase):
                         VERSION,
                         TARGET_SHA,
                         self._owner_marker(),
+                        self._body_sha256(self._owner_marker()),
                     ]
                 ),
                 0,

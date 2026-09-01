@@ -182,6 +182,7 @@ class WorkflowPublicationContractTests(unittest.TestCase):
         self.assertIn('"body": body', create)
         self.assertIn("draft_body_sha256=", create)
         self.assertIn('--expected-body-sha256 "$draft_body_sha256"', create)
+        self.assertIn('"$owner_marker" "$draft_body_sha256"', create)
 
         for step_name in (
             "Upload exact assets only to the new private draft",
@@ -216,6 +217,7 @@ class WorkflowPublicationContractTests(unittest.TestCase):
         failure = _release_step_block(
             "Preserve a failed private draft for explicit review"
         )
+        self.assertIn('"$owner_marker" "$draft_body_sha256"', failure)
         self.assertIn('--expected-body-sha256 "$draft_body_sha256"', failure)
         self.assertIn('--expected-body-sha256 "$final_body_sha256"', failure)
 

@@ -205,6 +205,19 @@ def _validate_owner_marker_body(
         )
 
 
+def _validate_body_sha256(release: dict[str, Any], expected_body_sha256: str) -> None:
+    if SHA256_PATTERN.fullmatch(expected_body_sha256) is None:
+        raise BuildScopeReleaseStateError(
+            "expected release body SHA-256 must be lowercase hexadecimal"
+        )
+    actual_body_sha256 = hashlib.sha256(_release_body_bytes(release)).hexdigest()
+    if actual_body_sha256 != expected_body_sha256:
+        raise BuildScopeReleaseStateError(
+            "release body SHA-256 mismatch: "
+            f"{actual_body_sha256} != {expected_body_sha256}"
+        )
+
+
 def _release_id(release: dict[str, Any]) -> int:
     release_id = release.get("id")
     if (
@@ -270,16 +283,7 @@ def _validate_release_state(
         )
         _validate_owner_marker_body(release, expected_owner_marker)
     if expected_body_sha256 is not None:
-        if SHA256_PATTERN.fullmatch(expected_body_sha256) is None:
-            raise BuildScopeReleaseStateError(
-                "expected release body SHA-256 must be lowercase hexadecimal"
-            )
-        actual_body_sha256 = hashlib.sha256(_release_body_bytes(release)).hexdigest()
-        if actual_body_sha256 != expected_body_sha256:
-            raise BuildScopeReleaseStateError(
-                "release body SHA-256 mismatch: "
-                f"{actual_body_sha256} != {expected_body_sha256}"
-            )
+        _validate_body_sha256(release, expected_body_sha256)
     return release_id
 
 
@@ -381,6 +385,7 @@ def _validate_owned_draft(
     tag: str,
     version: str,
     expected_owner_marker: str,
+    expected_body_sha256: str,
 ) -> int:
     release_id = _release_id(release)
     expected = {
@@ -402,6 +407,7 @@ def _validate_owned_draft(
             f"owned draft must have zero assets: {actual!r}"
         )
     _validate_owner_marker_body(release, expected_owner_marker)
+    _validate_body_sha256(release, expected_body_sha256)
     return release_id
 
 
@@ -411,6 +417,7 @@ def recover_owned_draft(
     version: str,
     target_sha: str,
     owner_marker: str,
+    expected_body_sha256: str,
 ) -> int:
     """Recover one private draft created by this exact workflow run.
 
@@ -431,7 +438,9 @@ def recover_owned_draft(
         raise BuildScopeReleaseStateError(
             f"release slot contains {len(matches)} entries for {tag}"
         )
-    return _validate_owned_draft(matches[0], tag, version, owner_marker)
+    return _validate_owned_draft(
+        matches[0], tag, version, owner_marker, expected_body_sha256
+    )
 
 
 def _positive_id(value: str) -> int:
@@ -464,6 +473,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     recover_parser.add_argument("version")
     recover_parser.add_argument("target_sha")
     recover_parser.add_argument("owner_marker")
+    recover_parser.add_argument("expected_body_sha256")
 
     state_parser = subparsers.add_parser("state", help="validate one release response")
     state_parser.add_argument("release_json", type=Path)
@@ -499,6 +509,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.version,
                 args.target_sha,
                 args.owner_marker,
+                args.expected_body_sha256,
             )
             print(release_id)
         else:

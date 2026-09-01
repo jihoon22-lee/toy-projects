@@ -876,7 +876,7 @@ jobs:
                   "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > "$listing" \
                 && release_id="$(python3 ci/check_buildscope_release_state.py \
                   recover-owned-draft "$listing" "$TAG" "$VERSION" "$TARGET_SHA" \
-                  "$owner_marker")";
+                  "$owner_marker" "$draft_body_sha256")";
               then
                 recovered=true
                 break
@@ -1325,7 +1325,7 @@ jobs:
                 "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > "$listing" \
               || ! release_id="$(python3 ci/check_buildscope_release_state.py \
                 recover-owned-draft "$listing" "$TAG" "$VERSION" "$TARGET_SHA" \
-                "$owner_marker")";
+                "$owner_marker" "$draft_body_sha256")";
             then
               echo "No exact current-run-owned empty draft could be recovered; no remote mutation was attempted" >&2
               exit 0
