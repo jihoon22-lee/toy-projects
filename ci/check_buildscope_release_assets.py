@@ -11,6 +11,7 @@ from silently drifting away from its unit-tested checks.
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import json
 import os
@@ -22,7 +23,17 @@ from typing import Any
 
 MAX_RELEASE_JSON_BYTES = 20_000_000
 HASH_CHUNK_BYTES = 1024 * 1024
+MAX_GITHUB_ID = (1 << 63) - 1
+MAX_ASSET_NAME_BYTES = 255
+MAX_ASSET_BYTES = 256 * 1024 * 1024
+MAX_TOTAL_ASSET_BYTES = 512 * 1024 * 1024
 VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+SHA256_DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", None)
+_CLOEXEC = getattr(os, "O_CLOEXEC", 0)
+_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
+_NONBLOCK = getattr(os, "O_NONBLOCK", 0)
 
 
 class BuildScopeReleaseAssetError(ValueError):
@@ -45,49 +56,148 @@ def expected_asset_names(version: str) -> tuple[str, ...]:
     )
 
 
-def _regular_file_info(path: Path, label: str) -> os.stat_result:
+def _open_flags(*, directory: bool = False) -> int:
+    """Return descriptor flags that never follow the final path component."""
+
+    if _NOFOLLOW is None:
+        raise BuildScopeReleaseAssetError(
+            "this platform does not provide O_NOFOLLOW for safe release audits"
+        )
+    flags = os.O_RDONLY | _CLOEXEC | _NOFOLLOW
+    if not directory:
+        # A FIFO must be rejected after fstat without allowing open(2) to block.
+        flags |= _NONBLOCK
+    if directory:
+        if not _DIRECTORY:
+            raise BuildScopeReleaseAssetError(
+                "this platform does not provide O_DIRECTORY for safe directory audits"
+            )
+        flags |= _DIRECTORY
+    return flags
+
+
+def _stat_signature(info: os.stat_result) -> tuple[int, ...]:
+    """Return metadata that must stay stable while a file is being consumed."""
+
+    return (
+        info.st_dev,
+        info.st_ino,
+        stat.S_IFMT(info.st_mode),
+        info.st_nlink,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
+def _assert_path_matches(path: Path, label: str, initial_info: os.stat_result) -> None:
+    """Reject a path that was replaced while its descriptor was consumed."""
+
     try:
-        info = path.lstat()
+        final_info = os.stat(path, follow_symlinks=False)
     except OSError as exc:
+        raise BuildScopeReleaseAssetError(
+            f"{label} disappeared while it was being audited: {exc}"
+        ) from exc
+    if _stat_signature(final_info) != _stat_signature(initial_info):
+        raise BuildScopeReleaseAssetError(f"{label} changed while it was being audited")
+
+
+def _open_regular_file(path: Path, label: str) -> tuple[int, os.stat_result]:
+    """Open a regular file without following a symlink and return its first stat."""
+
+    try:
+        fd = os.open(path, _open_flags())
+    except BuildScopeReleaseAssetError:
+        raise
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise BuildScopeReleaseAssetError(
+                f"{label} must be a regular file (symlinks are not allowed)"
+            ) from exc
         raise BuildScopeReleaseAssetError(
             f"{label} cannot be inspected: {exc}"
         ) from exc
-    if not stat.S_ISREG(info.st_mode):
-        raise BuildScopeReleaseAssetError(f"{label} must be a regular file")
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise BuildScopeReleaseAssetError(f"{label} must be a regular file")
+        return fd, info
+    except BuildScopeReleaseAssetError:
+        os.close(fd)
+        raise
+    except OSError as exc:
+        os.close(fd)
+        raise BuildScopeReleaseAssetError(
+            f"{label} cannot be inspected: {exc}"
+        ) from exc
+
+
+def _open_real_directory(path: Path, label: str) -> tuple[int, os.stat_result]:
+    """Open a directory descriptor without following its final symlink."""
+
+    try:
+        fd = os.open(path, _open_flags(directory=True))
+    except BuildScopeReleaseAssetError:
+        raise
+    except OSError as exc:
+        if exc.errno in {errno.ELOOP, errno.ENOTDIR}:
+            raise BuildScopeReleaseAssetError(
+                f"{label} must be a real directory (symlinks are not allowed)"
+            ) from exc
+        raise BuildScopeReleaseAssetError(
+            f"{label} cannot be inspected: {exc}"
+        ) from exc
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISDIR(info.st_mode):
+            raise BuildScopeReleaseAssetError(f"{label} must be a real directory")
+        return fd, info
+    except BuildScopeReleaseAssetError:
+        os.close(fd)
+        raise
+    except OSError as exc:
+        os.close(fd)
+        raise BuildScopeReleaseAssetError(
+            f"{label} cannot be inspected: {exc}"
+        ) from exc
+
+
+def _regular_file_info(path: Path, label: str) -> os.stat_result:
+    fd, info = _open_regular_file(path, label)
+    try:
+        _assert_path_matches(path, label, info)
+    finally:
+        os.close(fd)
     return info
 
 
 def _require_regular_directory(path: Path, label: str) -> None:
+    fd, info = _open_real_directory(path, label)
     try:
-        info = path.lstat()
-    except OSError as exc:
-        raise BuildScopeReleaseAssetError(
-            f"{label} cannot be inspected: {exc}"
-        ) from exc
-    if not stat.S_ISDIR(info.st_mode):
-        raise BuildScopeReleaseAssetError(f"{label} must be a real directory")
+        _assert_path_matches(path, label, info)
+    finally:
+        os.close(fd)
 
 
 def _read_release_json(path: Path) -> dict[str, Any]:
-    info = _regular_file_info(path, "release metadata")
+    fd, info = _open_regular_file(path, "release metadata")
     if info.st_size <= 0 or info.st_size > MAX_RELEASE_JSON_BYTES:
+        os.close(fd)
         raise BuildScopeReleaseAssetError(
             "release metadata size is outside the accepted range: "
             f"{info.st_size} bytes (maximum {MAX_RELEASE_JSON_BYTES})"
         )
 
     try:
-        with path.open("rb") as stream:
-            opened_info = os.fstat(stream.fileno())
-            if not stat.S_ISREG(opened_info.st_mode):
-                raise BuildScopeReleaseAssetError(
-                    "release metadata must be a regular file"
-                )
-            if opened_info.st_dev != info.st_dev or opened_info.st_ino != info.st_ino:
+        with os.fdopen(fd, "rb", closefd=True) as stream:
+            payload = stream.read(MAX_RELEASE_JSON_BYTES + 1)
+            final_info = os.fstat(stream.fileno())
+            if _stat_signature(final_info) != _stat_signature(info):
                 raise BuildScopeReleaseAssetError(
                     "release metadata changed while it was being audited"
                 )
-            payload = stream.read(MAX_RELEASE_JSON_BYTES + 1)
+            _assert_path_matches(path, "release metadata", info)
     except BuildScopeReleaseAssetError:
         raise
     except OSError as exc:
@@ -123,24 +233,24 @@ def _stream_sha256(
 
     digest = hashlib.sha256()
     total = 0
+    fd, opened_info = _open_regular_file(path, label)
+    if _stat_signature(opened_info) != _stat_signature(initial_info):
+        os.close(fd)
+        raise BuildScopeReleaseAssetError(f"{label} changed while it was being audited")
     try:
-        with path.open("rb") as stream:
-            opened_info = os.fstat(stream.fileno())
-            if not stat.S_ISREG(opened_info.st_mode):
-                raise BuildScopeReleaseAssetError(f"{label} must be a regular file")
-            if (
-                opened_info.st_dev != initial_info.st_dev
-                or opened_info.st_ino != initial_info.st_ino
-            ):
-                raise BuildScopeReleaseAssetError(
-                    f"{label} changed while it was being audited"
-                )
+        with os.fdopen(fd, "rb", closefd=True) as stream:
             while True:
                 chunk = stream.read(HASH_CHUNK_BYTES)
                 if not chunk:
                     break
                 digest.update(chunk)
                 total += len(chunk)
+            final_info = os.fstat(stream.fileno())
+            if _stat_signature(final_info) != _stat_signature(opened_info):
+                raise BuildScopeReleaseAssetError(
+                    f"{label} changed while it was being audited"
+                )
+            _assert_path_matches(path, label, opened_info)
     except BuildScopeReleaseAssetError:
         raise
     except OSError as exc:
@@ -176,7 +286,7 @@ def load_release_assets(
     if (
         isinstance(release_id, bool)
         or not isinstance(release_id, int)
-        or release_id <= 0
+        or not 0 < release_id <= MAX_GITHUB_ID
     ):
         raise BuildScopeReleaseAssetError(f"release id is invalid: {release_id!r}")
     release_tag = release.get("tag_name")
@@ -218,16 +328,32 @@ def load_release_assets(
         )
 
     expected = set(expected_asset_names(version))
+    if len(assets) != len(expected):
+        raise BuildScopeReleaseAssetError(
+            f"public asset count mismatch: expected={len(expected)} actual={len(assets)}"
+        )
     by_name: dict[str, dict[str, Any]] = {}
     duplicates: set[str] = set()
     asset_ids: set[int] = set()
     duplicate_ids: set[int] = set()
+    total_size = 0
     for index, asset in enumerate(assets):
         if not isinstance(asset, dict):
             raise BuildScopeReleaseAssetError(
                 f"public asset entry {index} is not an object"
             )
         name = asset.get("name")
+        if isinstance(name, str):
+            try:
+                name_bytes = len(name.encode("utf-8"))
+            except UnicodeEncodeError as exc:
+                raise BuildScopeReleaseAssetError(
+                    f"public asset entry {index} has an unencodable name"
+                ) from exc
+            if name_bytes > MAX_ASSET_NAME_BYTES:
+                raise BuildScopeReleaseAssetError(
+                    f"public asset entry {index} has an excessively long name"
+                )
         if (
             not isinstance(name, str)
             or not name
@@ -243,13 +369,46 @@ def load_release_assets(
         by_name[name] = asset
 
         asset_id = asset.get("id")
-        if isinstance(asset_id, bool) or not isinstance(asset_id, int) or asset_id <= 0:
+        if (
+            isinstance(asset_id, bool)
+            or not isinstance(asset_id, int)
+            or not 0 < asset_id <= MAX_GITHUB_ID
+        ):
             raise BuildScopeReleaseAssetError(
                 f"public asset entry {index} has an invalid id: {asset_id!r}"
             )
         if asset_id in asset_ids:
             duplicate_ids.add(asset_id)
         asset_ids.add(asset_id)
+
+        state = asset.get("state")
+        if state != "uploaded":
+            raise BuildScopeReleaseAssetError(
+                f"asset is not uploaded: {name} (state={state!r})"
+            )
+        size = asset.get("size")
+        if (
+            isinstance(size, bool)
+            or not isinstance(size, int)
+            or not 0 < size <= MAX_ASSET_BYTES
+        ):
+            raise BuildScopeReleaseAssetError(
+                f"asset size is outside the accepted range: {name} (size={size!r})"
+            )
+        total_size += size
+        if total_size > MAX_TOTAL_ASSET_BYTES:
+            raise BuildScopeReleaseAssetError(
+                "public asset sizes exceed the accepted total bound of "
+                f"{MAX_TOTAL_ASSET_BYTES} bytes"
+            )
+        digest = asset.get("digest")
+        if (
+            not isinstance(digest, str)
+            or SHA256_DIGEST_PATTERN.fullmatch(digest) is None
+        ):
+            raise BuildScopeReleaseAssetError(
+                f"asset digest is invalid: {name} (digest={digest!r})"
+            )
 
     if duplicates:
         raise BuildScopeReleaseAssetError(
@@ -258,10 +417,6 @@ def load_release_assets(
     if duplicate_ids:
         raise BuildScopeReleaseAssetError(
             f"duplicate public asset ids: {sorted(duplicate_ids)!r}"
-        )
-    if len(assets) != len(expected):
-        raise BuildScopeReleaseAssetError(
-            f"public asset count mismatch: expected={len(expected)} actual={len(assets)}"
         )
     actual = set(by_name)
     if actual != expected:
@@ -292,18 +447,16 @@ def check_release_assets(
 
     for name in sorted(by_name):
         asset = by_name[name]
-        state = asset.get("state")
-        if state != "uploaded":
-            raise BuildScopeReleaseAssetError(
-                f"asset is not uploaded: {name} (state={state!r})"
-            )
-
         local = dist / name
         initial_info = _regular_file_info(local, f"local asset {name}")
         if initial_info.st_size <= 0:
             raise BuildScopeReleaseAssetError(f"local asset must not be empty: {name}")
         api_size = asset.get("size")
-        if isinstance(api_size, bool) or not isinstance(api_size, int):
+        if (
+            isinstance(api_size, bool)
+            or not isinstance(api_size, int)
+            or not 0 < api_size <= MAX_ASSET_BYTES
+        ):
             raise BuildScopeReleaseAssetError(
                 f"asset size is invalid: {name} (size={api_size!r})"
             )

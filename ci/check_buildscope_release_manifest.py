@@ -11,8 +11,11 @@ from pathlib import Path
 
 from check_buildscope_release_assets import (
     BuildScopeReleaseAssetError,
+    _assert_path_matches,
+    _open_regular_file,
     _regular_file_info,
     _require_regular_directory,
+    _stat_signature,
     _stream_sha256,
     _validate_version,
     expected_asset_names,
@@ -37,20 +40,22 @@ def _read_bounded_regular_file(
     label: str,
     maximum_bytes: int,
 ) -> bytes:
-    info = _regular_file_info(path, label)
+    fd, info = _open_regular_file(path, label)
     if info.st_size <= 0 or info.st_size > maximum_bytes:
+        os.close(fd)
         raise BuildScopeReleaseAssetError(
             f"{label} size is outside the accepted range: {info.st_size} bytes "
             f"(maximum {maximum_bytes})"
         )
     try:
-        with path.open("rb") as stream:
-            opened_info = os.fstat(stream.fileno())
-            if opened_info.st_dev != info.st_dev or opened_info.st_ino != info.st_ino:
+        with os.fdopen(fd, "rb", closefd=True) as stream:
+            payload = stream.read(maximum_bytes + 1)
+            final_info = os.fstat(stream.fileno())
+            if _stat_signature(final_info) != _stat_signature(info):
                 raise BuildScopeReleaseAssetError(
                     f"{label} changed while it was being audited"
                 )
-            payload = stream.read(maximum_bytes + 1)
+            _assert_path_matches(path, label, info)
     except BuildScopeReleaseAssetError:
         raise
     except OSError as exc:
@@ -77,7 +82,12 @@ def _decode_checksum_file(path: Path, label: str, maximum_bytes: int) -> str:
 
 def _parse_manifest(text: str, version: str) -> dict[str, str]:
     expected_names = manifest_asset_names(version)
-    lines = text.splitlines()
+    # ``splitlines`` accepts Unicode separators such as U+2028.  Release
+    # manifests are byte-oriented sha256sum files and permit LF only.
+    lines_with_sentinel = text.split("\n")
+    if not lines_with_sentinel or lines_with_sentinel[-1] != "":
+        raise BuildScopeReleaseAssetError("SHA256SUMS must end with one newline")
+    lines = lines_with_sentinel[:-1]
     if len(lines) != len(expected_names):
         raise BuildScopeReleaseAssetError(
             f"SHA256SUMS entry count mismatch: expected={len(expected_names)} "

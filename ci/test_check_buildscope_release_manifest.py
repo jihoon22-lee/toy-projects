@@ -94,6 +94,19 @@ class BuildScopeReleaseManifestTests(unittest.TestCase):
                 with self.assertRaises(BuildScopeReleaseAssetError):
                     check_release_manifest(self.dist, VERSION)
 
+    def test_rejects_non_lf_unicode_line_separators(self) -> None:
+        manifest = self.dist / "SHA256SUMS"
+        original = manifest.read_text(encoding="utf-8")
+        invalid = (
+            original.replace("\n", "\u2028", 1),
+            original.replace("buildscope.pyz\n", "buildscope.pyz\u2028\n", 1),
+        )
+        for text in invalid:
+            with self.subTest(text=text[:70]):
+                manifest.write_text(text, encoding="utf-8")
+                with self.assertRaises(BuildScopeReleaseAssetError):
+                    check_release_manifest(self.dist, VERSION)
+
     def test_rejects_manifest_digest_or_pyz_sidecar_mismatch(self) -> None:
         pyz = self.dist / "buildscope.pyz"
         pyz.write_bytes(pyz.read_bytes() + b"changed")
@@ -121,6 +134,11 @@ class BuildScopeReleaseManifestTests(unittest.TestCase):
         target = self.root / "outside.json"
         target.write_bytes(b"outside")
         os.symlink(target, asset)
+        with self.assertRaisesRegex(BuildScopeReleaseAssetError, "regular file"):
+            check_release_manifest(self.dist, VERSION)
+
+        asset.unlink()
+        os.mkfifo(asset, 0o600)
         with self.assertRaisesRegex(BuildScopeReleaseAssetError, "regular file"):
             check_release_manifest(self.dist, VERSION)
 
