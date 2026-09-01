@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Release discipline — deliberate per-project version cadence
+
+- Documented that portfolio direction, B-stage progress, ici pin changes, and CI/runner-only changes
+  do not automatically bump a toy product version. Each toy product versions independently.
+- Reserved `patch` for defect/security/compatibility regressions in an already-public stable product,
+  and `minor` for a cohesive user-usable checkpoint backed by native tests, released-ici verification,
+  PR and exact-main CI/Pages, docs/limitations, and reproducible release assets.
+- Clarified that candidate, pre-release, and unreleased states are not stable releases. BuildScope
+  `0.5.0` remains justified as the bundled B3/B4/B5 first usable release boundary; later work stays
+  under `Unreleased` until a comparable checkpoint is complete.
+- Added the PR naming rule that product/technical outcomes are primary and plan codes such as `T0`/`B1`/
+  `D2` are secondary body or label metadata only. Historical evidence is preserved, and operational
+  ici `v0.10.0` pins are unchanged.
+
 ### BuildScope 0.5.0 — B4 semantic configuration diff + B5 release candidate groundwork (unreleased)
 
 - Added a shell-free semantic diff for two raw `compile_commands.json` arrays. Snapshot v1/v2/v3

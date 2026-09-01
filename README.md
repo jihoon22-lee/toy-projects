@@ -6,6 +6,20 @@ C++17 / Qt 5.15 및 Qt 6 환경을 대상으로 만드는 실사용 데스크톱
 앞으로의 방향과 그 순서를 정한 이유는 [ROADMAP.md](ROADMAP.md) 에, 이 과정에서 발견한
 ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 
+## 릴리스 버전 규율
+
+이 저장소의 버전은 포트폴리오 진행률이나 검증 인프라의 변경 횟수를 세는 숫자가 아니다.
+`loglens`, `diskmap`, `buildscope` 등 각 toy 제품은 서로 독립적으로 버전을 결정한다.
+
+- 포트폴리오 방향, B-stage 진행, ici pin, CI/runner-only 변경은 toy 버전을 자동으로 올리지 않는다.
+- `patch`는 이미 공개된 stable 제품의 defect, security, compatibility regression을 고칠 때만 사용한다.
+- `minor`는 하나의 응집된 사용자 가치가 실제로 쓸 수 있는 제품 checkpoint가 된 뒤에만 올린다.
+  이때 native tests, released-ici verification, PR 및 exact-main CI/Pages, 문서와 limitations,
+  재현 가능한 release assets를 모두 확인하고 기록한다.
+- candidate, pre-release, unreleased 상태는 stable release로 간주하지 않는다.
+- BuildScope `0.5.0`은 B3/B4/B5를 묶은 첫 usable release boundary로 계속 유효하다. 이 경계
+  이후의 작업은 같은 수준의 checkpoint가 마련될 때까지 `Unreleased`에 쌓는다.
+
 ## 프로젝트
 
 | 이름 | 설명 | 상태 |
@@ -224,6 +238,11 @@ literal SHA/API digest 검증을 정의한다. 예정된 top-level release asset
 `buildscope-ici-deep.{json,html}`, `buildscope-provenance.json`,
 `buildscope-<version>-linux-x86_64.tar.gz`, `SHA256SUMS`다. 아직 이 workflow의 PR/remote/Pages 실행,
 annotated tag, GitHub Release는 없으므로 B5와 `0.5.0` 제품 release는 pending이다.
+
+`0.5.0`은 B3 include explanation, B4 semantic configuration diff, B5 hybrid packaging/integration을
+한데 묶는 첫 usable BuildScope release boundary로 유지한다. B5의 local candidate 기록이나 ici
+`v0.10.0` pin 변경만으로 stable release 또는 다음 버전 bump를 만들지 않으며, `0.5.0` 이후의
+기능은 위 checkpoint 증거가 다시 모일 때까지 `Unreleased`에 기록한다.
 
 ## 공통 구조 규칙
 

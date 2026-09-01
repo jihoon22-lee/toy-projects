@@ -26,6 +26,24 @@
 | A | abilens Make/ELF/ABI explorer | [A stream](docs/superpowers/plans/2026-08-30-product-portfolio-master-plan.md) |
 | Q | quality-zoo expected-finding corpus | [Q stream](docs/superpowers/plans/2026-08-30-product-portfolio-master-plan.md) |
 
+## 릴리스 버전 규율
+
+포트폴리오의 단계와 제품의 버전은 같은 축이 아니다. `loglens`, `diskmap`, `buildscope` 등
+각 toy 제품은 독립적으로 버전을 올린다.
+
+- 포트폴리오 방향 전환, B-stage 진행, ici pin, CI/runner-only 변경은 toy 버전을 자동으로 bump하지 않는다.
+- `patch`는 이미 공개된 stable 제품의 defect/security/compatibility regression 수정에만 사용한다.
+- `minor`는 응집된 사용자 기능이 실제로 쓸 수 있는 제품 checkpoint가 된 경우에만 사용한다.
+  native tests, released-ici verification, PR 및 exact-main CI/Pages, docs/limitations, 재현 가능한
+  release assets를 모두 통과·기록해야 한다.
+- candidate, pre-release, unreleased는 stable로 세지 않는다.
+- BuildScope `0.5.0`은 B3/B4/B5를 함께 묶은 첫 usable release boundary로 유지한다. 그 이후 작업은
+  이에 상응하는 checkpoint가 생길 때까지 `Unreleased`에 누적한다.
+
+PR 제목과 요약은 plan code가 아니라 제품/기술 결과를 설명해야 한다. `T0`, `B1`, `D2` 같은 plan
+code는 본문이나 label의 보조 메타데이터로만 쓰며, 제목·요약의 유일하거나 주된 식별자로 삼지 않는다.
+이미 남아 있는 historical PR 제목과 문서는 증거이므로 이름을 바꾸지 않는다.
+
 ## 완료: BuildScope B0 hybrid skeleton (historical baseline, 2026-09-01)
 
 BuildScope는 `compile_commands.json`을 shell 실행 없이 bounded read해 deterministic
@@ -330,6 +348,11 @@ pyz, Qt6 Linux x86_64 bundle, native handoff, ici v0.10.0 sidecar/download/API d
 `buildscope-<version>.tar.gz`, `buildscope-ici-deep.{json,html}`, `buildscope-provenance.json`,
 `buildscope-<version>-linux-x86_64.tar.gz`, `SHA256SUMS`다. workflow는 정의만 되었고 아직 PR/remote/
 Pages run, tag, GitHub Release가 없으므로 B5와 `0.5.0` release는 pending이다.
+
+`0.5.0`은 B3 include explanation, B4 semantic configuration diff, B5 hybrid packaging/integration을
+묶은 첫 usable BuildScope release boundary로 남긴다. 이 candidate가 stable이 되기 전까지는
+release를 주장하지 않으며, 이후의 기능과 CI/ici pin 작업은 다음 comparable checkpoint까지
+`Unreleased`에 쌓는다.
 
 ## 배경
 

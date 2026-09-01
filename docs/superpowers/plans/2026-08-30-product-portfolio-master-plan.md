@@ -97,8 +97,30 @@
 - 한 PR은 한 제품의 하나의 사용자 또는 infrastructure milestone만 다룬다.
 - branch는 `feat/<project>-<feature>`, `fix/<project>-<issue>`, `test/<project>-<scope>`, `docs/<scope>` 형식을 사용한다.
 - 의미 있는 단위마다 Conventional Commit을 만든다.
+- PR 제목과 요약은 plan code가 아니라 제품/기술 결과를 설명한다. `T0`, `B1`, `D2` 같은 plan code는
+  본문이나 label의 보조 메타데이터로만 쓰며 제목·요약의 유일하거나 주된 식별자로 삼지 않는다.
+  이미 남은 historical PR 제목과 문서는 증거이므로 이름을 바꾸지 않는다.
 - ici 미지원으로 gate가 깨지면 우회 디렉터리로 옮기지 않고 `ICI-GAPS.md`에 재현을 남긴다.
 - ici 신규 기능이 필요한 toy PR은 release candidate pyz로 먼저 검증하고, 정식 release 후 workflow pin을 갱신해 병합한다.
+
+### 4.2 제품 버전과 release cadence
+
+- 포트폴리오 방향, B-stage 진행, ici pin, CI/runner-only 변경은 toy 제품 버전을 자동으로 올리지 않는다.
+- 각 toy 제품은 독립적인 버전을 가진다. 한 제품의 milestone이나 ici 변경이 다른 제품의 버전을
+  함께 bump하지 않는다.
+- `patch`는 이미 공개된 stable 제품의 defect, security, compatibility regression을 수정할 때만
+  사용한다.
+- `minor`는 응집된 사용자 가치가 실제로 쓸 수 있는 제품 checkpoint가 된 경우에만 사용한다. 다음
+  증거를 모두 완료·기록한 뒤에만 stable release를 만든다.
+  - native tests
+  - released-ici verification
+  - PR CI와 exact-main CI/Pages
+  - 사용자 문서와 limitations
+  - 재현 가능한 release assets와 checksum/provenance
+- candidate, pre-release, unreleased 상태는 stable release로 세지 않는다.
+- BuildScope `0.5.0`은 B3 include explanation, B4 semantic configuration diff, B5 hybrid
+  packaging/integration을 함께 묶는 첫 usable release boundary로 유지한다. 이 경계 이후의 작업은
+  같은 수준의 checkpoint가 마련될 때까지 `Unreleased`에 누적한다.
 
 ---
 
@@ -1049,6 +1071,11 @@ x86_64 bundle, wheel/pyz → native CLI handoff, ici v0.10.0 sidecar/download/AP
 `buildscope-ici-deep.{json,html}`, `buildscope-provenance.json`,
 `buildscope-<version>-linux-x86_64.tar.gz`, `SHA256SUMS`다. workflow는 정의만 되었고 아직 PR/remote/
 Pages run, tag, GitHub Release가 없으므로 B5와 제품 release는 pending이다.
+
+이 B5 candidate의 버전 경계는 `0.5.0`으로 유지한다. 이는 B3/B4/B5를 묶은 첫 usable BuildScope
+release boundary라는 제품 판단이며, candidate 기록이나 ici pin/CI 변경만으로 stable 또는 다음
+버전을 선언하지 않는다. `0.5.0` 이후 작업은 4.2의 comparable checkpoint가 닫힐 때까지
+`Unreleased`에 남긴다.
 
 ---
 
