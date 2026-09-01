@@ -1,5 +1,21 @@
 # BuildScope B4 configuration diff workthrough
 
+> **Post-green update (2026-09-01):** This workthrough was originally captured before PR/remote
+> verification. B4 implementation plus PR/remote/hosted evidence is now complete on [PR #36](https://github.com/jihoon22-lee/toy-projects/pull/36),
+> head `ce64613263f0c4358579012aab135e0b23341a0e`. [Run `33485837830`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33485837830)
+> used ici `v0.9.1` and completed all `16/16` checks successfully. BuildScope was `WARN`
+> (`10 PASS / 3 WARN / 0 FAIL / 0 ERROR / 0 SKIP`), with lint WARN (49 warnings), `92/92` tests,
+> line/function/branch `93.5% / 99.0% / 77.3%`, sanitizer PASS, compile DB `12/12` production
+> units and `27` configurations, and TEM `4.95/5.0`. The 100,000-entry / 25,000-source benchmark
+> recorded model `65 ms`, filter `1,602 ms`, filtered sources `1`, budget `10,000 ms`, and
+> correctness `true`. [Sticky comment #5489976814](https://github.com/jihoon22-lee/toy-projects/pull/36#issuecomment-5489976814)
+> has exactly one marker and three hosted-report links. Pages reports were HTTP 200 with exact
+> titles and zero external resource references: BuildScope `1,319,378` bytes / SHA-256
+> `5dc517d3ec8324cb1aedb6e611120ac9ae2951e27851cbc6b0e28303d02c5d43`, diskmap `337,554` bytes /
+> `39a52d1e3d5b9eed6bbc1ec5253f1bf837deb4a7bb33ed2f2ef3b32df0f90e0e`, and loglens `492,746` bytes /
+> `0480f07aea266c0777403ac37ebf90d4acd10f84b04e49aa2a9ccf99a6153007`. The `0.5.0` product
+> release artifact and B5 hybrid integration remain pending/not started.
+
 ## Overview
 
 BuildScope B4 documents the `0.5.0` semantic configuration-diff candidate on
@@ -7,7 +23,8 @@ BuildScope B4 documents the `0.5.0` semantic configuration-diff candidate on
 commands, preserves meaningful compiler/configuration order, and exports a strict diff contract that
 the Python CLI, native C++ consumer, and Qt UI share. This workthrough records the implementation,
 adversarial hardening, documentation updates, and checksum-verified local release evidence available
-before PR, remote CI, and release-artifact publication.
+before PR, remote CI, and release-artifact publication; the post-green update above records the later
+remote evidence.
 
 ## Context
 
@@ -20,8 +37,8 @@ before PR, remote CI, and release-artifact publication.
 - The implementation was developed in small Conventional Commit units. The final hardening split
   glob matching, native semantic validation, and diff-window rendering into focused modules, then
   added a dedicated native rejection-test target.
-- B4 PR/remote CI/hosted report and release-artifact evidence remain pending. The public ici v0.9.0
-  uncached deep result is complete and recorded below.
+- **Pre-PR capture:** B4 PR/remote CI/hosted report and release-artifact evidence remained pending.
+  The public ici v0.9.0 uncached deep result is historical local evidence and is recorded below.
 
 ## Changes Made
 
@@ -59,7 +76,8 @@ covers:
 ### 3. Repository status synchronization
 
 The following files were updated to describe B4 as the current `0.5.0` feature-branch candidate,
-with B5 still the unreleased hybrid boundary:
+with B5 still the unreleased hybrid boundary. This synchronization list is a pre-PR record; the
+post-green update above supersedes its pending remote-evidence state:
 
 - `/home/jihoon/projects/toy-projects/CHANGELOG.md` — added the top `Unreleased` B4 entry.
 - `/home/jihoon/projects/toy-projects/docs/superpowers/plans/2026-08-30-product-portfolio-master-plan.md`
@@ -79,7 +97,7 @@ The synchronized status records the current local candidate gate:
 - Qt6 6.10.2 default Release CMake/CTest: `9/9` PASS (`10/10` with benchmark).
 - Pure `buildscope-0.5.0-py3-none-any` wheel: snapshot v1/v2/v3 and diff v1 schemas included;
   no native extension.
-- Public ici v0.9.0 uncached deep suite: `WARN`, 11 PASS / 3 WARN with no FAIL/ERROR/SKIP,
+- Historical local ici v0.9.0 uncached deep suite: `WARN`, 11 PASS / 3 WARN with no FAIL/ERROR/SKIP,
   `92/92` tests, line/function/branch `93.5% / 99.0% / 76.7%`, sanitizer PASS, compile DB
   `12/12` production units and `27` configurations, TEM `4.95/5.0`.
 
@@ -131,7 +149,7 @@ Ruff check + format             19 files PASS
 mypy                            15 source files PASS
 Qt 5.15.18 default Release      9/9 CTest PASS
 Qt 6.10.2 default Release       9/9 CTest PASS
-ici v0.9.0 uncached deep        WARN; 11 PASS / 3 WARN; no FAIL/ERROR/SKIP
+historical ici v0.9.0 local     WARN; 11 PASS / 3 WARN; no FAIL/ERROR/SKIP
 ici combined test evidence      92/92; line 93.5%; function 99.0%; branch 76.7%
 ici sanitizer / compile DB      PASS; 12/12 production units; 27 configurations
 pure wheel/schema inspection    PASS; no native extension
@@ -148,10 +166,10 @@ An intermediate deep run exposed combined C++/Python branch coverage below the c
 minimum even though direct Python coverage was already high. The fix was additional native strict
 contract coverage, not a threshold change; the combined result rose to 76.7%.
 
-## Next Steps
+## Next Steps at pre-PR capture
 
-- TODO: open the B4 PR and capture remote CI/hosted report evidence.
-- TODO: perform B5 Python → JSON → C++ hybrid release integration, Qt/Python matrix confirmation,
-  and release-artifact publication.
+- Historical TODO (superseded): open the B4 PR and capture remote CI/hosted report evidence.
+- Remaining work: perform B5 Python → JSON → C++ hybrid release integration, Qt/Python matrix
+  confirmation, and release-artifact publication.
 - Preserve the raw-database input boundary and the strict diff v1/native-consumer contract while
-  closing those evidence gates.
+  completing the remaining B5/release boundary.

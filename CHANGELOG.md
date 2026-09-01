@@ -24,13 +24,27 @@
   Qt6 6.10.2 Release CMake/CTest matrices are each `9/9` (`10/10` with the opt-in benchmark).
   The pure `buildscope-0.5.0-py3-none-any` wheel contains the v1/v2/v3 snapshot and diff v1
   schemas and no native extension.
-- Verified the candidate with the checksum-validated public ici v0.9.0 release under the uncached
-  deep profile: suite `WARN`, 14 engines = 11 PASS / 3 WARN / 0 FAIL / 0 ERROR / 0 SKIP,
+- Historical local validation used the checksum-validated public ici v0.9.0 release under the
+  uncached deep profile: suite `WARN`, 14 engines = 11 PASS / 3 WARN / 0 FAIL / 0 ERROR / 0 SKIP,
   `92/92` tests, line/function/branch coverage `93.5% / 99.0% / 76.7%`, sanitizer PASS,
   compile DB `12/12` production units and `27` configurations, and TEM `4.95/5.0`. The
   Zero-CDN HTML is 1,235,505 bytes with SHA-256
-  `0c98a38b27e928df2c60dcadff9ecc3daa1072cb620354d9f4a9fe8d9b987f80`. B4 PR/remote CI,
-  hosted report publication, and release-artifact publication remain pending.
+  `0c98a38b27e928df2c60dcadff9ecc3daa1072cb620354d9f4a9fe8d9b987f80`; this remains separate
+  from the current remote CI evidence.
+- B4 implementation and PR/remote/hosted evidence are complete on [PR #36](https://github.com/jihoon22-lee/toy-projects/pull/36),
+  head `ce64613263f0c4358579012aab135e0b23341a0e`. [Run `33485837830`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33485837830)
+  used ici `v0.9.1` and completed all `16/16` checks successfully. BuildScope was `WARN`
+  (`10 PASS / 3 WARN / 0 FAIL / 0 ERROR / 0 SKIP`) with lint WARN (49 warnings), `92/92` tests,
+  line/function/branch `93.5% / 99.0% / 77.3%`, compile DB `12/12` production units and `27`
+  configurations, sanitizer PASS, and TEM `4.95/5.0`. The remote 100,000-entry / 25,000-source
+  benchmark recorded model `65 ms`, filter `1,602 ms`, filtered sources `1`, budget `10,000 ms`,
+  and correctness `true`. [Sticky comment #5489976814](https://github.com/jihoon22-lee/toy-projects/pull/36#issuecomment-5489976814)
+  has exactly one marker and three hosted-report links. Pages reports were HTTP 200 with exact titles
+  and zero external resource references: BuildScope `1,319,378` bytes / SHA-256
+  `5dc517d3ec8324cb1aedb6e611120ac9ae2951e27851cbc6b0e28303d02c5d43`, diskmap `337,554` bytes /
+  `39a52d1e3d5b9eed6bbc1ec5253f1bf837deb4a7bb33ed2f2ef3b32df0f90e0e`, and loglens `492,746` bytes /
+  `0480f07aea266c0777403ac37ebf90d4acd10f84b04e49aa2a9ccf99a6153007`. The `0.5.0` product
+  release artifact and B5 hybrid integration remain pending/not started.
 
 ### BuildScope 0.4.0 — B3 implementation + remote evidence (main candidate, unreleased)
 
