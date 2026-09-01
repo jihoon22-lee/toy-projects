@@ -768,7 +768,8 @@ symlink도 읽기 전에 거부한다. 공개 Draft 2020-12
 pure wheel에 함께 포함된다. v2 `producer.version`의 schema `maxLength` 1 MiB와 native reader
 문자열 bound도 일치한다. v2 normalized model/UI 전환은 B2 범위다. B1 구현과 PR #31
 remote integration evidence는 complete이며, B2 구현/local/remote verification도 아래와 같이
-완료됐다. B3~B5와 ici I3 target-by-target same-basename 비교는 미완료다.
+완료됐다. B3 include explanation은 현재 구현/local candidate 상태를 아래에 기록하지만, B3
+remote integration, B4/B5와 ici I3 target-by-target same-basename 비교는 미완료다.
 
 **B1 final local/public evidence (2026-09-01):** public
 `ici v0.7.1` cold verification은 표준 `sha256sum --check ici.pyz.sha256`가 통과했고 suite
@@ -806,8 +807,8 @@ marker 1개와 정확히 3개 project link를 포함하고 BuildScope `11 PASS /
 | loglens | [loglens/pr/31](https://jihoon22-lee.github.io/toy-projects/loglens/pr/31/) | 446,796 | `56f3b2d54ed2a05ebf100313b4d9447553e9c6fb9c85f7e7adce8eccc838dc4f` | `ici Verification Report — loglens` |
 
 B1 implementation과 PR #31 remote integration evidence는 complete다. B2 implementation/local 및
-remote verification도 complete다. B3/B4/B5와 ici I3 target-by-target same-basename comparison은
-아직 pending이다.
+remote verification도 complete다. B3 implementation/local candidate는 아래에 기록한다. B3
+remote verification, B4/B5와 ici I3 target-by-target same-basename comparison은 아직 pending이다.
 
 ### B2. C++ model과 Qt UI — implementation/local/remote verification 완료
 
@@ -866,15 +867,58 @@ filter `1,527 ms`, summary JSON SHA-256
 | diskmap | [diskmap/pr/32](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/32/) | 311,846 | `752f07251bc38285ea1633f5df879985131963e4b99f90532722eaedc9be1802` | `ici Verification Report — diskmap` |
 | loglens | [loglens/pr/32](https://jihoon22-lee.github.io/toy-projects/loglens/pr/32/) | 446,791 | `7b2669fb7de82ada30bfdf28a2d82533f5566ad92779ea08c90528e188ea582b` | `ici Verification Report — loglens` |
 
-### B3. include explanation
+### B3. include explanation (implementation/local candidate; remote pending)
 
 **브랜치:** `feat/buildscope-include-explain`
 
-- [ ] ici compilation context 또는 compiler dependency output을 입력으로 받는다.
-- [ ] include search order와 최종 resolved path를 보여준다.
-- [ ] same-basename collision, missing/generated/system header를 구분한다.
-- [ ] include edge에서 source command와 file location으로 이동한다.
-- [ ] “추정”과 compiler-measured edge를 UI에서 구분한다.
+BuildScope `0.4.0` local candidate는 normalized compile DB entry를 바탕으로 include
+explanation을 선택적으로 생성한다. CLI는 `--include-analysis estimate|compiler`를 제공하며,
+analysis를 생략하면 기존 normalized `buildscope.snapshot/v2`가 기본이다. `--include-analysis`
+는 v3를 암시하고, `--schema-version v3`만 지정하면 `estimate`가 선택된다. v1/v2와 analysis
+조합은 거부되어 기존 raw compatibility projection과 v2 consumer가 조용히 깨지지 않는다.
+
+- [x] normalized compile entry에서 bounded include explanation을 생성한다. `estimate`는
+  source scan으로 lexical 후보를 계산하고, `compiler`는 compiler `-H` include trace를
+  수집해 v3에 저장한다.
+- [x] v3 strict/self-contained schema와 C++ native reader를 제공한다. root, entry,
+  `include_analysis`, edge, search, diagnostic 필드를 required/enum/bounds로 검증하며,
+  분석 불가 entry도 `evidence: unavailable` warning record를 유지한다.
+- [x] quote include는 current directory와 quote roots, 이후 include/framework, system,
+  after roots를 recorded order로 검색하고, selected path·ordered candidates·same-basename
+  alternatives를 기록한다.
+- [x] edge classification으로 project/vendor/generated/system/missing/unresolved header를
+  구분한다. generated는 build/out/.build/cmake-build-* compilation root 아래를, system은
+  project root 밖을 기준으로 하며, missing compiler diagnostic과 unresolved estimate를
+  별도로 보존한다.
+- [x] compiler-measured resolution과 source-scan location evidence를 분리한다. compiler
+  trace가 resolved edge를 정하고 source scan이 parent:line/delimiter를 복원하며, missing
+  diagnostic은 compiler-diagnostic location evidence를 사용한다.
+- [x] shell 없는 allowlisted replay boundary를 적용한다. 직접 승인된 system GCC/Clang
+  driver만 `-E -H`로 실행하고, response file/stdin/extra input/plugin/linker escape를 거부하며
+  argv/trace/edge/source/unit/time bounds를 적용한다.
+- [x] Qt Include Edges UI에서 provenance, search order, collision alternatives와 edge 상세를
+  제공하고, edge 더블클릭/Open Source Location으로 parent source 위치를 열며 Compilation
+  Command로 command view로 이동한다.
+
+**B3 local candidate evidence (2026-09-01):**
+
+- [x] Python 3.10 pytest `57/57` PASS, Ruff check + format `14 files` PASS, mypy `11 source
+  files` PASS (replay policy, estimate/compiler, v3 projection, bounded failure paths 포함).
+- [x] Qt 6.10.2 Release CMake/CTest `6/6` PASS와 Qt 5.15.18 Release CMake/CTest `6/6` PASS
+  (v3 contract, GUI edge navigation, hybrid include contract 포함).
+- [x] checksum-verified ici v0.8.0 release asset의 최종 no-cache local validation은 `Suite
+  WARN`(검증 통과), engines `11 PASS / 2 WARN / 0 FAIL / 0 ERROR / 0 SKIP`, `63/63` tests,
+  line/function/branch `92.6% / 98.9% / 79.1%`, TEM `4.94`, compile_db `8/8` production
+  units·`19` configurations·`0` failures/warnings, complexity `PASS` max `14`/`251` functions·0
+  issues, total `34.71s`였다. WARN은 C++ type unsupported와 dup뿐이며 `/tmp` HTML `851,656`
+  bytes, SHA-256 `07d25971e04ed6a4aece36724ce8cf5e3c0548b7c382941a810454d8521c3e34`, exact title,
+  external refs `0`로 확인했다. 이는 B3 PR/remote Pages evidence와 구분되는 local evidence다.
+- [x] 100,000 entries/25,000 sources benchmark는 model `61 ms`, filter `1,126 ms`, budget
+  `10,000 ms`, correctness `true`였고, pure wheel에 `compiler_replay.py`와 v3 schema가 포함됐다.
+- [ ] B3 PR/remote CI 및 hosted report.
+
+B3 remote completion, B5 hybrid release integration, ici I3 target-by-target same-basename
+comparison은 이 local candidate 기록으로 닫지 않는다.
 
 ### B4. configuration diff
 
