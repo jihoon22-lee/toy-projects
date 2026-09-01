@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -79,6 +80,8 @@ class BuildScopeReleaseStateTests(unittest.TestCase):
         stage: str,
         expected_release_id: int | None = None,
         expected_asset_count: int | None = None,
+        expected_owner_marker: str | None = None,
+        expected_body_sha256: str | None = None,
     ) -> int:
         self._write(self.release_json, release)
         return check_release_state(
@@ -89,6 +92,8 @@ class BuildScopeReleaseStateTests(unittest.TestCase):
             stage,
             expected_release_id=expected_release_id,
             expected_asset_count=expected_asset_count,
+            expected_owner_marker=expected_owner_marker,
+            expected_body_sha256=expected_body_sha256,
         )
 
     def _owner_marker(
@@ -231,6 +236,22 @@ class BuildScopeReleaseStateTests(unittest.TestCase):
             inspect_release_slot(self.pages_json, TAG, VERSION, TARGET_SHA),
             ReleaseSlot(mode="final", release_id=RELEASE_ID),
         )
+
+    def test_state_requires_the_exact_release_body_digest(self) -> None:
+        body = "exact release notes\n"
+        digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+        release = self._release(body=body)
+        self.assertEqual(
+            self._state(release, stage="final", expected_body_sha256=digest),
+            RELEASE_ID,
+        )
+
+        changed = self._release(body=body + "changed")
+        with self.assertRaisesRegex(BuildScopeReleaseStateError, "body SHA-256"):
+            self._state(changed, stage="final", expected_body_sha256=digest)
+
+        with self.assertRaisesRegex(BuildScopeReleaseStateError, "lowercase"):
+            self._state(release, stage="final", expected_body_sha256="A" * 64)
 
     def test_rejects_state_name_published_and_asset_count_mismatches(
         self,
@@ -516,6 +537,8 @@ class BuildScopeReleaseStateTests(unittest.TestCase):
             self.release_json,
             self._release(body=f"release notes\n{self._owner_marker()}"),
         )
+        exact_body = f"release notes\n{self._owner_marker()}"
+        exact_body_sha256 = hashlib.sha256(exact_body.encode("utf-8")).hexdigest()
         stdout = StringIO()
         with redirect_stdout(stdout):
             self.assertEqual(
@@ -530,6 +553,8 @@ class BuildScopeReleaseStateTests(unittest.TestCase):
                         "final",
                         "--expected-owner-marker",
                         self._owner_marker(),
+                        "--expected-body-sha256",
+                        exact_body_sha256,
                     ]
                 ),
                 0,

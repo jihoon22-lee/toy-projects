@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -22,6 +23,7 @@ MAX_TAG_BYTES = 255
 MAX_RELEASE_BODY_BYTES = 1_000_000
 VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 OWNER_MARKER_PREFIX = "<!-- buildscope-release-owner:"
 OWNER_MARKER_PATTERN = re.compile(
     r"<!-- buildscope-release-owner:"
@@ -174,20 +176,25 @@ def _validate_owner_marker(owner_marker: object, target_sha: str) -> str:
     return owner_marker
 
 
-def _validate_owner_marker_body(
-    release: dict[str, Any], expected_owner_marker: str
-) -> None:
+def _release_body_bytes(release: dict[str, Any]) -> bytes:
     body = release.get("body")
     if not isinstance(body, str):
         raise BuildScopeReleaseStateError("release body must be a string")
     try:
-        body_size = len(body.encode("utf-8"))
+        encoded = body.encode("utf-8")
     except UnicodeEncodeError as exc:
         raise BuildScopeReleaseStateError(
             f"release body is not valid UTF-8: {exc}"
         ) from exc
-    if body_size > MAX_RELEASE_BODY_BYTES:
+    if len(encoded) > MAX_RELEASE_BODY_BYTES:
         raise BuildScopeReleaseStateError("release body exceeds the accepted bound")
+    return encoded
+
+
+def _validate_owner_marker_body(
+    release: dict[str, Any], expected_owner_marker: str
+) -> None:
+    body = _release_body_bytes(release).decode("utf-8")
     if (
         body.count(OWNER_MARKER_PREFIX) != 1
         or body.count(expected_owner_marker) != 1
@@ -220,6 +227,7 @@ def _validate_release_state(
     expected_release_id: int | None = None,
     expected_asset_count: int | None = None,
     expected_owner_marker: str | None = None,
+    expected_body_sha256: str | None = None,
 ) -> int:
     if stage not in {"draft", "final"}:
         raise BuildScopeReleaseStateError(f"invalid release stage: {stage!r}")
@@ -261,6 +269,17 @@ def _validate_release_state(
             expected_owner_marker, target_sha
         )
         _validate_owner_marker_body(release, expected_owner_marker)
+    if expected_body_sha256 is not None:
+        if SHA256_PATTERN.fullmatch(expected_body_sha256) is None:
+            raise BuildScopeReleaseStateError(
+                "expected release body SHA-256 must be lowercase hexadecimal"
+            )
+        actual_body_sha256 = hashlib.sha256(_release_body_bytes(release)).hexdigest()
+        if actual_body_sha256 != expected_body_sha256:
+            raise BuildScopeReleaseStateError(
+                "release body SHA-256 mismatch: "
+                f"{actual_body_sha256} != {expected_body_sha256}"
+            )
     return release_id
 
 
@@ -304,6 +323,7 @@ def check_release_state(
     expected_release_id: int | None = None,
     expected_asset_count: int | None = None,
     expected_owner_marker: str | None = None,
+    expected_body_sha256: str | None = None,
 ) -> int:
     """Validate one release response and return its positive numeric ID."""
 
@@ -320,6 +340,7 @@ def check_release_state(
         expected_release_id=expected_release_id,
         expected_asset_count=expected_asset_count,
         expected_owner_marker=expected_owner_marker,
+        expected_body_sha256=expected_body_sha256,
     )
 
 
@@ -453,6 +474,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     state_parser.add_argument("--expected-release-id", type=_positive_id)
     state_parser.add_argument("--expected-asset-count", type=int)
     state_parser.add_argument("--expected-owner-marker")
+    state_parser.add_argument("--expected-body-sha256")
 
     args = parser.parse_args(argv)
     try:
@@ -489,6 +511,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 expected_release_id=args.expected_release_id,
                 expected_asset_count=args.expected_asset_count,
                 expected_owner_marker=args.expected_owner_marker,
+                expected_body_sha256=args.expected_body_sha256,
             )
             print(release_id)
     except BuildScopeReleaseStateError as exc:
