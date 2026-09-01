@@ -598,6 +598,13 @@ The current dependency-free CI helper discovery suite is `145/145` on both Pytho
 `actionlint`, Ruff check/format, and mypy pass; these are pre-release implementation checks, not a
 public tag or release claim.
 
+The repository-level precondition is also active before tag creation: GitHub immutable releases are
+enabled, and tag ruleset
+[`buildscope-release-tags`](https://github.com/jihoon22-lee/toy-projects/rules/22049711) permits the
+initial `refs/tags/buildscope-v*` creation while blocking tag update and deletion with no bypass actor.
+The tag-only workflow still has to publish and audit the actual release before these controls count as
+release evidence.
+
 The equivalent CI preflight acceptance is recorded in PR #38 below; the tag-only release workflow has
 not run, and the annotated tag, GitHub Release, exact nine uploaded names, and post-release digest
 audit do not exist yet, so `0.5.0` remains unreleased.

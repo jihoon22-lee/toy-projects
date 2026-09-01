@@ -255,6 +255,23 @@ checks; this workthrough makes no current PR, tag, or release claim. Public ici-
 sticky/Pages evidence, exact-main `Merge Gate`, the tag-only workflow, and the final public-byte audit
 remain required before creating the annotated tag.
 
+### Repository immutability precondition
+
+The repository boundary was configured and then read back through the authenticated GitHub API before
+the release tag existed:
+
+- immutable releases are enabled for future published releases;
+- active ruleset
+  [`buildscope-release-tags`](https://github.com/jihoon22-lee/toy-projects/rules/22049711) targets
+  `refs/tags/buildscope-v*` with exact `update` and `deletion` rules, an empty bypass list, and no
+  `creation` rule;
+- the rule therefore permits the first annotated tag creation but prevents moving or deleting the
+  matching tag, while immutable releases lock the published release's tag and assets;
+- both `buildscope-v0.5.0` tag and release endpoints still returned absent after configuration.
+
+These controls close the workflow's unavoidable post-check tag/release TOCTOU assumption. They do not
+replace the exact-main gate, tag workflow, or final public-byte audit.
+
 ## Accepted baseline before this hardening PR
 
 The immediately preceding release-prep PR #40 merged as

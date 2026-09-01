@@ -347,6 +347,9 @@ tag 대상, GitHub Release, 정확히 9개 공개 asset의 사후 byte/digest au
   fixed release ID, bounded binary upload/no-clobber, prepublish 재감사, ambiguous PATCH
   reconciliation, final fresh-byte download, post-download metadata/tag/assets re-fetch를 계약으로
   고정한다. 실패한 owned draft는 자동 삭제하지 않고 명시적 수동 검토를 위해 보존한다.
+- [x] GitHub immutable releases를 활성화하고, active tag ruleset
+  [`buildscope-release-tags`](https://github.com/jihoon22-lee/toy-projects/rules/22049711)가
+  `refs/tags/buildscope-v*`의 최초 생성은 허용하되 update/deletion을 empty bypass로 차단한다.
 - [ ] annotated `buildscope-v0.5.0` tag at exact green main, GitHub Release, 정확히 9개 asset의
   공개 업로드 및 독립적인 final byte/digest audit.
 
