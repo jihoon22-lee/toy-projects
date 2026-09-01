@@ -47,6 +47,11 @@ The release state is synchronized across the following full paths:
 | `/home/jihoon/projects/toy-projects/buildscope/README.md` | Documents the product boundary, supported matrix, release contract, exact PR/main evidence, stable Pages bytes/digests, and the fact that no public stable release is claimed yet. |
 | `/home/jihoon/projects/toy-projects/docs/superpowers/2026-08-30-handover.md` | Updates the handoff state so a new session sees implementation, remote acceptance, exact-main CI, and trusted main Pages as complete, with the public release audit pending. |
 | `/home/jihoon/projects/toy-projects/docs/superpowers/plans/2026-08-30-product-portfolio-master-plan.md` | Keeps the portfolio release cadence and checkpoint policy aligned: B-stage progress, ici pins, and CI-only changes do not automatically bump a product version; `0.5.0` is the single usable BuildScope boundary. |
+| `/home/jihoon/projects/toy-projects/.github/workflows/buildscope-release.yml` | Calls the tested final asset-audit helper instead of embedding untestable Python in YAML. |
+| `/home/jihoon/projects/toy-projects/.github/workflows/ci.yml` | Runs the release-asset auditor regression suite during manifest discovery. |
+| `/home/jihoon/projects/toy-projects/ci/check_buildscope_release_assets.py` | Validates bounded release metadata and exactly nine unique public assets with regular-file and streaming-digest checks. |
+| `/home/jihoon/projects/toy-projects/ci/test_check_buildscope_release_assets.py` | Covers valid assets plus count, name, tag, state, size, digest, encoding, bound, missing-file, symlink, directory, and CLI failures. |
+| `/home/jihoon/projects/toy-projects/ci/test_ci_workflow_contract.py` | Locks the release workflow to the tested helper and the PR discovery job to its unit suite. |
 | `/home/jihoon/projects/toy-projects/workthrough/2026-09-02-buildscope-0.5.0-release-prep.md` | This pre-tag record of context, changes, evidence, verification, and remaining release gates. |
 
 Supporting workflow and checker surfaces referenced by this documentation are:
@@ -84,6 +89,13 @@ The tag-only release workflow already enforces the following before publication:
 - checksummed ici `v0.10.2` download, sidecar, literal, downloaded-byte, and API digest checks;
 - B5 deep JSON/HTML report contract and deterministic `SHA256SUMS` generation;
 - exact asset-name matching and immutable tag/release re-audit after publication.
+
+The final API audit is a dependency-free Python 3.10 helper rather than an inline workflow script.
+It bounds and validates regular UTF-8 JSON metadata, requires a final non-draft/non-prerelease tag,
+rejects malformed or duplicate names, requires exactly nine assets, refuses missing/empty/symlinked/
+non-regular local artifacts, and hashes large bundles in 1 MiB chunks before comparing GitHub's
+`sha256:` digest. This closes the case where a tenth duplicate asset could be hidden by a set-only
+name comparison and avoids loading a full native bundle into memory.
 
 The release boundary does not change the BuildScope version surfaces:
 
@@ -188,14 +200,48 @@ The release workflow creates and checks the final manifest before publication:
 (cd "$artifact" && sha256sum --check SHA256SUMS)
 ~~~
 
-Local documentation-only verification for this workthrough is:
+The final workflow invokes the tested audit boundary directly:
 
 ~~~bash
-git diff --check -- workthrough/2026-09-02-buildscope-0.5.0-release-prep.md
+python3 ci/check_buildscope_release_assets.py \
+  "$RUNNER_TEMP/buildscope-release.json" dist "$TAG" "$VERSION"
 ~~~
 
-The full implementation gates already passed in the accepted PR #38 workflow and must be repeated
-by the tag workflow for the exact release commit; this document does not replace those gates.
+Local release-prep verification completed with:
+
+~~~bash
+python3.10 -m unittest \
+  ci/test_check_manifest.py \
+  ci/test_check_published_html.py \
+  ci/test_check_buildscope_release_assets.py \
+  ci/test_ci_workflow_contract.py -v
+python3.14 -m unittest \
+  ci/test_check_manifest.py \
+  ci/test_check_published_html.py \
+  ci/test_check_buildscope_release_assets.py \
+  ci/test_ci_workflow_contract.py -v
+(
+  cd buildscope
+  PYTHONPATH=python:. uvx --python 3.10 --from pytest==9.1.1 pytest -q tests/python
+  PYTHONPATH=python:. uvx --python 3.14 --from pytest==9.1.1 pytest -q tests/python
+)
+python3.10 -m unittest ci/test_check_buildscope_b5_report.py -v
+python3.14 -m unittest ci/test_check_buildscope_b5_report.py -v
+uvx ruff check ci/check_buildscope_release_assets.py \
+  ci/test_check_buildscope_release_assets.py ci/test_ci_workflow_contract.py
+uvx ruff format --check ci/check_buildscope_release_assets.py \
+  ci/test_check_buildscope_release_assets.py ci/test_ci_workflow_contract.py
+uvx --from mypy==2.3.1 mypy --python-version 3.10 \
+  ci/check_buildscope_release_assets.py ci/test_check_buildscope_release_assets.py \
+  ci/test_ci_workflow_contract.py
+actionlint .github/workflows/ci.yml .github/workflows/buildscope-release.yml
+git diff --check
+~~~
+
+Both Python interpreters passed all 34 selected CI contract tests, all 87 BuildScope Python tests,
+and all 14 B5 report-contract tests; Ruff, mypy, actionlint, and diff checks passed. The full
+implementation gates already passed in the accepted PR #38 workflow and must be repeated by the tag
+workflow for the exact release commit; this document does not replace those gates.
 
 ## Intended release and remaining gates
 
