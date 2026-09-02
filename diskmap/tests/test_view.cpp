@@ -263,6 +263,29 @@ int main() {
         CHECK(diskmap::nodeKey(trailingSlash) == key);
     }
 
+    // Exact key lookup returns a stable root-to-target path without recursive
+    // call-stack growth. Missing identities fail closed instead of selecting a
+    // different entry that happens to reuse the same path.
+    {
+        FsNode root = makeDirectory(
+            "root", "/tmp/lookup",
+            {makeDirectory("nested", "/tmp/lookup/nested",
+                           {makeFile("leaf", "/tmp/lookup/nested/leaf", 8)})});
+        const FsNode* leaf = &root.children.front().children.front();
+        const NodeKey leafKey = diskmap::nodeKey(*leaf);
+        const std::vector<const FsNode*> path =
+            diskmap::nodePathByKey(root, leafKey);
+        CHECK_EQ(path.size(), static_cast<std::size_t>(3));
+        CHECK(path.front() == &root);
+        CHECK(path.back() == leaf);
+        CHECK(diskmap::findNodeByKey(root, leafKey) == leaf);
+
+        NodeKey changedIdentity = leafKey;
+        changedIdentity.identity = FileIdentity{99, 101, true};
+        CHECK(diskmap::nodePathByKey(root, changedIdentity).empty());
+        CHECK(diskmap::findNodeByKey(root, changedIdentity) == nullptr);
+    }
+
     // --- issue classification preserves cycle/depth/mount distinctions ---
     {
         FsNode node = makeDirectory("node", "/tmp/node");

@@ -71,6 +71,12 @@ struct NodeKey {
 
 NodeKey nodeKey(const FsNode& node);
 
+// Finds an exact key in a value-owned tree without recursion. nodePathByKey()
+// returns root through target so GUI navigation can rebuild every skipped
+// ancestor after a key-based activation. Missing keys return nullptr/empty.
+const FsNode* findNodeByKey(const FsNode& root, const NodeKey& key);
+std::vector<const FsNode*> nodePathByKey(const FsNode& root, const NodeKey& key);
+
 // The first matching issue is deterministic and intentionally preserves the
 // scanner's distinctions. A cycle can be complete because it was safely
 // skipped; it therefore has priority over the generic incomplete state.

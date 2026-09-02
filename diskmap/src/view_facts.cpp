@@ -194,6 +194,38 @@ NodeKey nodeKey(const FsNode& node) {
     return key;
 }
 
+std::vector<const FsNode*> nodePathByKey(const FsNode& root, const NodeKey& key) {
+    struct Frame {
+        const FsNode* node = nullptr;
+        std::size_t nextChild = 0;
+    };
+
+    std::vector<Frame> stack{{&root}};
+    while (!stack.empty()) {
+        Frame& frame = stack.back();
+        if (frame.nextChild == 0 && nodeKey(*frame.node) == key) {
+            std::vector<const FsNode*> path;
+            path.reserve(stack.size());
+            for (const Frame& ancestor : stack) {
+                path.push_back(ancestor.node);
+            }
+            return path;
+        }
+        if (frame.nextChild < frame.node->children.size()) {
+            const FsNode* child = &frame.node->children[frame.nextChild++];
+            stack.push_back(Frame{child});
+            continue;
+        }
+        stack.pop_back();
+    }
+    return {};
+}
+
+const FsNode* findNodeByKey(const FsNode& root, const NodeKey& key) {
+    const std::vector<const FsNode*> path = nodePathByKey(root, key);
+    return path.empty() ? nullptr : path.back();
+}
+
 NodeIssue classifyNodeIssue(const FsNode& node, bool scannerTotalsFiltered) {
     const NodeIssue structural = structuralIssue(node);
     if (structural != NodeIssue::None) {

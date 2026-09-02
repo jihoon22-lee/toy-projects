@@ -1,5 +1,10 @@
 # loglens → CMake, diskmap → qmake 구현 계획 (toy-projects)
 
+> **Historical recipe / completed (2026-09-02):** The CMake/qmake migration, Qt shell tests, and
+> release-era adapter work described here were completed through the merged implementation PRs.
+> The unchecked steps below are preserved as historical design and evidence; do not treat them as
+> active work. Current priorities and status are maintained in the [portfolio master plan](2026-08-30-product-portfolio-master-plan.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 두 프로젝트를 각자의 빌드 시스템으로 옮기고, `Q_OBJECT` 클래스를 대상으로 한 단위 테스트를 `tests/` 안에 두어 **실제로 통과시킨다.** 그 과정에서 `loglens` 의 라이브 팔로우 기능을 만든다.

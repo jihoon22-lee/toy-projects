@@ -14,7 +14,18 @@ INCLUDEPATH += $$PWD/../../include
 
 HEADERS += \
     $$PWD/../../include/diskmap/gui/main_window.hpp \
-    $$PWD/../../include/diskmap/gui/treemap_widget.hpp
+    $$PWD/../../include/diskmap/gui/treemap_widget.hpp \
+    $$PWD/../../include/diskmap/gui/node_key_metatype.hpp \
+    $$PWD/../../include/diskmap/gui/node_table_model.hpp \
+    explorer_text.hpp \
+    main_window_filter_data.hpp
 
-SOURCES += main_window.cpp treemap_widget.cpp
+SOURCES += \
+    main_window.cpp \
+    main_window_ui.cpp \
+    main_window_projection.cpp \
+    treemap_widget.cpp \
+    node_table_model.cpp \
+    node_table_model_presentation.cpp \
+    explorer_text.cpp
 PRE_TARGETDEPS += $$OUT_PWD/../libdiskmap_core.a

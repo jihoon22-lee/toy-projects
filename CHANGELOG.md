@@ -31,12 +31,45 @@
   and Zero-CDN. LogLens version/release remains pending, and this evidence does not claim broader
   L3 completion.
 
+### DiskMap explorer workbench (local GUI milestone)
+
+- Completed the local `feat/diskmap-explorer-ui` GUI slice on top of the D3 core projection.
+  `MainWindow` owns one shared immutable scan document, and `NodeKey` is the navigation
+  identity shared by the treemap, sortable table, and breadcrumb trail. Both views share the
+  current root, filters, and metric; the table can additionally switch to a recursive
+  largest-files projection. Accessible breadcrumb actions and table activation provide equivalent
+  directory navigation.
+- Added search, type/size/age/state filters, selectable logical/allocated/reclaimable metrics,
+  and a bounded largest-files projection. The GUI explains the three size meanings and keeps
+  unknown, incomplete, cycle, depth, mount, and scanner-filtered facts visible instead of
+  presenting uncertain physical totals as exact values.
+- Rescans restore the deepest valid `NodeKey` trail and selection, fall back safely when an entry
+  disappears or changes identity, and reject stale generations and mismatched result metadata.
+  While a scan is running, explorer interaction is frozen; atomic progress state remains alive
+  until late worker callbacks are harmlessly drained, including after window destruction.
+- The local native qmake matrix is clean on Qt 5.15.18 and Qt 6.10.2 with `-Werror`: all `11/11`
+  targets pass. Focused QtTest counts are MainWindow `29`, TreemapWidget `12`, and
+  NodeTableModel `11`.
+- Deep no-cache verification with the public ici `v0.10.2` asset (SHA-256
+  `8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4`) is `WARN` with
+  `10 PASS / 2 WARN / 0 FAIL / 0 ERROR / 2 SKIP`, TEM `4.95`, `16/16` production units across
+  `30` configurations, line/function/branch coverage `96.1% / 99.1% / 83.4%`, complexity max
+  `14`, and sanitizer `PASS`. The HTML artifact is exactly `499,265` bytes, SHA-256
+  `9b624303b6191c6ead73079aa42636f318b495e807699601cd403a960cf059c3`, and its exact-title /
+  Zero-CDN checker passes.
+- The local limitation is that `clang-tidy` and `clazy` are unavailable, ici does not yet provide
+  C++ type analysis, and exact C++ dead-symbol analysis remains pending. The heuristic duplicate
+  warning is `6.42%` across `34` groups; it is linked
+  to ici I4-3's robust duplicate backlog, so product code is not contorted around false-positive
+  clone shapes. DiskMap remains `0.1.0` under `Unreleased`; this local milestone makes no PR,
+  remote CI, `main`, Pages, or release claim.
+
 ### DiskMap explorer projection (first core slice)
 
 - Added a Qt-free view projection for logical, allocated, and reclaimable metrics,
   deterministic node keys/issues, conjunctive search/type/size/age filters, and
-  stable visible-child/largest-regular-file ordering. The D3 GUI, treemap/table
-  integration, and cleanup workflow remain unfinished.
+  stable visible-child/largest-regular-file ordering. This entry preserves the historical
+  core-only slice; its GUI and cleanup work were separate follow-up scopes.
 
 ### Roadmap status reconciliation
 

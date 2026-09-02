@@ -1,30 +1,26 @@
 #include "diskmap/gui/main_window.hpp"
 
-#include <QApplication>
+#include <QComboBox>
 #include <QFileDialog>
-#include <QHBoxLayout>
 #include <QLabel>
-#include <QMetaObject>
-#include <QPointer>
-#include <QPushButton>
 #include <QStatusBar>
+#include <QTimer>
 #include <QVBoxLayout>
+#include <QWidget>
 #include <QtConcurrent>
 
 #include <exception>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
-#include "diskmap/format.hpp"
-#include "diskmap/fs_node.hpp"
-#include "diskmap/gui/treemap_widget.hpp"
+#include "explorer_text.hpp"
 
 namespace {
 
-// Runs off the GUI thread. Constructing the source here rather than passing one
-// in keeps everything the worker touches local to it.
 diskmap::ScanResult runScan(
     const QString& path,
     const diskmap::ScanOptions& options,
@@ -37,12 +33,6 @@ diskmap::ScanResult runScan(
         diskmap::sortBySizeDesc(result.root);
     }
     return result;
-}
-
-QString describe(const diskmap::FsNode& node) {
-    return QStringLiteral("%1  %2")
-        .arg(QString::fromStdString(node.name))
-        .arg(QString::fromStdString(diskmap::humanBytes(node.size)));
 }
 
 int pluralCount(std::size_t value) {
@@ -74,80 +64,74 @@ MainWindow::MainWindow(QWidget* parent, ScanRunner scanRunner)
     }
     auto* central = new QWidget(this);
     auto* layout = new QVBoxLayout(central);
-
-    auto* bar = new QHBoxLayout();
-    auto* chooseButton = new QPushButton(tr("Choose folder…"), central);
-    chooseButton->setObjectName(QStringLiteral("chooseFolderButton"));
-    chooseButton->setAccessibleName(tr("Choose folder"));
-    upButton_ = new QPushButton(tr("Up"), central);
-    upButton_->setObjectName(QStringLiteral("upButton"));
-    upButton_->setAccessibleName(tr("Go to parent folder"));
-    upButton_->setEnabled(false);
-    cancelButton_ = new QPushButton(tr("Cancel"), central);
-    cancelButton_->setObjectName(QStringLiteral("cancelScanButton"));
-    cancelButton_->setAccessibleName(tr("Cancel current scan"));
-    cancelButton_->setEnabled(false);
-    breadcrumb_ = new QLabel(tr("(no scan yet)"), central);
-    breadcrumb_->setObjectName(QStringLiteral("breadcrumb"));
-    breadcrumb_->setAccessibleName(tr("Current folder"));
-    bar->addWidget(chooseButton);
-    bar->addWidget(upButton_);
-    bar->addWidget(cancelButton_);
-    bar->addWidget(breadcrumb_, 1);
-    layout->addLayout(bar);
-
-    treemap_ = new TreemapWidget(central);
-    treemap_->setObjectName(QStringLiteral("treemap"));
-    treemap_->setAccessibleName(tr("Disk usage treemap"));
-    layout->addWidget(treemap_, 1);
-
+    buildNavigationBar(central, layout);
+    buildFilterPanel(central, layout);
+    buildExplorer(central, layout);
     setCentralWidget(central);
+
     status_ = new QLabel(tr("Ready"), this);
     status_->setObjectName(QStringLiteral("status"));
     status_->setAccessibleName(tr("Scan status"));
+    status_->setTextFormat(Qt::PlainText);
     statusBar()->addWidget(status_);
 
-    connect(chooseButton, &QPushButton::clicked, this, &MainWindow::chooseFolder);
-    connect(upButton_, &QPushButton::clicked, this, &MainWindow::goUp);
-    connect(cancelButton_, &QPushButton::clicked, this, &MainWindow::cancelScan);
-    connect(treemap_, &TreemapWidget::nodeActivated, this, &MainWindow::onNodeActivated);
-    connect(treemap_, &TreemapWidget::hoveredNodeChanged, this,
-            &MainWindow::onHoveredNodeChanged);
+    progressTimer_ = new QTimer(this);
+    progressTimer_->setInterval(100);
+    connect(progressTimer_, &QTimer::timeout, this, [this]() {
+        if (activeProgress_) {
+            onScanProgress(activeGeneration_,
+                           activeProgress_->dirs.load(std::memory_order_relaxed),
+                           activeProgress_->files.load(std::memory_order_relaxed),
+                           requestedScanPath_);
+        }
+    });
 
-    resize(960, 640);
-    setWindowTitle(tr("diskmap"));
+    connectUi();
+    updateBreadcrumb();
+    updateMetricExplanation();
+    updatePartialBanner();
+    updateControlState();
+    resize(1180, 800);
+    setWindowTitle(tr("diskmap explorer"));
 }
 
 MainWindow::~MainWindow() {
     if (activeCancellation_) {
         activeCancellation_->cancel();
     }
+    filterTimer_->stop();
+    filterTimer_->stop();
 }
 
 void MainWindow::chooseFolder() {
     const QString path = QFileDialog::getExistingDirectory(this, tr("Choose a folder to scan"));
-    if (path.isEmpty()) {
-        return;
+    if (!path.isEmpty()) {
+        startScan(path, false);
     }
-    startScan(path);
 }
 
-void MainWindow::scanPath(const QString& path) { startScan(path); }
+void MainWindow::scanPath(const QString& path) { startScan(path, false); }
+
+void MainWindow::rescan() {
+    if (!currentScanPath_.isEmpty()) {
+        startScan(currentScanPath_, true);
+    }
+}
 
 void MainWindow::cancelScan() {
     if (!activeCancellation_) {
         return;
     }
     activeCancellation_->cancel();
-    cancelButton_->setEnabled(false);
     status_->setText(tr("Cancelling scan…"));
+    updateControlState();
 }
 
 void MainWindow::setScanOptions(const diskmap::ScanOptions& options) {
     scanOptions_ = options;
 }
 
-void MainWindow::startScan(const QString& path) {
+void MainWindow::startScan(const QString& path, bool restoreNavigation) {
     if (path.isEmpty()) {
         status_->setText(tr("Choose a non-empty path to scan"));
         return;
@@ -156,35 +140,34 @@ void MainWindow::startScan(const QString& path) {
         activeCancellation_->cancel();
     }
 
+    pendingRestore_ = restoreNavigation && document_ != nullptr
+                      && path == currentScanPath_;
+    pendingTrail_ = pendingRestore_ ? trail_ : std::vector<diskmap::NodeKey>{};
+    pendingSelectedKey_ = pendingRestore_ ? selectedKey_ : std::nullopt;
+    requestedScanPath_ = path;
+
     ++activeGeneration_;
     const std::uint64_t generation = activeGeneration_;
     diskmap::ScanOptions options = scanOptions_;
     options.generation = generation;
     const auto cancellation = std::make_shared<diskmap::ScanCancellationToken>();
+    const auto progressState = std::make_shared<ScanProgressState>();
     activeCancellation_ = cancellation;
+    activeProgress_ = progressState;
 
     auto* watcher = new QFutureWatcher<diskmap::ScanResult>(this);
     connect(watcher, &QFutureWatcher<diskmap::ScanResult>::finished, this,
             [this, watcher, generation]() { onScanFinished(watcher, generation); });
 
-    QPointer<MainWindow> window(this);
-    const diskmap::ProgressFn progress = [window, generation, path](std::size_t dirs,
-                                                                   std::size_t files) {
-        if (!window) {
-            return;
-        }
-        QMetaObject::invokeMethod(
-            window.data(),
-            [window, generation, dirs, files, path]() {
-                if (window) {
-                    window->onScanProgress(generation, dirs, files, path);
-                }
-            },
-            Qt::QueuedConnection);
+    const diskmap::ProgressFn progress = [progressState](std::size_t dirs,
+                                                         std::size_t files) {
+        progressState->dirs.store(dirs, std::memory_order_relaxed);
+        progressState->files.store(files, std::memory_order_relaxed);
     };
 
     status_->setText(tr("Scanning %1…").arg(path));
-    cancelButton_->setEnabled(true);
+    progressTimer_->start();
+    updateControlState();
     const ScanRunner runner = scanRunner_;
     watcher->setFuture(QtConcurrent::run(
         [runner, path, options, cancellation, progress]() {
@@ -220,88 +203,83 @@ void MainWindow::onScanProgress(std::uint64_t generation,
 
 void MainWindow::onScanFinished(QFutureWatcher<diskmap::ScanResult>* watcher,
                                 std::uint64_t generation) {
-    diskmap::ScanResult completed = watcher->result();
-    watcher->deleteLater();
     if (generation != activeGeneration_) {
+        watcher->deleteLater();
         return;
     }
+    diskmap::ScanResult completed = watcher->result();
+    watcher->deleteLater();
     activeCancellation_.reset();
-    cancelButton_->setEnabled(false);
+    activeProgress_.reset();
+    progressTimer_->stop();
+
+    if (completed.generation != generation
+        || completed.root.scan_generation != generation) {
+        discardPendingRestore();
+        status_->setText(tr("Scan result discarded: generation metadata mismatch"));
+        updateControlState();
+        return;
+    }
 
     if (completed.cancelled) {
+        discardPendingRestore();
         status_->setText(tr("Scan cancelled — partial result discarded"));
+        updateControlState();
         return;
     }
     if (!completed.fatal_error.empty()) {
+        discardPendingRestore();
         status_->setText(tr("Scan failed: %1")
                              .arg(QString::fromStdString(completed.fatal_error)));
+        updateControlState();
         return;
     }
 
-    result_ = std::move(completed);
-    trail_.clear();
-    showNode(&result_.root);
+    const std::vector<diskmap::NodeKey> previousTrail = pendingTrail_;
+    const std::optional<diskmap::NodeKey> previousSelection = pendingSelectedKey_;
+    document_ = std::make_shared<diskmap::ScanResult>(std::move(completed));
+    currentScanPath_ = requestedScanPath_;
+    if (pendingRestore_) {
+        restoreNavigation(previousTrail);
+        selectedKey_ = previousSelection;
+    } else {
+        trail_ = {diskmap::nodeKey(document_->root)};
+        selectedKey_.reset();
+    }
+    discardPendingRestore();
+    refreshProjection();
+}
 
-    QString message = tr("%1 dirs, %2 files, %3")
-                          .arg(result_.dirs_scanned)
-                          .arg(result_.files_scanned)
-                          .arg(QString::fromStdString(diskmap::humanBytes(result_.root.size)));
-    if (result_.error_count > 0) {
-        // Surfacing the count matters: a scan that silently skipped unreadable
-        // directories would report a total that is quietly too small.
-        message +=
-            tr("  —  %n unreadable path(s)", "", pluralCount(result_.error_count));
+void MainWindow::updateDocumentStatus() {
+    if (!document_ || activeCancellation_) {
+        return;
     }
-    if (result_.totals_filtered) {
-        message += tr("  —  %n filtered entry(s)", "",
-                      pluralCount(result_.entries_filtered));
+    const diskmap::SizeMetric metric = static_cast<diskmap::SizeMetric>(
+        metricCombo_->currentData().toInt());
+    const diskmap::MetricValue rootMetric = diskmap::metricValue(
+        document_->root, metric, document_->totals_filtered);
+    QString message = tr("%1 dirs, %2 files · %3: %4")
+                          .arg(document_->dirs_scanned)
+                          .arg(document_->files_scanned)
+                          .arg(diskmap_gui_text::metricName(metric),
+                               diskmap_gui_text::metricValueText(rootMetric));
+    if (document_->error_count > 0) {
+        message += tr("  —  %n unreadable path(s)", "",
+                      pluralCount(document_->error_count));
     }
-    if (result_.mount_boundaries_skipped > 0) {
+    if (document_->totals_filtered) {
+        message += tr("  —  %n scanner-filtered entry(s)", "",
+                      pluralCount(document_->entries_filtered));
+    }
+    if (document_->mount_boundaries_skipped > 0) {
         message += tr("  —  %n mount boundary skipped", "",
-                      pluralCount(result_.mount_boundaries_skipped));
+                      pluralCount(document_->mount_boundaries_skipped));
     }
     status_->setText(message);
 }
 
-void MainWindow::showNode(const diskmap::FsNode* node) {
-    if (node == nullptr) {
-        return;
-    }
-    trail_.push_back(node);
-    treemap_->setRoot(node);
-    upButton_->setEnabled(trail_.size() > 1);
-    updateBreadcrumb();
-}
-
-void MainWindow::goUp() {
-    if (trail_.size() <= 1) {
-        return;
-    }
-    trail_.pop_back();
-    treemap_->setRoot(trail_.back());
-    upButton_->setEnabled(trail_.size() > 1);
-    updateBreadcrumb();
-}
-
-void MainWindow::updateBreadcrumb() {
-    QStringList parts;
-    for (const diskmap::FsNode* node : trail_) {
-        parts << QString::fromStdString(node->name);
-    }
-    breadcrumb_->setText(parts.join(QStringLiteral(" / ")));
-}
-
-void MainWindow::onNodeActivated(const diskmap::FsNode* node) {
-    if (node == nullptr || node->children.empty()) {
-        return;
-    }
-    showNode(node);
-}
-
-void MainWindow::onHoveredNodeChanged(const diskmap::FsNode* node) {
-    if (node == nullptr) {
-        treemap_->setToolTip(QString());
-        return;
-    }
-    treemap_->setToolTip(describe(*node));
+void MainWindow::discardPendingRestore() {
+    pendingRestore_ = false;
+    pendingTrail_.clear();
+    pendingSelectedKey_.reset();
 }

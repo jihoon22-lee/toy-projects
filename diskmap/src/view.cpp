@@ -271,6 +271,28 @@ bool sortBefore(const FsNode* left,
     return false;
 }
 
+struct VisibleSortEntry {
+    const FsNode* node = nullptr;
+    MetricValue metric;
+    NodeKey key;
+};
+
+bool visibleEntryBefore(const VisibleSortEntry& left,
+                        const VisibleSortEntry& right,
+                        const SortSpec& sort) {
+    if (left.metric.known != right.metric.known) {
+        return left.metric.known;
+    }
+    if (left.metric.known && left.metric.bytes != right.metric.bytes) {
+        return sort.descending ? left.metric.bytes > right.metric.bytes
+                               : left.metric.bytes < right.metric.bytes;
+    }
+    if (left.key != right.key) {
+        return left.key < right.key;
+    }
+    return left.node->name < right.node->name;
+}
+
 std::optional<std::size_t> selectedIdentityIndex(
     const std::vector<const FsNode*>& selected, const FsNode& candidate) {
     if (!candidate.metadata.identity.valid) {
@@ -349,17 +371,29 @@ bool inspectLargestNode(const FsNode& node,
 std::vector<const FsNode*> visibleChildren(const FsNode& node,
                                            const ViewFilter& filter,
                                            const SortSpec& sort) {
-    std::vector<const FsNode*> visible;
-    visible.reserve(node.children.size());
+    // metricValue() validates a whole subtree. Cache it once per visible
+    // child before sorting instead of repeating the same traversal for every
+    // comparator call on wide directory levels.
+    std::vector<VisibleSortEntry> entries;
+    entries.reserve(node.children.size());
     for (const FsNode& child : node.children) {
         if (matchesFilter(child, filter)) {
-            visible.push_back(&child);
+            entries.push_back(VisibleSortEntry{
+                &child,
+                metricValue(child, sort.metric, filter.scanner_totals_filtered),
+                nodeKey(child),
+            });
         }
     }
-    std::sort(visible.begin(), visible.end(), [&filter, &sort](const FsNode* left,
-                                                                const FsNode* right) {
-        return sortBefore(left, right, filter, sort);
+    std::sort(entries.begin(), entries.end(), [&sort](const VisibleSortEntry& left,
+                                                       const VisibleSortEntry& right) {
+        return visibleEntryBefore(left, right, sort);
     });
+    std::vector<const FsNode*> visible;
+    visible.reserve(entries.size());
+    for (const VisibleSortEntry& entry : entries) {
+        visible.push_back(entry.node);
+    }
     return visible;
 }
 
