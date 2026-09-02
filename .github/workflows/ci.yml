@@ -138,6 +138,85 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  # quality-zoo is a known-answer compatibility surface, not another product.
+  # The ordinary gate deliberately consumes the same checksummed public ici
+  # release as external users. Candidate bundles are injected only through the
+  # separate local intake contract after their Actions evidence is verified.
+  quality-zoo-contract:
+    name: Quality-zoo known-answer contract
+    needs: discover
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+
+      - name: Fetch checksummed public ici release
+        run: |
+          set -euo pipefail
+          ici_root="$RUNNER_TEMP/quality-zoo-ici"
+          ici_pyz="$ici_root/ici.pyz"
+          mkdir -p "$ici_root"
+          base="https://github.com/jihoon22-lee/ici/releases/download/${ICI_VERSION}"
+          curl -fsSL --retry 3 -o "$ici_pyz" "${base}/ici.pyz"
+          curl -fsSL --retry 3 -o "$ici_root/ici.pyz.sha256" "${base}/ici.pyz.sha256"
+          manifest_hash="$(awk 'NR == 1 {print $1}' "$ici_root/ici.pyz.sha256")"
+          manifest_name="$(awk 'NR == 1 {print $2}' "$ici_root/ici.pyz.sha256")"
+          test "$manifest_name" = ici.pyz
+          test "$manifest_hash" = "$ICI_SHA256"
+          (cd "$ici_root" && sha256sum --check ici.pyz.sha256)
+          printf '%s  %s\n' "$ICI_SHA256" "$ici_pyz" | sha256sum --check -
+          chmod +x "$ici_pyz"
+          test -x "$ici_pyz"
+          printf 'QUALITY_ZOO_ICI=%s\n' "$ici_pyz" >> "$GITHUB_ENV"
+          ICI_PYTHON=python3.10 "$ici_pyz" --version
+
+      - name: Test runner trust boundaries
+        working-directory: quality-zoo
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Run stable known-answer scenarios
+        working-directory: quality-zoo
+        env:
+          ICI_PYTHON: python3.10
+        run: |
+          set -euo pipefail
+          python3 -m runner.run \
+            --manifest manifest.json \
+            --ici-bin "$QUALITY_ZOO_ICI" \
+            --output-dir "$RUNNER_TEMP/quality-zoo-results" \
+            --timeout-seconds 300
+          python3 - "$RUNNER_TEMP/quality-zoo-results/suite.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          if payload.get("schema") != "quality-zoo.suite/v1":
+              raise SystemExit("quality-zoo suite schema mismatch")
+          if payload.get("contract_verdict") != "PASS":
+              raise SystemExit("quality-zoo contract did not pass")
+          if payload.get("ici", {}).get("sha256") != "${{ env.ICI_SHA256 }}":
+              raise SystemExit("quality-zoo did not use the pinned release")
+          PY
+
+      - name: Upload quality-zoo evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: quality-zoo-contract
+          path: ${{ runner.temp }}/quality-zoo-results
+          if-no-files-found: warn
+          retention-days: 14
+
   # ici builds and unit-tests the widget libraries now, but it never launches
   # the application. This matrix does: a GUI that links and then dies on
   # startup still fails the gate here. Discovery expands every GUI project to
@@ -1054,7 +1133,7 @@ jobs:
   report-pr:
     name: Publish Reports & Sticky Comment
     if: ${{ always() && github.event_name == 'pull_request' }}
-    needs: [discover, verify, gui-build]
+    needs: [discover, verify, gui-build, quality-zoo-contract]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
@@ -1241,11 +1320,13 @@ jobs:
           DISCOVER_RESULT: ${{ needs.discover.result }}
           VERIFY_RESULT: ${{ needs.verify.result }}
           GUI_RESULT: ${{ needs.gui-build.result }}
+          QUALITY_ZOO_RESULT: ${{ needs.quality-zoo-contract.result }}
           GUI_COUNT: ${{ needs.discover.outputs.gui_count }}
         run: |
           set -euo pipefail
           test "$DISCOVER_RESULT" = success
           test "$VERIFY_RESULT" = success
+          test "$QUALITY_ZOO_RESULT" = success
           if [ "$GUI_RESULT" != success ]; then
             test "$GUI_COUNT" = 0
             test "$GUI_RESULT" = skipped
@@ -1267,6 +1348,7 @@ jobs:
       - buildscope-ici-deep
       - buildscope-python-quality
       - buildscope-release-contract
+      - quality-zoo-contract
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
@@ -1288,6 +1370,7 @@ jobs:
           BUILDSCOPE_DEEP_RESULT: ${{ needs.buildscope-ici-deep.result }}
           BUILDSCOPE_PYTHON_RESULT: ${{ needs.buildscope-python-quality.result }}
           BUILDSCOPE_RELEASE_RESULT: ${{ needs.buildscope-release-contract.result }}
+          QUALITY_ZOO_RESULT: ${{ needs.quality-zoo-contract.result }}
           GUI_COUNT: ${{ needs.discover.outputs.gui_count }}
         run: |
           set -euo pipefail
@@ -1299,6 +1382,7 @@ jobs:
           test "$BUILDSCOPE_DEEP_RESULT" = success
           test "$BUILDSCOPE_PYTHON_RESULT" = success
           test "$BUILDSCOPE_RELEASE_RESULT" = success
+          test "$QUALITY_ZOO_RESULT" = success
           if [ "$GUI_RESULT" != success ]; then
             test "$GUI_COUNT" = 0
             test "$GUI_RESULT" = skipped
@@ -1454,7 +1538,7 @@ jobs:
   merge-gate:
     name: Merge Gate
     if: ${{ always() }}
-    needs: [discover, verify, gui-build, benchmark-smoke, diskmap-benchmark-smoke, buildscope-benchmark-smoke, buildscope-ici-deep, buildscope-python-quality, buildscope-release-contract, report-pr, publish-main]
+    needs: [discover, verify, gui-build, quality-zoo-contract, benchmark-smoke, diskmap-benchmark-smoke, buildscope-benchmark-smoke, buildscope-ici-deep, buildscope-python-quality, buildscope-release-contract, report-pr, publish-main]
     runs-on: ubuntu-latest
     steps:
       - name: Require every quality job
@@ -1463,6 +1547,7 @@ jobs:
           DISCOVER_RESULT: ${{ needs.discover.result }}
           VERIFY_RESULT: ${{ needs.verify.result }}
           GUI_RESULT: ${{ needs.gui-build.result }}
+          QUALITY_ZOO_RESULT: ${{ needs.quality-zoo-contract.result }}
           BENCHMARK_SMOKE_RESULT: ${{ needs.benchmark-smoke.result }}
           DISKMAP_BENCHMARK_SMOKE_RESULT: ${{ needs.diskmap-benchmark-smoke.result }}
           BUILDSCOPE_BENCHMARK_SMOKE_RESULT: ${{ needs.buildscope-benchmark-smoke.result }}
@@ -1476,6 +1561,7 @@ jobs:
           set -euo pipefail
           test "$DISCOVER_RESULT" = success
           test "$VERIFY_RESULT" = success
+          test "$QUALITY_ZOO_RESULT" = success
           test "$BENCHMARK_SMOKE_RESULT" = success
           test "$DISKMAP_BENCHMARK_SMOKE_RESULT" = success
           test "$BUILDSCOPE_BENCHMARK_SMOKE_RESULT" = success

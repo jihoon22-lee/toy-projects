@@ -176,6 +176,7 @@ class WorkflowPublicationContractTests(unittest.TestCase):
             "discover",
             "verify",
             "gui-build",
+            "quality-zoo-contract",
             "benchmark-smoke",
             "diskmap-benchmark-smoke",
             "buildscope-benchmark-smoke",
@@ -209,6 +210,8 @@ class WorkflowPublicationContractTests(unittest.TestCase):
     def test_merge_gate_requires_the_correct_event_publisher(self) -> None:
         block = _job_block("merge-gate")
 
+        self.assertIn("quality-zoo-contract", block)
+        self.assertIn('test "$QUALITY_ZOO_RESULT" = success', block)
         self.assertIn("publish-main", block)
         self.assertIn('test "$REPORT_RESULT" = success', block)
         self.assertIn('test "$MAIN_PUBLISH_RESULT" = skipped', block)
@@ -220,6 +223,16 @@ class WorkflowPublicationContractTests(unittest.TestCase):
         block = _job_block("discover")
 
         self.assertIn("ci/test_ci_workflow_contract.py", block)
+
+    def test_quality_zoo_uses_the_pinned_release_and_uploads_evidence(self) -> None:
+        block = _job_block("quality-zoo-contract")
+
+        self.assertIn('test "$manifest_hash" = "$ICI_SHA256"', block)
+        self.assertIn("sha256sum --check ici.pyz.sha256", block)
+        self.assertIn("python3 -m unittest discover -s tests -v", block)
+        self.assertIn("python3 -m runner.run", block)
+        self.assertIn('--ici-bin "$QUALITY_ZOO_ICI"', block)
+        self.assertIn("name: quality-zoo-contract", block)
 
     def test_buildscope_release_pipeline_has_a_fixed_fail_closed_order(self) -> None:
         step_names = (
