@@ -26,13 +26,14 @@
 
 ## 2. 현재 포트폴리오와 검증 공백
 
-2026-09-02 기준:
+2026-09-03 기준:
 
 | 프로젝트 | 현재 형태 | 실측 | 제품 상태 |
 |---|---|---|---|
 | loglens | C++17, Qt, CMake | L2 bounded/background slice · PR #25 CI green · local Qt5/Qt6 12 CTest targets · 1 GiB benchmark PR #26 merged · main Qt5/Qt6 sweep green | Tail N/From start와 worker UX, benchmark/default 8192 완료 |
 | diskmap | C++17, Qt, qmake | D1/D2 complete · D3 explorer workbench merged by PR #46 · exact-main evidence green · `0.1.0`/`Unreleased` | treemap/table, filters, uncertainty, accessible navigation, rescan restoration verified; cleanup UX는 D4~D6에서 확장 |
 | buildscope | Python + C++17/Qt, CMake | B0~B5 implementation, remote acceptance, exact-main CI, trusted main Pages와 `0.5.0` tag/release/public asset audit complete | B3~B5 첫 usable release boundary published and audited |
+| quality-zoo | Python 3.10, stdlib runner | scenario contract/local candidate consumer complete · remote PR CI/sticky/exact-main pending | test asset only; Q1~Q5 corpus pending |
 | ici/viewer | Qt-free core + Qt6 GUI | 3 tests, TEM 4.94 | core 중심, 셸과 report workflow 부족 |
 
 현재 공백:
@@ -52,7 +53,7 @@
 | ELF/ABI/RPATH | 없음 | abilens |
 | Python runtime/package matrix | ici self뿐 | envlens |
 | hybrid process contract | 없음 | buildscope |
-| known-bad detection recall | 작은 ici fixture뿐 | quality-zoo |
+| known-bad detection recall | quality-zoo의 1개 stable Python scenario와 작은 ici fixture | C++/Qt/build/binary/hybrid corpus 확장 |
 
 새 프로젝트가 ici 기능보다 먼저 빈 껍데기로 만들어지지 않도록 각 신규 프로젝트는 대응 ici milestone과 함께 시작한다.
 
@@ -1369,14 +1370,14 @@ abilens/
 
 ### Q0. scenario 계약
 
-**브랜치:** `test/quality-zoo-runner`
+**브랜치:** `test/quality-zoo-contract`
 
 권장 구조:
 
 ```text
 quality-zoo/
   README.md
-  manifest.toml
+  manifest.json
   runner/
   scenarios/
     python/<rule-case>/
@@ -1386,7 +1387,9 @@ quality-zoo/
     hybrid/<integration-case>/
 ```
 
-각 scenario는 다음을 선언한다.
+현재 schema-2 scenario는 `scenario.json`에 scenario identity와 exact ici executable SHA-256별
+expectation 경로를 선언하고, 각 경로가 가리키는 full strict schema-1 expectation에 다음을
+담는다.
 
 - project root와 ici profile/config
 - 실행할 command와 expected suite/engine status
@@ -1396,10 +1399,41 @@ quality-zoo/
 - 반드시 없어야 하는 finding
 - 필요한 capability와 skip 조건
 
-- [ ] runner는 `ICI_BIN`으로 local/release pyz를 받는다.
-- [ ] scenario project 밖 path와 shell command를 거부한다.
-- [ ] report schema mismatch와 runner failure를 engine failure와 구분한다.
-- [ ] line number가 변경되면 무조건 snapshot을 갱신하지 않고 source/expectation을 함께 검토한다.
+**현재 상태 (2026-09-03):** scenario contract, dependency-free runner, candidate archive intake와
+local candidate consumer 구현은 완료됐다. Registry는 Python 3.10 표준 라이브러리만 사용하는
+`manifest.json`으로 고정했으며, scenario의 `ici.toml`은 ici 입력으로 남기고 runner가 TOML
+parser를 추가하지 않는다. `ICI_BIN`은 명시적인 local executable path이고, ordinary CI는
+released ici `v0.10.2` pin을 유지한다. Candidate ZIP과 optional exact five authenticated
+GitHub API snapshots의 provenance/digest/identity validation은 local evidence에서 통과했다.
+Released ici `v0.10.2` digest `8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4`는
+legacy `MEASURED`/`high`를, 같은 package version의 candidate digest
+`53fc75f0a073a74689babfe9ef8a4b2378995002d7d563bdc52da548fdbb9ee8`는 provenance-aware
+`ESTIMATED`/`medium`을 보고한다. 따라서 schema-2 selector는 exact executable SHA-256으로
+full strict schema-1 expectation을 고르고 unknown digest는 fail closed한다. Ordinary CI는
+released expectation을, candidate validation은 candidate expectation을 사용한다.
+
+- [x] runner는 `ICI_BIN`/`--ici-bin`으로 local pyz를 받고, archive consumer는 검증된 candidate를 받는다.
+- [x] scenario project 밖 path, symlink와 shell command를 거부한다.
+- [x] report schema mismatch와 runner failure를 engine failure와 구분한다.
+- [x] line number가 변경되면 무조건 snapshot을 갱신하지 않고 source/expectation을 함께 검토한다.
+- [x] candidate ZIP의 digest/provenance, exact member/mode, sidecar, executable version과 optional
+      `artifact.json`, `candidate-run.json`, `gate-check.json`, `gate-job.json`, `gate-run.json`
+      five-snapshot evidence를 fail-closed로 검증한다.
+- [x] schema-2 `scenario.json`이 exact executable SHA-256으로 full strict schema-1 expectation을
+      선택하고, unknown digest를 fallback 없이 fail closed한다.
+- [x] contract verdict를 observed suite `WARN`/`FAIL`과 분리하고 expected finding 및 clean
+      counterpart absence를 검증한다.
+- [ ] current PR rerun이 pending인 remote PR CI, sticky report publication과 exact-main evidence를
+      완료한다.
+
+첫 local candidate evidence는 candidate run `33689056008`, source/target
+`7872a7b80899cbd3d40d92d18e7920cd7e2283e7`, artifact `9869395069`, ZIP SHA-256
+`640e50ecf5b099174c16f1ef5d2b5b87945329711e96f926d94c3cc04109081e`, candidate `ici.pyz` SHA-256
+`53fc75f0a073a74689babfe9ef8a4b2378995002d7d563bdc52da548fdbb9ee8`, version `0.10.2`다.
+Authenticated API evidence validation은 통과했다. `python.dead-private-function`은 observed
+suite `WARN`이지만 contract `PASS`였고, expected finding 하나만 match됐으며 clean counterpart
+false positive가 없었다. 이 evidence는 version/release bump를 의미하지 않으며, same package
+version의 released/candidate report를 하나의 expectation으로 취급하지 않는다.
 
 ### Q1. Python stable corpus
 
@@ -1470,7 +1504,10 @@ quality-zoo/
 ### 13.2 ici pin과 local candidate
 
 - [ ] default CI는 checksum이 있는 released ici version을 사용한다.
-- [ ] manual workflow는 `ICI_BIN` artifact 또는 candidate URL/checksum을 명시적으로 받는다.
+- [ ] manual/local consumer는 `ICI_BIN` local path 또는 provenance-bound candidate archive와
+      expected ZIP SHA-256을 명시적으로 받는다. Candidate provenance를 기록할 때는 optional
+      exact five authenticated GitHub API snapshots(`artifact.json`, `candidate-run.json`,
+      `gate-check.json`, `gate-job.json`, `gate-run.json`)을 함께 검증한다.
 - [ ] 각 project report에 ici version과 tool capability를 보존한다.
 - [ ] version bump PR은 portfolio 전체 standard verify 결과를 첨부한다.
 
@@ -1514,7 +1551,8 @@ ici와 toy-projects가 함께 바뀌는 기능은 다음 순서를 따른다.
 - [x] B0~B5: buildscope hybrid compile explorer와 release 완료 (implementation·remote acceptance·trusted main Pages·`0.5.0` tag/release/public asset audit complete)
 - [ ] E0~E4: envlens pure-Python environment explorer와 release 완료
 - [ ] A0~A4: abilens Makefile/ELF explorer와 release 완료
-- [ ] Q0~Q5: Python/C++/Qt/build/hybrid stable expected-finding corpus 완료
+- [ ] Q0~Q5: Python/C++/Qt/build/hybrid stable expected-finding corpus 완료 (Q0 implementation/local
+  candidate consumer complete; remote PR CI/sticky/exact-main pending; Q1~Q5 pending)
 - [ ] repository path-aware CI, ici pin/candidate와 artifact 정책 완료
 
 체크포인트는 기능이 시연되는 것만으로 닫지 않는다. 공통 제품 완성 불변식, native tests, ici 실측, 문서와 오류 처리까지 모두 충족해야 한다.

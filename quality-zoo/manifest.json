@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "scenarios": [
+    {
+      "id": "python.dead-private-function",
+      "path": "scenarios/python/dead-private-function"
+    }
+  ]
+}

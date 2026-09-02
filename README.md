@@ -33,6 +33,41 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 | [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D1/D2 complete · D3 explorer workbench merged (PR #46; exact-main green) · `0.1.0`/`Unreleased` |
 | [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · L2 1 GiB benchmark merged in PR #26 · default capacity 8192 |
 | [buildscope](buildscope/) | compile DB explorer | 0.5.0 stable · published 2026-09-02 · immutable GitHub Release |
+| [quality-zoo](quality-zoo/) | ici known-answer expected-finding corpus | scenario contract and local candidate consumer complete · remote PR CI/sticky/exact-main pending · no product release |
+
+### Quality Zoo known-answer corpus and candidate consumer
+
+Quality Zoo keeps intentionally defective, small scenarios outside the user-facing products and
+checks the complete ici report contract: schema, observed status, evidence, locations, expected
+findings, and forbidden findings in nearby clean code. Its registry is the dependency-free
+[`quality-zoo/manifest.json`](quality-zoo/manifest.json), deliberately JSON rather than a TOML
+parser so the runner stays standard-library-only and works on Python 3.10. Scenario projects may
+still contain `ici.toml`; ici reads that file, while the runner only validates its location and
+invokes a fixed argv contract.
+
+Local runs use an explicit executable path through `ICI_BIN` (or `--ici-bin`). Candidate intake
+accepts a checksum- and provenance-bound ZIP and, when authenticated provenance is being recorded,
+an optional directory containing exactly five API snapshots: `artifact.json`, `candidate-run.json`,
+`gate-check.json`, `gate-job.json`, and `gate-run.json`. The intake rejects unsafe archive members,
+path escapes, symlinks, digest/version mismatches, and identity mismatches; the detailed threat
+model and command examples are in the [Quality Zoo README](quality-zoo/README.md).
+
+The first local candidate consumer run used ici candidate workflow [33689056008](https://github.com/jihoon22-lee/ici/actions/runs/33689056008),
+source `7872a7b80899cbd3d40d92d18e7920cd7e2283e7`, artifact `9869395069`, ZIP SHA-256
+`640e50ecf5b099174c16f1ef5d2b5b87945329711e96f926d94c3cc04109081e`, and candidate `ici.pyz`
+SHA-256 `53fc75f0a073a74689babfe9ef8a4b2378995002d7d563bdc52da548fdbb9ee8` (version `0.10.2`).
+Authenticated API evidence validation passed. `python.dead-private-function` had contract `PASS`
+with observed suite `WARN`, exactly one matched finding, and no clean-counterpart false positive.
+The current PR rerun is still pending, so remote PR CI, sticky report, and exact-main verification
+remain pending. Package version alone is not an expectation selector: released ici `v0.10.2` digest
+`8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4` reports legacy `MEASURED`/`high`,
+while candidate digest `53fc75f0a073a74689babfe9ef8a4b2378995002d7d563bdc52da548fdbb9ee8` reports
+provenance-aware `ESTIMATED`/`medium`, despite the same package version. Schema-2 `scenario.json`
+therefore selects a full strict schema-1 expectation by exact executable SHA-256; unknown digests
+fail closed. Ordinary CI uses the released expectation, and candidate validation uses the candidate
+expectation. This candidate validation does not bump a toy version or create a release. The exact
+local evidence and remaining remote PR/sticky/exact-main work are captured in the [Quality Zoo
+workthrough](docs/workthroughs/2026-09-03-quality-zoo-contract.md).
 
 ### buildscope B0 hybrid skeleton — release-backed evidence
 

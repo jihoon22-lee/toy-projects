@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+### Quality Zoo known-answer contract
+
+- Added the Quality Zoo scenario contract and local candidate consumer. The registry is the
+  dependency-free `quality-zoo/manifest.json`, intentionally JSON rather than a TOML parser so the
+  runner remains standard-library-only and compatible with Python 3.10. Scenario `ici.toml` files
+  remain ici inputs; the runner validates their location and executes only its fixed verify argv.
+- Documented the explicit local `ICI_BIN` boundary, candidate ZIP intake, and threat model. Intake
+  checks the expected archive SHA-256, exact archive members/modes, safe extraction, provenance,
+  executable digest/size, sidecar, and `--version`; an optional authenticated evidence directory
+  must contain exactly `artifact.json`, `candidate-run.json`, `gate-check.json`, `gate-job.json`, and
+  `gate-run.json`.
+- Separated the Quality Zoo `contract_verdict` from ici's `observed_suite_status`. A known `WARN`
+  or `FAIL` can be part of an expected answer, but schema, status, evidence, location, positive
+  finding, forbidden-finding, exit-code, and version checks must all match for contract `PASS`.
+- Corrected expectation selection for schema-2 `scenario.json`: the released ici `v0.10.2` digest
+  `8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4` reports legacy
+  `MEASURED`/`high`, while candidate digest
+  `53fc75f0a073a74689babfe9ef8a4b2378995002d7d563bdc52da548fdbb9ee8` reports provenance-aware
+  `ESTIMATED`/`medium`, despite the same package version. The selector maps each exact executable
+  SHA-256 to a full strict schema-1 expectation and fails closed for unknown digests. Ordinary CI
+  uses the released expectation; candidate validation uses the candidate expectation.
+- Missing-report failures now retain a bounded `quality-zoo.runner-error/v1` `run.json`, including
+  exit status, report presence, and truncated stdout/stderr, so the always-upload CI step carries
+  actionable diagnostics instead of an empty artifact path. Executable symlinks are rejected
+  before resolution, and the selected ici binary is rehashed after its version probe and scenarios.
+- Recorded the first local candidate consumer evidence: candidate run `33689056008`, source
+  `7872a7b80899cbd3d40d92d18e7920cd7e2283e7`, artifact `9869395069`, ZIP SHA-256
+  `640e50ecf5b099174c16f1ef5d2b5b87945329711e96f926d94c3cc04109081e`, candidate `ici.pyz`
+  SHA-256 `53fc75f0a073a74689babfe9ef8a4b2378995002d7d563bdc52da548fdbb9ee8`, and version `0.10.2`.
+  Authenticated API evidence validation passed. The first `python.dead-private-function` scenario
+  was contract `PASS` with observed suite `WARN`, exactly one matched finding, and no clean
+  counterpart false positive.
+- The local implementation and candidate consumer are complete; the current PR rerun is still
+  pending, so remote PR CI, sticky report, and exact-main evidence remain pending. Ordinary CI stays
+  pinned to released ici `v0.10.2`. No toy product version or release was changed, and the remaining
+  Python/C++/Qt/build/binary/hybrid corpus work is not claimed complete.
+
 ### Sticky PR report comment cardinality
 
 - The pull-request report verifier now enumerates every paginated PR comment and fails closed unless
