@@ -2,7 +2,6 @@
 
 #include <QBrush>
 #include <QColor>
-#include <QDateTime>
 #include <QString>
 
 #include <algorithm>
@@ -12,72 +11,7 @@
 #include <utility>
 #include <vector>
 
-#include "diskmap/format.hpp"
-
 namespace {
-
-constexpr const char* kPhysicalMetricExplanation =
-    "Physical values are identity-aware and are not additive across sibling "
-    "subtrees because hard-linked identities may overlap.";
-
-QString utf8(const std::string& value) {
-    const std::size_t maximum = static_cast<std::size_t>(std::numeric_limits<int>::max());
-    const int length = static_cast<int>(std::min(value.size(), maximum));
-    return QString::fromUtf8(value.data(), length);
-}
-
-QString kindName(diskmap::FsKind kind) {
-    switch (kind) {
-    case diskmap::FsKind::RegularFile:
-        return QStringLiteral("File");
-    case diskmap::FsKind::Directory:
-        return QStringLiteral("Directory");
-    case diskmap::FsKind::Symlink:
-        return QStringLiteral("Symlink");
-    case diskmap::FsKind::Other:
-        return QStringLiteral("Other");
-    }
-    return QStringLiteral("Other");
-}
-
-QString issueName(diskmap::NodeIssue issue) {
-    switch (issue) {
-    case diskmap::NodeIssue::None:
-        return QStringLiteral("Complete");
-    case diskmap::NodeIssue::Incomplete:
-        return QStringLiteral("Incomplete");
-    case diskmap::NodeIssue::CycleSkipped:
-        return QStringLiteral("Cycle skipped");
-    case diskmap::NodeIssue::MountBoundarySkipped:
-        return QStringLiteral("Mount boundary");
-    case diskmap::NodeIssue::DepthLimitReached:
-        return QStringLiteral("Depth limit");
-    case diskmap::NodeIssue::MetadataUnknown:
-        return QStringLiteral("Metadata unknown");
-    case diskmap::NodeIssue::Error:
-        return QStringLiteral("Error");
-    case diskmap::NodeIssue::ScannerFiltered:
-        return QStringLiteral("Scanner-filtered");
-    }
-    return QStringLiteral("Unknown");
-}
-
-QString metricText(const diskmap::MetricValue& value) {
-    const QString amount = utf8(diskmap::humanBytes(value.bytes));
-    if (value.known) {
-        return amount;
-    }
-    if (value.bytes == 0) {
-        return QStringLiteral("Unknown");
-    }
-    return QStringLiteral("At least %1").arg(amount);
-}
-
-QString modifiedText(std::int64_t nanoseconds) {
-    return QDateTime::fromMSecsSinceEpoch(nanoseconds / 1000000)
-        .toUTC()
-        .toString(Qt::ISODateWithMs);
-}
 
 const diskmap::FsMetadata* displayMetadata(const diskmap::FsNode& node) {
     if (node.followed) {
@@ -214,155 +148,6 @@ const NodeTableModel::Row* NodeTableModel::rowForIndex(
         return nullptr;
     }
     return &rows_[static_cast<std::size_t>(index.row())];
-}
-
-QVariant NodeTableModel::displayData(const Row& row, int column) const {
-    switch (column) {
-    case NameColumn:
-        return utf8(row.node->name);
-    case PathColumn:
-        return utf8(row.key.normalized_path);
-    case TypeColumn:
-        return kindName(row.key.kind);
-    case LogicalColumn:
-        return metricText(row.logical);
-    case AllocatedColumn:
-        return metricText(row.allocated);
-    case ReclaimableColumn:
-        return metricText(row.reclaimable);
-    case ModifiedColumn:
-        return row.modifiedKnown ? QVariant(modifiedText(row.modifiedNs))
-                                 : QVariant(QStringLiteral("Unknown"));
-    case StateColumn:
-        return issueName(row.issue);
-    default:
-        return QVariant();
-    }
-}
-
-QVariant NodeTableModel::descriptionData(const Row& row) const {
-    QString tooltip = QStringLiteral("%1\nType: %2\nLogical: %3\nAllocated: "
-                                     "%4\nReclaimable: %5\nState: %6")
-                          .arg(utf8(row.key.normalized_path), kindName(row.key.kind),
-                               metricText(row.logical), metricText(row.allocated),
-                               metricText(row.reclaimable), issueName(row.issue));
-    tooltip += row.modifiedKnown
-                   ? QStringLiteral("\nModified: %1").arg(modifiedText(row.modifiedNs))
-                   : QStringLiteral("\nModified: Unknown");
-    if (!row.error.empty()) {
-        tooltip += QStringLiteral("\nDetail: %1").arg(utf8(row.error));
-    }
-    tooltip += QStringLiteral("\n%1").arg(QString::fromLatin1(kPhysicalMetricExplanation));
-    return tooltip;
-}
-
-QVariant NodeTableModel::semanticRoleData(const Row& row, int role) const {
-    switch (role) {
-    case NodeKeyRole:
-        return QVariant::fromValue(row.key);
-    case NodeKindRole:
-        return static_cast<int>(row.key.kind);
-    case NodeIssueRole:
-        return static_cast<int>(row.issue);
-    case NodeErrorRole:
-        return utf8(row.error);
-    case CompleteRole:
-        return row.node->complete;
-    case FollowedRole:
-        return row.node->followed;
-    case IdentityRole:
-        if (!row.key.identity.has_value()) {
-            return QVariant();
-        }
-        return QStringLiteral("%1:%2")
-            .arg(static_cast<qulonglong>(row.key.identity->device))
-            .arg(static_cast<qulonglong>(row.key.identity->file));
-    default:
-        return QVariant();
-    }
-}
-
-QVariant NodeTableModel::metricRoleData(const Row& row, int role) const {
-    switch (role) {
-    case LogicalBytesRole:
-        return QVariant::fromValue(static_cast<qulonglong>(row.logical.bytes));
-    case LogicalKnownRole:
-        return row.logical.known;
-    case LogicalAdditiveRole:
-        return row.logical.additive;
-    case AllocatedBytesRole:
-        return QVariant::fromValue(static_cast<qulonglong>(row.allocated.bytes));
-    case AllocatedKnownRole:
-        return row.allocated.known;
-    case AllocatedAdditiveRole:
-        return row.allocated.additive;
-    case ReclaimableBytesRole:
-        return QVariant::fromValue(static_cast<qulonglong>(row.reclaimable.bytes));
-    case ReclaimableKnownRole:
-        return row.reclaimable.known;
-    case ReclaimableAdditiveRole:
-        return row.reclaimable.additive;
-    case ModifiedNsRole:
-        return row.modifiedKnown
-                   ? QVariant::fromValue(static_cast<qlonglong>(row.modifiedNs))
-                   : QVariant();
-    case ModifiedKnownRole:
-        return row.modifiedKnown;
-    default:
-        return QVariant();
-    }
-}
-
-QVariant NodeTableModel::headerData(int section,
-                                    Qt::Orientation orientation,
-                                    int role) const {
-    if (orientation != Qt::Horizontal || section < 0 || section >= ColumnCount) {
-        return QVariant();
-    }
-    if (role == Qt::DisplayRole) {
-        static const char* const headers[] = {
-            "Name", "Path", "Type", "Logical", "Allocated", "Reclaimable", "Modified",
-            "State",
-        };
-        return QString::fromLatin1(headers[section]);
-    }
-    if (role == Qt::ToolTipRole) {
-        if (section == LogicalColumn) {
-            return QStringLiteral("Directory-entry bytes. Values are additive when exact.");
-        }
-        if (section == AllocatedColumn) {
-            return QStringLiteral("Filesystem-allocated bytes. %1")
-                .arg(QString::fromLatin1(kPhysicalMetricExplanation));
-        }
-        if (section == ReclaimableColumn) {
-            return QStringLiteral("Bytes reclaimable when every known hard link is included. %1")
-                .arg(QString::fromLatin1(kPhysicalMetricExplanation));
-        }
-    }
-    return QVariant();
-}
-
-QHash<int, QByteArray> NodeTableModel::roleNames() const {
-    QHash<int, QByteArray> roles = QAbstractTableModel::roleNames();
-    roles.insert(NodeKeyRole, QByteArrayLiteral("nodeKey"));
-    roles.insert(NodeKindRole, QByteArrayLiteral("nodeKind"));
-    roles.insert(NodeIssueRole, QByteArrayLiteral("nodeIssue"));
-    roles.insert(NodeErrorRole, QByteArrayLiteral("nodeError"));
-    roles.insert(CompleteRole, QByteArrayLiteral("complete"));
-    roles.insert(FollowedRole, QByteArrayLiteral("followed"));
-    roles.insert(IdentityRole, QByteArrayLiteral("identity"));
-    roles.insert(LogicalBytesRole, QByteArrayLiteral("logicalBytes"));
-    roles.insert(LogicalKnownRole, QByteArrayLiteral("logicalKnown"));
-    roles.insert(LogicalAdditiveRole, QByteArrayLiteral("logicalAdditive"));
-    roles.insert(AllocatedBytesRole, QByteArrayLiteral("allocatedBytes"));
-    roles.insert(AllocatedKnownRole, QByteArrayLiteral("allocatedKnown"));
-    roles.insert(AllocatedAdditiveRole, QByteArrayLiteral("allocatedAdditive"));
-    roles.insert(ReclaimableBytesRole, QByteArrayLiteral("reclaimableBytes"));
-    roles.insert(ReclaimableKnownRole, QByteArrayLiteral("reclaimableKnown"));
-    roles.insert(ReclaimableAdditiveRole, QByteArrayLiteral("reclaimableAdditive"));
-    roles.insert(ModifiedNsRole, QByteArrayLiteral("modifiedNs"));
-    roles.insert(ModifiedKnownRole, QByteArrayLiteral("modifiedKnown"));
-    return roles;
 }
 
 void NodeTableModel::setProjection(std::shared_ptr<const diskmap::ScanResult> document,
@@ -571,78 +356,94 @@ void NodeTableModel::updateProjectionStatus(bool sourceComplete) {
             projectionIssue_ =
                 firstSubtreeIssue(*root_, filter_.scanner_totals_filtered);
         }
-        if (projectionIssue_ == diskmap::NodeIssue::None) {
-            projectionIssue_ = diskmap::NodeIssue::MetadataUnknown;
-        }
     }
 }
 
 void NodeTableModel::applyDisplaySort() {
-    const auto compareMetric = [this](const diskmap::MetricValue& left,
-                                      const diskmap::MetricValue& right) {
-        if (left.known != right.known) {
-            return left.known;
-        }
-        if (left.known && left.bytes != right.bytes) {
-            return sortOrder_ == Qt::DescendingOrder ? left.bytes > right.bytes
-                                                     : left.bytes < right.bytes;
-        }
-        return false;
-    };
-
-    std::stable_sort(rows_.begin(), rows_.end(), [this, &compareMetric](const Row& left,
-                                                                        const Row& right) {
-        bool different = false;
-        bool before = false;
-        switch (sortColumn_) {
-        case NameColumn:
-            different = left.node->name != right.node->name;
-            before = left.node->name < right.node->name;
-            break;
-        case PathColumn:
-            different = left.key.normalized_path != right.key.normalized_path;
-            before = left.key.normalized_path < right.key.normalized_path;
-            break;
-        case TypeColumn:
-            different = left.key.kind != right.key.kind;
-            before = static_cast<int>(left.key.kind) < static_cast<int>(right.key.kind);
-            break;
-        case LogicalColumn:
-            if (left.logical.known != right.logical.known
-                || (left.logical.known && left.logical.bytes != right.logical.bytes)) {
-                return compareMetric(left.logical, right.logical);
-            }
-            break;
-        case AllocatedColumn:
-            if (left.allocated.known != right.allocated.known
-                || (left.allocated.known && left.allocated.bytes != right.allocated.bytes)) {
-                return compareMetric(left.allocated, right.allocated);
-            }
-            break;
-        case ReclaimableColumn:
-            if (left.reclaimable.known != right.reclaimable.known
-                || (left.reclaimable.known
-                    && left.reclaimable.bytes != right.reclaimable.bytes)) {
-                return compareMetric(left.reclaimable, right.reclaimable);
-            }
-            break;
-        case ModifiedColumn:
-            if (left.modifiedKnown != right.modifiedKnown) {
-                return left.modifiedKnown;
-            }
-            different = left.modifiedKnown && left.modifiedNs != right.modifiedNs;
-            before = left.modifiedNs < right.modifiedNs;
-            break;
-        case StateColumn:
-            different = left.issue != right.issue;
-            before = static_cast<int>(left.issue) < static_cast<int>(right.issue);
-            break;
-        default:
-            break;
-        }
-        if (different) {
-            return sortOrder_ == Qt::AscendingOrder ? before : !before;
-        }
-        return left.key < right.key;
+    std::stable_sort(rows_.begin(), rows_.end(), [this](const Row& left, const Row& right) {
+        return rowBefore(left, right);
     });
+}
+
+bool NodeTableModel::rowBefore(const Row& left, const Row& right) const {
+    if (sortColumn_ <= TypeColumn) {
+        return textColumnBefore(left, right);
+    }
+    if (sortColumn_ <= ReclaimableColumn) {
+        return metricColumnBefore(left, right);
+    }
+    if (sortColumn_ == ModifiedColumn) {
+        return modifiedColumnBefore(left, right);
+    }
+    if (sortColumn_ == StateColumn) {
+        return stateColumnBefore(left, right);
+    }
+    return tieBreakBefore(left, right);
+}
+
+bool NodeTableModel::textColumnBefore(const Row& left, const Row& right) const {
+    if (sortColumn_ == NameColumn && left.node->name != right.node->name) {
+        return sortDirectionBefore(left.node->name < right.node->name);
+    }
+    if (sortColumn_ == PathColumn
+        && left.key.normalized_path != right.key.normalized_path) {
+        return sortDirectionBefore(left.key.normalized_path < right.key.normalized_path);
+    }
+    if (sortColumn_ == TypeColumn && left.key.kind != right.key.kind) {
+        return sortDirectionBefore(static_cast<int>(left.key.kind)
+                                   < static_cast<int>(right.key.kind));
+    }
+    return tieBreakBefore(left, right);
+}
+
+bool NodeTableModel::metricColumnBefore(const Row& left, const Row& right) const {
+    switch (sortColumn_) {
+    case LogicalColumn:
+        return metricValueBefore(left, right, left.logical, right.logical);
+    case AllocatedColumn:
+        return metricValueBefore(left, right, left.allocated, right.allocated);
+    case ReclaimableColumn:
+        return metricValueBefore(left, right, left.reclaimable, right.reclaimable);
+    default:
+        return tieBreakBefore(left, right);
+    }
+}
+
+bool NodeTableModel::metricValueBefore(const Row& left,
+                                       const Row& right,
+                                       const diskmap::MetricValue& leftMetric,
+                                       const diskmap::MetricValue& rightMetric) const {
+    if (leftMetric.known != rightMetric.known) {
+        return leftMetric.known;
+    }
+    if (leftMetric.known && leftMetric.bytes != rightMetric.bytes) {
+        return sortDirectionBefore(leftMetric.bytes < rightMetric.bytes);
+    }
+    return tieBreakBefore(left, right);
+}
+
+bool NodeTableModel::modifiedColumnBefore(const Row& left, const Row& right) const {
+    if (left.modifiedKnown != right.modifiedKnown) {
+        return left.modifiedKnown;
+    }
+    if (left.modifiedKnown && left.modifiedNs != right.modifiedNs) {
+        return sortDirectionBefore(left.modifiedNs < right.modifiedNs);
+    }
+    return tieBreakBefore(left, right);
+}
+
+bool NodeTableModel::stateColumnBefore(const Row& left, const Row& right) const {
+    if (left.issue != right.issue) {
+        return sortDirectionBefore(static_cast<int>(left.issue)
+                                   < static_cast<int>(right.issue));
+    }
+    return tieBreakBefore(left, right);
+}
+
+bool NodeTableModel::sortDirectionBefore(bool ascendingBefore) const {
+    return sortOrder_ == Qt::AscendingOrder ? ascendingBefore : !ascendingBefore;
+}
+
+bool NodeTableModel::tieBreakBefore(const Row& left, const Row& right) const {
+    return left.key < right.key;
 }

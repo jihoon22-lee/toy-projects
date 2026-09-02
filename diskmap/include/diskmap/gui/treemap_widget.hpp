@@ -11,10 +11,9 @@
 
 // Renders one level of a squarified treemap and lets the user drill into it.
 //
-// Production projections retain one shared immutable scan document: the tree
-// can be large and must not be copied, while every rendered node pointer must
-// remain valid across queued paint and input events. setRoot() is a deliberately
-// non-owning compatibility boundary for small, synchronous widget fixtures.
+// Projections retain one shared immutable scan document: the tree can be large
+// and must not be copied, while every rendered node pointer must remain valid
+// across queued paint and input events.
 class TreemapWidget : public QWidget {
     Q_OBJECT
 
@@ -25,9 +24,7 @@ public:
                        const diskmap::NodeKey& root,
                        const diskmap::ViewFilter& filter,
                        const diskmap::SortSpec& sort);
-    // Compatibility boundary for small widget fixtures. Production callers
-    // use setProjection(), which owns the immutable scan document.
-    void setRoot(const diskmap::FsNode* root);
+    void clear();
     const diskmap::FsNode* currentNode() const;
     bool projectionComplete() const;
 
@@ -49,7 +46,6 @@ private:
     const diskmap::FsNode* root_ = nullptr;
     diskmap::ViewFilter filter_;
     diskmap::SortSpec sort_;
-    bool projected_ = false;
     bool projectionComplete_ = true;
     std::vector<diskmap::Tile> tiles_;
     const diskmap::FsNode* hovered_ = nullptr;

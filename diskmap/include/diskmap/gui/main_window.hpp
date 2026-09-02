@@ -3,6 +3,7 @@
 #include <QFutureWatcher>
 #include <QMainWindow>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -29,8 +30,8 @@ class TreemapWidget;
 //
 // The scan runs on a worker thread through QtConcurrent. The core stays
 // thread-agnostic: it takes a progress callback and knows nothing about Qt.
-// MainWindow marshals progress back to the GUI thread and rejects stale scan
-// generations before touching widgets.
+// MainWindow polls worker-owned atomic progress from the GUI thread and rejects
+// stale scan generations before touching widgets.
 class MainWindow : public QMainWindow {
     Q_OBJECT
 
@@ -64,6 +65,11 @@ private slots:
     void clearHover();
 
 private:
+    struct ScanProgressState {
+        std::atomic<std::size_t> dirs{0};
+        std::atomic<std::size_t> files{0};
+    };
+
     QPushButton* chooseButton_ = nullptr;
     QPushButton* rescanButton_ = nullptr;
     TreemapWidget* treemap_ = nullptr;
@@ -85,9 +91,11 @@ private:
     QComboBox* issueCombo_ = nullptr;
     QComboBox* modeCombo_ = nullptr;
     QTimer* filterTimer_ = nullptr;
+    QTimer* progressTimer_ = nullptr;
     QPushButton* upButton_ = nullptr;
     QPushButton* cancelButton_ = nullptr;
     std::shared_ptr<diskmap::ScanCancellationToken> activeCancellation_;
+    std::shared_ptr<ScanProgressState> activeProgress_;
     ScanRunner scanRunner_;
     diskmap::ScanOptions scanOptions_;
     std::uint64_t activeGeneration_ = 0;
@@ -103,6 +111,7 @@ private:
     QString filterError_;
     bool pendingRestore_ = false;
     bool refreshingProjection_ = false;
+    bool modelResetInProgress_ = false;
 
     void buildNavigationBar(QWidget* central, QVBoxLayout* layout);
     void buildFilterPanel(QWidget* central, QVBoxLayout* layout);
@@ -115,6 +124,7 @@ private:
                         const QString& path);
     void onScanFinished(QFutureWatcher<diskmap::ScanResult>* watcher,
                         std::uint64_t generation);
+    void discardPendingRestore();
     void restoreNavigation(const std::vector<diskmap::NodeKey>& previousTrail);
     void navigateToKey(const diskmap::NodeKey& key);
     void navigateToBreadcrumb(std::size_t index);
@@ -124,6 +134,7 @@ private:
     const diskmap::FsNode* currentNode() const;
     void updateBreadcrumb();
     void updateMetricExplanation();
+    void updateDocumentStatus();
     void updatePartialBanner();
     void updateControlState();
     void restoreSelection();

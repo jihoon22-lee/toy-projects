@@ -7,7 +7,7 @@
 #include <QResizeEvent>
 #include <QtGlobal>
 
-#include "diskmap/format.hpp"
+#include "explorer_text.hpp"
 
 namespace {
 
@@ -44,15 +44,6 @@ QColor tileColor(const diskmap::FsNode& node, bool hovered) {
     return QColor::fromHsv(hue, saturation, value);
 }
 
-QString metricLabel(const diskmap::MetricValue& metric) {
-    const QString amount = QString::fromStdString(diskmap::humanBytes(metric.bytes));
-    if (metric.known) {
-        return amount;
-    }
-    return metric.bytes == 0 ? QObject::tr("Unknown")
-                             : QObject::tr("At least %1").arg(amount);
-}
-
 bool uncertain(const diskmap::Tile& tile) {
     return !tile.metric.known || tile.issue != diskmap::NodeIssue::None;
 }
@@ -61,6 +52,10 @@ bool uncertain(const diskmap::Tile& tile) {
 
 TreemapWidget::TreemapWidget(QWidget* parent) : QWidget(parent) {
     qRegisterMetaType<diskmap::NodeKey>("diskmap::NodeKey");
+    setAccessibleName(tr("Disk usage treemap"));
+    setAccessibleDescription(tr(
+        "Visual overview of the current projection. Use the adjacent filesystem "
+        "entries table for keyboard navigation and detailed evidence."));
     setMouseTracking(true);
     setMinimumSize(320, 240);
 }
@@ -73,7 +68,6 @@ void TreemapWidget::setProjection(
     document_ = std::move(document);
     filter_ = filter;
     sort_ = sort;
-    projected_ = true;
     root_ = document_ == nullptr
                 ? nullptr
                 : diskmap::findNodeByKey(document_->root, root);
@@ -84,10 +78,9 @@ void TreemapWidget::setProjection(
     emit projectionStatusChanged(projectionComplete_);
 }
 
-void TreemapWidget::setRoot(const diskmap::FsNode* root) {
+void TreemapWidget::clear() {
     document_.reset();
-    root_ = root;
-    projected_ = false;
+    root_ = nullptr;
     projectionComplete_ = true;
     hovered_ = nullptr;
     rebuildTiles();
@@ -103,17 +96,12 @@ bool TreemapWidget::projectionComplete() const { return projectionComplete_; }
 void TreemapWidget::rebuildTiles() {
     tiles_.clear();
     if (root_ == nullptr) {
-        projectionComplete_ = !projected_ || document_ == nullptr;
+        projectionComplete_ = document_ == nullptr;
         return;
     }
     const diskmap::Rect bounds{0.0, 0.0, static_cast<double>(width()),
                                static_cast<double>(height())};
-    tiles_ = projected_ ? diskmap::squarify(*root_, bounds, kRenderDepth, filter_, sort_)
-                        : diskmap::squarify(*root_, bounds, kRenderDepth);
-    if (!projected_) {
-        projectionComplete_ = true;
-        return;
-    }
+    tiles_ = diskmap::squarify(*root_, bounds, kRenderDepth, filter_, sort_);
     projectionComplete_ =
         diskmap::metricValue(*root_, sort_.metric, filter_.scanner_totals_filtered).known;
 }
@@ -161,7 +149,7 @@ void TreemapWidget::paintEvent(QPaintEvent* event) {
         painter.drawText(box.adjusted(4, 2, -4, -2), Qt::AlignLeft | Qt::AlignTop,
                          QString::fromStdString(tile.node->name));
         painter.drawText(box.adjusted(4, 2, -4, -2), Qt::AlignRight | Qt::AlignBottom,
-                         metricLabel(tile.metric));
+                         diskmap_gui_text::metricValueText(tile.metric));
     }
 
     painter.setPen(QColor(255, 255, 255, 60));

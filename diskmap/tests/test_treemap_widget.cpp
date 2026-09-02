@@ -37,6 +37,12 @@ FsNode makeTree() {
     return root;
 }
 
+std::shared_ptr<ScanResult> makeTreeDocument() {
+    auto document = std::make_shared<ScanResult>();
+    document->root = makeTree();
+    return document;
+}
+
 FsNode makeMetricFile(const char* name, std::uint64_t logical, std::uint64_t allocated) {
     FsNode node = makeFileNode(name, logical);
     node.metadata.allocated_size = allocated;
@@ -95,12 +101,12 @@ class TestTreemapWidget : public QObject {
     Q_OBJECT
 
 private slots:
-    void clearingTheRootLeavesNoCurrentNode();
+    void clearingTheProjectionLeavesNoCurrentNode();
     void clickInsideADirectoryTileActivatesIt();
     void rightClickInsideADirectoryTileDoesNotActivateIt();
     void movingOverATileReportsItsKey();
     void leavingTheWidgetClearsTheHover();
-    void projectionOwnsItsDocumentLifetime();
+    void projectionOwnsDocumentsAcrossReplacement();
     void projectionFiltersAndUsesSelectedMetric();
     void projectionReportsUncertaintyAndRendersIt();
     void missingProjectionRootIsSafe();
@@ -109,12 +115,14 @@ private slots:
 
 // A Q_OBJECT widget links only when moc has run. Before ici 0.6.0 the gate could
 // not build this test at all, which is why diskmap's widget had no unit tests.
-void TestTreemapWidget::clearingTheRootLeavesNoCurrentNode() {
+void TestTreemapWidget::clearingTheProjectionLeavesNoCurrentNode() {
+    const std::shared_ptr<ScanResult> document = makeTreeDocument();
     TreemapWidget widget;
     widget.resize(400, 300);
+    widget.setProjection(document, diskmap::nodeKey(document->root), {}, {});
     QSignalSpy cleared(&widget, &TreemapWidget::hoverCleared);
     QSignalSpy status(&widget, &TreemapWidget::projectionStatusChanged);
-    widget.setRoot(nullptr);
+    widget.clear();
     QCOMPARE(widget.currentNode(), nullptr);
     QCOMPARE(cleared.count(), 1);
     QCOMPARE(status.count(), 1);
@@ -122,10 +130,10 @@ void TestTreemapWidget::clearingTheRootLeavesNoCurrentNode() {
 }
 
 void TestTreemapWidget::clickInsideADirectoryTileActivatesIt() {
-    FsNode root = makeTree();
+    const std::shared_ptr<ScanResult> document = makeTreeDocument();
     TreemapWidget widget;
     widget.resize(400, 300);
-    widget.setRoot(&root);
+    widget.setProjection(document, diskmap::nodeKey(document->root), {}, {});
 
     QSignalSpy spy(&widget, &TreemapWidget::nodeActivated);
     QMouseEvent press(QEvent::MouseButtonPress, QPointF(10, 10), QPointF(10, 10),
@@ -136,14 +144,15 @@ void TestTreemapWidget::clickInsideADirectoryTileActivatesIt() {
     // size and paint-time layout. None of that is extractable into the Qt-free
     // core, which is why the check has to live in a Qt test.
     QCOMPARE(spy.count(), 1);
-    QVERIFY(spy.at(0).at(0).value<NodeKey>() == diskmap::nodeKey(root.children[0].children[0]));
+    QVERIFY(spy.at(0).at(0).value<NodeKey>() ==
+            diskmap::nodeKey(document->root.children[0].children[0]));
 }
 
 void TestTreemapWidget::rightClickInsideADirectoryTileDoesNotActivateIt() {
-    FsNode root = makeTree();
+    const std::shared_ptr<ScanResult> document = makeTreeDocument();
     TreemapWidget widget;
     widget.resize(400, 300);
-    widget.setRoot(&root);
+    widget.setProjection(document, diskmap::nodeKey(document->root), {}, {});
 
     QSignalSpy spy(&widget, &TreemapWidget::nodeActivated);
     QMouseEvent press(QEvent::MouseButtonPress, QPointF(10, 10), QPointF(10, 10),
@@ -154,10 +163,10 @@ void TestTreemapWidget::rightClickInsideADirectoryTileDoesNotActivateIt() {
 }
 
 void TestTreemapWidget::movingOverATileReportsItsKey() {
-    FsNode root = makeTree();
+    const std::shared_ptr<ScanResult> document = makeTreeDocument();
     TreemapWidget widget;
     widget.resize(400, 300);
-    widget.setRoot(&root);
+    widget.setProjection(document, diskmap::nodeKey(document->root), {}, {});
 
     QSignalSpy spy(&widget, &TreemapWidget::nodeHovered);
     sendMouseMove(widget, QPoint(10, 10));
@@ -165,16 +174,17 @@ void TestTreemapWidget::movingOverATileReportsItsKey() {
     // One signal per change, not per move: the status line would flicker
     // otherwise, and a repaint per mouse event is wasted work.
     QCOMPARE(spy.count(), 1);
-    QVERIFY(spy.at(0).at(0).value<NodeKey>() == diskmap::nodeKey(root.children[0].children[0]));
+    QVERIFY(spy.at(0).at(0).value<NodeKey>() ==
+            diskmap::nodeKey(document->root.children[0].children[0]));
     sendMouseMove(widget, QPoint(12, 12));
     QCOMPARE(spy.count(), 1);
 }
 
 void TestTreemapWidget::leavingTheWidgetClearsTheHover() {
-    FsNode root = makeTree();
+    const std::shared_ptr<ScanResult> document = makeTreeDocument();
     TreemapWidget widget;
     widget.resize(400, 300);
-    widget.setRoot(&root);
+    widget.setProjection(document, diskmap::nodeKey(document->root), {}, {});
 
     sendMouseMove(widget, QPoint(10, 10));
     QSignalSpy spy(&widget, &TreemapWidget::hoverCleared);
@@ -186,20 +196,44 @@ void TestTreemapWidget::leavingTheWidgetClearsTheHover() {
     QCOMPARE(spy.count(), 1);
 }
 
-void TestTreemapWidget::projectionOwnsItsDocumentLifetime() {
-    std::shared_ptr<ScanResult> document = makeProjectionDocument();
-    const NodeKey rootKey = diskmap::nodeKey(document->root);
+void TestTreemapWidget::projectionOwnsDocumentsAcrossReplacement() {
     TreemapWidget widget;
     widget.resize(400, 300);
-    widget.setProjection(document, rootKey, {}, SortSpec{SizeMetric::Logical, true});
+    std::weak_ptr<const ScanResult> firstWeak;
+    std::weak_ptr<const ScanResult> replacementWeak;
+    {
+        std::shared_ptr<ScanResult> first = makeProjectionDocument();
+        firstWeak = first;
+        const NodeKey firstKey = diskmap::nodeKey(first->root);
+        widget.setProjection(first, firstKey, {}, SortSpec{SizeMetric::Logical, true});
+        first.reset();
 
-    const FsNode* projectedRoot = widget.currentNode();
-    QVERIFY(projectedRoot == &document->root);
-    document.reset();
-    QVERIFY(widget.currentNode() == projectedRoot);
-    QCOMPARE(widget.currentNode()->name, std::string("root"));
-    QVERIFY(widget.projectionComplete());
-    QVERIFY(hasPaintedPixel(renderWidget(widget)));
+        QVERIFY(!firstWeak.expired());
+        QVERIFY(widget.currentNode() != nullptr);
+        QCOMPARE(widget.currentNode()->name, std::string("root"));
+        QVERIFY(widget.projectionComplete());
+        QVERIFY(hasPaintedPixel(renderWidget(widget)));
+
+        std::shared_ptr<ScanResult> replacement = makeProjectionDocument();
+        replacement->root.name = "replacement";
+        replacementWeak = replacement;
+        const NodeKey replacementKey = diskmap::nodeKey(replacement->root);
+        widget.setProjection(replacement, replacementKey, {},
+                              SortSpec{SizeMetric::Logical, true});
+        replacement.reset();
+
+        QVERIFY(firstWeak.expired());
+        QVERIFY(!replacementWeak.expired());
+        QVERIFY(widget.currentNode() != nullptr);
+        QCOMPARE(widget.currentNode()->name, std::string("replacement"));
+    }
+
+    // Replacing a projection releases the old document while the active
+    // projection remains owned until the widget is cleared or destroyed.
+    QVERIFY(!replacementWeak.expired());
+    widget.clear();
+    QVERIFY(replacementWeak.expired());
+    QVERIFY(widget.currentNode() == nullptr);
 }
 
 void TestTreemapWidget::projectionFiltersAndUsesSelectedMetric() {
@@ -292,7 +326,7 @@ void TestTreemapWidget::missingProjectionRootIsSafe() {
     QVERIFY(!status.at(0).at(0).toBool());
     QVERIFY(hasPaintedPixel(renderWidget(widget)));
 
-    widget.setProjection(nullptr, {}, {}, {});
+    widget.clear();
     QCOMPARE(widget.currentNode(), nullptr);
     QVERIFY(widget.projectionComplete());
     QCOMPARE(cleared.count(), 2);
@@ -306,6 +340,8 @@ void TestTreemapWidget::accessibilityAndEmptyStateRenderAreStable() {
     QVERIFY(widget != nullptr);
     QCOMPARE(widget->objectName(), QStringLiteral("treemap"));
     QCOMPARE(widget->accessibleName(), QStringLiteral("Disk usage treemap"));
+    QVERIFY(widget->accessibleDescription().contains(
+        QStringLiteral("filesystem entries table")));
     QVERIFY(widget->hasMouseTracking());
     QVERIFY(widget->minimumSize().width() >= 320);
     QVERIFY(widget->minimumSize().height() >= 240);
@@ -313,7 +349,7 @@ void TestTreemapWidget::accessibilityAndEmptyStateRenderAreStable() {
     window.show();
     QCoreApplication::processEvents();
     widget->resize(400, 300);
-    widget->setRoot(nullptr);
+    widget->clear();
     QVERIFY(hasPaintedPixel(renderWidget(*widget)));
 }
 

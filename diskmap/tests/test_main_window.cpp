@@ -18,10 +18,13 @@
 #include <QtTest>
 #include <QWidget>
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -51,6 +54,13 @@ private slots:
     void rescanCancelsPreviousToken();
     void progressAppearsWhileRunnerIsBlocked();
     void cancelDiscardsPartialResultAndPreservesVisibleResult();
+    void selectionSurvivesTextAndMetricSortsAndModelResets();
+    void explorerControlsAreDisabledAndInertDuringRescan();
+    void generationMetadataMismatchPreservesVisibleDocument();
+    void summariesUseSelectedMetricAndConservativeValues();
+    void metricOnlyUncertaintyUsesGenericReason();
+    void regularFileRootSupportsLargestFilesActivation();
+    void destructionWithLateProgressCallbackIsSafe();
     void activatingADirectoryDescendsAndUpdatesBreadcrumb();
     void goingUpReturnsToTheRootAndStopsThere();
     void activatingALeafDoesNothing();
@@ -159,6 +169,20 @@ QModelIndex tableIndexNamed(MainWindow& window, const QString& name) {
         }
     }
     return QModelIndex();
+}
+
+bool currentSelectionHasKey(MainWindow& window, const diskmap::NodeKey& key) {
+    QTableView* table = nodeTable(window);
+    NodeTableModel* model = tableModel(window);
+    if (table == nullptr || model == nullptr || table->selectionModel() == nullptr) {
+        return false;
+    }
+    const QModelIndex current = table->selectionModel()->currentIndex();
+    if (!current.isValid()) {
+        return false;
+    }
+    const std::optional<diskmap::NodeKey> currentKey = model->keyAt(current.row());
+    return currentKey.has_value() && *currentKey == key;
 }
 
 void activateTableRow(MainWindow& window, const QString& name) {
@@ -392,6 +416,56 @@ MainWindow::ScanRunner explorerRunner(ExplorerResultKind kind) {
     };
 }
 
+enum class GenerationMismatchKind {
+    ResultOnly,
+    RootOnly,
+};
+
+MainWindow::ScanRunner generationMismatchRunner(GenerationMismatchKind mismatch) {
+    return [mismatch](const QString& path,
+                      const diskmap::ScanOptions& options,
+                      const std::shared_ptr<diskmap::ScanCancellationToken>&,
+                      const diskmap::ProgressFn&) {
+        diskmap::ScanResult result = fakeResult(path, options);
+        if (path == QStringLiteral("mismatched")) {
+            if (mismatch == GenerationMismatchKind::ResultOnly) {
+                result.generation = options.generation + 1;
+            } else {
+                result.root.scan_generation = options.generation + 1;
+            }
+        }
+        return result;
+    };
+}
+
+ScanResult metricOnlyUnknownResult(const QString& path,
+                                   const diskmap::ScanOptions& options,
+                                   bool zeroValue) {
+    ScanResult result = explorerResult(path, options, ExplorerResultKind::Complete);
+    if (zeroValue) {
+        result.root.children.clear();
+        result.root.size = 0;
+        result.root.allocated_size = 0;
+        result.root.reclaimable_size = 0;
+        result.files_scanned = 0;
+    }
+    // The tree and metadata remain complete; only the selected physical
+    // aggregates are deliberately unavailable. This distinguishes a metric
+    // uncertainty from a metadata or traversal issue.
+    result.root.allocated_size_known = false;
+    result.root.reclaimable_size_known = false;
+    return result;
+}
+
+MainWindow::ScanRunner metricOnlyUnknownRunner(bool zeroValue = false) {
+    return [zeroValue](const QString& path,
+                       const diskmap::ScanOptions& options,
+                       const std::shared_ptr<diskmap::ScanCancellationToken>&,
+                       const diskmap::ProgressFn&) {
+        return metricOnlyUnknownResult(path, options, zeroValue);
+    };
+}
+
 // The production runner is intentionally asynchronous, so these tests use a
 // shared, thread-safe probe to hold a worker at an observable point. This
 // makes ordering and cancellation assertions independent of scheduler timing.
@@ -522,6 +596,156 @@ struct ScanProbe {
     }
 };
 
+// Returns one completed document, then holds the second invocation until the
+// test has inspected the live rescan state. The second result is still valid,
+// so the test can release it and verify that the controls recover normally.
+struct RescanProbe {
+    mutable QMutex mutex;
+    QWaitCondition condition;
+    int calls = 0;
+    bool rescanStarted = false;
+    bool rescanReleased = false;
+    bool rescanFinished = false;
+
+    ScanResult run(const QString& path,
+                   const diskmap::ScanOptions& options,
+                   const std::shared_ptr<diskmap::ScanCancellationToken>&,
+                   const diskmap::ProgressFn&) {
+        int call = 0;
+        {
+            QMutexLocker locker(&mutex);
+            call = ++calls;
+        }
+        if (call == 1) {
+            return explorerResult(path, options, ExplorerResultKind::Complete);
+        }
+
+        {
+            QMutexLocker locker(&mutex);
+            rescanStarted = true;
+            condition.wakeAll();
+            while (!rescanReleased) {
+                condition.wait(&mutex);
+            }
+            rescanFinished = true;
+            condition.wakeAll();
+        }
+        return explorerResult(path, options, ExplorerResultKind::StableRescan);
+    }
+
+    bool isRescanStarted() const {
+        QMutexLocker locker(&mutex);
+        return rescanStarted;
+    }
+
+    bool isRescanFinished() const {
+        QMutexLocker locker(&mutex);
+        return rescanFinished;
+    }
+
+    void release() {
+        QMutexLocker locker(&mutex);
+        rescanReleased = true;
+        condition.wakeAll();
+    }
+};
+
+MainWindow::ScanRunner rescanRunner(const std::shared_ptr<RescanProbe>& probe) {
+    return [probe](const QString& path,
+                   const diskmap::ScanOptions& options,
+                   const std::shared_ptr<diskmap::ScanCancellationToken>& token,
+                   const diskmap::ProgressFn& progress) {
+        return probe->run(path, options, token, progress);
+    };
+}
+
+struct LateProgressProbe {
+    mutable QMutex mutex;
+    mutable QWaitCondition condition;
+    bool started = false;
+    bool released = false;
+    bool finished = false;
+
+    ScanResult run(const QString& path,
+                   const diskmap::ScanOptions& options,
+                   const std::shared_ptr<diskmap::ScanCancellationToken>&,
+                   const diskmap::ProgressFn& progress) {
+        {
+            QMutexLocker locker(&mutex);
+            started = true;
+            condition.wakeAll();
+            while (!released) {
+                condition.wait(&mutex);
+            }
+        }
+        // This callback is intentionally invoked only after the MainWindow
+        // owner has gone out of scope in the test.
+        if (progress) {
+            progress(17, 29);
+        }
+        {
+            QMutexLocker locker(&mutex);
+            finished = true;
+            condition.wakeAll();
+        }
+        return fakeResult(path, options);
+    }
+
+    bool isStarted() const {
+        QMutexLocker locker(&mutex);
+        return started;
+    }
+
+    bool isFinished() const {
+        QMutexLocker locker(&mutex);
+        return finished;
+    }
+
+    void release() {
+        QMutexLocker locker(&mutex);
+        released = true;
+        condition.wakeAll();
+    }
+
+    void waitUntilStartedOrReleased() const {
+        QMutexLocker locker(&mutex);
+        while (!started && !released) {
+            condition.wait(&mutex);
+        }
+    }
+};
+
+MainWindow::ScanRunner lateProgressRunner(const std::shared_ptr<LateProgressProbe>& probe) {
+    return [probe](const QString& path,
+                   const diskmap::ScanOptions& options,
+                   const std::shared_ptr<diskmap::ScanCancellationToken>& token,
+                   const diskmap::ProgressFn& progress) {
+        return probe->run(path, options, token, progress);
+    };
+}
+
+struct LateProgressRelease {
+    std::shared_ptr<LateProgressProbe> probe;
+    std::thread worker;
+
+    explicit LateProgressRelease(std::shared_ptr<LateProgressProbe> value)
+        : probe(std::move(value)), worker([probe = this->probe]() {
+              probe->waitUntilStartedOrReleased();
+              if (!probe->isStarted()) {
+                  return;
+              }
+              std::this_thread::sleep_for(std::chrono::milliseconds(50));
+              probe->release();
+          }) {}
+
+    ~LateProgressRelease() {
+        probe->release();
+        if (worker.joinable()) {
+            worker.join();
+        }
+    }
+};
+
 MainWindow::ScanRunner runnerFor(const std::shared_ptr<ScanProbe>& probe) {
     return [probe](const QString& path,
                    const diskmap::ScanOptions& options,
@@ -619,7 +843,7 @@ void TestMainWindow::tableAndTreemapShowProjectedDocument() {
     QCOMPARE(tableModel(window)->mode(), NodeTableModel::ChildrenMode);
     QCOMPARE(tableModel(window)->rowCount(), 5);
     QCOMPARE(projectionSummary(window)->text(),
-             QStringLiteral("5 item(s) · exact evidence"));
+             QStringLiteral("5 item(s) · exact evidence · Logical subtree: 285 B"));
     QVERIFY(partialBanner(window)->isHidden());
     QCOMPARE(nodeTable(window)->accessibleName(), QStringLiteral("Entries in current folder"));
 }
@@ -934,6 +1158,280 @@ void TestMainWindow::cancelDiscardsPartialResultAndPreservesVisibleResult() {
     QTRY_VERIFY(!cancel->isEnabled());
     QCOMPARE(treemap(window)->currentNode(), prior);
     QCOMPARE(QString::fromStdString(treemap(window)->currentNode()->name), QStringLiteral("prior"));
+}
+
+void TestMainWindow::selectionSurvivesTextAndMetricSortsAndModelResets() {
+    MainWindow window(nullptr, explorerRunner(ExplorerResultKind::Complete));
+    window.scanPath(QStringLiteral("selection-sorts"));
+    waitForScan(window);
+
+    QTableView* table = nodeTable(window);
+    NodeTableModel* model = tableModel(window);
+    QVERIFY(table != nullptr);
+    QVERIFY(model != nullptr);
+    if (table == nullptr || model == nullptr) {
+        return;
+    }
+
+    const QModelIndex selected = tableIndexNamed(window, QStringLiteral("projects"));
+    QVERIFY(selected.isValid());
+    if (!selected.isValid()) {
+        return;
+    }
+    const std::optional<diskmap::NodeKey> selectedKey = model->keyAt(selected.row());
+    QVERIFY(selectedKey.has_value());
+    if (!selectedKey.has_value()) {
+        return;
+    }
+    table->selectionModel()->setCurrentIndex(
+        selected, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    QTRY_VERIFY(currentSelectionHasKey(window, *selectedKey));
+
+    // A text sort resets the model and moves the selected row. The key, not
+    // the old row number or QModelIndex, is the selection contract.
+    table->sortByColumn(NodeTableModel::NameColumn, Qt::AscendingOrder);
+    QTRY_VERIFY(currentSelectionHasKey(window, *selectedKey));
+    QVERIFY(table->selectionModel()->currentIndex().row() != selected.row());
+
+    // Metric sorting also causes a projection/model reset and synchronizes the
+    // selected metric combo. The same exact NodeKey must still be selected.
+    table->sortByColumn(NodeTableModel::AllocatedColumn, Qt::AscendingOrder);
+    QTRY_VERIFY(currentSelectionHasKey(window, *selectedKey));
+
+    // Debounced filtering exercises another reset in both directions while
+    // retaining the selected row in the projected result.
+    searchEdit(window)->setText(QStringLiteral("projects"));
+    QTRY_COMPARE((tableRowNames(window)), (QStringList{QStringLiteral("projects")}));
+    QTRY_VERIFY(currentSelectionHasKey(window, *selectedKey));
+    searchEdit(window)->clear();
+    QTRY_COMPARE(tableModel(window)->rowCount(), 5);
+    QTRY_VERIFY(currentSelectionHasKey(window, *selectedKey));
+}
+
+void TestMainWindow::explorerControlsAreDisabledAndInertDuringRescan() {
+    const auto probe = std::make_shared<RescanProbe>();
+    struct ReleaseOnExit {
+        std::shared_ptr<RescanProbe> probe;
+        ~ReleaseOnExit() { probe->release(); }
+    } releaseOnExit{probe};
+
+    MainWindow window(nullptr, rescanRunner(probe));
+    window.scanPath(QStringLiteral("active-rescan"));
+    waitForScan(window);
+    activateTableRow(window, QStringLiteral("projects"));
+    activateTableRow(window, QStringLiteral("deep"));
+    QTRY_COMPARE(breadcrumbPath(window), QStringLiteral("root / projects / deep"));
+
+    QTableView* table = nodeTable(window);
+    NodeTableModel* model = tableModel(window);
+    QVERIFY(table != nullptr);
+    QVERIFY(model != nullptr);
+    if (table == nullptr || model == nullptr) {
+        return;
+    }
+    const QModelIndex selected = tableIndexNamed(window, QStringLiteral("keep.bin"));
+    QVERIFY(selected.isValid());
+    if (!selected.isValid()) {
+        return;
+    }
+    const std::optional<diskmap::NodeKey> selectedKey = model->keyAt(selected.row());
+    QVERIFY(selectedKey.has_value());
+    if (!selectedKey.has_value()) {
+        return;
+    }
+    table->selectionModel()->setCurrentIndex(
+        selected, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    QTRY_VERIFY(currentSelectionHasKey(window, *selectedKey));
+
+    const QString beforePath = breadcrumbPath(window);
+    const QStringList beforeRows = tableRowNames(window);
+    const FsNode* beforeNode = treemap(window)->currentNode();
+    QVERIFY(beforeNode != nullptr);
+
+    rescanButton(window)->click();
+    QTRY_VERIFY(probe->isRescanStarted());
+
+    // Every user-facing explorer control except cancellation is unavailable
+    // while the old document remains visible during the active rescan. The
+    // folder chooser is intentionally omitted: it is the explicit command to
+    // supersede a scan with a different path, rather than an explorer control.
+    const std::vector<QWidget*> controls{
+        rescanButton(window), upButton(window), searchEdit(window),
+        minimumSizeEdit(window), metricCombo(window), typeCombo(window), ageCombo(window),
+        window.findChild<QComboBox*>(QStringLiteral("issueCombo")), modeCombo(window),
+        table, treemap(window),
+    };
+    for (QWidget* control : controls) {
+        QVERIFY(control != nullptr);
+        if (control != nullptr) {
+            QVERIFY2(!control->isEnabled(), qPrintable(control->objectName()));
+        }
+    }
+    for (int index = 0; index < 3; ++index) {
+        QToolButton* segment = breadcrumbSegment(window, index);
+        QVERIFY(segment != nullptr);
+        if (segment != nullptr) {
+            QVERIFY2(!segment->isEnabled(), qPrintable(segment->objectName()));
+        }
+    }
+    QVERIFY(cancelButton(window) != nullptr);
+    QVERIFY(cancelButton(window)->isEnabled());
+
+    // Direct signal/API attempts are still guarded, which keeps this test
+    // valid for an implementation that chooses inert controls over disabling
+    // them at the widget level.
+    emit table->activated(selected);
+    if (breadcrumbSegment(window, 0) != nullptr) {
+        breadcrumbSegment(window, 0)->click();
+    }
+    upButton(window)->click();
+    searchEdit(window)->setText(QStringLiteral("needle"));
+    typeCombo(window)->setCurrentIndex(1);
+    modeCombo(window)->setCurrentIndex(
+        modeCombo(window)->findData(static_cast<int>(NodeTableModel::LargestFilesMode)));
+    QTest::qWait(250);
+
+    QCOMPARE(breadcrumbPath(window), beforePath);
+    QCOMPARE(tableRowNames(window), beforeRows);
+    QCOMPARE(treemap(window)->currentNode(), beforeNode);
+    QVERIFY(currentSelectionHasKey(window, *selectedKey));
+
+    probe->release();
+    QTRY_VERIFY(probe->isRescanFinished());
+    QTRY_VERIFY(treemap(window)->currentNode() != nullptr
+               && treemap(window)->currentNode()->scan_generation == 2);
+}
+
+void TestMainWindow::generationMetadataMismatchPreservesVisibleDocument() {
+    const std::vector<GenerationMismatchKind> mismatches{
+        GenerationMismatchKind::ResultOnly,
+        GenerationMismatchKind::RootOnly,
+    };
+    for (const GenerationMismatchKind mismatch : mismatches) {
+        MainWindow window(nullptr, generationMismatchRunner(mismatch));
+        window.scanPath(QStringLiteral("prior-document"));
+        waitForScan(window);
+
+        const FsNode* previousNode = treemap(window)->currentNode();
+        QVERIFY(previousNode != nullptr);
+        const QString previousPath = breadcrumbPath(window);
+        const QStringList previousRows = tableRowNames(window);
+        QVERIFY(tableModel(window)->rootNode() == previousNode);
+
+        window.scanPath(QStringLiteral("mismatched"));
+        QTRY_VERIFY(status(window)->text().contains(
+            QStringLiteral("generation metadata mismatch")));
+
+        // Neither generation field may admit a document into the view. The
+        // previous shared document, model root, breadcrumb, and rows remain.
+        QCOMPARE(treemap(window)->currentNode(), previousNode);
+        QCOMPARE(tableModel(window)->rootNode(), previousNode);
+        QCOMPARE(breadcrumbPath(window), previousPath);
+        QCOMPARE(tableRowNames(window), previousRows);
+        QVERIFY(!cancelButton(window)->isEnabled());
+    }
+}
+
+void TestMainWindow::summariesUseSelectedMetricAndConservativeValues() {
+    {
+        MainWindow window(nullptr, metricOnlyUnknownRunner());
+        metricCombo(window)->setCurrentIndex(
+            metricCombo(window)->findData(static_cast<int>(diskmap::SizeMetric::Allocated)));
+        window.scanPath(QStringLiteral("metric-summary"));
+        waitForScan(window);
+
+        QTRY_VERIFY(status(window)->text().contains(QStringLiteral("Allocated:"))
+                   && status(window)->text().contains(QStringLiteral("At least")));
+        QTRY_VERIFY(projectionSummary(window)->text().contains(
+                        QStringLiteral("Allocated subtree: At least")));
+
+        metricCombo(window)->setCurrentIndex(
+            metricCombo(window)->findData(static_cast<int>(diskmap::SizeMetric::Reclaimable)));
+        QTRY_VERIFY(status(window)->text().contains(QStringLiteral("Reclaimable:"))
+                   && status(window)->text().contains(QStringLiteral("At least")));
+        QTRY_VERIFY(projectionSummary(window)->text().contains(
+            QStringLiteral("Reclaimable subtree: At least")));
+    }
+
+    // An unknown zero cannot be rendered as an exact "0 B". It is explicitly
+    // labeled Unknown in both summary surfaces.
+    MainWindow window(nullptr, metricOnlyUnknownRunner(true));
+    metricCombo(window)->setCurrentIndex(
+        metricCombo(window)->findData(static_cast<int>(diskmap::SizeMetric::Allocated)));
+    window.scanPath(QStringLiteral("metric-summary-zero"));
+    waitForScan(window);
+    QTRY_VERIFY(status(window)->text().contains(QStringLiteral("Allocated:"))
+               && status(window)->text().contains(QStringLiteral("Unknown")));
+    QTRY_VERIFY(projectionSummary(window)->text().contains(
+        QStringLiteral("Allocated subtree: Unknown")));
+}
+
+void TestMainWindow::metricOnlyUncertaintyUsesGenericReason() {
+    MainWindow window(nullptr, metricOnlyUnknownRunner());
+    window.scanPath(QStringLiteral("metric-only-uncertainty"));
+    waitForScan(window);
+
+    metricCombo(window)->setCurrentIndex(
+        metricCombo(window)->findData(static_cast<int>(diskmap::SizeMetric::Allocated)));
+    QTRY_VERIFY(!partialBanner(window)->isHidden());
+    QTRY_VERIFY(projectionSummary(window)->text().contains(
+        QStringLiteral("Allocated subtree: At least")));
+
+    const QString banner = partialBanner(window)->text().toLower();
+    QVERIFY(banner.contains(QStringLiteral("selected metric"))
+            || banner.contains(QStringLiteral("not known exactly")));
+    QVERIFY(!banner.contains(QStringLiteral("metadata unknown")));
+}
+
+void TestMainWindow::regularFileRootSupportsLargestFilesActivation() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QFile file(directory.filePath(QStringLiteral("single.bin")));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    const QByteArray contents(4096, 'r');
+    QCOMPARE(file.write(contents), contents.size());
+    file.close();
+
+    MainWindow window;
+    window.scanPath(file.fileName());
+    waitForScan(window);
+
+    TreemapWidget* view = treemap(window);
+    QVERIFY(view != nullptr);
+    QVERIFY(view->currentNode() != nullptr);
+    if (view == nullptr || view->currentNode() == nullptr) {
+        return;
+    }
+    const FsNode* root = view->currentNode();
+    QVERIFY(!root->is_dir);
+    const QString rootName = QString::fromStdString(root->name);
+
+    modeCombo(window)->setCurrentIndex(
+        modeCombo(window)->findData(static_cast<int>(NodeTableModel::LargestFilesMode)));
+    QTRY_VERIFY(tableModel(window)->mode() == NodeTableModel::LargestFilesMode);
+    QTRY_COMPARE((tableRowNames(window)), (QStringList{rootName}));
+
+    const diskmap::NodeKey rootKey = diskmap::nodeKey(*root);
+    activateTableRow(window, rootName);
+    QTRY_VERIFY(view->currentNode() != nullptr);
+    QCOMPARE(view->currentNode(), root);
+    QCOMPARE(diskmap::nodeKey(*view->currentNode()), rootKey);
+    QVERIFY(currentSelectionHasKey(window, rootKey));
+}
+
+void TestMainWindow::destructionWithLateProgressCallbackIsSafe() {
+    const auto probe = std::make_shared<LateProgressProbe>();
+    LateProgressRelease release(probe);
+    {
+        MainWindow window(nullptr, lateProgressRunner(probe));
+        window.scanPath(QStringLiteral("late-progress"));
+        QTRY_VERIFY(probe->isStarted());
+    }
+
+    // The worker invokes its captured ProgressFn after MainWindow has been
+    // destroyed. Joining the releaser proves the worker can finish without a
+    // dangling queued callback, crash, or lifecycle deadlock.
+    QTRY_VERIFY(probe->isFinished());
 }
 
 void TestMainWindow::activatingADirectoryDescendsAndUpdatesBreadcrumb() {

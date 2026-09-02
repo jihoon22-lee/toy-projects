@@ -123,6 +123,17 @@ private:
     void rebuild();
     void rebuildRows();
     void applyDisplaySort();
+    bool rowBefore(const Row& left, const Row& right) const;
+    bool textColumnBefore(const Row& left, const Row& right) const;
+    bool metricColumnBefore(const Row& left, const Row& right) const;
+    bool metricValueBefore(const Row& left,
+                           const Row& right,
+                           const diskmap::MetricValue& leftMetric,
+                           const diskmap::MetricValue& rightMetric) const;
+    bool modifiedColumnBefore(const Row& left, const Row& right) const;
+    bool stateColumnBefore(const Row& left, const Row& right) const;
+    bool sortDirectionBefore(bool ascendingBefore) const;
+    bool tieBreakBefore(const Row& left, const Row& right) const;
     QVariant displayData(const Row& row, int column) const;
     QVariant descriptionData(const Row& row) const;
     QVariant semanticRoleData(const Row& row, int role) const;
