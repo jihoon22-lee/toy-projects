@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+### LogLens filter diagnostics and bounds
+
+- Hardened the recursive-descent filter parser with deterministic byte-based diagnostics. `ParseError::position`
+  remains the start offset for existing callers, and the new `ParseError::end` completes a half-open
+  `[position, end)` range; the GUI and CLI render the range in filter errors. The appended field keeps
+  existing `position`/`message` aggregate initialization source-compatible.
+- Added bounded filter queries (4,096 input bytes, 256 AST nodes, 1,024 decoded bytes per literal) while
+  retaining the 64-level nesting cap. Oversized queries, literals, and ASTs now fail before unbounded
+  parser state can grow, with stable messages and ranges.
+- Quoted filter values now decode only `\\"` and `\\\\`. Unsupported escapes and unterminated quotes are
+  rejected, while UTF-8 input bytes remain byte-preserving. `~` and `!~` continue to perform literal,
+  case-insensitive substring matching rather than regular-expression matching.
+- CLI `--level` and `--filter` are parsed independently so diagnostics map back to the user-supplied
+  argument instead of a synthesized conjunction. The GUI parses the untrimmed UTF-8 input, preserves
+  the previously applied filter after a failed apply, points depth failures at the extra nesting token,
+  and spans an unsupported UTF-8 escape through its complete scalar. Structured parser token metadata
+  also removes the new clang-tidy swapped-parameter warnings. Final local validation used the public
+  ici `v0.10.2` `ici.pyz`, SHA-256
+  `2af5198d1348a64c39f4f37d12657aa9a2c4bf3ddf034a9099909c41e86e30e7`. Its uncached deep suite is
+  `WARN` only because clazy is unavailable and pre-existing lint findings remain. The changed
+  `filter_expr.cpp`, `main.cpp`, and `main_window.cpp` have zero actionable lint targets; the overall
+  lint result still contains 26 targets because ici currently counts 16 clang-tidy `note:` lines
+  separately, which is recorded as a known ici engine follow-up. `compile_db` is `PASS` for 14/14
+  production units across 40 configurations; `test` is `PASS` for 12/12 with line/function/branch
+  coverage `93.3% / 96.7% / 82.4%`; `complexity` is `PASS` with max 15 across 218; `sanitize` is
+  `PASS`. The HTML artifact is 484,899 bytes with exact title `ici Verification Report — loglens`
+  and Zero-CDN. LogLens version/release remains pending, and this evidence does not claim broader
+  L3 completion.
+
 ### Roadmap status reconciliation
 
 - Marked the master-plan T0 checkpoint complete after the merged Qt shell, native/ici, Qt5/Qt6,

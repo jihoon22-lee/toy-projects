@@ -28,11 +28,17 @@ namespace {
 
 constexpr std::uint64_t kBucketMs = 60000;
 
+QString filterErrorRange(const loglens::ParseError& error) {
+    const qulonglong begin = static_cast<qulonglong>(error.position);
+    const qulonglong end = static_cast<qulonglong>(error.end);
+    return QStringLiteral("[%1,%2)").arg(begin).arg(end);
+}
+
 } // namespace
 
-MainWindow::MainWindow(QWidget* parent, std::size_t recordCapacity, std::size_t sourceChunkBytes)
-    : QMainWindow(parent), source_chunk_bytes_(sourceChunkBytes),
-      record_capacity_(recordCapacity) {
+MainWindow::MainWindow(QWidget* parent, MainWindowOptions options)
+    : QMainWindow(parent), source_chunk_bytes_(options.sourceChunkBytes),
+      record_capacity_(options.recordCapacity) {
     auto* central = new QWidget(this);
     auto* layout = new QVBoxLayout(central);
 
@@ -57,8 +63,8 @@ MainWindow::MainWindow(QWidget* parent, std::size_t recordCapacity, std::size_t 
     tailRecords_ = new QSpinBox(central);
     tailRecords_->setObjectName(QStringLiteral("tailRecordsSpinBox"));
     tailRecords_->setAccessibleName(tr("Latest record count"));
-    tailRecords_->setRange(1, static_cast<int>(recordCapacity));
-    tailRecords_->setValue(static_cast<int>(recordCapacity));
+    tailRecords_->setRange(1, static_cast<int>(record_capacity_));
+    tailRecords_->setValue(static_cast<int>(record_capacity_));
     bar->addWidget(tailRecords_);
     bar->addWidget(filterEdit_, 1);
     bar->addWidget(applyButton);
@@ -79,7 +85,7 @@ MainWindow::MainWindow(QWidget* parent, std::size_t recordCapacity, std::size_t 
     timeline_->setAccessibleName(tr("Log timeline"));
     layout->addWidget(timeline_);
 
-    model_ = new LogModel(this, recordCapacity);
+    model_ = new LogModel(this, record_capacity_);
     table_ = new QTableView(central);
     table_->setObjectName(QStringLiteral("logTable"));
     table_->setAccessibleName(tr("Log records"));
@@ -253,7 +259,7 @@ void MainWindow::handleLoadError(const loglens::LoadBatch& batch) {
     followBox_->setChecked(false);
 }
 
-void MainWindow::handleLoadBatch(loglens::LoadBatch batch) {
+void MainWindow::handleLoadBatch(const loglens::LoadBatch& batch) {
     if (batch.job_id != active_job_) {
         return;
     }
@@ -312,8 +318,8 @@ loglens::InitialLoadMode MainWindow::selectedLoadMode() const {
 }
 
 void MainWindow::applyFilter() {
-    const QString text = filterEdit_->text().trimmed();
-    if (text.isEmpty()) {
+    const QString text = filterEdit_->text();
+    if (text.trimmed().isEmpty()) {
         filter_.reset();
         model_->setFilter(nullptr);
         refreshTimeline();
@@ -321,14 +327,16 @@ void MainWindow::applyFilter() {
         return;
     }
     loglens::ParseError error;
-    filter_ = loglens::Filter::parse(text.toStdString(), error);
-    if (!filter_) {
+    const std::optional<loglens::Filter> candidate =
+        loglens::Filter::parse(text.toStdString(), error);
+    if (!candidate) {
         // Keep the previous view; a typo should not blank the table.
-        updateStatus(tr("bad filter at %1: %2")
-                         .arg(error.position)
+        updateStatus(tr("bad filter at bytes %1: %2")
+                         .arg(filterErrorRange(error))
                          .arg(QString::fromStdString(error.message)));
         return;
     }
+    filter_ = candidate;
     model_->setFilter(&filter_.value());
     refreshTimeline();
     updateStatus(QString());

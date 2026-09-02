@@ -389,7 +389,34 @@ L3 parser/filter와 L6 release 완료 조건은 이 결정으로 닫히지 않�
 - [ ] malformed line을 유실하지 않고 parse error metadata와 raw를 보존한다.
 - [ ] timestamp timezone/precision과 missing timestamp 정책을 정의한다.
 - [ ] filter AST에 syntax diagnostic range와 saved query를 추가한다.
-- [ ] regex catastrophic input에 timeout/limit 또는 안전 정책을 둔다.
+- [x] regex catastrophic input에 timeout/limit 또는 안전 정책을 둔다.
+  - filter 언어는 regex를 실행하지 않고 `~`/`!~`를 bounded literal substring으로 고정한다.
+
+#### L3 filter diagnostics slice — bounded recursive parser (2026-09-02)
+
+- [x] 기존 recursive-descent filter에 4,096-byte query, 256-node AST, 1,024-byte decoded
+  literal, depth 64 bounds를 적용하고, oversized/unknown/trailing/invalid syntax를
+  deterministic message로 거부한다.
+- [x] `ParseError::position`을 기존 시작 offset API로 유지하면서 `[position, end)` UTF-8
+  input byte range를 추가했다. quoted value의 `\\"`/`\\\\`만 해석하고 나머지 bytes는 보존하며,
+  `~`/`!~` literal substring 의미론과 기존 precedence를 유지한다.
+- [x] CLI의 `--level`과 `--filter`를 독립 parse해 사용자 argument 기준으로 diagnostic range를
+  매핑하고, GUI는 untrimmed UTF-8 input을 사용한다. 이전 GUI filter는 failed apply 뒤에도
+  유지하며, depth error는 추가 nesting token을, unsupported UTF-8 escape는 전체 scalar를
+  가리킨다. `TokenRange`/`PredicateTokens` 구조화로 새 clang-tidy swapped-parameter 경고를
+  제거했다.
+- [x] Qt5/Qt6 native suite는 각각 12/12 pass했다. public ici `v0.10.2` `ici.pyz`의 SHA-256은
+  `2af5198d1348a64c39f4f37d12657aa9a2c4bf3ddf034a9099909c41e86e30e7`이며, uncached deep suite는
+  clazy unavailable 및 pre-existing lint findings로 인한 `WARN`만 남겼다. 변경된
+  `filter_expr.cpp`/`main.cpp`/`main_window.cpp`는 actionable lint target 0건이고, 전체 lint
+  26개 target 중 clang-tidy `note:` 16줄이 ici에서 별도 target으로 집계되는 알려진 engine
+  follow-up이 있다. `compile_db`는 40 configurations의 production unit 14/14 `PASS`, `test`는
+  12/12 `PASS`와 line/function/branch `93.3% / 96.7% / 82.4%`, `complexity`는 218개 대상
+  max 15 `PASS`, `sanitize`는 `PASS`다. HTML은 484,899 bytes, exact title
+  `ici Verification Report — loglens`, Zero-CDN이다. 이 증거는 version/release를 올리거나
+  broader L3 parser-pipeline contract를 닫지 않는다.
+- [ ] saved query, source-profile parser, malformed log-line metadata와 나머지 L3 contract는
+  후속 slice에서 다룬다.
 
 ### L4. 실제 사용되는 highlight와 triage
 
