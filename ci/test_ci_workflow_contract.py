@@ -44,8 +44,8 @@ def _sticky_verifier_script() -> str:
 def _run_sticky_verifier(
     comments_pages: list[list[dict[str, str]]],
     *,
-    names: str = "buildscope,diskmap",
-    expected_count: int = 2,
+    names: str = "diskmap,loglens,buildscope,envlens",
+    expected_count: int = 4,
 ) -> subprocess.CompletedProcess[str]:
     run_url = "https://github.com/example/toy-projects/actions/runs/99"
     with tempfile.TemporaryDirectory() as temporary_directory:
@@ -109,8 +109,10 @@ class WorkflowPublicationContractTests(unittest.TestCase):
             (
                 "<!-- ici-report -->",
                 f"[workflow]({run_url})",
-                "[buildscope](https://pages.example/toy-projects/buildscope/pr/42/)",
                 "[diskmap](https://pages.example/toy-projects/diskmap/pr/42/)",
+                "[loglens](https://pages.example/toy-projects/loglens/pr/42/)",
+                "[buildscope](https://pages.example/toy-projects/buildscope/pr/42/)",
+                "[envlens](https://pages.example/toy-projects/envlens/pr/42/)",
             )
         )
 
@@ -124,8 +126,10 @@ class WorkflowPublicationContractTests(unittest.TestCase):
             (
                 "<!-- ici-report -->",
                 f"[workflow]({run_url})",
-                "[buildscope](https://pages.example/toy-projects/buildscope/pr/42/)",
                 "[diskmap](https://pages.example/toy-projects/diskmap/pr/42/)",
+                "[loglens](https://pages.example/toy-projects/loglens/pr/42/)",
+                "[buildscope](https://pages.example/toy-projects/buildscope/pr/42/)",
+                "[envlens](https://pages.example/toy-projects/envlens/pr/42/)",
             )
         )
 
@@ -156,8 +160,10 @@ class WorkflowPublicationContractTests(unittest.TestCase):
                 "<!-- ici-report -->",
                 "<!-- ici-report -->",
                 f"[workflow]({run_url})",
-                "[buildscope](https://pages.example/toy-projects/buildscope/pr/42/)",
                 "[diskmap](https://pages.example/toy-projects/diskmap/pr/42/)",
+                "[loglens](https://pages.example/toy-projects/loglens/pr/42/)",
+                "[buildscope](https://pages.example/toy-projects/buildscope/pr/42/)",
+                "[envlens](https://pages.example/toy-projects/envlens/pr/42/)",
             )
         )
 
@@ -182,6 +188,7 @@ class WorkflowPublicationContractTests(unittest.TestCase):
             "buildscope-benchmark-smoke",
             "buildscope-ici-deep",
             "buildscope-python-quality",
+            "envlens-python-quality",
             "buildscope-release-contract",
         ):
             self.assertIn(f"      - {dependency}\n", block)
@@ -233,6 +240,53 @@ class WorkflowPublicationContractTests(unittest.TestCase):
         self.assertIn("python3 -m runner.run", block)
         self.assertIn('--ici-bin "$QUALITY_ZOO_ICI"', block)
         self.assertIn("name: quality-zoo-contract", block)
+
+    def test_envlens_python_quality_covers_both_interpreters_and_boundaries(
+        self,
+    ) -> None:
+        block = _job_block("envlens-python-quality")
+
+        self.assertIn('python_version: "3.10"', block)
+        self.assertIn("label: py310", block)
+        self.assertIn('python_version: "3.14"', block)
+        self.assertIn("label: latest", block)
+        self.assertIn("-m pytest tests", block)
+        self.assertIn('ruff" check src tests', block)
+        self.assertIn('ruff" format --check src tests', block)
+        self.assertIn('mypy" --strict --python-version 3.10 src/envlens', block)
+        self.assertIn("Draft202012Validator.check_schema(schema)", block)
+        self.assertIn(").validate(snapshot)", block)
+        self.assertIn("--captured-at 2026-09-03T00:00:00Z", block)
+        self.assertIn("uv build --out-dir", block)
+        self.assertIn("SOURCE_DATE_EPOCH=1700000000", block)
+        self.assertIn('cmp "$first_build/envlens-0.1.0-py3-none-any.whl"', block)
+        self.assertIn('cmp "$first_build/envlens-0.1.0.tar.gz"', block)
+        self.assertIn("envlens-0.1.0-py3-none-any.whl", block)
+        self.assertIn('"Root-Is-Purelib: true"', block)
+        self.assertIn('"Tag: py3-none-any"', block)
+        self.assertIn("envlens wheel contains native extensions", block)
+        self.assertIn("envlens sdist contains native extensions", block)
+        self.assertIn('"envlens/py.typed"', block)
+        self.assertIn('"$consumer_env/bin/envlens" --version', block)
+
+    def test_manifest_and_report_contract_are_dynamic_for_four_projects(self) -> None:
+        manifest = json.loads(
+            (Path(__file__).resolve().parents[1] / "ci" / "projects.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        names = [entry["name"] for entry in manifest["projects"]]
+        self.assertEqual(names, ["diskmap", "loglens", "buildscope", "envlens"])
+        self.assertEqual(len(names), 4)
+
+        report_block = _job_block("report-pr")
+        self.assertIn(
+            "PROJECT_NAMES: ${{ needs.discover.outputs.names }}", report_block
+        )
+        self.assertIn(
+            "EXPECTED_REPORTS: ${{ needs.discover.outputs.count }}", report_block
+        )
+        self.assertNotIn("exact-three-project", WORKFLOW)
 
     def test_buildscope_release_pipeline_has_a_fixed_fail_closed_order(self) -> None:
         step_names = (

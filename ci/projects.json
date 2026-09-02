@@ -33,6 +33,13 @@
         "binary": "build/gui/src/gui/buildscope-gui",
         "smoke_arg": "fixtures/sample.snapshot.json"
       }
+    },
+    {
+      "name": "envlens",
+      "verify": true,
+      "gui": {
+        "enabled": false
+      }
     }
   ]
 }
