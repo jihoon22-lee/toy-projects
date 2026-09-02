@@ -338,7 +338,7 @@ bool inspectLargestNode(const FsNode& node,
     }
     const CandidateEvaluation evaluation = evaluateLargestCandidate(node, filter, sort);
     result.complete = result.complete && evaluation.complete;
-    if (evaluation.matches) {
+    if (evaluation.matches && limit > 0) {
         considerLargestCandidate(result.files, node, limit, filter, sort);
     }
     return false;
@@ -369,9 +369,6 @@ LargestFilesResult largestFiles(const FsNode& node,
                                 const SortSpec& sort) {
     LargestFilesResult result;
     result.complete = !filter.scanner_totals_filtered;
-    if (limit == 0) {
-        return result;
-    }
 
     struct TraversalFrame {
         const FsNode* node;

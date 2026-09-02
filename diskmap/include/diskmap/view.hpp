@@ -164,7 +164,8 @@ struct LargestFilesResult {
 // candidate memory are bounded by tree depth and limit respectively, and
 // `complete` exposes whether the list is exhaustive. It is also false when an
 // observed candidate cannot be evaluated exactly against an active size/age
-// predicate or the selected sort metric.
+// predicate or the selected sort metric. A zero limit still traverses the tree
+// to return truthful completeness evidence, while retaining no candidates.
 // Symlink entries are not regular files, even when followed; this prevents a
 // largest-files list from presenting a link alias as an additional file.
 // Filtering is applied to each file, while directories are traversed even if

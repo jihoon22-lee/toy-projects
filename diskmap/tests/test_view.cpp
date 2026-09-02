@@ -504,6 +504,9 @@ int main() {
         if (result.files.size() == 1) {
             CHECK_EQ(result.files.front()->name, std::string("visible"));
         }
+        const diskmap::LargestFilesResult zeroLimit = diskmap::largestFiles(root, 0);
+        CHECK(zeroLimit.files.empty());
+        CHECK(!zeroLimit.complete);
 
         ViewFilter filtered;
         filtered.scanner_totals_filtered = true;
