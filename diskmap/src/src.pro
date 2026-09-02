@@ -1,5 +1,6 @@
 TEMPLATE = lib
 CONFIG += staticlib
+CONFIG += c++17
 CONFIG -= qt
 QT =
 
@@ -13,7 +14,8 @@ HEADERS += \
     $$PWD/../include/diskmap/fs_node.hpp \
     $$PWD/../include/diskmap/fs_source.hpp \
     $$PWD/../include/diskmap/scanner.hpp \
-    $$PWD/../include/diskmap/treemap.hpp
+    $$PWD/../include/diskmap/treemap.hpp \
+    $$PWD/../include/diskmap/view.hpp
 
 # main.cpp is the CLI entry point and stays out of the library so tests can link
 # it without a second main(). ici excludes entry points from coverage scope for
@@ -23,4 +25,5 @@ SOURCES += \
     fs_node.cpp \
     fs_source.cpp \
     scanner.cpp \
-    treemap.cpp
+    treemap.cpp \
+    view.cpp

@@ -181,9 +181,15 @@ bool byDescendingFileSize(const FsNode* a, const FsNode* b) {
     return a->size > b->size;
 }
 
+bool hasUnvisitedSubtree(const FsNode& node) {
+    static const std::string depthMarker = "scan depth limit reached";
+    return node.cycle_skipped || node.mount_boundary_skipped
+           || node.error.find(depthMarker) != std::string::npos;
+}
+
 StorageFrame makeStorageFrame(FsNode* node) {
     StorageFrame frame{node, 0, StorageFacts{}};
-    frame.facts.complete = node->complete;
+    frame.facts.complete = node->complete && !hasUnvisitedSubtree(*node);
     return frame;
 }
 
@@ -228,6 +234,7 @@ std::uint64_t aggregateSizes(FsNode& node) {
         FsNode* node;
         std::size_t next_child = 0;
         std::uint64_t total = 0;
+        bool total_known = true;
     };
 
     std::vector<Frame> stack;
@@ -243,10 +250,13 @@ std::uint64_t aggregateSizes(FsNode& node) {
         const std::uint64_t subtotal = frame.node->is_dir ? frame.total : frame.node->size;
         if (frame.node->is_dir) {
             frame.node->size = subtotal;
+            frame.node->logical_size_known = frame.total_known;
         }
+        const bool subtotalKnown = frame.node->logical_size_known;
         stack.pop_back();
         if (!stack.empty()) {
-            addSize(stack.back().total, subtotal);
+            const bool sumKnown = addSize(stack.back().total, subtotal);
+            stack.back().total_known = stack.back().total_known && subtotalKnown && sumKnown;
         }
     }
     return node.size;
