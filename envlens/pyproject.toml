@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "envlens"
+version = "0.1.0"
+description = "Offline, deterministic Python environment snapshots"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "envlens contributors"}]
+dependencies = []
+
+[project.scripts]
+envlens = "envlens.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/envlens"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"schemas/envlens-snapshot-v1.schema.json" = "envlens/schemas/envlens-snapshot-v1.schema.json"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+packages = ["envlens"]
+mypy_path = "src"

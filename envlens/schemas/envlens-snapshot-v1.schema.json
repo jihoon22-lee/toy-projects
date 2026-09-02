@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jihoon22-lee/toy-projects/envlens/schemas/envlens-snapshot-v1.schema.json",
+  "title": "envlens snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "producer",
+    "captured_at",
+    "redaction",
+    "source",
+    "environment",
+    "distributions",
+    "collection"
+  ],
+  "properties": {
+    "schema_version": {"const": "envlens.snapshot/v1"},
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "envlens"},
+        "version": {"type": "string", "minLength": 1}
+      }
+    },
+    "captured_at": {"type": "string", "format": "date-time"},
+    "redaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy", "enabled"],
+      "properties": {
+        "policy": {"const": "envlens-redaction/v1"},
+        "enabled": {"type": "boolean"}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "requested_executable",
+        "resolved_executable",
+        "identity",
+        "sysconfig"
+      ],
+      "properties": {
+        "kind": {"const": "python-interpreter"},
+        "requested_executable": {"type": "string"},
+        "resolved_executable": {"type": "string"},
+        "identity": {"type": "object"},
+        "sysconfig": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["paths", "variables"],
+          "properties": {
+            "paths": {"type": "object"},
+            "variables": {"type": "object"}
+          }
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["variables"],
+      "properties": {
+        "variables": {
+          "type": "object",
+          "additionalProperties": {"type": "string"}
+        }
+      }
+    },
+    "distributions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "normalized_name",
+          "version",
+          "metadata",
+          "entry_points",
+          "location",
+          "status",
+          "errors"
+        ],
+        "properties": {
+          "name": {"type": "string"},
+          "normalized_name": {"type": "string"},
+          "version": {"type": "string"},
+          "metadata": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["requires_python", "requires_dist"],
+            "properties": {
+              "requires_python": {"type": "string"},
+              "requires_dist": {"type": "array", "items": {"type": "string"}}
+            }
+          },
+          "entry_points": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["group", "name", "value"],
+              "properties": {
+                "group": {"type": "string"},
+                "name": {"type": "string"},
+                "value": {"type": "string"}
+              }
+            }
+          },
+          "location": {"type": "string"},
+          "status": {"enum": ["ok", "error"]},
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["code", "field", "type", "message"],
+              "properties": {
+                "code": {"type": "string"},
+                "field": {"type": "string"},
+                "type": {"type": "string"},
+                "message": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "collection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "distribution_count", "error_count"],
+      "properties": {
+        "status": {"enum": ["complete", "partial"]},
+        "distribution_count": {"type": "integer", "minimum": 0},
+        "error_count": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}
