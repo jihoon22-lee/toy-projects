@@ -155,10 +155,10 @@ All commands below were run with the Python 3.10 interpreter selected by uv.
 
 ```text
 uv run --python 3.10 --project envlens --with pytest pytest envlens/tests -q
-49 passed
+50 passed
 ```
 
-The test breakdown is CLI `7`, atomic I/O `6`, probe/process boundary `11`,
+The test breakdown is CLI `7`, atomic I/O `6`, probe/process boundary `12`,
 redaction `7`, and snapshot normalization/schema `18`.
 
 ### Static quality
@@ -169,7 +169,7 @@ Ruff format --check:    12 files already formatted
 strict mypy:            Success: no issues found in 6 source files
 ```
 
-The same 49 tests, Ruff checks, strict Python-3.10 typing contract, and a real
+The same 50 tests, Ruff checks, strict Python-3.10 typing contract, and a real
 schema-validated snapshot also pass under Python 3.14.7.
 
 `envlens/ici.toml` records the intended test/coverage contract: TEM at least
@@ -177,7 +177,7 @@ schema-validated snapshot also pass under Python 3.14.7.
 
 The released ici `v0.10.2` local deep verification is `PASS` across 14 total
 engines: `13 PASS / 0 WARN / 0 FAIL / 0 ERROR / 1 compile_db SKIP`. It records
-TEM `5.00`, line/function/branch coverage `92.5% / 100.0% / 84.6%`, complexity
+TEM `5.00`, line/function/branch coverage `93.0% / 100.0% / 84.6%`, complexity
 max `13`, and passing cycle/sanitize checks.
 
 Two clean `SOURCE_DATE_EPOCH=1700000000` builds were byte-identical. The audited
@@ -185,9 +185,9 @@ artifacts were:
 
 ```text
 envlens-0.1.0-py3-none-any.whl
-  sha256 a02fcf09f87d3aafecb2eaadb446475b5c1536c00c9a41ba5fef223cd6ae1743
+  sha256 906c86270b2cad5c693816d43fa4d143e50be0cc3f3a852fdd538a453f51e3df
 envlens-0.1.0.tar.gz
-  sha256 0d890927b93b5f1a66b2a73dca446ad0d4365785516b3fbb72d5a878ea59eba8
+  sha256 d8bf786c6bb6569371bc27092f3ade01e03315abca4fb862b66d22cd6ac9e63e
 ```
 
 The wheel and sdist had unique members, no native libraries or runtime

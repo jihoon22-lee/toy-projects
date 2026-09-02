@@ -33,11 +33,11 @@
   boundary, not an operating-system sandbox.
 - Added atomic same-directory JSON replacement with POSIX mode `0600`, refusing symlink/special-file
   destinations and replacement of the selected interpreter, including an existing hardlink alias.
-- Local Python 3.10 validation is `49/49` tests (CLI 7, I/O 6, probe/process 11, redaction 7,
+- Local Python 3.10 validation is `50/50` tests (CLI 7, I/O 6, probe/process 12, redaction 7,
   snapshot normalization/schema 18), with Ruff check/format and strict mypy for six source modules
   also passing. Released ici `v0.10.2` local deep verification is `PASS` across 14 total engines:
   `13 PASS / 0 WARN / 0 FAIL / 0 ERROR / 1 compile_db SKIP`, with line/function/branch
-  `92.5% / 100.0% / 84.6%`, TEM `5.00`, complexity max `13`, and cycle/sanitize also `PASS`.
+  `93.0% / 100.0% / 84.6%`, TEM `5.00`, complexity max `13`, and cycle/sanitize also `PASS`.
   The path-aware manifest now includes envlens, while a Python 3.10/3.14 matrix validates tests,
   schema, strict typing, reproducible pure wheel/sdist builds, package metadata, and a clean-wheel
   smoke. Remote PR/sticky/exact-main and stable release evidence remain pending. Snapshot diff,

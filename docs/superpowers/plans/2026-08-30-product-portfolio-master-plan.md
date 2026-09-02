@@ -1283,10 +1283,10 @@ distribution requirement/entry point/location/error 문자열에서도 scrub한�
 same-directory replacement와 POSIX `0600`을 사용하며 symlink/special file과 selected interpreter
 (hardlink alias 포함) overwrite를 거부한다.
 
-2026-09-03 local Python 3.10에서 49/49 tests (CLI 7, I/O 6, probe/process 11, redaction 7,
+2026-09-03 local Python 3.10에서 50/50 tests (CLI 7, I/O 6, probe/process 12, redaction 7,
 snapshot normalization/schema 18), Ruff check/format, strict mypy 6 source modules가 통과했다.
 Released ici `v0.10.2` local deep도 14 total engines에서 `13 PASS / 0 WARN / 0 FAIL / 0 ERROR /
-1 compile_db SKIP`로 PASS했으며, TEM `5.00`, line/function/branch `92.5% / 100.0% / 84.6%`,
+1 compile_db SKIP`로 PASS했으며, TEM `5.00`, line/function/branch `93.0% / 100.0% / 84.6%`,
 complexity max `13`, cycle/sanitize `PASS`였다.
 `envlens/ici.toml`은 test/coverage, TEM `≥ 4.0`, branch `≥ 80%`, function `≥ 90%`의 intended
 quality contract를 기록한다. Repository path-aware manifest와 Python 3.10/3.14 quality matrix는

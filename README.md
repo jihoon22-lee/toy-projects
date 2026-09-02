@@ -64,10 +64,10 @@ interpreter(기존 hardlink alias 포함) 덮어쓰기를 거부한다. 이는 s
 현재 사용자 권한으로 실행된다.
 
 2026-09-03 현재 local Python 3.10에서 CLI/I/O/probe·process/redaction/normalization-schema
-`49/49` tests, Ruff check/format, strict mypy(6 source modules)가 통과했다. released ici
+`50/50` tests, Ruff check/format, strict mypy(6 source modules)가 통과했다. released ici
 `v0.10.2` local deep 검증도 14 total engines에서 `13 PASS / 0 WARN / 0 FAIL / 0 ERROR /
 1 compile_db SKIP`로 PASS했으며, TEM `5.00`, line/function/branch
-`92.5% / 100.0% / 84.6%`, complexity max `13`, cycle/sanitize `PASS`였다. `envlens/ici.toml`은
+`93.0% / 100.0% / 84.6%`, complexity max `13`, cycle/sanitize `PASS`였다. `envlens/ici.toml`은
 test/coverage, TEM `≥ 4.0`, branch `≥ 80%`, function `≥ 90%`의 intended quality contract를
 기록한다. Path-aware manifest와 Python 3.10/3.14 quality matrix도 이 브랜치에 연결했지만 이
 slice의 remote PR CI, sticky report, exact-main verification과 stable release는 아직 pending이다.
