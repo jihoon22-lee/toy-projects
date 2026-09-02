@@ -494,7 +494,7 @@ exact-main/Merge Gate evidence까지 완료됐다. 따라서 T0 checkpoint는 �
 | 프로젝트 | 빌드 | 검증 | Qt 테스트 |
 |---|---|---|---|
 | `loglens` | CMake · Qt5/Qt6 | L2 benchmark PR #26 merged · main Qt5/Qt6 sweep green · default 8192 | `QAbstractItemModelTester` + MainWindow QtTest |
-| `diskmap` | qmake · Qt5/Qt6 | D1 Slice 2 merged · D2 fully complete (PR #28 remote evidence + main benchmark green) · D3 next | `QSignalSpy` + 9 native test targets + MainWindow QtTest |
+| `diskmap` | qmake · Qt5/Qt6 | D1 Slice 2 merged · D2 fully complete · D3 core projection merged (PR #45) · GUI explorer UX next | `QSignalSpy` + 9 native test targets + MainWindow QtTest |
 | `ici/viewer` | CMake · Qt5/Qt6 | PASS · TEM 4.86 | MainWindow QtTest 4/4 |
 
 T0-5의 `discover`는 GUI 프로젝트 한 항목을 Qt5·Qt6 두 항목으로 확장한다. 따라서 현재
@@ -682,8 +682,24 @@ budgets enforced는 `PASS`였다.
 combined `summary.json`은 3567 bytes이며 SHA-256은
 `26391797763aed17fedb04e2a4aeb5cf8238ec4d5b5d040d473d32a513369251`이다. 이는 toy-projects
 `main`의 기능 병합 및 검증 기록이며, 별도 제품 버전 release를 의미하지 않는다. 따라서 D2는
-local/native/ici, PR CI, sticky report, Pages와 merged-main benchmark까지 모두 완료됐고 다음
-단계는 D3 explorer UX다.
+local/native/ici, PR CI, sticky report, Pages와 merged-main benchmark까지 모두 완료됐다. D3의
+Qt-free core projection도 아래 PR #45 증거와 함께 병합됐고, 이제 GUI explorer UX가 남아 있다.
+
+### 진행 중: DiskMap D3 explorer UX — core projection merged, GUI remainder
+
+[PR #45](https://github.com/jihoon22-lee/toy-projects/pull/45)은 merge commit
+`0688e44fa99d1ec69aba0c9bf9995a4a857fea9e`로 `main`에 병합됐다. PR workflow
+[`33607634973`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33607634973)와 exact-main
+workflow [`33608884643`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33608884643)가
+모두 성공했으며 required checks, Qt5/Qt6, ici, benchmark, report publication과 Merge Gate를
+포함한다.
+
+병합된 core slice는 metric projection, deterministic node key/issue, conjunctive filter,
+visible children/largest-files ordering과 incomplete·cycle·depth·mount·scanner-filtered
+provenance를 닫았다. 그러나 D3 전체는 아직 열려 있다. treemap·sortable table/list,
+breadcrumb/accessibility, 실제 search/filter/largest-files UI, logical/allocated/reclaimable
+설명, unknown/incomplete 표시, rescan·selection 유지 UX와 테스트가 남은 작업이다. D4~D7도
+계속 미완료이며, 이번 병합은 제품 버전이나 release를 변경하지 않았다.
 
 ### 4단계 — 여유가 되면
 

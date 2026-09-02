@@ -31,7 +31,7 @@
 | 프로젝트 | 현재 형태 | 실측 | 제품 상태 |
 |---|---|---|---|
 | loglens | C++17, Qt, CMake | L2 bounded/background slice · PR #25 CI green · local Qt5/Qt6 12 CTest targets · 1 GiB benchmark PR #26 merged · main Qt5/Qt6 sweep green | Tail N/From start와 worker UX, benchmark/default 8192 완료 |
-| diskmap | C++17, Qt, qmake | D1 Slice 2 merged · D2 fully complete (PR #28 remote evidence + main benchmark green) | D3 explorer UX next; treemap/cleanup UX는 D3~D6에서 확장 |
+| diskmap | C++17, Qt, qmake | D1 Slice 2 merged · D2 complete · D3 core projection merged (PR #45) | D3 GUI explorer UX next; treemap/cleanup UX는 D3~D6에서 확장 |
 | buildscope | Python + C++17/Qt, CMake | B0~B5 implementation, remote acceptance, exact-main CI, trusted main Pages와 `0.5.0` tag/release/public asset audit complete | B3~B5 첫 usable release boundary published and audited |
 | ici/viewer | Qt-free core + Qt6 GUI | 3 tests, TEM 4.94 | core 중심, 셸과 report workflow 부족 |
 
@@ -376,8 +376,8 @@ loader/Tail N 변경 이전 bounded foundation에 대한 historical evidence다.
 L2 bounded/background 구현과 1 GiB benchmark, 성능 budget/default capacity 결정은 완료됐다.
 PR26의 원격 CI·ici·sticky report·Pages 검증과 main Qt5/Qt6 full sweep도 완료됐다. D2
 cancellable scan local candidate와 current ici main의 full local verify, PR #28 원격
-PR/CI·sticky·Pages evidence와 merged-main full benchmark도 모두 닫혔으며, 다음 diskmap 단계는
-D3 explorer UX다.
+PR/CI·sticky·Pages evidence와 merged-main full benchmark도 모두 닫혔다. D3 core projection은
+PR #45로 병합됐으며, 다음 diskmap 단계는 GUI explorer UX다.
 L3 parser/filter와 L6 release 완료 조건은 이 결정으로 닫히지 않으며 체크리스트를 유지한다.
 
 ### L3. parser와 filter 완성도
@@ -661,6 +661,14 @@ local/native/ici, PR CI, sticky report, Pages와 merged-main benchmark까지 모
 - [ ] logical/allocated/reclaimable size 차이를 설명한다.
 - [ ] unreadable/incomplete subtree를 시각적으로 구분한다.
 - [ ] rescan, refresh와 selection 유지 의미론을 테스트한다.
+
+[PR #45](https://github.com/jihoon22-lee/toy-projects/pull/45)은 merge commit
+`0688e44fa99d1ec69aba0c9bf9995a4a857fea9e`로 `main`에 병합됐다. PR workflow
+[`33607634973`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33607634973)와 exact-main
+workflow [`33608884643`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33608884643)가
+모두 성공했으며 required checks, Qt5/Qt6, ici, benchmark, report publication과 Merge Gate를
+확인했다. 위 체크리스트의 첫 항목만 완료된 D3 core slice이며, treemap/table부터 rescan·selection
+유지 UX까지 나머지 GUI 항목이 남아 있으므로 D3 전체는 아직 완료되지 않았다.
 
 ### D4. cleanup staging core
 
@@ -1158,12 +1166,11 @@ Zero-CDN이며 그 실행의 산출물과 byte-identical했다.
 | diskmap | [diskmap/main](https://jihoon22-lee.github.io/toy-projects/diskmap/main/) | 339,929 | `1bd6ebdce2206e4538fb28c20c17f2d504f1a160e15f5d8d4e2923b15b399e65` |
 | loglens | [loglens/main](https://jihoon22-lee.github.io/toy-projects/loglens/main/) | 495,237 | `11e4c78eed957e237bcea8ec5ea64c3894751eafbe639c454e47ab0acd70df96` |
 
-이 B5 candidate의 버전 경계는 `0.5.0`으로 유지한다. 이는 B3/B4/B5를 묶은 첫 usable BuildScope
-release boundary라는 제품 판단이며, candidate 기록이나 ici pin/CI 변경만으로 stable 또는 다음
-버전을 선언하지 않는다. 현재 B5의 implementation·remote acceptance·exact-main/Pages 증거는
-완료됐지만 annotated tag와 public release asset audit이 끝나기 전까지 B0~B5 release 체크포인트는
-열린 상태로 유지한다. `0.5.0` 이후 작업은 4.2의 comparable checkpoint가 닫힐 때까지 `Unreleased`에
-남긴다.
+이 B5 candidate 문단은 publication 이전의 historical snapshot이다. 당시 B5 candidate의 버전
+경계는 `0.5.0`으로 유지했으며, candidate 기록이나 ici pin/CI 변경만으로 stable 또는 다음 버전을
+선언하지 않는다는 정책을 확인했다. 당시에는 annotated tag와 public release asset audit이 pending
+이었지만, 현재 상태는 아래 `B5 publication closeout`에서 닫혔다. `0.5.0` 이후 작업은 4.2의
+comparable checkpoint가 닫힐 때까지 `Unreleased`에 남긴다.
 
 ### B5 publication closeout (2026-09-02 KST)
 
@@ -1473,8 +1480,8 @@ ici와 toy-projects가 함께 바뀌는 기능은 다음 순서를 따른다.
 - [ ] L1~L3: loglens streaming correctness, bounded storage, parser pipeline 완료 (L1/L2 완료;
   L3 parser/filter pipeline pending)
 - [ ] L4~L6: loglens triage/window analysis와 release 완료
-- [ ] D1~D3: diskmap identity-safe scan, cancellation, explorer UX 완료 (D1/D2 완료;
-  D3 explorer UX pending)
+- [ ] D1~D3: diskmap identity-safe scan, cancellation, explorer UX 완료 (D1/D2 및 D3 core
+  projection 완료; D3 GUI explorer UX pending)
 - [ ] D4~D7: cleanup/trash/snapshot과 release 완료
 - [x] B0~B5: buildscope hybrid compile explorer와 release 완료 (implementation·remote acceptance·trusted main Pages·`0.5.0` tag/release/public asset audit complete)
 - [ ] E0~E4: envlens pure-Python environment explorer와 release 완료

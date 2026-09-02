@@ -26,7 +26,7 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 
 | 이름 | 설명 | 상태 |
 |---|---|---|
-| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D2 cancellable/latest-generation scan complete (PR #28) · identity-safe scan · D3 next |
+| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D2 cancellable/latest-generation scan complete (PR #28) · D3 core projection merged (PR #45) · GUI explorer remains |
 | [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · L2 1 GiB benchmark merged in PR #26 · default capacity 8192 |
 | [buildscope](buildscope/) | compile DB explorer | 0.5.0 stable · published 2026-09-02 · immutable GitHub Release |
 
@@ -484,6 +484,26 @@ resource 0개로 각각 확인했다.
 | `loglens/pr/28/` | 334215 | `acda3bfb29bf5f3534256f614719e678ec89ed21b3420ee2b282ec55e2107830` |
 
 이것은 toy-projects `main`의 기능 병합 및 검증 기록이며, 별도 제품 버전 release를 의미하지 않는다.
+
+### diskmap D3 Qt-free view projection — core slice merged
+
+D3의 첫 core slice는 Qt에 의존하지 않는 view projection API로 병합됐다. [PR #45](https://github.com/jihoon22-lee/toy-projects/pull/45)의
+merge commit은 `0688e44fa99d1ec69aba0c9bf9995a4a857fea9e`이며, PR workflow
+[`33607634973`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33607634973)와 exact-main
+workflow [`33608884643`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33608884643)가
+모두 성공했다. 두 실행에서 required checks, Qt5/Qt6 native GUI matrix, ici 검증, benchmark,
+report publication과 Merge Gate를 확인했다.
+
+core는 logical/allocated/reclaimable metric, 불확실성·cycle·depth·mount·scanner-filter
+provenance, deterministic node key/issue, conjunctive search/type/size/age filter, visible
+children와 largest-files의 안정적인 정렬을 제공한다. hard-link이 겹칠 수 있는 physical 값은
+non-additive 범위를 보존하므로 형제 subtree를 합산하지 않는다.
+
+이는 D3 전체 완료를 뜻하지 않는다. Qt treemap/table, breadcrumb, search/filter/largest-files
+화면, unknown/incomplete 시각화, rescan·selection 유지 UX와 회귀 테스트는 다음 GUI slice로
+남아 있다. D4~D7 cleanup/trash/snapshot 작업도 아직 시작하지 않았으며, 이 core slice만으로
+제품 버전을 올리거나 release하지 않는다. 상세한 native/ici 수치는
+[workthrough 기록](workthrough/2026-09-02-diskmap-view-projection.md)에 보존한다.
 
 ### GUI 는 빌드되고 테스트된다
 

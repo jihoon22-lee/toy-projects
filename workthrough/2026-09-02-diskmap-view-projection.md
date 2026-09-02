@@ -36,8 +36,8 @@ contract.
   shadow builds do not depend on top-level configuration inheritance.
 - Corrected the README, master-plan, and `test_fs_node` overflow wording and
   assertion to document and verify `FsNode::logical_size_known`.
-- Recorded this as a partial D3 checkbox and an Unreleased changelog entry;
-  GUI treemap/table integration and cleanup remain unchecked.
+- Recorded this as the completed D3 core projection checkbox and an Unreleased changelog entry;
+  overall D3 remains open because GUI treemap/table integration and explorer UX remain unchecked.
 
 ### Audit corrections
 
@@ -58,7 +58,11 @@ contract.
 
 ### Native qmake builds
 
-- The branch was rebased onto toy-projects `main` at `f926233`.
+- The implementation was merged by PR #45 as exact toy-projects `main`
+  `0688e44fa99d1ec69aba0c9bf9995a4a857fea9e`.
+- PR workflow `33607634973` and exact-main workflow `33608884643` both completed
+  successfully, including the required checks, Qt5/Qt6 matrix, ici verification,
+  benchmarks, report publication, and Merge Gate.
 - Qt 6.10.2 and Qt 5.15.18 both completed a full DiskMap build; all 10
   `make check` binaries passed, including GUI test suites of 6/6 and 10/10.
 - Standalone `g++ -std=c++17 -Wall -Wextra -Werror -pedantic` compilation
@@ -79,5 +83,6 @@ The generated HTML report is 356,798 bytes with SHA-256
 `6c5c2346ac1b309c7fb827608b05c1cac7ffb8d83666c92843a8bbd9b59450a1`; its
 title, UTF-8 encoding, and zero-CDN invariant were verified.
 
-The project version and release were intentionally unchanged. The PR and its
-remote CI gate remain pending.
+The project version and release were intentionally unchanged. PR #45 and its
+exact-main CI evidence are complete; the overall D3 GUI integration remains
+unfinished and is the next implementation slice.
