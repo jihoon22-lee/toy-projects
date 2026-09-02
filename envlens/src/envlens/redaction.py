@@ -16,8 +16,20 @@ SENSITIVE_NAME_PARTS = (
     "CREDENTIAL",
     "PASSWORD",
     "PRIVATE_KEY",
+    "REGISTRY",
+    "REPOSITORY",
     "SECRET",
     "TOKEN",
+)
+SENSITIVE_NAME_SUFFIXES = ("_URL", "_URI")
+URL_USERINFO_RE = re.compile(
+    r"(?P<scheme>\b[a-z][a-z0-9+.-]*://)(?P<userinfo>[^/@\s]+)@",
+    flags=re.IGNORECASE,
+)
+URL_SECRET_QUERY_RE = re.compile(
+    r"(?P<prefix>[?&](?:access[_-]?key|access[_-]?token|api[_-]?key|auth|"
+    r"credential|password|private[_-]?key|secret|token)=)[^&#\s]*",
+    flags=re.IGNORECASE,
 )
 
 
@@ -25,7 +37,17 @@ def is_sensitive_name(name: str) -> bool:
     """Return whether an environment-variable name normally carries a secret."""
 
     normalized = name.upper().replace("-", "_")
-    return any(part in normalized for part in SENSITIVE_NAME_PARTS)
+    return any(part in normalized for part in SENSITIVE_NAME_PARTS) or normalized.endswith(
+        SENSITIVE_NAME_SUFFIXES
+    )
+
+
+def _redact_url_secrets(value: str) -> str:
+    redacted = URL_USERINFO_RE.sub(lambda match: match.group("scheme") + REDACTED + "@", value)
+    return URL_SECRET_QUERY_RE.sub(
+        lambda match: match.group("prefix") + REDACTED,
+        redacted,
+    )
 
 
 def _home_patterns(home: str) -> tuple[re.Pattern[str], ...]:
@@ -40,7 +62,7 @@ def _home_patterns(home: str) -> tuple[re.Pattern[str], ...]:
 def redact_text(value: str, homes: tuple[str, ...]) -> str:
     """Replace host/target home paths without changing unrelated text."""
 
-    redacted = value
+    redacted = _redact_url_secrets(value)
     for home in sorted(set(homes), key=len, reverse=True):
         for pattern in _home_patterns(home):
             redacted = pattern.sub(USER_HOME, redacted)

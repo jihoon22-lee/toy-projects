@@ -27,7 +27,8 @@ def write_snapshot(snapshot: Mapping[str, object], output: Path, *, pretty: bool
         descriptor, temporary_name = tempfile.mkstemp(
             dir=parent, prefix=f".{output.name}.", suffix=".tmp"
         )
-        os.fchmod(descriptor, 0o600)
+        if os.name == "posix":
+            os.fchmod(descriptor, 0o600)
         with os.fdopen(descriptor, "wb") as stream:
             descriptor = -1
             stream.write(payload)
@@ -35,11 +36,12 @@ def write_snapshot(snapshot: Mapping[str, object], output: Path, *, pretty: bool
             os.fsync(stream.fileno())
         os.replace(temporary_name, output)
         temporary_name = ""
-        directory_fd = os.open(parent, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        if os.name == "posix":
+            directory_fd = os.open(parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
     except OSError as error:
         raise SnapshotError("atomic-write-failed", str(error)) from error
     finally:

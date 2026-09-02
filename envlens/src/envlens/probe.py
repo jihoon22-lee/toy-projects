@@ -8,11 +8,14 @@ import signal
 import subprocess
 import sys
 import threading
+import time
+from contextlib import suppress
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, cast
 
 MAX_PROBE_BYTES = 8 * 1024 * 1024
 MAX_STDERR_BYTES = 64 * 1024
+READER_DRAIN_SECONDS = 2.0
 
 PROBE_SCRIPT = r"""
 import importlib.metadata
@@ -119,7 +122,7 @@ payload = {
         for distribution in importlib.metadata.distributions()
     ],
 }
-print(json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True))
+print(json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True))
 """
 
 
@@ -157,7 +160,10 @@ def resolve_interpreter(interpreter: str | Path | None) -> tuple[Path, str]:
 def _drain(stream: BinaryIO, limit: int, chunks: list[bytes]) -> None:
     retained = 0
     while True:
-        chunk = stream.read(64 * 1024)
+        try:
+            chunk = stream.read(64 * 1024)
+        except (OSError, ValueError):
+            break
         if not chunk:
             break
         if retained <= limit:
@@ -166,24 +172,60 @@ def _drain(stream: BinaryIO, limit: int, chunks: list[bytes]) -> None:
             retained += len(keep)
 
 
-def _terminate(process: subprocess.Popen[bytes]) -> None:
-    if process.poll() is not None:
-        return
-    try:
-        if os.name == "posix":
+def _terminate_tree(process: subprocess.Popen[bytes]) -> None:
+    """Best-effort termination of the isolated probe and its descendants."""
+
+    if os.name == "posix":
+        # The probe is a session leader. Its process group can outlive the
+        # leader when an import hook spawns a child that inherits our pipes.
+        with suppress(ProcessLookupError, PermissionError):
             os.killpg(process.pid, signal.SIGTERM)
-        else:
+    else:
+        # taskkill is part of Windows and is the only stdlib-adjacent way to
+        # terminate an entire descendant tree without native extensions.
+        with suppress(OSError, subprocess.TimeoutExpired):
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=2,
+            )
+    if process.poll() is None:
+        with suppress(OSError):
             process.terminate()
-        process.wait(timeout=2)
-    except (OSError, subprocess.TimeoutExpired):
-        try:
-            if os.name == "posix":
-                os.killpg(process.pid, signal.SIGKILL)
-            else:
-                process.kill()
-        except OSError:
-            pass
-        process.wait()
+        with suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=1)
+    if os.name == "posix":
+        # Kill a surviving descendant group even when the direct interpreter
+        # has already exited and therefore cannot be waited on again.
+        with suppress(ProcessLookupError, PermissionError):
+            os.killpg(process.pid, signal.SIGKILL)
+    if process.poll() is None:
+        with suppress(OSError):
+            process.kill()
+        with suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=1)
+
+
+def _finish_readers(
+    process: subprocess.Popen[bytes],
+    threads: list[threading.Thread],
+    streams: tuple[BinaryIO, BinaryIO],
+) -> None:
+    """Drain ordinary output while placing a hard bound on inherited pipes."""
+
+    deadline = time.monotonic() + READER_DRAIN_SECONDS
+    for thread in threads:
+        thread.join(max(0.0, deadline - time.monotonic()))
+    if any(thread.is_alive() for thread in threads):
+        _terminate_tree(process)
+        for stream in streams:
+            with suppress(OSError, ValueError):
+                stream.close()
+        for thread in threads:
+            thread.join(0.25)
 
 
 def _run_bounded(command: list[str], timeout_seconds: int) -> tuple[bytes, bytes, int]:
@@ -195,22 +237,27 @@ def _run_bounded(command: list[str], timeout_seconds: int) -> tuple[bytes, bytes
             stderr=subprocess.PIPE,
             shell=False,
             start_new_session=os.name == "posix",
+            creationflags=(
+                getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
+            ),
         )
     except OSError as error:
         raise ProbeError("probe-start-failed", str(error)) from error
     assert process.stdout is not None
     assert process.stderr is not None
+    stdout_stream = cast(BinaryIO, process.stdout)
+    stderr_stream = cast(BinaryIO, process.stderr)
     stdout_chunks: list[bytes] = []
     stderr_chunks: list[bytes] = []
     threads = [
         threading.Thread(
             target=_drain,
-            args=(process.stdout, MAX_PROBE_BYTES, stdout_chunks),
+            args=(stdout_stream, MAX_PROBE_BYTES, stdout_chunks),
             daemon=True,
         ),
         threading.Thread(
             target=_drain,
-            args=(process.stderr, MAX_STDERR_BYTES, stderr_chunks),
+            args=(stderr_stream, MAX_STDERR_BYTES, stderr_chunks),
             daemon=True,
         ),
     ]
@@ -219,14 +266,12 @@ def _run_bounded(command: list[str], timeout_seconds: int) -> tuple[bytes, bytes
     try:
         return_code = process.wait(timeout=timeout_seconds)
     except subprocess.TimeoutExpired as error:
-        _terminate(process)
-        for thread in threads:
-            thread.join()
+        _terminate_tree(process)
+        _finish_readers(process, threads, (stdout_stream, stderr_stream))
         raise ProbeError(
             "probe-timeout", f"interpreter exceeded {timeout_seconds} seconds"
         ) from error
-    for thread in threads:
-        thread.join()
+    _finish_readers(process, threads, (stdout_stream, stderr_stream))
     return b"".join(stdout_chunks), b"".join(stderr_chunks), return_code
 
 

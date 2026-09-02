@@ -78,6 +78,8 @@ def _scalar_mapping(value: Any, label: str) -> dict[str, object]:
 
 
 def _timestamp(value: datetime | None) -> str:
+    if value is not None and not isinstance(value, datetime):
+        raise SnapshotError("invalid-captured-at", "captured_at must be a datetime")
     current = datetime.now(timezone.utc) if value is None else value
     if current.tzinfo is None or current.utcoffset() is None:
         raise SnapshotError("invalid-captured-at", "captured_at must be timezone-aware")
@@ -98,11 +100,11 @@ def _normalize_error(value: Any, homes: tuple[str, ...]) -> dict[str, str]:
 
 def _normalize_distribution(value: Any, homes: tuple[str, ...]) -> dict[str, Any]:
     raw = _object(value, "distribution")
-    name = _string(raw.get("name"), "distribution.name")
-    version = _string(raw.get("version"), "distribution.version")
+    name = redact_text(_string(raw.get("name"), "distribution.name"), homes)
+    version = redact_text(_string(raw.get("version"), "distribution.version"), homes)
     metadata = _object(raw.get("metadata"), "distribution.metadata")
     requirements = sorted(
-        _string(item, "requires_dist item", allow_empty=False)
+        redact_text(_string(item, "requires_dist item", allow_empty=False), homes)
         for item in _array(
             metadata.get("requires_dist"),
             "distribution.metadata.requires_dist",
@@ -118,9 +120,9 @@ def _normalize_distribution(value: Any, homes: tuple[str, ...]) -> dict[str, Any
         entry = _object(item, "entry point")
         entry_points.append(
             {
-                "group": _string(entry.get("group"), "entry_point.group"),
-                "name": _string(entry.get("name"), "entry_point.name"),
-                "value": _string(entry.get("value"), "entry_point.value"),
+                "group": redact_text(_string(entry.get("group"), "entry_point.group"), homes),
+                "name": redact_text(_string(entry.get("name"), "entry_point.name"), homes),
+                "value": redact_text(_string(entry.get("value"), "entry_point.value"), homes),
             }
         )
     entry_points.sort(key=lambda item: (item["group"], item["name"], item["value"]))
@@ -152,8 +154,12 @@ def _normalize_distribution(value: Any, homes: tuple[str, ...]) -> dict[str, Any
         "normalized_name": normalize_project_name(name),
         "version": version,
         "metadata": {
-            "requires_python": _string(
-                metadata.get("requires_python"), "distribution.metadata.requires_python"
+            "requires_python": redact_text(
+                _string(
+                    metadata.get("requires_python"),
+                    "distribution.metadata.requires_python",
+                ),
+                homes,
             ),
             "requires_dist": requirements,
         },
@@ -179,6 +185,10 @@ def collect_snapshot(
         or timeout_seconds < 1
     ):
         raise SnapshotError("invalid-timeout", "timeout_seconds must be a positive integer")
+    if not isinstance(redact, bool):
+        raise SnapshotError("invalid-redact", "redact must be a boolean")
+    if captured_at is not None and not isinstance(captured_at, datetime):
+        raise SnapshotError("invalid-captured-at", "captured_at must be a datetime")
     try:
         raw, resolved, requested = probe.collect_probe(interpreter, timeout_seconds=timeout_seconds)
     except probe.ProbeError as error:
@@ -211,6 +221,13 @@ def collect_snapshot(
             item["name"],
             item["version"],
             item["location"],
+            json.dumps(
+                item,
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+                allow_nan=False,
+            ),
         )
     )
     error_count = sum(len(item["errors"]) for item in distributions)
@@ -276,13 +293,15 @@ def collect_snapshot(
 
 
 def dumps_snapshot(snapshot: Mapping[str, object], *, pretty: bool = False) -> str:
-    """Serialize a snapshot canonically with UTF-8-friendly JSON and one newline."""
+    """Serialize a snapshot canonically as UTF-8-safe JSON with one newline."""
 
     separators = None if pretty else (",", ":")
     return (
         json.dumps(
             snapshot,
-            ensure_ascii=False,
+            # Surrogate-escaped environment bytes are legal on POSIX. Escaping
+            # non-ASCII data keeps every returned string UTF-8 encodable.
+            ensure_ascii=True,
             indent=2 if pretty else None,
             separators=separators,
             sort_keys=True,
