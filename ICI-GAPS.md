@@ -24,10 +24,22 @@ Phase 5(Qt/CMake 어댑터) 설계의 입력이다. 각 항목은 **코드 위�
 | | 항목 | 성격 |
 |---|---|---|
 | **A-2** | 손으로 쓴 `Makefile` 만 있는 프로젝트는 여전히 거부 | **부분 수정** — CMake·qmake 는 해결 |
-| B-3 | `dead`/`cognitive`/`resource` 가 Python 전용 | 문서·표기 문제 |
+| B-3 | `dead`/`cognitive`/`resource` 가 Python 전용 | **부분 해결** — 언어 범위 표기는 명시됐지만 C++ dead/resource/maintainability coverage는 ici I4-3/I4-4에 남음 |
 
 A-2 를 "수정됨" 으로 옮기지 않는 이유는 남은 거부 경로가 문서에서 사라지지 않게 하기
 위해서다. 실측 대상이 될 `Makefile` 전용 프로젝트가 없으므로 어댑터도 만들지 않았다.
+
+B-3의 언어별 적용 범위 표기와 `NOT_APPLICABLE`/지원 matrix의 source of truth는 ici I1-2
+support/capability matrix에서 명시됐다. 그러나 C++에서 `dead`/`resource` 및 관련
+maintainability 결과를 제공하는 capability gap 자체는 남아 있다. 이 표의 B-3 행은
+발견 당시의 문서 요구와 현재의 부분 해결을 함께 보존하며, 실제 C++ coverage 구현은
+toy 기능이 아니라 ici I4-3/I4-4에서 소유한다.
+
+C-7의 예전 `ESTIMATED`/`SKIP` aggregate-status 제안은 현재 evidence taxonomy가 원래의
+inapplicable/실행불가 모호성을 줄인 뒤에도 남아 있는 historical policy 기록이다. 현재
+상태·증거·inapplicable scope의 의미는 ici I1-2와 각 엔진 계약이 소유하지만, 향후 gate
+정책 문제가 닫혔다고 간주하지 않는다. 새 문제가 acceptance에서 재현될 때 ici 마스터
+계획(I4/I9 등)에 후속 항목으로 등록한다.
 
 B-2의 BuildScope 외부 대조 보류 표기는 historical stale 상태였다. BuildScope B3의
 compiler-measured include explanation과 same-basename selection은 [PR #34](https://github.com/jihoon22-lee/toy-projects/pull/34)
@@ -182,7 +194,7 @@ exact `main` `b87afba`의 [CI run `33419851128`](https://github.com/jihoon22-lee
 - **영향**: `src/core/format.hpp` 와 `gui/format.hpp` 처럼 흔한 이름이 겹치면 해당 파일들의 순환은
   탐지되지 않는다. 조용히 탐지력이 떨어지고 리포트에는 아무 표시가 없다.
 
-### B-3. `dead` / `cognitive` / `resource` 는 Python 전용
+### B-3. `dead` / `cognitive` / `resource` 는 Python 전용 (partially addressed capability gap)
 - **위치**: `src/ici/engines/dead.py`, `cognitive.py`, `resource.py` — 모두 `get_all_python_sources()` 만 사용
 - **현상**: C++ 소스를 아예 보지 않는다.
 - **영향**: 순수 C++ 프로젝트에서 이 3개 엔진은 항상 빈 결과다. README 의 엔진 설명
@@ -278,7 +290,14 @@ exact `main` `b87afba`의 [CI run `33419851128`](https://github.com/jihoon22-lee
   저장소 정책 `ruff_required = true`. 이제 ruff 부재 시 `lint` = ERROR / evidence NOT_RUN /
   suite = ERROR / exit 1.
 
-### C-7. 도구 부재로 인한 강등(ESTIMATED)이 부적용(SKIP)보다 관대하다
+### C-7. 도구 부재로 인한 강등(ESTIMATED)이 부적용(SKIP)보다 관대하다 (historical policy note)
+
+> **현재 소유권:** 이 절은 초기 gap의 재현 조건과 제안을 보존한다. I1-2가
+> `NOT_APPLICABLE`, `NOT_RUN`, `ESTIMATED` 및 required/optional gate의 evidence taxonomy를
+> 명시했지만, 이것이 향후 gate 정책까지 닫았다는 뜻은 아니다. 현재 의미와 후속 정책은
+> ici의 I1-2/I4/I9 및 엔진 계약이 관리하며, toy-projects에는 이 절을 별도 구현 항목으로
+> 만들지 않는다.
+
 - **위치**: `src/ici/core/models.py:68-79` `aggregate_suite_status()`
 - **현상**: required 엔진이 `SKIP` 이거나 evidence 가 `NOT_RUN` 이면 스위트를 `ERROR` 로 승격한다.
   그러나 evidence `ESTIMATED` 는 승격 대상이 아니다.
@@ -356,6 +375,7 @@ exact `main` `b87afba`의 [CI run `33419851128`](https://github.com/jihoon22-lee
 - **적용**: 이 저장소는 매트릭스 레그가 아티팩트만 올리고 `report-pr` 잡이 전부 모아 한 번에 게시한다.
   그 잡은 **PR 소스를 체크아웃하지 않는다** — 실행물은 체크섬 검증된 릴리스 pyz, 게시물은
   verify 잡의 아티팩트뿐이라 PR 이 쓰기 토큰에 닿지 않는다.
-- **남은 것**: ici 저장소의 `publish-main` 은 여전히 루트 리포트만 게시한다. main 에서 verify 를
-  재실행해 인라인 게시하는 구조라, 뷰어까지 담으려면 C++ 게이트 재실행이나 아티팩트 소비로의
-  전환이 필요하고 후자는 `test_purity.py` 의 토큰 격리 검증을 손대게 된다.
+- **후속 상태:** 위 root-only 제한은 이 문서가 처음 작성될 당시의 historical residual이었다.
+  현재 ici `main`의 trusted publisher는 verify artifact를 소비하고
+  `--report-dir ici=. --report-dir viewer`를 사용해 root와 viewer report를 각각 게시한다.
+  현재 workflow와 evidence가 소유하는 상태이므로 이 문단을 active toy gap으로 해석하지 않는다.

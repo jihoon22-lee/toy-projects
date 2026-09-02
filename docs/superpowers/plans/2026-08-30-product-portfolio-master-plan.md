@@ -158,7 +158,8 @@
 `QT_QPA_PLATFORM=offscreen ici.pyz verify --report --html ... --github-summary`로 실행한 결과는
 `loglens: Suite PASS, TEM 4.08 (10 passed, 2 skipped)`와 `diskmap: Suite PASS, TEM 4.85
 (10 passed, 2 skipped)`였다. Qt major별 native build/test는 T0-3~T0-5에서 이 증거와 별도로
-완료해야 하며, 아직 T0 전체 완료로 표시하지 않는다.
+완료됐고, 그 remote/native evidence는 T0-5 절과 handover에 기록한다. 현재 T0 전체 checkpoint는
+§15에서 완료로 표시한다.
 
 ### T0-2. loglens parser contract부터 수정
 
@@ -1437,10 +1438,13 @@ ici와 toy-projects가 함께 바뀌는 기능은 다음 순서를 따른다.
 
 ## 15. 마스터 완료 체크포인트
 
-- [ ] T0: loglens/diskmap Qt shell과 Qt5/Qt6 matrix 완료
-- [ ] L1~L3: loglens streaming correctness, bounded storage, parser pipeline 완료
+- [x] T0: loglens/diskmap Qt shell과 Qt5/Qt6 matrix 완료 (T0-1~T0-5 구현, native/ici 실측,
+  PR/exact-main matrix와 Merge Gate evidence complete; 상세 기준은 handover의 현재 기준을 따른다)
+- [ ] L1~L3: loglens streaming correctness, bounded storage, parser pipeline 완료 (L1/L2 완료;
+  L3 parser/filter pipeline pending)
 - [ ] L4~L6: loglens triage/window analysis와 release 완료
-- [ ] D1~D3: diskmap identity-safe scan, cancellation, explorer UX 완료
+- [ ] D1~D3: diskmap identity-safe scan, cancellation, explorer UX 완료 (D1/D2 완료;
+  D3 explorer UX pending)
 - [ ] D4~D7: cleanup/trash/snapshot과 release 완료
 - [x] B0~B5: buildscope hybrid compile explorer와 release 완료 (implementation·remote acceptance·trusted main Pages·`0.5.0` tag/release/public asset audit complete)
 - [ ] E0~E4: envlens pure-Python environment explorer와 release 완료
