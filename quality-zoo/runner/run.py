@@ -14,6 +14,7 @@ from typing import Any
 
 from runner.common import (
     SCENARIO_ID_RE,
+    SHA256_RE,
     ContractError,
     contained_path,
     load_json_object,
@@ -87,11 +88,50 @@ def _load_registry(manifest_path: Path) -> tuple[Path, dict[str, Path]]:
     return root, registry
 
 
-def _load_scenario(scenario_id: str, scenario_root: Path) -> dict[str, Any]:
+def _load_scenario(
+    scenario_id: str,
+    scenario_root: Path,
+    ici_sha256: str | None = None,
+) -> dict[str, Any]:
     _reject_symlinks(scenario_root)
     payload = load_json_object(
         scenario_root / "scenario.json", label=f"scenario {scenario_id}"
     )
+    if payload.get("scenario_id") != scenario_id:
+        raise ContractError(
+            "scenario-schema", f"scenario identity mismatch for {scenario_id}"
+        )
+    if payload.get("schema") == 2:
+        if set(payload) != {"schema", "scenario_id", "expectations"}:
+            raise ContractError(
+                "scenario-schema", f"scenario selector fields differ for {scenario_id}"
+            )
+        raw_expectations = payload.get("expectations")
+        if not isinstance(raw_expectations, dict) or not raw_expectations:
+            raise ContractError(
+                "scenario-schema", f"scenario {scenario_id} needs expectations"
+            )
+        expectation_paths: dict[str, str] = {}
+        for digest, raw_path in raw_expectations.items():
+            if not isinstance(digest, str) or not SHA256_RE.fullmatch(digest):
+                raise ContractError(
+                    "scenario-schema",
+                    f"scenario {scenario_id} has an invalid ici SHA-256 selector",
+                )
+            expectation_paths[digest] = require_string(
+                raw_path, f"scenario {scenario_id} expectation path"
+            )
+        if ici_sha256 is None or ici_sha256 not in expectation_paths:
+            raise ContractError(
+                "unsupported-ici",
+                f"scenario {scenario_id} has no expectation for ici SHA-256 "
+                f"{ici_sha256!r}",
+            )
+        expectation_path = contained_path(scenario_root, expectation_paths[ici_sha256])
+        payload = load_json_object(
+            expectation_path,
+            label=f"scenario {scenario_id} expectation {ici_sha256}",
+        )
     if payload.get("schema") != 1 or payload.get("scenario_id") != scenario_id:
         raise ContractError(
             "scenario-schema", f"scenario identity mismatch for {scenario_id}"
@@ -174,7 +214,7 @@ def run_scenario(
     producer_version: str,
     ici_sha256: str,
 ) -> dict[str, Any]:
-    scenario = _load_scenario(scenario_id, scenario_root)
+    scenario = _load_scenario(scenario_id, scenario_root, ici_sha256)
     project_relative = require_string(scenario["project_root"], "project_root")
     scenario_output = output_root / scenario_id
     if scenario_output.exists():

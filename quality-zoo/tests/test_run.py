@@ -9,7 +9,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 from runner import run
-from runner.common import ContractError
+from runner.common import ContractError, sha256_file
 from tests.helpers import (
     PRODUCER_VERSION,
     engine,
@@ -226,6 +226,64 @@ class RunContractTests(unittest.TestCase):
         symlink_root.symlink_to(scenario_root, target_is_directory=True)
         self.assert_error(
             run._load_scenario, "unsafe-scenario", "python.example", symlink_root
+        )
+
+    def test_digest_bound_scenario_selects_one_exact_expectation(self) -> None:
+        manifest, scenario_root, fake, output, scenario = self.fixture()
+        digest, _ = sha256_file(fake)
+        expectations = scenario_root / "expectations"
+        expectations.mkdir()
+        (expectations / "expected.json").write_text(
+            json.dumps(scenario), encoding="utf-8"
+        )
+        selector = {
+            "schema": 2,
+            "scenario_id": "python.example",
+            "expectations": {digest: "expectations/expected.json"},
+        }
+        selector_path = scenario_root / "scenario.json"
+        selector_path.write_text(json.dumps(selector), encoding="utf-8")
+
+        self.assertEqual(
+            run._load_scenario("python.example", scenario_root, digest), scenario
+        )
+        aggregate = run.run_manifest(manifest, [], fake, output, timeout_seconds=5)
+        self.assertEqual(aggregate["contract_verdict"], "PASS")
+        self.assertEqual(aggregate["results"][0]["ici_sha256"], digest)
+
+        for label, update, code in (
+            (
+                "unknown",
+                {"expectations": {"f" * 64: "expectations/expected.json"}},
+                "unsupported-ici",
+            ),
+            ("empty", {"expectations": {}}, "scenario-schema"),
+            (
+                "bad-digest",
+                {"expectations": {"not-a-digest": "expectations/expected.json"}},
+                "scenario-schema",
+            ),
+            ("escape", {"expectations": {digest: "../expected.json"}}, "unsafe-path"),
+            ("extra", {"extra": True}, "scenario-schema"),
+        ):
+            with self.subTest(label=label):
+                altered = copy.deepcopy(selector)
+                altered.update(update)
+                selector_path.write_text(json.dumps(altered), encoding="utf-8")
+                self.assert_error(
+                    run._load_scenario,
+                    code,
+                    "python.example",
+                    scenario_root,
+                    digest,
+                )
+
+        selector_path.write_text(json.dumps(selector), encoding="utf-8")
+        self.assert_error(
+            run._load_scenario,
+            "unsupported-ici",
+            "python.example",
+            scenario_root,
         )
 
     def test_run_manifest_success_copies_reports_and_records_reproducible_summary(

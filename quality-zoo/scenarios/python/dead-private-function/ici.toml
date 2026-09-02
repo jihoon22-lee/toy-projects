@@ -22,7 +22,6 @@ enabled = false
 enabled = false
 [engines.dead]
 enabled = true
-cpp_unused = "off"
 [engines.dup]
 enabled = false
 [engines.exception]

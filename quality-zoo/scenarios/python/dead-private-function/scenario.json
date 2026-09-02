@@ -1,53 +1,8 @@
 {
-  "schema": 1,
+  "schema": 2,
   "scenario_id": "python.dead-private-function",
-  "class": "stable",
-  "project_root": ".",
-  "profile": "fast",
-  "command": [
-    "verify",
-    "--profile",
-    "fast",
-    "--no-cache"
-  ],
-  "required_capabilities": [],
-  "skip_policy": "forbid",
-  "suite_status": "WARN",
-  "producer_version": "0.10.2",
-  "engines": [
-    {
-      "name": "dead",
-      "status": "WARN",
-      "evidence": "ESTIMATED",
-      "required": true,
-      "extra": {
-        "analysis_provenance": "python-ast-heuristic"
-      }
-    }
-  ],
-  "findings": [
-    {
-      "engine": "dead",
-      "engine_status": "WARN",
-      "evidence": "ESTIMATED",
-      "rule_id": "ici.legacy.dead.target",
-      "tool_rule_id": "",
-      "category": "maintainability",
-      "severity": "medium",
-      "confidence": "medium",
-      "suppressed": false,
-      "location": {
-        "path": "src/bad.py",
-        "line": 1
-      }
-    }
-  ],
-  "forbidden_findings": [
-    {
-      "engine": "dead",
-      "location": {
-        "path": "src/clean.py"
-      }
-    }
-  ]
+  "expectations": {
+    "8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4": "expectations/released-v0.10.2.json",
+    "53fc75f0a073a74689babfe9ef8a4b2378995002d7d563bdc52da548fdbb9ee8": "expectations/candidate-7872a7b.json"
+  }
 }
