@@ -518,12 +518,13 @@ filesystem 회귀·coverage 보강·qmake relink를 완료했다. `FsNode::path`
 `std::filesystem::path`를 사용하고, scanner는 physical `FileIdentity` 방문 집합으로
 followed-directory cycle/back-edge를 노드로 보존하면서 확장을 차단한다. target identity가
 없는 followed directory는 `complete=false`와 오류로 남긴다. logical bytes는 directory entry마다
-계산하고, allocated bytes는 유효 identity별로 deduplicate하며, reclaimable bytes는 subtree가
-known hard-link reference를 모두 소유할 때만 확정한다. symlink target alias는 소유 reference로
+계산하고, allocated bytes는 non-directory entry data를 유효 identity별로 deduplicate한다.
+directory 자체의 filesystem metadata block은 이 aggregate 범위에서 제외하며, reclaimable
+bytes는 subtree가 known hard-link reference를 모두 소유할 때만 확정한다. symlink target alias는 소유 reference로
 세지 않고, incomplete/unknown은 `*_known=false`로 전파한다. 유한한 `max_depth`로 잘린
 directory도 `complete=false`와 `scan depth limit reached`를 남겨 physical aggregate를
-unknown으로 만든다. logical aggregate는 별도 known bit가 없으므로 `uint64_t` overflow에서
-최댓값으로 포화한다.
+unknown으로 만든다. logical aggregate도 `FsNode::logical_size_known`으로 정확성을 보존하며,
+`uint64_t` overflow에서는 최댓값으로 포화하고 해당 flag를 false로 설정한다.
 
 - [x] fixed-identity `FakeFsSource`가 공백이 있는 nested path, cycle, hard-link ownership,
   symlink alias, unknown allocation/link-count와 overflow를 검증한다.
@@ -652,6 +653,8 @@ local/native/ici, PR CI, sticky report, Pages와 merged-main benchmark까지 모
 
 **브랜치:** `feat/diskmap-explorer-ui`
 
+- [x] Qt-free core view projection slice: metric values, deterministic node keys/issues,
+  conjunctive search/type/size/age filters, and stable child/largest-file ordering
 - [ ] treemap과 sortable table/list를 함께 제공한다.
 - [ ] breadcrumb에 실제 path segment와 accessible action을 제공한다.
 - [ ] search, size/type/age filter와 largest files view를 추가한다.

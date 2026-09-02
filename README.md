@@ -385,15 +385,16 @@ followed directory는 안전하게 `complete=false`와 오류를 남긴다. list
 하며, target이 file이면 leaf로 남긴다. 이 옵션은 root 아래 descendants에만 적용된다. 깨진
 root symlink target은 root를 incomplete로 남기고 오류를 `ScanResult.errors`에도 포함한다.
 
-`FsNode::size`는 directory entry마다 logical bytes를 세고, `allocated_size`는 유효한 물리
-identity별로 한 번만 합산한다. `reclaimable_size`는 해당 subtree가 known hard-link reference를
+`FsNode::size`는 directory entry마다 logical bytes를 세고, `allocated_size`는 non-directory
+entry data를 유효한 물리 identity별로 한 번만 합산한다. directory 자체의 filesystem metadata
+block은 이 값의 범위가 아니다. `reclaimable_size`는 해당 subtree가 known hard-link reference를
 모두 소유할 때만 known으로 계산하며, symlink target alias는 소유 reference로 세지 않는다.
 불완전한 subtree·unknown allocation/link-count는 조용히 0으로 바꾸지 않고 aggregate의
 `*_known=false`로 전파한다. 유한한 `max_depth`로 잘린 directory도
 `complete=false`, `scan depth limit reached`로 남기므로 allocated/reclaimable total을
-확정값처럼 보이지 않게 한다. logical aggregate는 별도 known bit가 없으므로
-`uint64_t` overflow에서 최댓값으로 포화(saturate)한다. 따라서 cleanup 기능은 확정된 값과
-추정할 수 없는 값을 구분할 수 있다.
+확정값처럼 보이지 않게 한다. logical aggregate도 `FsNode::logical_size_known`으로 정확성을
+보존하며, `uint64_t` overflow에서는 최댓값으로 포화(saturate)하고 해당 flag를 false로
+설정한다. 따라서 cleanup 기능은 확정된 값과 추정할 수 없는 값을 구분할 수 있다.
 
 D1 Slice 2의 검증은 fixed-identity fake source와 실제 POSIX temporary filesystem을 함께
 사용한다. 경로 component의 공백, cycle/back-edge, hard-link 중복·reclaimability, symlink

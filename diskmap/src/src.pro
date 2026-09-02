@@ -26,4 +26,5 @@ SOURCES += \
     fs_source.cpp \
     scanner.cpp \
     treemap.cpp \
-    view.cpp
+    view.cpp \
+    view_facts.cpp

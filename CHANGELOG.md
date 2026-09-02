@@ -31,6 +31,13 @@
   and Zero-CDN. LogLens version/release remains pending, and this evidence does not claim broader
   L3 completion.
 
+### DiskMap explorer projection (first core slice)
+
+- Added a Qt-free view projection for logical, allocated, and reclaimable metrics,
+  deterministic node keys/issues, conjunctive search/type/size/age filters, and
+  stable visible-child/largest-regular-file ordering. The D3 GUI, treemap/table
+  integration, and cleanup workflow remain unfinished.
+
 ### Roadmap status reconciliation
 
 - Marked the master-plan T0 checkpoint complete after the merged Qt shell, native/ici, Qt5/Qt6,
