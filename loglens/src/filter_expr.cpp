@@ -154,6 +154,32 @@ private:
         return end;
     }
 
+    std::size_t utf8ScalarEnd(std::size_t begin) const {
+        if (begin >= text_.size()) {
+            return begin;
+        }
+        const unsigned char lead = static_cast<unsigned char>(text_[begin]);
+        std::size_t width = 1;
+        if (lead >= 0xc2U && lead <= 0xdfU) {
+            width = 2;
+        } else if (lead >= 0xe0U && lead <= 0xefU) {
+            width = 3;
+        } else if (lead >= 0xf0U && lead <= 0xf4U) {
+            width = 4;
+        }
+        if (begin + width > text_.size()) {
+            return begin + 1;
+        }
+        for (std::size_t offset = 1; offset < width; ++offset) {
+            const unsigned char continuation =
+                static_cast<unsigned char>(text_[begin + offset]);
+            if ((continuation & 0xc0U) != 0x80U) {
+                return begin + 1;
+            }
+        }
+        return begin + width;
+    }
+
     std::nullptr_t failAt(std::size_t begin, std::size_t end, const std::string& message) {
         if (error_.message.empty()) {
             const std::size_t clampedBegin = std::min(begin, text_.size());
@@ -277,7 +303,7 @@ private:
                 }
                 const char escaped = text_[pos_];
                 if (escaped != '"' && escaped != '\\') {
-                    failAt(escapeBegin, pos_ + 1,
+                    failAt(escapeBegin, utf8ScalarEnd(pos_),
                            "unsupported escape sequence (only \\\" and \\\\ are allowed)");
                     return false;
                 }
@@ -315,6 +341,7 @@ private:
     std::shared_ptr<const Node> parseBinary(int depth, const char* keyword, Op op,
                                             ParseOperand parseOperand) {
         if (depth > kMaxFilterDepth) {
+            skipSpaces();
             return failAt(pos_, tokenEnd(pos_), "expression nested too deeply");
         }
         auto first = parseOperand(depth);
@@ -347,11 +374,15 @@ private:
 
     std::shared_ptr<const Node> parseFactor(int depth) {
         if (depth > kMaxFilterDepth) {
+            skipSpaces();
             return failAt(pos_, tokenEnd(pos_), "expression nested too deeply");
         }
         std::size_t notBegin = pos_;
         std::size_t notEnd = pos_;
         if (consumeKeyword("NOT", &notBegin, &notEnd)) {
+            if (depth >= kMaxFilterDepth) {
+                return failAt(notBegin, notEnd, "expression nested too deeply");
+            }
             auto node = makeNode(notBegin, notEnd);
             if (!node) {
                 return nullptr;
@@ -364,7 +395,13 @@ private:
             node->children.push_back(inner);
             return node;
         }
+        skipSpaces();
+        const std::size_t parenthesisBegin = pos_;
         if (consumeChar('(')) {
+            if (depth >= kMaxFilterDepth) {
+                return failAt(parenthesisBegin, parenthesisBegin + 1,
+                              "expression nested too deeply");
+            }
             auto inner = parseExpr(depth + 1);
             if (!inner) {
                 return nullptr;

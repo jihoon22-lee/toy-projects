@@ -5,6 +5,7 @@
 #include "loglens/log_stats.hpp"
 #include "loglens/ring_buffer.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <iostream>
 #include <limits>
@@ -25,6 +26,23 @@ struct CliOptions {
     std::uint64_t bucket_ms = 60000;
     std::size_t top = 10;
     std::size_t capacity = loglens::kDefaultRecordCapacity;
+};
+
+struct ActiveFilters {
+    std::optional<loglens::Filter> level;
+    std::optional<loglens::Filter> expression;
+
+    bool matches(const loglens::LogRecord& record) const {
+        return (!level || level->matches(record))
+               && (!expression || expression->matches(record));
+    }
+};
+
+struct FilterArgument {
+    std::string parserText;
+    std::size_t userOffset = 0;
+    std::size_t userSize = 0;
+    const char* optionName = "--filter";
 };
 
 void printUsage(std::ostream& out) {
@@ -151,13 +169,36 @@ loglens::Format resolveFormat(const std::string& name) {
     return loglens::Format::Auto;
 }
 
-// Combines --level shorthand and --filter into one expression.
-std::string buildFilterText(const CliOptions& options) {
-    if (options.level.empty()) {
-        return options.filter;
+bool parseFilterArgument(const FilterArgument& argument,
+                         std::optional<loglens::Filter>& output) {
+    loglens::ParseError error;
+    output = loglens::Filter::parse(argument.parserText, error);
+    if (output) {
+        return true;
     }
-    const std::string levelClause = "level>=" + options.level;
-    return options.filter.empty() ? levelClause : levelClause + " AND (" + options.filter + ")";
+    const auto userPosition = [&argument](std::size_t parserPosition) {
+        if (parserPosition <= argument.userOffset) {
+            return std::size_t{0};
+        }
+        return std::min(parserPosition - argument.userOffset, argument.userSize);
+    };
+    std::cerr << "fatal: bad " << argument.optionName << " at bytes ["
+              << userPosition(error.position) << "," << userPosition(error.end)
+              << "): " << error.message << "\n";
+    return false;
+}
+
+bool initializeFilters(const CliOptions& options, ActiveFilters& filters) {
+    constexpr std::size_t kLevelPrefixBytes = 7;
+    if (!options.level.empty()
+        && !parseFilterArgument(
+            {"level>=" + options.level, kLevelPrefixBytes, options.level.size(), "--level"},
+            filters.level)) {
+        return false;
+    }
+    return options.filter.empty()
+           || parseFilterArgument(
+               {options.filter, 0, options.filter.size(), "--filter"}, filters.expression);
 }
 
 // Applies the parser's explicit append/extend contract to the same bounded FIFO
@@ -186,12 +227,12 @@ void printRetentionSummary(const loglens::RingBuffer& records, std::ostream& out
     out << ", capacity " << records.capacity() << "\n";
 }
 
-void printRecords(const loglens::RingBuffer& records,
-                  const std::optional<loglens::Filter>& filter, std::ostream& out) {
+void printRecords(const loglens::RingBuffer& records, const ActiveFilters& filters,
+                  std::ostream& out) {
     std::size_t shown = 0;
     for (std::size_t index = 0; index < records.size(); ++index) {
         const loglens::LogRecord& record = records.at(index);
-        if (filter && !filter->matches(record)) {
+        if (!filters.matches(record)) {
             continue;
         }
         out << record.line_number << "  " << loglens::levelName(record.level) << "  "
@@ -207,12 +248,12 @@ void printRecords(const loglens::RingBuffer& records,
 }
 
 void printStats(const loglens::RingBuffer& records,
-                const std::optional<loglens::Filter>& filter, const CliOptions& options,
+                const ActiveFilters& filters, const CliOptions& options,
                 std::ostream& out) {
     loglens::Stats stats;
     for (std::size_t index = 0; index < records.size(); ++index) {
         const loglens::LogRecord& record = records.at(index);
-        if (!filter || filter->matches(record)) {
+        if (filters.matches(record)) {
             stats.add(record);
         }
     }
@@ -233,16 +274,9 @@ void printStats(const loglens::RingBuffer& records,
 }
 
 int run(const CliOptions& options) {
-    std::optional<loglens::Filter> filter;
-    const std::string filterText = buildFilterText(options);
-    if (!filterText.empty()) {
-        loglens::ParseError parseError;
-        filter = loglens::Filter::parse(filterText, parseError);
-        if (!filter) {
-            std::cerr << "fatal: bad filter at bytes [" << parseError.position << ","
-                      << parseError.end << "): " << parseError.message << "\n";
-            return 1;
-        }
+    ActiveFilters filters;
+    if (!initializeFilters(options, filters)) {
+        return 1;
     }
 
     const loglens::Format format = resolveFormat(options.format);
@@ -275,9 +309,9 @@ int run(const CliOptions& options) {
     applyDeltas(assembler.flush(), records);
 
     if (options.stats) {
-        printStats(records, filter, options, std::cout);
+        printStats(records, filters, options, std::cout);
     } else {
-        printRecords(records, filter, std::cout);
+        printRecords(records, filters, std::cout);
     }
     return 0;
 }

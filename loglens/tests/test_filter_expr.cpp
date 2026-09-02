@@ -84,6 +84,12 @@ void testEscapedAndUtf8Literals() {
     const std::size_t slash = invalidEscape.find('\\');
     expectRejectedAt(invalidEscape, slash, slash + 2,
                      "unsupported escape sequence (only \\\" and \\\\ are allowed)");
+
+    const std::string unicodeEscape = u8"message~\"bad\\é\"";
+    const std::size_t unicodeSlash = unicodeEscape.find('\\');
+    expectRejectedAt(unicodeEscape, unicodeSlash,
+                     unicodeSlash + 1 + std::string(u8"é").size(),
+                     "unsupported escape sequence (only \\\" and \\\\ are allowed)");
 }
 
 void testCombinators() {
@@ -133,10 +139,23 @@ void testDepthCap() {
     CHECK(Filter::parse(exact, exactError).has_value());
 
     const std::string deep = "NOT " + exact;
-    ParseError error;
-    CHECK(!Filter::parse(deep, error).has_value());
-    CHECK(error.position <= error.end);
-    CHECK(error.end <= deep.size());
+    expectRejectedAt(deep, static_cast<std::size_t>(loglens::kMaxFilterDepth) * 4,
+                     static_cast<std::size_t>(loglens::kMaxFilterDepth) * 4 + 3,
+                     "expression nested too deeply");
+
+    const std::string exactParentheses(
+        static_cast<std::size_t>(loglens::kMaxFilterDepth), '(');
+    const std::string exactNested = exactParentheses + "message~x"
+                                    + std::string(
+                                        static_cast<std::size_t>(loglens::kMaxFilterDepth), ')');
+    ParseError exactNestedError;
+    CHECK(Filter::parse(exactNested, exactNestedError).has_value());
+
+    const std::string deepParentheses = "(" + exactNested + ")";
+    expectRejectedAt(deepParentheses,
+                     static_cast<std::size_t>(loglens::kMaxFilterDepth),
+                     static_cast<std::size_t>(loglens::kMaxFilterDepth) + 1,
+                     "expression nested too deeply");
 }
 
 void testDiagnosticRanges() {

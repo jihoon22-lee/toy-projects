@@ -42,6 +42,7 @@ private slots:
     void boundedStorageEvictsOldRowsAndReportsWindow();
     void drainsBacklogWithFollowDisabled();
     void searchAndFilterCanChangeDuringBackgroundLoading();
+    void invalidFilterPreservesViewAndReportsVisibleByteRange();
     void loadProgressReportsFinalFromStartState();
     void loadProgressReportsInitialOpenError();
 };
@@ -489,7 +490,7 @@ void TestMainWindow::boundedStorageEvictsOldRowsAndReportsWindow() {
     writeFile(path, line("INFO", 1) + line("WARN", 2) + line("ERROR", 3)
                         + line("FATAL", 4));
 
-    MainWindow window(nullptr, 2);
+    MainWindow window(nullptr, MainWindowOptions{2, loglens::kDefaultSourceChunkBytes});
     window.openPath(path, loglens::InitialLoadMode::FromStart, 2);
 
     QTRY_COMPARE(rowCount(window), 2);
@@ -524,7 +525,7 @@ void TestMainWindow::drainsBacklogWithFollowDisabled() {
     }
     writeFile(path, contents);
 
-    MainWindow window(nullptr, 64, 17);
+    MainWindow window(nullptr, MainWindowOptions{64, 17});
     QCheckBox* follow = followBox(window);
     QTimer* timer = pollTimer(window);
     QVERIFY(follow != nullptr);
@@ -557,7 +558,7 @@ void TestMainWindow::searchAndFilterCanChangeDuringBackgroundLoading() {
     contents += lineWithMessage("ERROR", 6, "NEEDLE final");
     writeFile(path, contents);
 
-    MainWindow window(nullptr, 64, 5);
+    MainWindow window(nullptr, MainWindowOptions{64, 5});
     auto* model = qobject_cast<LogModel*>(tableModel(window));
     QVERIFY(model != nullptr);
     loglens::ParseError parseError;
@@ -589,6 +590,32 @@ void TestMainWindow::searchAndFilterCanChangeDuringBackgroundLoading() {
     QTRY_COMPARE(status(window)->text(), statusText(3, 6, 6, 0, 1, 6, 64));
 }
 
+void TestMainWindow::invalidFilterPreservesViewAndReportsVisibleByteRange() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("app.log"));
+    writeFile(path, line("INFO", 1) + line("ERROR", 2));
+
+    MainWindow window;
+    window.openPath(path);
+    QTRY_COMPARE(rowCount(window), 2);
+
+    auto* filterEdit = window.findChild<QLineEdit*>(QStringLiteral("filterEdit"));
+    QVERIFY(filterEdit != nullptr);
+    filterEdit->setText(QStringLiteral("level>=ERROR"));
+    QVERIFY(QMetaObject::invokeMethod(&window, "applyFilter", Qt::DirectConnection));
+    QTRY_COMPARE(rowCount(window), 1);
+    QCOMPARE(cell(window, 0, LogModel::ColumnLevel), QStringLiteral("ERROR"));
+
+    filterEdit->setText(QStringLiteral("  level>=WARN extra"));
+    QVERIFY(QMetaObject::invokeMethod(&window, "applyFilter", Qt::DirectConnection));
+
+    QCOMPARE(rowCount(window), 1);
+    QCOMPARE(cell(window, 0, LogModel::ColumnLevel), QStringLiteral("ERROR"));
+    QVERIFY(status(window)->text().contains(QStringLiteral("bytes [14,19)")));
+    QVERIFY(status(window)->text().contains(QStringLiteral("unexpected trailing input")));
+}
+
 void TestMainWindow::loadProgressReportsFinalFromStartState() {
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
@@ -596,7 +623,7 @@ void TestMainWindow::loadProgressReportsFinalFromStartState() {
     const QByteArray contents = line("INFO", 1) + line("WARN", 2) + line("ERROR", 3);
     writeFile(path, contents);
 
-    MainWindow window(nullptr, 64, 5);
+    MainWindow window(nullptr, MainWindowOptions{64, 5});
     QSignalSpy progress(&window, &MainWindow::loadProgress);
     window.openPath(path, loglens::InitialLoadMode::FromStart, 64);
 
@@ -629,7 +656,7 @@ void TestMainWindow::loadProgressReportsInitialOpenError() {
     QVERIFY(dir.isValid());
     const QString missing = dir.filePath(QStringLiteral("missing.log"));
 
-    MainWindow window(nullptr, 64, 5);
+    MainWindow window(nullptr, MainWindowOptions{64, 5});
     QSignalSpy progress(&window, &MainWindow::loadProgress);
     window.openPath(missing, loglens::InitialLoadMode::FromStart, 64);
 

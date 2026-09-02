@@ -23,14 +23,17 @@ class QThread;
 class QTimer;
 class TimelineWidget;
 
+struct MainWindowOptions {
+    std::size_t recordCapacity = loglens::kDefaultRecordCapacity;
+    std::size_t sourceChunkBytes = loglens::kDefaultSourceChunkBytes;
+};
+
 // Loads a log file, shows it filtered, and draws a level histogram over time.
 class MainWindow : public QMainWindow {
     Q_OBJECT
 
 public:
-    explicit MainWindow(QWidget* parent = nullptr,
-                        std::size_t recordCapacity = loglens::kDefaultRecordCapacity,
-                        std::size_t sourceChunkBytes = loglens::kDefaultSourceChunkBytes);
+    explicit MainWindow(QWidget* parent = nullptr, MainWindowOptions options = {});
     ~MainWindow() override;
 
     // Opens a file without the dialog, so `loglens-gui <path>` works and the
@@ -51,7 +54,7 @@ private slots:
     void applyFilter();
     void pollSource();
     void setFollowing(bool following);
-    void handleLoadBatch(loglens::LoadBatch batch);
+    void handleLoadBatch(const loglens::LoadBatch& batch);
 
 private:
     enum class FollowState { Stopped, Following, WaitingRetry };
