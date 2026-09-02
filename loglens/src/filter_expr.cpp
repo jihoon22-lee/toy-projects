@@ -1,14 +1,15 @@
 #include "loglens/filter_expr.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <memory>
 
 namespace loglens {
 
 namespace {
 
-enum class Op { And, Or, Not, LevelAtLeast, LevelEquals, SourceEquals, SourceContains,
-                MessageContains, MessageExcludes };
+enum class Op : std::uint8_t { And, Or, Not, LevelAtLeast, LevelEquals, SourceEquals,
+                               SourceContains, MessageContains, MessageExcludes };
 
 bool isAsciiSpace(unsigned char byte) {
     return byte == ' ' || byte == '\t' || byte == '\n' || byte == '\r' || byte == '\f'
@@ -55,6 +56,28 @@ struct Filter::Node {
 namespace {
 
 using Node = Filter::Node;
+
+struct TokenRange {
+    std::size_t begin = 0;
+    std::size_t end = 0;
+};
+
+struct PredicateTokens {
+    std::string field;
+    std::string op;
+    std::string value;
+    TokenRange fieldRange;
+    TokenRange opRange;
+    TokenRange valueRange;
+};
+
+struct TextPredicateSpec {
+    const char* firstOperator;
+    const char* secondOperator;
+    const char* unsupportedMessage;
+    Op firstOp;
+    Op secondOp;
+};
 
 // Evaluates one leaf predicate. Split out so eval() stays shallow.
 bool evalPredicate(const Node& node, const LogRecord& record) {
@@ -357,81 +380,87 @@ private:
 
     std::shared_ptr<const Node> parsePredicate() {
         skipSpaces();
-        const std::size_t fieldBegin = pos_;
-        const std::string field = peekWord();
-        if (field.empty()) {
-            return failAt(fieldBegin, tokenEnd(fieldBegin), "expected a predicate");
+        PredicateTokens tokens;
+        tokens.fieldRange.begin = pos_;
+        tokens.field = peekWord();
+        if (tokens.field.empty()) {
+            return failAt(tokens.fieldRange.begin, tokenEnd(tokens.fieldRange.begin),
+                          "expected a predicate");
         }
-        pos_ += field.size();
-        const std::size_t fieldEnd = pos_;
+        pos_ += tokens.field.size();
+        tokens.fieldRange.end = pos_;
 
-        std::size_t opBegin = pos_;
-        std::size_t opEnd = pos_;
-        const std::string op = consumeOperator(opBegin, opEnd);
-        if (op.empty()) {
-            return failAt(opBegin, tokenEnd(opBegin),
-                          "expected an operator after '" + field + "'");
+        tokens.opRange.begin = pos_;
+        tokens.opRange.end = pos_;
+        tokens.op = consumeOperator(tokens.opRange.begin, tokens.opRange.end);
+        if (tokens.op.empty()) {
+            return failAt(tokens.opRange.begin, tokenEnd(tokens.opRange.begin),
+                          "expected an operator after '" + tokens.field + "'");
         }
 
-        std::string value;
-        std::size_t valueBegin = pos_;
-        std::size_t valueEnd = pos_;
-        if (!consumeValue(value, valueBegin, valueEnd)) {
+        tokens.valueRange.begin = pos_;
+        tokens.valueRange.end = pos_;
+        if (!consumeValue(tokens.value, tokens.valueRange.begin, tokens.valueRange.end)) {
             if (!error_.message.empty()) {
                 return nullptr;
             }
-            return failAt(valueBegin, tokenEnd(valueBegin),
-                          "expected a value after '" + op + "'");
+            return failAt(tokens.valueRange.begin, tokenEnd(tokens.valueRange.begin),
+                          "expected a value after '" + tokens.op + "'");
         }
-        return makePredicate(field, op, value, fieldBegin, fieldEnd, opBegin, opEnd,
-                             valueBegin, valueEnd);
+        return makePredicate(tokens);
     }
 
-    std::shared_ptr<const Node> makePredicate(const std::string& field, const std::string& op,
-                                              const std::string& value, std::size_t fieldBegin,
-                                              std::size_t fieldEnd, std::size_t opBegin,
-                                              std::size_t opEnd, std::size_t valueBegin,
-                                              std::size_t valueEnd) {
-        if (field == "level") {
-            const Level level = parseLevel(value);
-            if (level == Level::Unknown) {
-                return failAt(valueBegin, valueEnd, "unknown level '" + value + "'");
-            }
-            if (op != ">=" && op != "==") {
-                return failAt(opBegin, opEnd, "level supports '>=' or '=='");
-            }
-            auto node = makeNode(fieldBegin, valueEnd);
-            if (!node) {
-                return nullptr;
-            }
-            node->op = op == ">=" ? Op::LevelAtLeast : Op::LevelEquals;
-            node->level = level;
-            return node;
+    std::shared_ptr<const Node> makePredicate(const PredicateTokens& tokens) {
+        if (tokens.field == "level") {
+            return makeLevelPredicate(tokens);
         }
-        if (field == "source") {
-            if (op != "==" && op != "~") {
-                return failAt(opBegin, opEnd, "source supports '==' or '~'");
-            }
-            auto node = makeNode(fieldBegin, valueEnd);
-            if (!node) {
-                return nullptr;
-            }
-            node->op = op == "==" ? Op::SourceEquals : Op::SourceContains;
-            node->text = value;
-            return node;
+        if (tokens.field == "source") {
+            static const TextPredicateSpec sourceSpec{"==", "~",
+                                                      "source supports '==' or '~'",
+                                                      Op::SourceEquals, Op::SourceContains};
+            return makeTextPredicate(tokens, sourceSpec);
         }
-        if (field != "message") {
-            return failAt(fieldBegin, fieldEnd, "unknown field '" + field + "'");
+        if (tokens.field != "message") {
+            return failAt(tokens.fieldRange.begin, tokens.fieldRange.end,
+                          "unknown field '" + tokens.field + "'");
         }
-        if (op != "~" && op != "!~") {
-            return failAt(opBegin, opEnd, "message supports '~' or '!~'");
+        static const TextPredicateSpec messageSpec{"!~", "~",
+                                                   "message supports '~' or '!~'",
+                                                   Op::MessageExcludes, Op::MessageContains};
+        return makeTextPredicate(tokens, messageSpec);
+    }
+
+    std::shared_ptr<const Node> makeLevelPredicate(const PredicateTokens& tokens) {
+        const Level level = parseLevel(tokens.value);
+        if (level == Level::Unknown) {
+            return failAt(tokens.valueRange.begin, tokens.valueRange.end,
+                          "unknown level '" + tokens.value + "'");
         }
-        auto node = makeNode(fieldBegin, valueEnd);
+        if (tokens.op != ">=" && tokens.op != "==") {
+            return failAt(tokens.opRange.begin, tokens.opRange.end,
+                          "level supports '>=' or '=='");
+        }
+        auto node = makeNode(tokens.fieldRange.begin, tokens.valueRange.end);
         if (!node) {
             return nullptr;
         }
-        node->op = op == "!~" ? Op::MessageExcludes : Op::MessageContains;
-        node->text = value;
+        node->op = tokens.op == ">=" ? Op::LevelAtLeast : Op::LevelEquals;
+        node->level = level;
+        return node;
+    }
+
+    std::shared_ptr<const Node> makeTextPredicate(const PredicateTokens& tokens,
+                                                  const TextPredicateSpec& spec) {
+        if (tokens.op != spec.firstOperator && tokens.op != spec.secondOperator) {
+            return failAt(tokens.opRange.begin, tokens.opRange.end,
+                          spec.unsupportedMessage);
+        }
+        auto node = makeNode(tokens.fieldRange.begin, tokens.valueRange.end);
+        if (!node) {
+            return nullptr;
+        }
+        node->op = tokens.op == spec.firstOperator ? spec.firstOp : spec.secondOp;
+        node->text = tokens.value;
         return node;
     }
 };
