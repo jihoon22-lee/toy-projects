@@ -25,13 +25,36 @@
   and `minor` for a cohesive user-usable checkpoint backed by native tests, released-ici verification,
   PR and exact-main CI/Pages, docs/limitations, and reproducible release assets.
 - Clarified that candidate, pre-release, and unreleased states are not stable releases. BuildScope
-  `0.5.0` remains justified as the bundled B3/B4/B5 first usable release boundary; later work stays
-  under `Unreleased` until a comparable checkpoint is complete.
+  `0.5.0` is the bundled B3/B4/B5 first usable stable release boundary; later work stays under
+  `Unreleased` until a comparable checkpoint is complete.
 - Added the PR naming rule that product/technical outcomes are primary and plan codes such as `T0`/`B1`/
   `D2` are secondary body or label metadata only. Historical evidence is preserved; an operational
   ici pin change remains independent from the toy product version.
 
-### BuildScope 0.5.0 — release candidate
+### Publication closeout for BuildScope 0.5.0
+
+- Stable publication completed on 2026-09-02 KST (`published_at` `2026-09-01T22:36:42Z`) as the
+  [BuildScope `0.5.0` GitHub Release](https://github.com/jihoon22-lee/toy-projects/releases/tag/buildscope-v0.5.0),
+  release ID `380863869`, with `immutable=true`, `draft=false`, and `prerelease=false`. The
+  successful tag workflow [run `33566464110`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33566464110)
+  ran at exact `main` `fda8b5fb068b68c04c8c40e297812fbe79cee3da`.
+- Provenance is the annotated tag object `dcaaf83a5842f6d7fc6c47e3b212e26b9528c342`, peeled to
+  that exact `main` SHA. The successful `Merge Gate` is [job `100050176790`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33565542193/job/100050176790)
+  in [run `33565542193`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33565542193).
+- The final release body SHA-256 is
+  `9e58639c280655bf50b510ef676bb3e5f458cf2021c3c6c6b24c3b625945dd3b`; exactly `9` fresh-downloaded
+  assets were independently audited. The public ici `v0.10.2` pin is
+  `8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4`.
+- The final deep report is `WARN` with `11 PASS / 3 WARN / 0 FAIL / 0 ERROR / 0 SKIP`, tests
+  `97/97`, line/function/branch coverage `93.5% / 99.0% / 77.2%`, compile DB `12/12` units across
+  `27` configurations, exact Qt6 codegen (`MOC 1`, `UIC 1`, `RCC 1`), and exact `12`-source/config
+  coverage for both `clang-tidy` and `clazy`; TEM was `4.95`.
+- The final HTML is `1,344,843` bytes, SHA-256
+  `0a0b50f8e056ad561427fd2141dbd8649dd43fdf111b2d6e187c220b0a610ee9`, with
+  exact title `ici Verification Report — buildscope` and Zero-CDN; see the canonical
+  [BuildScope README](buildscope/README.md) for the implementation and contract detail.
+
+## [0.5.0] - 2026-09-02
 
 - Added a shell-free semantic diff for two raw `compile_commands.json` arrays. Snapshot v1/v2/v3
   compatibility remains on the producer boundary; the diff output is the separate strict
@@ -207,7 +230,7 @@
   PR/main verification boundary. Its publication boundary requires the exact-main fixed annotated-
   tag check, fail-closed slot policy, prepublish audit, and final nine-asset public-byte audit.
 
-### BuildScope 0.4.0 — historical B3 implementation and remote evidence
+## BuildScope 0.4.0 — historical B3 implementation and remote evidence
 
 - Added optional include explanation modes: `--include-analysis estimate` performs bounded
   source-scan estimation, while `--include-analysis compiler` records compiler-measured edges

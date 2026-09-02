@@ -26,13 +26,13 @@
 
 ## 2. 현재 포트폴리오와 검증 공백
 
-2026-08-31 기준:
+2026-09-02 기준:
 
 | 프로젝트 | 현재 형태 | 실측 | 제품 상태 |
 |---|---|---|---|
 | loglens | C++17, Qt, CMake | L2 bounded/background slice · PR #25 CI green · local Qt5/Qt6 12 CTest targets · 1 GiB benchmark PR #26 merged · main Qt5/Qt6 sweep green | Tail N/From start와 worker UX, benchmark/default 8192 완료 |
 | diskmap | C++17, Qt, qmake | D1 Slice 2 merged · D2 fully complete (PR #28 remote evidence + main benchmark green) | D3 explorer UX next; treemap/cleanup UX는 D3~D6에서 확장 |
-| buildscope | Python + C++17/Qt, CMake | B5 implementation, remote acceptance, exact-main CI와 trusted main Pages complete · `0.5.0` tag/release/public asset audit pending | B3~B5 첫 usable release boundary, artifact audit 후 release |
+| buildscope | Python + C++17/Qt, CMake | B0~B5 implementation, remote acceptance, exact-main CI, trusted main Pages와 `0.5.0` tag/release/public asset audit complete | B3~B5 첫 usable release boundary published and audited |
 | ici/viewer | Qt-free core + Qt6 GUI | 3 tests, TEM 4.94 | core 중심, 셸과 report workflow 부족 |
 
 현재 공백:
@@ -1029,14 +1029,14 @@ implementation과 PR/remote/hosted evidence는 complete다. PR #36는 `main`에
 같은 head에서 성공했다. 이 B4 merge 시점에는 `0.5.0` product release artifact와 B5 hybrid
 release integration이 pending/not started였고, 이후 local B5 candidate는 다음 절에 기록한다.
 
-### B5. hybrid integration과 release (remote acceptance complete; 0.5.0 release audit pending)
+### B5. hybrid integration과 release (historical pre-publication snapshot; publication complete)
 
 **선행 조건:** B3/B4 implementation과 ici I3 compile-context 기능이 public release로 제공되어야
 한다. B4 implementation과 PR/remote/hosted/merged-main evidence는 complete다. 2026-09-02 현재
 standalone packaging, native install layout, sample/tutorial, public ici pin과 release workflow
-contract가 `main`에 반영됐고 B5 remote acceptance도 완료됐다. `0.5.0`의 버전 경계는 그대로
-유지하며, stable release를 닫기 위해 annotated tag, GitHub Release, 9개 public asset 게시와
-독립 checksum/provenance audit을 남겨 둔다. 로컬에서 unavailable이었던 도구 상태는 historical
+contract가 `main`에 반영됐고 B5 remote acceptance도 완료됐다. 이 pre-publication snapshot에서
+`0.5.0`의 버전 경계는 그대로 유지했으며, stable release를 닫기 위해 annotated tag, GitHub
+Release, 9개 public asset 게시와 독립 checksum/provenance audit을 남겨 두었다. 로컬에서 unavailable이었던 도구 상태는 historical
 local evidence로 보존하고, remote preflight matrix와 B5 report contract의 결과를 현재 acceptance
 근거로 삼는다.
 
@@ -1053,8 +1053,8 @@ local evidence로 보존하고, remote preflight matrix와 B5 report contract의
   matrix, generated MOC/UIC/RCC/offscreen smoke, wheel/pyz/native handoff를 검증
 - [x] PR CI, sticky HTML comment, PR Pages와 exact-main/green Merge Gate provenance를 모두 확인
 - [x] trusted main Pages를 `main` 산출물과 byte-identical한 HTTP 200, exact title, Zero-CDN으로 확인
-- [ ] annotated `buildscope-v0.5.0` tag, GitHub Release, 9개 public release asset 게시와 독립
-  checksum/provenance audit
+- [x] annotated `buildscope-v0.5.0` tag, GitHub Release, 9개 public release asset 게시와 독립
+  checksum/provenance audit (release ID `380863869`, workflow run `33566464110`)
 
 **B5 local ici evidence (2026-09-01, historical):** public ici `v0.10.0` asset의 literal SHA-256 pin
 `6d5f8c008b3b5393a61b2c1a418124eb66393c9eaab0abbb7d1c7922162bed9b`과
@@ -1067,7 +1067,7 @@ exact title `ici Verification Report — buildscope`, external refs `0`였다. l
 unavailable은 당시 환경의 historical limitation이며, remote preflight matrix와 B5 report contract에서
 release-runner 검증 경계를 확인했다.
 
-**B5 release contract (CI preflight validated; tag workflow pending):** `.github/workflows/buildscope-release.yml`은
+**B5 release contract (historical pre-publication; CI preflight validated):** `.github/workflows/buildscope-release.yml`은
 고정 annotated `buildscope-vX.Y.Z` tag의 peeled commit이 exact `origin/main`과 green `Merge Gate`를
 가리키는지 확인하고, Python `3.10/3.14` 및 Qt `5/6` Release/CTest matrix, generated MOC/UIC/RCC
 path checks, Qt6 Linux x86_64 bundle, wheel/pyz → native CLI handoff, ici v0.10.2
@@ -1082,7 +1082,7 @@ equality는 사용하지 않고 annotated tag peel을 authoritative proof로 삼
 Pages를 포함한 acceptance는 완료됐지만 tag, GitHub Release와 9개 public asset의 게시·독립
 checksum/provenance audit은 아직 pending이다.
 
-**B5 publication hardening (2026-09-02):** tag workflow는 authenticated paginated slot을
+**B5 publication hardening (2026-09-02 pre-publication snapshot; historical):** tag workflow는 authenticated paginated slot을
 fail-closed로 검사해 빈 슬롯에서만 fixed numeric release ID의 private draft를 만들고, 기존 final은
 mutation 없는 audit-only 경로로 처리한다. 기존 draft·중복·모호한 slot은 중단한다. 새 draft body는
 repository/run/peeled target SHA를 담은 terminal current-run owner marker로 끝나며, 모호한 생성
@@ -1133,6 +1133,24 @@ release boundary라는 제품 판단이며, candidate 기록이나 ici pin/CI �
 완료됐지만 annotated tag와 public release asset audit이 끝나기 전까지 B0~B5 release 체크포인트는
 열린 상태로 유지한다. `0.5.0` 이후 작업은 4.2의 comparable checkpoint가 닫힐 때까지 `Unreleased`에
 남긴다.
+
+### B5 publication closeout (2026-09-02 KST)
+
+The public [BuildScope 0.5.0 release](https://github.com/jihoon22-lee/toy-projects/releases/tag/buildscope-v0.5.0)
+is release ID `380863869`, published at `2026-09-01T22:36:42Z`, with `draft=false`,
+`prerelease=false`, and `immutable=true`. Workflow [run `33566464110`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33566464110)
+completed successfully on `push` at exact main SHA
+`fda8b5fb068b68c04c8c40e297812fbe79cee3da`. Annotated tag object
+`dcaaf83a5842f6d7fc6c47e3b212e26b9528c342` peels to that commit. The final body SHA-256 is
+`9e58639c280655bf50b510ef676bb3e5f458cf2021c3c6c6b24c3b625945dd3b`; Merge Gate is job
+`100050176790` in run `33565542193`. Immutable releases are enabled and active ruleset
+`22049711` (`buildscope-release-tags`) blocks update/deletion for `refs/tags/buildscope-v*`
+with no bypass actor. Exactly nine assets were fresh-downloaded and audited; the canonical
+[BuildScope README](../../../buildscope/README.md#buildscope-050-publication-evidence-2026-09-02-kst)
+contains their names, bytes, and SHA-256 digests plus the final ici v0.10.2 deep-report evidence.
+
+The B0~B5 release checkpoint is now complete. The product version remains `0.5.0`; subsequent
+changes stay in `Unreleased` until a new cohesive checkpoint satisfies the same release policy.
 
 ---
 
@@ -1424,7 +1442,7 @@ ici와 toy-projects가 함께 바뀌는 기능은 다음 순서를 따른다.
 - [ ] L4~L6: loglens triage/window analysis와 release 완료
 - [ ] D1~D3: diskmap identity-safe scan, cancellation, explorer UX 완료
 - [ ] D4~D7: cleanup/trash/snapshot과 release 완료
-- [ ] B0~B5: buildscope hybrid compile explorer와 release 완료 (implementation·remote acceptance·trusted main Pages는 완료, `0.5.0` tag/release/public asset audit pending)
+- [x] B0~B5: buildscope hybrid compile explorer와 release 완료 (implementation·remote acceptance·trusted main Pages·`0.5.0` tag/release/public asset audit complete)
 - [ ] E0~E4: envlens pure-Python environment explorer와 release 완료
 - [ ] A0~A4: abilens Makefile/ELF explorer와 release 완료
 - [ ] Q0~Q5: Python/C++/Qt/build/hybrid stable expected-finding corpus 완료
@@ -1446,8 +1464,7 @@ ici와 toy-projects가 함께 바뀌는 기능은 다음 순서를 따른다.
 8. benchmark 결과가 안정되면 ici Make/ABI I7와 함께 A0/A1 abilens를 시작한다.
 
 이 순서는 계획 수립 당시의 역사적 실행 순서다. 현재는 B0~B5 implementation, PR/remote/hosted/
-merged-main evidence, remote preflight matrix와 hybrid handoff, trusted main Pages까지 완료됐다.
-BuildScope의 다음 경계는 버전을 올리지 않는 `0.5.0` tag/GitHub Release와 9개 public asset의
-독립 audit이며, 이 audit이 끝나기 전까지 B0~B5 release 체크포인트는 닫지 않는다. ici I3
-cross-repository comparison은 완료됐다. 이 순서를 다시 바꾸려면 제품 dependency나 ici release
-boundary라는 구체적 근거를 문서에 남긴다.
+merged-main evidence, remote preflight matrix와 hybrid handoff, trusted main Pages, `0.5.0`
+tag/GitHub Release와 9개 public asset의 독립 audit까지 완료됐다. 따라서 B0~B5 release
+체크포인트는 닫혔고, ici I3 cross-repository comparison은 완료됐다. 이 순서를 다시 바꾸려면
+제품 dependency나 ici release boundary라는 구체적 근거를 문서에 남긴다.
