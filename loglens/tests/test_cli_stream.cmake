@@ -107,6 +107,22 @@ foreach(invalid_capacity IN ITEMS 0 1000001 not-a-number)
     endif()
 endforeach()
 
+execute_process(
+    COMMAND "${LOGLENS}" "${INPUT}" --filter "level>=WARN extra"
+    RESULT_VARIABLE invalid_filter_result
+    OUTPUT_QUIET
+    ERROR_VARIABLE invalid_filter_error
+)
+if(invalid_filter_result EQUAL 0)
+    message(FATAL_ERROR "invalid filter was accepted")
+endif()
+string(FIND "${invalid_filter_error}"
+       "fatal: bad filter at bytes [12,17): unexpected trailing input"
+       invalid_filter_position)
+if(invalid_filter_position EQUAL -1)
+    message(FATAL_ERROR "missing CLI filter diagnostic range:\n${invalid_filter_error}")
+endif()
+
 string(REPEAT "x" 65540 oversized_record)
 set(oversized_input "${CMAKE_CURRENT_BINARY_DIR}/loglens-oversized-record.log")
 file(WRITE "${oversized_input}" "${oversized_record}\n")

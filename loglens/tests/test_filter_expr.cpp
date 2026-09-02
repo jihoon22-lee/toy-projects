@@ -33,6 +33,17 @@ void expectRejected(const std::string& text) {
     ParseError error;
     CHECK(!Filter::parse(text, error).has_value());
     CHECK(!error.message.empty());
+    CHECK(error.position <= error.end);
+    CHECK(error.end <= text.size());
+}
+
+void expectRejectedAt(const std::string& text, std::size_t begin, std::size_t end,
+                     const std::string& message) {
+    ParseError error;
+    CHECK(!Filter::parse(text, error).has_value());
+    CHECK_EQ(error.position, begin);
+    CHECK_EQ(error.end, end);
+    CHECK_EQ(error.message, message);
 }
 
 void testLevelPredicates() {
@@ -54,6 +65,25 @@ void testSourceAndMessage() {
     CHECK(matches("message!~missing", sample()));
     CHECK(!matches("message!~query", sample()));
     CHECK(matches("message~\"slow query\"", sample()));
+
+    const LogRecord metacharacters =
+        makeRecord(Level::Info, "api", "literal a.*? [x] (y) $^");
+    CHECK(matches("message~\"a.*? [x]\"", metacharacters));
+    CHECK(!matches("message~\"a.+? [x]\"", metacharacters));
+}
+
+void testEscapedAndUtf8Literals() {
+    const LogRecord escaped = makeRecord(Level::Info, "api", "quote: \" slash: \\");
+    CHECK(matches("message~\"quote: \\\" slash: \\\\\"", escaped));
+
+    const std::string utf8 = u8"장애 🚨 구간";
+    const LogRecord unicode = makeRecord(Level::Info, "api", utf8);
+    CHECK(matches("message~\"" + utf8 + "\"", unicode));
+
+    const std::string invalidEscape = u8"message~\"한\\q\"";
+    const std::size_t slash = invalidEscape.find('\\');
+    expectRejectedAt(invalidEscape, slash, slash + 2,
+                     "unsupported escape sequence (only \\\" and \\\\ are allowed)");
 }
 
 void testCombinators() {
@@ -94,13 +124,75 @@ void testRejections() {
 }
 
 void testDepthCap() {
-    std::string deep;
-    for (int i = 0; i < loglens::kMaxFilterDepth + 5; ++i) {
-        deep += "NOT ";
+    std::string exact;
+    for (int i = 0; i < loglens::kMaxFilterDepth; ++i) {
+        exact += "NOT ";
     }
-    deep += "message~x";
+    exact += "message~x";
+    ParseError exactError;
+    CHECK(Filter::parse(exact, exactError).has_value());
+
+    const std::string deep = "NOT " + exact;
     ParseError error;
     CHECK(!Filter::parse(deep, error).has_value());
+    CHECK(error.position <= error.end);
+    CHECK(error.end <= deep.size());
+}
+
+void testDiagnosticRanges() {
+    expectRejectedAt("", 0, 0, "empty filter expression");
+    expectRejectedAt("   ", 3, 3, "empty filter expression");
+    expectRejectedAt("unknown~x", 0, 7, "unknown field 'unknown'");
+    expectRejectedAt("level>=WARN extra", 12, 17, "unexpected trailing input");
+    expectRejectedAt("source>=api", 6, 8, "source supports '==' or '~'");
+
+    const std::string unicodeTrailing = u8"message~x 余計";
+    const std::size_t trailing = unicodeTrailing.find(u8"余");
+    expectRejectedAt(unicodeTrailing, trailing, unicodeTrailing.size(),
+                     "unexpected trailing input");
+}
+
+void testQueryAndLiteralBounds() {
+    const std::string atLimit = "message~x"
+                                + std::string(loglens::kMaxFilterQueryBytes - 9, ' ');
+    ParseError atLimitError;
+    CHECK(Filter::parse(atLimit, atLimitError).has_value());
+
+    const std::string oversized(loglens::kMaxFilterQueryBytes + 1, 'x');
+    expectRejectedAt(oversized, loglens::kMaxFilterQueryBytes, oversized.size(),
+                     "filter query exceeds 4096-byte limit");
+
+    const std::string exactLiteral(loglens::kMaxFilterLiteralBytes, 'x');
+    CHECK(matches("message~\"" + exactLiteral + "\"",
+                  makeRecord(Level::Info, "api", exactLiteral)));
+    const std::string oversizedLiteral = exactLiteral + "x";
+    const std::string oversizedLiteralQuery = "message~\"" + oversizedLiteral + "\"";
+    expectRejectedAt(oversizedLiteralQuery, 8, 8 + loglens::kMaxFilterLiteralBytes + 2,
+                     "filter literal exceeds 1024-byte limit");
+}
+
+std::string repeatedOrPredicates(std::size_t count) {
+    std::string expression;
+    for (std::size_t index = 0; index < count; ++index) {
+        if (index != 0) {
+            expression += " OR ";
+        }
+        expression += "message~x";
+    }
+    return expression;
+}
+
+void testAstNodeBound() {
+    // One OR node plus one leaf per predicate reaches the cap exactly.
+    ParseError acceptedError;
+    CHECK(Filter::parse(repeatedOrPredicates(loglens::kMaxFilterNodes - 1), acceptedError).has_value());
+
+    const std::string oversized = repeatedOrPredicates(loglens::kMaxFilterNodes);
+    ParseError error;
+    CHECK(!Filter::parse(oversized, error).has_value());
+    CHECK_EQ(error.message, "filter AST exceeds 256-node limit");
+    CHECK(error.position < error.end);
+    CHECK(error.end <= oversized.size());
 }
 
 } // namespace
@@ -108,9 +200,13 @@ void testDepthCap() {
 int main() {
     testLevelPredicates();
     testSourceAndMessage();
+    testEscapedAndUtf8Literals();
     testCombinators();
     testShortCircuit();
     testRejections();
     testDepthCap();
+    testDiagnosticRanges();
+    testQueryAndLiteralBounds();
+    testAstNodeBound();
     return checkSummary();
 }

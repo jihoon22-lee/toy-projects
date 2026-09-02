@@ -239,8 +239,8 @@ int run(const CliOptions& options) {
         loglens::ParseError parseError;
         filter = loglens::Filter::parse(filterText, parseError);
         if (!filter) {
-            std::cerr << "fatal: bad filter at offset " << parseError.position << ": "
-                      << parseError.message << "\n";
+            std::cerr << "fatal: bad filter at bytes [" << parseError.position << ","
+                      << parseError.end << "): " << parseError.message << "\n";
             return 1;
         }
     }

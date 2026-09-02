@@ -1,7 +1,7 @@
 #include "loglens/filter_expr.hpp"
 
 #include <algorithm>
-#include <cctype>
+#include <memory>
 
 namespace loglens {
 
@@ -10,11 +10,28 @@ namespace {
 enum class Op { And, Or, Not, LevelAtLeast, LevelEquals, SourceEquals, SourceContains,
                 MessageContains, MessageExcludes };
 
+bool isAsciiSpace(unsigned char byte) {
+    return byte == ' ' || byte == '\t' || byte == '\n' || byte == '\r' || byte == '\f'
+           || byte == '\v';
+}
+
+bool isWordByte(unsigned char byte) {
+    return (byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z')
+           || (byte >= '0' && byte <= '9') || byte == '_' || byte == '-' || byte == '.';
+}
+
+char toUpperAscii(char c) {
+    return c >= 'a' && c <= 'z' ? static_cast<char>(c - 'a' + 'A') : c;
+}
+
 std::string toLowerAscii(const std::string& text) {
     std::string lower;
     lower.reserve(text.size());
     for (char c : text) {
-        lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (c >= 'A' && c <= 'Z') {
+            c = static_cast<char>(c - 'A' + 'a');
+        }
+        lower += c;
     }
     return lower;
 }
@@ -84,8 +101,9 @@ public:
         }
         skipSpaces();
         if (pos_ != text_.size()) {
-            fail("unexpected trailing input");
-            return nullptr;
+            // The complete remaining suffix is reported so a pasted query
+            // with more than one unknown token has one stable diagnostic.
+            return failAt(pos_, text_.size(), "unexpected trailing input");
         }
         return root;
     }
@@ -94,45 +112,75 @@ private:
     const std::string& text_;
     ParseError& error_;
     std::size_t pos_ = 0;
+    std::size_t node_count_ = 0;
 
     bool atEnd() const { return pos_ >= text_.size(); }
 
     void skipSpaces() {
-        while (!atEnd() && std::isspace(static_cast<unsigned char>(text_[pos_]))) {
+        while (!atEnd() && isAsciiSpace(static_cast<unsigned char>(text_[pos_]))) {
             ++pos_;
         }
     }
 
-    std::nullptr_t fail(const std::string& message) {
+    std::size_t tokenEnd(std::size_t begin) const {
+        std::size_t end = std::min(begin, text_.size());
+        while (end < text_.size()
+               && !isAsciiSpace(static_cast<unsigned char>(text_[end]))) {
+            ++end;
+        }
+        return end;
+    }
+
+    std::nullptr_t failAt(std::size_t begin, std::size_t end, const std::string& message) {
         if (error_.message.empty()) {
-            error_.position = pos_;
+            const std::size_t clampedBegin = std::min(begin, text_.size());
+            const std::size_t clampedEnd = std::min(std::max(end, clampedBegin), text_.size());
+            error_.position = clampedBegin;
+            error_.end = clampedEnd;
             error_.message = message;
         }
         return nullptr;
+    }
+
+    std::shared_ptr<Node> makeNode(std::size_t begin, std::size_t end) {
+        if (node_count_ >= kMaxFilterNodes) {
+            failAt(begin, end, "filter AST exceeds 256-node limit");
+            return nullptr;
+        }
+        ++node_count_;
+        return std::make_shared<Node>();
     }
 
     // Consumes an identifier-ish word: letters, digits, and a few operators'
     // characters are handled separately by consumeOperator.
     std::string peekWord() const {
         std::size_t i = pos_;
-        while (i < text_.size() && (std::isalnum(static_cast<unsigned char>(text_[i])) ||
-                                    text_[i] == '_' || text_[i] == '-' || text_[i] == '.')) {
+        while (i < text_.size() && isWordByte(static_cast<unsigned char>(text_[i]))) {
             ++i;
         }
         return text_.substr(pos_, i - pos_);
     }
 
-    bool consumeKeyword(const char* keyword) {
+    bool consumeKeyword(const char* keyword, std::size_t* begin = nullptr,
+                        std::size_t* end = nullptr) {
         skipSpaces();
+        const std::size_t candidateBegin = pos_;
         const std::string word = peekWord();
         std::string upper;
+        upper.reserve(word.size());
         for (char c : word) {
-            upper += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            upper += toUpperAscii(c);
         }
         if (upper != keyword) {
             return false;
         }
         pos_ += word.size();
+        if (begin != nullptr) {
+            *begin = candidateBegin;
+        }
+        if (end != nullptr) {
+            *end = pos_;
+        }
         return true;
     }
 
@@ -146,37 +194,85 @@ private:
     }
 
     // Returns the operator token at the cursor, or an empty string.
-    std::string consumeOperator() {
+    std::string consumeOperator(std::size_t& begin, std::size_t& end) {
         skipSpaces();
+        begin = pos_;
         static const char* const kOperators[] = {">=", "==", "!~", "~"};
         for (const char* candidate : kOperators) {
             const std::size_t length = std::string(candidate).size();
             if (text_.compare(pos_, length, candidate) == 0) {
                 pos_ += length;
+                end = pos_;
                 return candidate;
             }
         }
+        end = begin;
         return std::string();
     }
 
-    // A value is either a quoted string or a bare word.
-    bool consumeValue(std::string& out) {
+    // A value is either a quoted string or a bare word. Quoted strings decode
+    // only quote/backslash escapes; every other byte, including UTF-8 bytes,
+    // is copied unchanged.
+    bool consumeValue(std::string& out, std::size_t& begin, std::size_t& end) {
         skipSpaces();
+        begin = pos_;
+        end = pos_;
         if (atEnd()) {
             return false;
         }
         if (text_[pos_] != '"') {
             out = peekWord();
             pos_ += out.size();
-            return !out.empty();
+            end = pos_;
+            if (out.empty()) {
+                return false;
+            }
+            if (out.size() > kMaxFilterLiteralBytes) {
+                failAt(begin, end, "filter literal exceeds 1024-byte limit");
+                return false;
+            }
+            return true;
         }
-        const std::size_t close = text_.find('"', pos_ + 1);
-        if (close == std::string::npos) {
-            return false;
+
+        const std::size_t quoteBegin = pos_;
+        ++pos_; // opening quote
+        out.clear();
+        out.reserve(std::min(kMaxFilterLiteralBytes, text_.size() - pos_));
+        while (!atEnd()) {
+            const unsigned char byte = static_cast<unsigned char>(text_[pos_]);
+            if (byte == '"') {
+                ++pos_;
+                end = pos_;
+                return true;
+            }
+            if (byte == '\\') {
+                const std::size_t escapeBegin = pos_;
+                ++pos_;
+                if (atEnd()) {
+                    failAt(escapeBegin, pos_, "unterminated escape sequence");
+                    return false;
+                }
+                const char escaped = text_[pos_];
+                if (escaped != '"' && escaped != '\\') {
+                    failAt(escapeBegin, pos_ + 1,
+                           "unsupported escape sequence (only \\\" and \\\\ are allowed)");
+                    return false;
+                }
+                out.push_back(escaped);
+                ++pos_;
+            } else {
+                // Copy the original char object so bytes >= 0x80 retain
+                // their exact representation in the decoded literal.
+                out.push_back(text_[pos_]);
+                ++pos_;
+            }
+            if (out.size() > kMaxFilterLiteralBytes) {
+                failAt(quoteBegin, pos_, "filter literal exceeds 1024-byte limit");
+                return false;
+            }
         }
-        out = text_.substr(pos_ + 1, close - pos_ - 1);
-        pos_ = close + 1;
-        return true;
+        failAt(quoteBegin, text_.size(), "unterminated quoted value");
+        return false;
     }
 
     std::shared_ptr<const Node> parseExpr(int depth) {
@@ -189,45 +285,59 @@ private:
                            [this](int d) { return parseFactor(d); });
     }
 
-    // Shared shape for the two left-associative binary levels.
+    // Shared shape for the two left-associative binary levels. The internal
+    // node is charged when its operator is consumed, making node-limit errors
+    // point at the operator rather than an arbitrary later token.
     template <typename ParseOperand>
     std::shared_ptr<const Node> parseBinary(int depth, const char* keyword, Op op,
                                             ParseOperand parseOperand) {
         if (depth > kMaxFilterDepth) {
-            return fail("expression nested too deeply");
+            return failAt(pos_, tokenEnd(pos_), "expression nested too deeply");
         }
-        auto first = parseOperand(depth + 1);
+        auto first = parseOperand(depth);
         if (!first) {
             return nullptr;
         }
-        std::vector<std::shared_ptr<const Node>> operands{first};
-        while (consumeKeyword(keyword)) {
-            auto next = parseOperand(depth + 1);
+        std::shared_ptr<Node> combined;
+        while (true) {
+            std::size_t keywordBegin = pos_;
+            std::size_t keywordEnd = pos_;
+            if (!consumeKeyword(keyword, &keywordBegin, &keywordEnd)) {
+                break;
+            }
+            if (!combined) {
+                combined = makeNode(keywordBegin, keywordEnd);
+                if (!combined) {
+                    return nullptr;
+                }
+                combined->op = op;
+                combined->children.push_back(first);
+            }
+            auto next = parseOperand(depth);
             if (!next) {
                 return nullptr;
             }
-            operands.push_back(next);
+            combined->children.push_back(next);
         }
-        if (operands.size() == 1) {
-            return first;
-        }
-        auto node = std::make_shared<Node>();
-        node->op = op;
-        node->children = std::move(operands);
-        return node;
+        return combined ? std::shared_ptr<const Node>(std::move(combined)) : first;
     }
 
     std::shared_ptr<const Node> parseFactor(int depth) {
         if (depth > kMaxFilterDepth) {
-            return fail("expression nested too deeply");
+            return failAt(pos_, tokenEnd(pos_), "expression nested too deeply");
         }
-        if (consumeKeyword("NOT")) {
+        std::size_t notBegin = pos_;
+        std::size_t notEnd = pos_;
+        if (consumeKeyword("NOT", &notBegin, &notEnd)) {
+            auto node = makeNode(notBegin, notEnd);
+            if (!node) {
+                return nullptr;
+            }
+            node->op = Op::Not;
             auto inner = parseFactor(depth + 1);
             if (!inner) {
                 return nullptr;
             }
-            auto node = std::make_shared<Node>();
-            node->op = Op::Not;
             node->children.push_back(inner);
             return node;
         }
@@ -236,59 +346,92 @@ private:
             if (!inner) {
                 return nullptr;
             }
-            return consumeChar(')') ? inner : fail("expected ')'");
+            if (consumeChar(')')) {
+                return inner;
+            }
+            skipSpaces();
+            return failAt(pos_, tokenEnd(pos_), "expected ')'");
         }
         return parsePredicate();
     }
 
     std::shared_ptr<const Node> parsePredicate() {
         skipSpaces();
+        const std::size_t fieldBegin = pos_;
         const std::string field = peekWord();
         if (field.empty()) {
-            return fail("expected a predicate");
+            return failAt(fieldBegin, tokenEnd(fieldBegin), "expected a predicate");
         }
         pos_ += field.size();
-        const std::string op = consumeOperator();
+        const std::size_t fieldEnd = pos_;
+
+        std::size_t opBegin = pos_;
+        std::size_t opEnd = pos_;
+        const std::string op = consumeOperator(opBegin, opEnd);
         if (op.empty()) {
-            return fail("expected an operator after '" + field + "'");
+            return failAt(opBegin, tokenEnd(opBegin),
+                          "expected an operator after '" + field + "'");
         }
+
         std::string value;
-        if (!consumeValue(value)) {
-            return fail("expected a value after '" + op + "'");
+        std::size_t valueBegin = pos_;
+        std::size_t valueEnd = pos_;
+        if (!consumeValue(value, valueBegin, valueEnd)) {
+            if (!error_.message.empty()) {
+                return nullptr;
+            }
+            return failAt(valueBegin, tokenEnd(valueBegin),
+                          "expected a value after '" + op + "'");
         }
-        return makePredicate(field, op, value);
+        return makePredicate(field, op, value, fieldBegin, fieldEnd, opBegin, opEnd,
+                             valueBegin, valueEnd);
     }
 
     std::shared_ptr<const Node> makePredicate(const std::string& field, const std::string& op,
-                                              const std::string& value) {
-        auto node = std::make_shared<Node>();
+                                              const std::string& value, std::size_t fieldBegin,
+                                              std::size_t fieldEnd, std::size_t opBegin,
+                                              std::size_t opEnd, std::size_t valueBegin,
+                                              std::size_t valueEnd) {
         if (field == "level") {
-            return makeLevelPredicate(op, value, node);
+            const Level level = parseLevel(value);
+            if (level == Level::Unknown) {
+                return failAt(valueBegin, valueEnd, "unknown level '" + value + "'");
+            }
+            if (op != ">=" && op != "==") {
+                return failAt(opBegin, opEnd, "level supports '>=' or '=='");
+            }
+            auto node = makeNode(fieldBegin, valueEnd);
+            if (!node) {
+                return nullptr;
+            }
+            node->op = op == ">=" ? Op::LevelAtLeast : Op::LevelEquals;
+            node->level = level;
+            return node;
         }
         if (field == "source") {
+            if (op != "==" && op != "~") {
+                return failAt(opBegin, opEnd, "source supports '==' or '~'");
+            }
+            auto node = makeNode(fieldBegin, valueEnd);
+            if (!node) {
+                return nullptr;
+            }
             node->op = op == "==" ? Op::SourceEquals : Op::SourceContains;
             node->text = value;
-            return (op == "==" || op == "~") ? node : fail("source supports '==' or '~'");
+            return node;
         }
         if (field != "message") {
-            return fail("unknown field '" + field + "'");
+            return failAt(fieldBegin, fieldEnd, "unknown field '" + field + "'");
+        }
+        if (op != "~" && op != "!~") {
+            return failAt(opBegin, opEnd, "message supports '~' or '!~'");
+        }
+        auto node = makeNode(fieldBegin, valueEnd);
+        if (!node) {
+            return nullptr;
         }
         node->op = op == "!~" ? Op::MessageExcludes : Op::MessageContains;
         node->text = value;
-        return (op == "~" || op == "!~") ? node : fail("message supports '~' or '!~'");
-    }
-
-    std::shared_ptr<const Node> makeLevelPredicate(const std::string& op, const std::string& value,
-                                                   std::shared_ptr<Node> node) {
-        const Level level = parseLevel(value);
-        if (level == Level::Unknown) {
-            return fail("unknown level '" + value + "'");
-        }
-        if (op != ">=" && op != "==") {
-            return fail("level supports '>=' or '=='");
-        }
-        node->op = op == ">=" ? Op::LevelAtLeast : Op::LevelEquals;
-        node->level = level;
         return node;
     }
 };
@@ -299,10 +442,27 @@ Filter::Filter(NodePtr root) : root_(std::move(root)) {}
 
 std::optional<Filter> Filter::parse(const std::string& text, ParseError& error) {
     error = ParseError{};
+    if (text.size() > kMaxFilterQueryBytes) {
+        error.position = kMaxFilterQueryBytes;
+        error.end = text.size();
+        error.message = "filter query exceeds 4096-byte limit";
+        return std::nullopt;
+    }
+    if (std::all_of(text.begin(), text.end(), [](char byte) {
+            return isAsciiSpace(static_cast<unsigned char>(byte));
+        })) {
+        error.position = text.size();
+        error.end = text.size();
+        error.message = "empty filter expression";
+        return std::nullopt;
+    }
+
     ExprParser parser(text, error);
     auto root = parser.run();
     if (!root) {
         if (error.message.empty()) {
+            error.position = text.size();
+            error.end = text.size();
             error.message = "empty filter expression";
         }
         return std::nullopt;

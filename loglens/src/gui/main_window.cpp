@@ -28,6 +28,13 @@ namespace {
 
 constexpr std::uint64_t kBucketMs = 60000;
 
+QString filterErrorRange(const loglens::ParseError& error) {
+    const qulonglong begin = static_cast<qulonglong>(error.position);
+    const qulonglong end = static_cast<qulonglong>(error.end);
+    return error.position == error.end ? QString::number(begin)
+                                       : QStringLiteral("%1–%2").arg(begin).arg(end);
+}
+
 } // namespace
 
 MainWindow::MainWindow(QWidget* parent, std::size_t recordCapacity, std::size_t sourceChunkBytes)
@@ -324,8 +331,8 @@ void MainWindow::applyFilter() {
     filter_ = loglens::Filter::parse(text.toStdString(), error);
     if (!filter_) {
         // Keep the previous view; a typo should not blank the table.
-        updateStatus(tr("bad filter at %1: %2")
-                         .arg(error.position)
+        updateStatus(tr("bad filter at bytes %1: %2")
+                         .arg(filterErrorRange(error))
                          .arg(QString::fromStdString(error.message)));
         return;
     }
