@@ -134,6 +134,19 @@ class WorkflowPublicationContractTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("sticky comment cardinality mismatch", result.stderr)
 
+    def test_pr_sticky_comment_verifier_rejects_missing_marker_across_pages(
+        self,
+    ) -> None:
+        result = _run_sticky_verifier(
+            [
+                [{"body": "ordinary discussion comment"}],
+                [{"body": "unrelated report comment"}],
+            ]
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("sticky comment cardinality mismatch", result.stderr)
+
     def test_pr_sticky_comment_verifier_rejects_multiple_markers_in_one_comment(
         self,
     ) -> None:

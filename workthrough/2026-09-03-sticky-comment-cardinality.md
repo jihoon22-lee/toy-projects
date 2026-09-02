@@ -35,6 +35,8 @@ whole run, so cardinality must be validated before checking the current-run link
   and the absence of delete calls.
 - Extracted and executed the workflow's embedded verifier against synthetic paginated API responses.
 - Covered one valid marker across pages, two marker comments, and two marker occurrences in one comment.
+- Added a missing-marker regression with unrelated comments on separate API pages; zero marker
+  comments now fails with the same cardinality mismatch.
 
 ### 3. Recorded the user-visible CI contract
 
@@ -65,7 +67,7 @@ body = marked[0].get("body") or ""
 
 ```text
 python3 -m pytest -q ci/test_ci_workflow_contract.py
-22 passed, 8 subtests passed in 0.15s
+23 passed, 8 subtests passed in 0.15s
 
 uvx ruff check ci/test_ci_workflow_contract.py
 All checks passed!
