@@ -12,4 +12,5 @@ SUBDIRS = \
     test_scanner_real_safety.pro \
     test_treemap.pro \
     test_treemap_widget.pro \
-    test_main_window.pro
+    test_main_window.pro \
+    test_view.pro

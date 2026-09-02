@@ -1,4 +1,5 @@
 TEMPLATE = app
+include($$PWD/../cxx17.pri)
 CONFIG += console
 CONFIG -= app_bundle qt
 QT =

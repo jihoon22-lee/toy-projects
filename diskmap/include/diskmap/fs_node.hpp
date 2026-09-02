@@ -23,6 +23,10 @@ struct FsNode {
     // explicit known bit when the platform or an incomplete scan cannot prove
     // an exact value.
     std::uint64_t size = 0;
+    // False when aggregateSizes() had to saturate at uint64 max. Scan
+    // completeness remains separate: a partial tree can have an
+    // overflow-free subtotal that is nevertheless not an exact total.
+    bool logical_size_known = true;
     std::uint64_t allocated_size = 0;
     bool allocated_size_known = false;
     std::uint64_t reclaimable_size = 0;
@@ -49,13 +53,15 @@ struct FsNode {
 
 // Post-order sum of subtree sizes; sets every directory's size to the sum
 // of its children and returns the size of the whole tree rooted at node.
-// Since logical size has no separate known bit, overflow saturates at uint64
-// max instead of wrapping to a misleadingly small value.
+// Overflow saturates at uint64 max and clears logical_size_known instead of
+// wrapping to a misleadingly small value.
 std::uint64_t aggregateSizes(FsNode& node);
 
 // Computes identity-aware physical storage facts independently for every
-// subtree. Hard-linked files contribute allocated bytes once per identity;
-// bytes are reclaimable only when every known hard-link reference is present.
+// subtree. These values describe non-directory entry data; a directory's own
+// filesystem metadata blocks are outside this contract. Hard-linked files
+// contribute allocated bytes once per identity; bytes are reclaimable only
+// when every known hard-link reference is present.
 void aggregateStorage(FsNode& node);
 
 // Iteratively sorts every level of children by size (descending), breaking

@@ -4,8 +4,8 @@ CONFIG += testcase console
 CONFIG -= app_bundle qt
 QT =
 
-TARGET = test_scanner_real_safety
+TARGET = test_view
 INCLUDEPATH += $$PWD/../include $$PWD
-SOURCES += test_scanner_real_safety.cpp
+SOURCES += test_view.cpp
 LIBS += -L$$OUT_PWD/../src -ldiskmap_core
 PRE_TARGETDEPS += $$OUT_PWD/../src/libdiskmap_core.a

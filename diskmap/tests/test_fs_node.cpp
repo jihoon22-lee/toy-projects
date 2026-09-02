@@ -175,8 +175,8 @@ int main() {
         CHECK_EQ(file.size, static_cast<std::uint64_t>(99));
     }
 
-    // Logical bytes have no separate known bit, so overflow must saturate
-    // instead of wrapping to a deceptively small directory size.
+    // Logical aggregation retains an explicit known bit, so overflow must
+    // saturate and clear it instead of wrapping to a deceptively small size.
     {
         constexpr std::uint64_t maximum = std::numeric_limits<std::uint64_t>::max();
         FsNode root = makeDirNode("logical-overflow", {
@@ -185,6 +185,7 @@ int main() {
         });
         CHECK_EQ(diskmap::aggregateSizes(root), maximum);
         CHECK_EQ(root.size, maximum);
+        CHECK(!root.logical_size_known);
     }
 
     // --- sortBySizeDesc: size desc, ties broken by name asc, at every level ---

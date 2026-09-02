@@ -1,4 +1,5 @@
 TEMPLATE = app
+include($$PWD/../../cxx17.pri)
 QT += core gui widgets concurrent
 
 TARGET = diskmap-gui
