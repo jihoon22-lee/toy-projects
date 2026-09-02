@@ -7,6 +7,11 @@
 > Qt 5.15는 현재 설치돼 있으므로 미검증으로 남기지 않고 Qt 6 탐색을 명시적으로 비활성화해
 > 양 major를 실측한다.
 
+> **Historical recipe / T0 완료 (2026-09-02):** 이 문서는 T0의 상세 설계와 evidence trail을
+> 보존한다. T0-1~T0-5의 구현, native/ici 검증, Qt5/Qt6 matrix, PR/exact-main 및 Merge Gate
+> acceptance는 완료됐다. 아래의 unchecked recipe box를 현재 진행 상태로 읽지 말고, 열린
+> 작업과 완료 기준은 master plan과 handover를 따른다.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** `loglens` 와 `diskmap` 의 Qt 셸에 단위 테스트를 붙여 `loglens` 의 커버리지 임계값을 되돌리고, 빌드가 설치된 Qt 버전을 따라가게 한다.

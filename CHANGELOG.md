@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Roadmap status reconciliation
+
+- Marked the master-plan T0 checkpoint complete after the merged Qt shell, native/ici, Qt5/Qt6,
+  PR, and exact-main evidence already recorded in the handover.
+- Reconciled the historical ROADMAP/ICI-GAPS entries: the hand-written-Makefile A-2 limitation
+  remains open; BuildScope B-2 comparison is complete; B-3 language-scope disclosure is explicit
+  while C++ dead/resource/maintainability coverage remains owned by ici I4-3/I4-4. C-7's original
+  evidence-taxonomy ambiguity is documented as ici-owned without claiming future gate policy closed.
+- Marked the old Qt-shell document as a completed-T0 historical recipe without mechanically
+  rewriting its detailed task checkboxes. No product version or release was changed.
+
 ### Trusted main report publication
 
 - Added a separate exact-`main` publisher for the BuildScope, DiskMap, and LogLens ici HTML reports.

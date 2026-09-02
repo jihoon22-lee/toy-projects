@@ -471,17 +471,25 @@ checkpoint까지 `Unreleased`에 쌓는다. 상세 contract는 [BuildScope READM
 
 결과는 기록이 말한다. 초기 실물 개발에서 **ici 결함 17건을 찾았고 그중 13건이 수정됐다.**
 어댑터 작업에서 9건이 더 발견돼 현재 추적 항목은 26건이며, 그중 22건이 수정됐다. 전부
-만들면서 나왔고, 코드를 읽어서 찾은 것은 하나도 없다. 남은 항목은
-[ICI-GAPS.md](ICI-GAPS.md)의 A-2, B-2, B-3, C-7이다.
+만들면서 나왔고, 코드를 읽어서 찾은 것은 하나도 없다. 아래 문장은 당시 기록의 남은 목록을
+보존한 historical snapshot이다. 현재 상태는 [ICI-GAPS.md](ICI-GAPS.md)의 현황과 ici
+마스터 계획이 기준이다. 손으로 쓴 `Makefile`만 있는 프로젝트를 거부하는 A-2는 여전히
+실제 ici I7/AbiLens A0 입력이다. B-2의 BuildScope 외부 대조는 완료됐다. B-3의 언어 지원
+범위 표기는 ici I1-2 support/capability matrix가 소유하지만, C++에서 dead/resource 및
+관련 maintainability 결과를 제공하는 capability gap은 남아 있다. 그 구현은 toy 기능이
+아니라 ici I4-3/I4-4가 소유한다. C-7의 예전 aggregate-status 제안은 현재 evidence taxonomy가
+원래의 inapplicable/실행불가 모호성을 줄인 historical 입력이며, 향후 gate 정책까지 닫혔다고
+간주하지 않는다.
 
 ## 완료: 어댑터와 loglens stream state (2026-08-31)
 
 1단계와 그에 딸린 전환이 끝났다. **ici 0.6.0 이 CMake/CTest 와 qmake/Make 어댑터를 갖췄고**,
 A-3 은 닫혔다. `Q_OBJECT` 클래스의 단위 테스트가 `tests/` 안에서 통과한다. 이어서
 loglens의 poll 경계 parser state와 CLI/GUI 공통 delta 계약도
-[#14](https://github.com/jihoon22-lee/toy-projects/pull/14)로 병합됐다. 이것은 T0-2 완료이며,
-Qt 셸 테스트와 양 Qt major matrix까지 끝나야 T0 전체가 완료된다. T0-5 구현의 원격 PR
-gate에서는 아래 네 leg가 같은 계약을 다시 실행한다.
+[#14](https://github.com/jihoon22-lee/toy-projects/pull/14)로 병합됐다. 이것은 T0-2 완료였고,
+후속 T0-3~T0-5의 Qt 셸 테스트와 양 Qt major matrix도 구현·native/ici 실측·PR 및
+exact-main/Merge Gate evidence까지 완료됐다. 따라서 T0 checkpoint는 닫혔으며 아래 표는
+완료된 계약의 evidence를 요약한다.
 
 | 프로젝트 | 빌드 | 검증 | Qt 테스트 |
 |---|---|---|---|
