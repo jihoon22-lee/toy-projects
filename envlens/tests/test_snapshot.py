@@ -73,7 +73,7 @@ def _raw_probe(distributions: list[dict[str, object]]) -> dict[str, object]:
 
 def _collect(raw: dict[str, object], *, redact: bool = True) -> dict[str, object]:
     with patch.object(
-        snapshot_module.probe,
+        snapshot_module,
         "collect_probe",
         return_value=(raw, Path("/target/home/.venv/bin/python"), "/requested/python"),
     ):
@@ -317,6 +317,75 @@ def test_collect_snapshot_rejects_invalid_public_api_types_before_probing() -> N
     with pytest.raises(snapshot_module.SnapshotError) as caught:
         snapshot_module.collect_snapshot(captured_at=object())  # type: ignore[arg-type]
     assert caught.value.code == "invalid-captured-at"
+
+
+def test_collect_snapshot_translates_probe_error() -> None:
+    from envlens.probe import ProbeError
+
+    with (
+        patch.object(
+            snapshot_module,
+            "collect_probe",
+            side_effect=ProbeError("probe-failed", "deliberate failure"),
+        ),
+        pytest.raises(snapshot_module.SnapshotError) as caught,
+    ):
+        snapshot_module.collect_snapshot()
+
+    assert caught.value.code == "probe-failed"
+    assert caught.value.message == "deliberate failure"
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("identity", [], "identity must be an object"),
+        ("environment", [], "environment must be an object"),
+        ("distributions", {}, "distributions must be an array"),
+    ],
+)
+def test_collect_snapshot_rejects_malformed_top_level_probe_shapes(
+    field: str, value: object, message: str
+) -> None:
+    raw = _raw_probe([])
+    raw[field] = value
+
+    with pytest.raises(snapshot_module.SnapshotError, match=message):
+        _collect(raw)
+
+
+def test_collect_snapshot_rejects_invalid_version_info_and_sysconfig_scalar() -> None:
+    raw = _raw_probe([])
+    raw["identity"]["version_info"] = [3, 10, 1]  # type: ignore[index]
+    with pytest.raises(snapshot_module.SnapshotError, match=r"identity\.version_info must match"):
+        _collect(raw)
+
+    raw = _raw_probe([])
+    raw["sysconfig"]["paths"] = {"bad": []}  # type: ignore[index]
+    with pytest.raises(snapshot_module.SnapshotError, match="not a JSON scalar"):
+        _collect(raw)
+
+
+def test_collect_snapshot_records_missing_distribution_metadata() -> None:
+    result = _collect(_raw_probe([_distribution("", "", location="/package")]))
+
+    distribution = result["distributions"][0]
+    assert distribution["status"] == "error"
+    assert [error["field"] for error in distribution["errors"]] == ["name", "version"]
+
+
+def test_collect_snapshot_rejects_naive_timestamp_and_oversized_environment() -> None:
+    with pytest.raises(snapshot_module.SnapshotError) as caught:
+        snapshot_module._timestamp(datetime(2024, 1, 1))
+    assert caught.value.code == "invalid-captured-at"
+
+    raw = _raw_probe([])
+    raw["environment"] = {
+        f"NAME_{index}": "value" for index in range(snapshot_module.MAX_ENVIRONMENT_VARIABLES + 1)
+    }
+    with pytest.raises(snapshot_module.SnapshotError) as caught:
+        _collect(raw)
+    assert caught.value.code == "probe-field-too-large"
 
 
 def test_dump_is_utf8_safe_for_surrogate_escaped_environment_bytes() -> None:

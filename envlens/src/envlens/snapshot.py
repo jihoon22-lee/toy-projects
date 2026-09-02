@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from envlens import probe
+from envlens.probe import ProbeError, collect_probe
 from envlens.redaction import redact_environment, redact_text, redact_value
 
 MAX_DISTRIBUTIONS = 10_000
@@ -185,15 +185,9 @@ def _normalize_distribution(value: Any, homes: tuple[str, ...], *, redact: bool)
     }
 
 
-def collect_snapshot(
-    interpreter: str | Path | None = None,
-    *,
-    timeout_seconds: int = 10,
-    captured_at: datetime | None = None,
-    redact: bool = True,
-) -> dict[str, object]:
-    """Collect a deterministic, offline snapshot from one target interpreter."""
-
+def _validate_collection_options(
+    timeout_seconds: int, captured_at: datetime | None, redact: bool
+) -> None:
     if (
         isinstance(timeout_seconds, bool)
         or not isinstance(timeout_seconds, int)
@@ -204,51 +198,9 @@ def collect_snapshot(
         raise SnapshotError("invalid-redact", "redact must be a boolean")
     if captured_at is not None and not isinstance(captured_at, datetime):
         raise SnapshotError("invalid-captured-at", "captured_at must be a datetime")
-    try:
-        raw, resolved, requested = probe.collect_probe(interpreter, timeout_seconds=timeout_seconds)
-    except probe.ProbeError as error:
-        raise SnapshotError(error.code, error.message) from error
 
-    identity = _object(raw.get("identity"), "identity")
-    target_home = _string(identity.get("user_home"), "identity.user_home")
-    host_home = str(Path.home())
-    homes = (target_home, host_home) if redact else ()
-    raw_environment = _object(raw.get("environment"), "environment")
-    if len(raw_environment) > MAX_ENVIRONMENT_VARIABLES:
-        raise SnapshotError("probe-field-too-large", "environment exceeds 4096 variables")
-    environment = {
-        _string(name, "environment name", allow_empty=False): _string(
-            value, f"environment[{name!r}]"
-        )
-        for name, value in raw_environment.items()
-    }
-    distributions = [
-        _normalize_distribution(item, homes, redact=redact)
-        for item in _array(
-            raw.get("distributions"),
-            "distributions",
-            maximum=MAX_DISTRIBUTIONS,
-        )
-    ]
-    distributions.sort(
-        key=lambda item: (
-            item["normalized_name"],
-            item["name"],
-            item["version"],
-            item["location"],
-            json.dumps(
-                item,
-                ensure_ascii=True,
-                separators=(",", ":"),
-                sort_keys=True,
-                allow_nan=False,
-            ),
-        )
-    )
-    error_count = sum(len(item["errors"]) for item in distributions)
-    sysconfig = _object(raw.get("sysconfig"), "sysconfig")
-    paths = _scalar_mapping(sysconfig.get("paths"), "sysconfig.paths")
-    variables = _scalar_mapping(sysconfig.get("variables"), "sysconfig.variables")
+
+def _normalize_identity(identity: dict[str, Any]) -> dict[str, object]:
     public_identity: dict[str, object] = {
         key: _string(identity.get(key), f"identity.{key}")
         for key in (
@@ -276,6 +228,68 @@ def collect_snapshot(
             "invalid-probe-schema", "identity.version_info must match sys.version_info"
         )
     public_identity["version_info"] = version_info
+    return public_identity
+
+
+def _normalize_distributions(
+    value: Any, homes: tuple[str, ...], *, redact: bool
+) -> list[dict[str, Any]]:
+    distributions = [
+        _normalize_distribution(item, homes, redact=redact)
+        for item in _array(value, "distributions", maximum=MAX_DISTRIBUTIONS)
+    ]
+    distributions.sort(
+        key=lambda item: (
+            item["normalized_name"],
+            item["name"],
+            item["version"],
+            item["location"],
+            json.dumps(
+                item,
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+                allow_nan=False,
+            ),
+        )
+    )
+    return distributions
+
+
+def collect_snapshot(
+    interpreter: str | Path | None = None,
+    *,
+    timeout_seconds: int = 10,
+    captured_at: datetime | None = None,
+    redact: bool = True,
+) -> dict[str, object]:
+    """Collect a deterministic, offline snapshot from one target interpreter."""
+
+    _validate_collection_options(timeout_seconds, captured_at, redact)
+    try:
+        raw, resolved, requested = collect_probe(interpreter, timeout_seconds=timeout_seconds)
+    except ProbeError as error:
+        raise SnapshotError(error.code, error.message) from error
+
+    identity = _object(raw.get("identity"), "identity")
+    target_home = _string(identity.get("user_home"), "identity.user_home")
+    host_home = str(Path.home())
+    homes = (target_home, host_home) if redact else ()
+    raw_environment = _object(raw.get("environment"), "environment")
+    if len(raw_environment) > MAX_ENVIRONMENT_VARIABLES:
+        raise SnapshotError("probe-field-too-large", "environment exceeds 4096 variables")
+    environment = {
+        _string(name, "environment name", allow_empty=False): _string(
+            value, f"environment[{name!r}]"
+        )
+        for name, value in raw_environment.items()
+    }
+    distributions = _normalize_distributions(raw.get("distributions"), homes, redact=redact)
+    error_count = sum(len(item["errors"]) for item in distributions)
+    sysconfig = _object(raw.get("sysconfig"), "sysconfig")
+    paths = _scalar_mapping(sysconfig.get("paths"), "sysconfig.paths")
+    variables = _scalar_mapping(sysconfig.get("variables"), "sysconfig.variables")
+    public_identity = _normalize_identity(identity)
     return {
         "schema_version": "envlens.snapshot/v1",
         "producer": {"name": "envlens", "version": "0.1.0"},
