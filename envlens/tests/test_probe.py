@@ -102,6 +102,18 @@ def test_drain_retains_only_one_byte_beyond_probe_limit() -> None:
     assert len(retained) == probe.MAX_PROBE_BYTES + 1
 
 
+def test_drain_treats_a_closed_stream_as_end_of_input() -> None:
+    class ClosedStream:
+        def read(self, _size: int) -> bytes:
+            raise ValueError("read of closed file")
+
+    chunks: list[bytes] = []
+
+    probe._drain(ClosedStream(), probe.MAX_PROBE_BYTES, chunks)  # type: ignore[arg-type]
+
+    assert chunks == []
+
+
 def test_collect_probe_rejects_duplicate_json_keys(tmp_path: Path) -> None:
     executable = _make_executable(
         tmp_path,
