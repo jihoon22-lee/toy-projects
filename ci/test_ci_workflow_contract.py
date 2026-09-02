@@ -255,6 +255,9 @@ class WorkflowPublicationContractTests(unittest.TestCase):
         self.assertIn('ruff" format --check src tests', block)
         self.assertIn('mypy" --strict --python-version 3.10 src/envlens', block)
         self.assertIn("Draft202012Validator.check_schema(schema)", block)
+        self.assertGreaterEqual(
+            block.count("Draft202012Validator.check_schema(schema)"), 2
+        )
         self.assertIn(").validate(snapshot)", block)
         self.assertIn("--captured-at 2026-09-03T00:00:00Z", block)
         self.assertIn("uv build --out-dir", block)
@@ -262,12 +265,22 @@ class WorkflowPublicationContractTests(unittest.TestCase):
         self.assertIn('cmp "$first_build/envlens-0.1.0-py3-none-any.whl"', block)
         self.assertIn('cmp "$first_build/envlens-0.1.0.tar.gz"', block)
         self.assertIn("envlens-0.1.0-py3-none-any.whl", block)
-        self.assertIn('"Root-Is-Purelib: true"', block)
-        self.assertIn('"Tag: py3-none-any"', block)
+        self.assertIn('"Root-Is-Purelib": "true"', block)
+        self.assertIn('"Tag": "py3-none-any"', block)
         self.assertIn("envlens wheel contains native extensions", block)
         self.assertIn("envlens sdist contains native extensions", block)
         self.assertIn('"envlens/py.typed"', block)
         self.assertIn('"$consumer_env/bin/envlens" --version', block)
+        self.assertIn('wheel_schema="$artifact_dir/wheel.schema.json"', block)
+        self.assertIn('files("envlens")', block)
+        self.assertIn(
+            'cmp "$wheel_schema" envlens/schemas/envlens-snapshot-v1.schema.json', block
+        )
+        self.assertIn("clean installed wheel snapshot schema validation: PASS", block)
+        self.assertIn("exactly one WHEEL metadata file", block)
+        self.assertIn("exactly one METADATA file", block)
+        self.assertIn("exactly one PKG-INFO", block)
+        self.assertIn("envlens sdist unexpectedly declares dependencies", block)
 
     def test_manifest_and_report_contract_are_dynamic_for_four_projects(self) -> None:
         manifest = json.loads(
