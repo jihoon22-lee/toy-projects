@@ -264,6 +264,16 @@ class RunContractTests(unittest.TestCase):
                 "scenario-schema",
             ),
             ("escape", {"expectations": {digest: "../expected.json"}}, "unsafe-path"),
+            (
+                "unselected-escape",
+                {
+                    "expectations": {
+                        digest: "expectations/expected.json",
+                        "f" * 64: "../expected.json",
+                    }
+                },
+                "unsafe-path",
+            ),
             ("extra", {"extra": True}, "scenario-schema"),
         ):
             with self.subTest(label=label):
@@ -393,6 +403,13 @@ class RunContractTests(unittest.TestCase):
         )
         self.assertTrue((output / "python.example").is_dir())
         self.assertFalse((output / "suite.json").exists())
+        diagnostic = json.loads(
+            (output / "python.example" / "run.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(diagnostic["schema"], "quality-zoo.runner-error/v1")
+        self.assertEqual(diagnostic["error_code"], "runner-report-missing")
+        self.assertEqual(diagnostic["reports_present"], {"json": False, "html": False})
+        self.assertEqual(diagnostic["stderr"], "fake stderr\n")
 
     def test_unsafe_command_is_rejected_before_fake_binary_runs(self) -> None:
         manifest, scenario_root, fake, output, scenario = self.fixture(
@@ -457,6 +474,19 @@ class RunContractTests(unittest.TestCase):
             [],
             fake,
             output,
+            timeout_seconds=5,
+        )
+
+        fake.chmod(0o755)
+        fake_link = self.root / "ici-link"
+        fake_link.symlink_to(fake)
+        self.assert_error(
+            run.run_manifest,
+            "unsafe-ici-bin",
+            manifest,
+            [],
+            fake_link,
+            self.root / "link-output",
             timeout_seconds=5,
         )
 

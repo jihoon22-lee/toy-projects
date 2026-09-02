@@ -111,15 +111,16 @@ def _load_scenario(
             raise ContractError(
                 "scenario-schema", f"scenario {scenario_id} needs expectations"
             )
-        expectation_paths: dict[str, str] = {}
+        expectation_paths: dict[str, Path] = {}
         for digest, raw_path in raw_expectations.items():
             if not isinstance(digest, str) or not SHA256_RE.fullmatch(digest):
                 raise ContractError(
                     "scenario-schema",
                     f"scenario {scenario_id} has an invalid ici SHA-256 selector",
                 )
-            expectation_paths[digest] = require_string(
-                raw_path, f"scenario {scenario_id} expectation path"
+            expectation_paths[digest] = contained_path(
+                scenario_root,
+                require_string(raw_path, f"scenario {scenario_id} expectation path"),
             )
         if ici_sha256 is None or ici_sha256 not in expectation_paths:
             raise ContractError(
@@ -127,7 +128,7 @@ def _load_scenario(
                 f"scenario {scenario_id} has no expectation for ici SHA-256 "
                 f"{ici_sha256!r}",
             )
-        expectation_path = contained_path(scenario_root, expectation_paths[ici_sha256])
+        expectation_path = expectation_paths[ici_sha256]
         payload = load_json_object(
             expectation_path,
             label=f"scenario {scenario_id} expectation {ici_sha256}",
@@ -261,9 +262,32 @@ def run_scenario(
         report_path = project_root / "verify_report.json"
         html_path = project_root / "verify_report.html"
         if not report_path.is_file() or not html_path.is_file():
+            error_message = f"{scenario_id} exit {completed.returncode} did not produce both reports"
+            diagnostic = {
+                "schema": "quality-zoo.runner-error/v1",
+                "scenario_id": scenario_id,
+                "scenario_class": scenario["class"],
+                "error_code": "runner-report-missing",
+                "error": error_message,
+                "ici_sha256": ici_sha256,
+                "argv": command[1:],
+                "exit_code": completed.returncode,
+                "stdout": stdout_text,
+                "stdout_truncated": stdout_truncated,
+                "stderr": stderr_text,
+                "stderr_truncated": stderr_truncated,
+                "reports_present": {
+                    "json": report_path.is_file(),
+                    "html": html_path.is_file(),
+                },
+            }
+            (scenario_output / "run.json").write_text(
+                json.dumps(diagnostic, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
             raise ContractError(
                 "runner-report-missing",
-                f"{scenario_id} exit {completed.returncode} did not produce both reports",
+                error_message,
             )
         report = load_json_object(report_path, label=f"{scenario_id} ici report")
         contract = evaluate_contract(report, scenario)
@@ -330,13 +354,16 @@ def run_manifest(
     unknown = sorted(set(selected) - set(registry))
     if unknown or len(selected) != len(set(selected)):
         raise ContractError("scenario-selection", f"invalid selection: {unknown!r}")
-    ici_bin = ici_bin.resolve(strict=True)
-    if not ici_bin.is_file() or ici_bin.is_symlink() or not os.access(ici_bin, os.X_OK):
+    if ici_bin.is_symlink() or not ici_bin.is_file() or not os.access(ici_bin, os.X_OK):
         raise ContractError(
             "unsafe-ici-bin", "ICI_BIN must be an executable regular file"
         )
+    ici_bin = ici_bin.resolve(strict=True)
     ici_sha256, _ = sha256_file(ici_bin, max_bytes=32 * 1024 * 1024)
     producer_version = _run_version(ici_bin, timeout_seconds)
+    version_probe_sha256, _ = sha256_file(ici_bin, max_bytes=32 * 1024 * 1024)
+    if version_probe_sha256 != ici_sha256:
+        raise ContractError("ici-changed", "ICI_BIN changed during version probing")
     if output_root.exists():
         raise ContractError("output-exists", f"refusing to replace {output_root}")
     output_root.mkdir(parents=True)
@@ -352,6 +379,9 @@ def run_manifest(
         )
         for scenario_id in selected
     ]
+    final_sha256, _ = sha256_file(ici_bin, max_bytes=32 * 1024 * 1024)
+    if final_sha256 != ici_sha256:
+        raise ContractError("ici-changed", "ICI_BIN changed during scenario execution")
     aggregate = {
         "schema": "quality-zoo.suite/v1",
         "contract_verdict": (
