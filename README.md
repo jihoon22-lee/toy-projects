@@ -641,6 +641,26 @@ GUI thread에서 안전하게 바꿀 수 있으며, timeline 갱신은 debounce�
 거부된다. GUI filter 상태도 이 byte range를 표시하며, 이전에 적용된 정상 filter 화면은
 오류가 나도 유지한다. CLI도 같은 `[begin,end)` byte range를 stderr에 출력한다.
 
+CLI의 --level shorthand와 --filter는 각각 독립적으로 parse한 뒤 결합하므로 오류 range가
+생성된 conjunction의 prefix/괄호 때문에 이동하지 않고 사용자가 입력한 argument에 매핑된다.
+GUI도 입력을 trim해서 버리지 않고 untrimmed UTF-8 bytes를 parser에 전달한다. depth 제한 오류는
+허용 한도를 넘긴 추가 NOT/괄호 nesting token을 가리키며, unsupported escape가 multibyte UTF-8
+scalar를 시작하면 backslash부터 scalar 전체를 range에 포함한다. 실패한 apply는 이전에 적용된
+정상 filter를 계속 유지한다. parser의 TokenRange/PredicateTokens 구조화로 새 clang-tidy
+swapped-parameter 경고도 제거했다.
+
+이 slice의 Qt5/Qt6 native suite는 각각 12/12 pass이고, public ici `v0.10.2` `ici.pyz`로 수행한
+uncached deep 검증의 artifact SHA-256은
+`2af5198d1348a64c39f4f37d12657aa9a2c4bf3ddf034a9099909c41e86e30e7`이다. 전체 suite는 clazy가
+사용 불가하고 기존 lint finding이 남아 `WARN`이지만 다른 실패는 없다. 변경된
+`filter_expr.cpp`, `main.cpp`, `main_window.cpp`는 actionable lint target 0건이다. 전체 lint는
+26개 target으로 보이며, 그중 clang-tidy `note:` 16줄은 ici가 별도 target으로 부풀려 세고 있다.
+이는 ici 엔진의 알려진 후속 보완 과제로 기록한다. `compile_db`는 40개 configuration의 production
+unit 14/14 `PASS`, `test`는 12/12 `PASS`이며 line/function/branch coverage는
+`93.3% / 96.7% / 82.4%`, `complexity`는 218개 대상에서 max 15 `PASS`, `sanitize`는 `PASS`다.
+HTML은 484,899 bytes이며 exact title `ici Verification Report — loglens`와 Zero-CDN을 확인했다.
+LogLens product version/release는 아직 pending이고, 더 넓은 L3 parser-pipeline 완료를 의미하지 않는다.
+
 2026-08-31에 canonical 1 GiB synthetic log(정확히 1,073,741,824 bytes, 1,000,000 records,
 SHA-256 `11186d3021e558c8ed5e33473198a6f9f281ca0605ae79739a928a87156435bb`)의 전체 sweep을
 완료했다. capacity `8192, 16384, 32768, 65536, 131072, 262144`를 각 3회, process timeout
