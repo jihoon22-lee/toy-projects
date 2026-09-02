@@ -58,8 +58,10 @@ struct FsNode {
 std::uint64_t aggregateSizes(FsNode& node);
 
 // Computes identity-aware physical storage facts independently for every
-// subtree. Hard-linked files contribute allocated bytes once per identity;
-// bytes are reclaimable only when every known hard-link reference is present.
+// subtree. These values describe non-directory entry data; a directory's own
+// filesystem metadata blocks are outside this contract. Hard-linked files
+// contribute allocated bytes once per identity; bytes are reclaimable only
+// when every known hard-link reference is present.
 void aggregateStorage(FsNode& node);
 
 // Iteratively sorts every level of children by size (descending), breaking

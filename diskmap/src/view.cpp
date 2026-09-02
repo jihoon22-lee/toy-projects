@@ -110,6 +110,11 @@ bool containsIssue(const std::vector<NodeIssue>& issues, NodeIssue issue) {
     return std::find(issues.begin(), issues.end(), issue) != issues.end();
 }
 
+bool metadataComplete(const FsNode& node) {
+    return node.metadata.complete
+           && (!node.followed || (node.has_target_metadata && node.target_metadata.complete));
+}
+
 bool logicalSubtreeKnown(const FsNode& root, bool scannerTotalsFiltered) {
     struct Frame {
         const FsNode* node;
@@ -121,12 +126,10 @@ bool logicalSubtreeKnown(const FsNode& root, bool scannerTotalsFiltered) {
     while (!stack.empty()) {
         Frame& frame = stack.back();
         const FsNode& node = *frame.node;
-        if (!node.complete || !node.logical_size_known || node.cycle_skipped
+        if (!node.complete || !metadataComplete(node) || !node.logical_size_known
+            || node.cycle_skipped
             || node.mount_boundary_skipped
             || isDepthLimitError(node)) {
-            return false;
-        }
-        if (node.followed && (!node.has_target_metadata || !node.target_metadata.complete)) {
             return false;
         }
         // ScanResult::totals_filtered is a global fact, not a view predicate.
@@ -141,6 +144,29 @@ bool logicalSubtreeKnown(const FsNode& root, bool scannerTotalsFiltered) {
         }
         const FsNode* child = &node.children[frame.nextChild++];
         stack.push_back(Frame{child});
+    }
+    return true;
+}
+
+bool physicalSubtreeKnown(const FsNode& root,
+                          SizeMetric metric,
+                          bool scannerTotalsFiltered) {
+    std::vector<const FsNode*> stack{&root};
+    while (!stack.empty()) {
+        const FsNode* node = stack.back();
+        stack.pop_back();
+        const bool valueKnown = metric == SizeMetric::Allocated
+                                    ? node->allocated_size_known
+                                    : node->reclaimable_size_known;
+        if (!node->complete || !metadataComplete(*node) || !valueKnown
+            || node->cycle_skipped || node->mount_boundary_skipped
+            || isDepthLimitError(*node)
+            || (scannerTotalsFiltered && node->is_dir)) {
+            return false;
+        }
+        for (const FsNode& child : node->children) {
+            stack.push_back(&child);
+        }
     }
     return true;
 }
@@ -209,6 +235,51 @@ bool matchesFilter(const FsNode& node, const ViewFilter& filter) {
     return matchesSearch(node, filter) && matchesType(node, filter)
            && matchesIssue(node, filter) && matchesSize(node, filter)
            && matchesAge(node, filter);
+}
+
+struct CandidateEvaluation {
+    bool matches = false;
+    bool complete = true;
+};
+
+CandidateEvaluation evaluateLargestCandidate(const FsNode& node,
+                                             const ViewFilter& filter,
+                                             const SortSpec& sort) {
+    if (!matchesSearch(node, filter) || !matchesType(node, filter)
+        || !matchesIssue(node, filter)) {
+        return {};
+    }
+
+    const std::optional<std::uint64_t> lowerSize = minimumSize(filter);
+    const std::optional<std::uint64_t> upperSize = maximumSize(filter);
+    if (lowerSize.has_value() || upperSize.has_value()) {
+        const MetricValue value = metricValue(node, filterMetric(filter),
+                                              filter.scanner_totals_filtered);
+        if (!value.known) {
+            return CandidateEvaluation{false, false};
+        }
+        if ((lowerSize.has_value() && value.bytes < *lowerSize)
+            || (upperSize.has_value() && value.bytes > *upperSize)) {
+            return {};
+        }
+    }
+
+    const std::optional<std::int64_t> lowerTime = modifiedAfter(filter);
+    const std::optional<std::int64_t> upperTime = modifiedBefore(filter);
+    if (lowerTime.has_value() || upperTime.has_value()) {
+        const FsMetadata* metadata = metadataForAge(node);
+        if (metadata == nullptr || !metadata->modified_time_known) {
+            return CandidateEvaluation{false, false};
+        }
+        if ((lowerTime.has_value() && metadata->modified_ns < *lowerTime)
+            || (upperTime.has_value() && metadata->modified_ns > *upperTime)) {
+            return {};
+        }
+    }
+
+    const MetricValue sortValue =
+        metricValue(node, sort.metric, filter.scanner_totals_filtered);
+    return CandidateEvaluation{true, sortValue.known};
 }
 
 int compareIdentity(const std::optional<FileIdentity>& left,
@@ -382,23 +453,25 @@ FsKind nodeKind(const FsNode& node) {
 MetricValue metricValue(const FsNode& node,
                         SizeMetric metric,
                         bool scannerTotalsFiltered) {
-    const bool structurallyKnown = node.complete && !node.cycle_skipped
-                                   && !node.mount_boundary_skipped
-                                   && !isDepthLimitError(node);
     switch (metric) {
     case SizeMetric::Logical:
         return MetricValue{
             node.size,
             node.logical_size_known && logicalSubtreeKnown(node, scannerTotalsFiltered),
+            true,
         };
     case SizeMetric::Allocated:
-        return MetricValue{node.allocated_size,
-                           structurallyKnown && node.allocated_size_known
-                               && !(scannerTotalsFiltered && node.is_dir)};
+        return MetricValue{
+            node.allocated_size,
+            physicalSubtreeKnown(node, metric, scannerTotalsFiltered),
+            false,
+        };
     case SizeMetric::Reclaimable:
-        return MetricValue{node.reclaimable_size,
-                           structurallyKnown && node.reclaimable_size_known
-                               && !(scannerTotalsFiltered && node.is_dir)};
+        return MetricValue{
+            node.reclaimable_size,
+            physicalSubtreeKnown(node, metric, scannerTotalsFiltered),
+            false,
+        };
     }
     return MetricValue{};
 }
@@ -491,9 +564,13 @@ LargestFilesResult largestFiles(const FsNode& node,
                 }
             }
             if (!current.is_dir) {
-                if (issue == NodeIssue::None && isRegularFileEntry(current)
-                    && matchesFilter(current, filter)) {
-                    considerLargestCandidate(result.files, current, limit, filter, sort);
+                if (issue == NodeIssue::None && isRegularFileEntry(current)) {
+                    const CandidateEvaluation evaluation =
+                        evaluateLargestCandidate(current, filter, sort);
+                    result.complete = result.complete && evaluation.complete;
+                    if (evaluation.matches) {
+                        considerLargestCandidate(result.files, current, limit, filter, sort);
+                    }
                 }
                 stack.pop_back();
                 continue;

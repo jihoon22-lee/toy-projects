@@ -23,9 +23,13 @@ enum class SizeMetric { Logical, Allocated, Reclaimable };
 struct MetricValue {
     std::uint64_t bytes = 0;
     bool known = false;
+    // Logical entry bytes are additive. Identity-aware physical metrics are
+    // deliberately marked non-additive because the same hard-linked identity
+    // can be present below more than one sibling subtree.
+    bool additive = true;
 
     bool operator==(const MetricValue& other) const {
-        return bytes == other.bytes && known == other.known;
+        return bytes == other.bytes && known == other.known && additive == other.additive;
     }
     bool operator!=(const MetricValue& other) const { return !(*this == other); }
 };
@@ -154,11 +158,13 @@ struct LargestFilesResult {
     bool complete = true;
 };
 
-// Returns at most limit regular-file nodes observed in the tree. Explicitly
-// unvisited cycle/mount/depth branches are not traversed. Valid physical
-// identities are deduplicated, both traversal and candidate memory are
-// bounded by tree depth and limit respectively, and
-// `complete` exposes whether the list is exhaustive.
+// Returns at most limit regular-file nodes observed in the tree. Incomplete,
+// metadata-unknown, errored, cycle, mount, and depth-pruned branches are not
+// traversed. Valid physical identities are deduplicated, both traversal and
+// candidate memory are bounded by tree depth and limit respectively, and
+// `complete` exposes whether the list is exhaustive. It is also false when an
+// observed candidate cannot be evaluated exactly against an active size/age
+// predicate or the selected sort metric.
 // Symlink entries are not regular files, even when followed; this prevents a
 // largest-files list from presenting a link alias as an additional file.
 // Filtering is applied to each file, while directories are traversed even if
