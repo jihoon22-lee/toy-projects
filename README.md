@@ -17,10 +17,10 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
   이때 native tests, released-ici verification, PR 및 exact-main CI/Pages, 문서와 limitations,
   재현 가능한 release assets를 모두 확인하고 기록한다.
 - candidate, pre-release, unreleased 상태는 stable release로 간주하지 않는다.
-- BuildScope `0.5.0`은 B3/B4/B5를 묶은 첫 usable release boundary로 release-ready 상태지만
-  아직 미출시다. 고정 annotated tag 대상, GitHub Release 생성, 최종 9개 공개 asset byte audit이
-  모두 끝나기 전까지 public stable release로 주장하지 않으며, 그 이후의 작업은 같은 수준의
-  checkpoint가 마련될 때까지 `Unreleased`에 쌓는다.
+- BuildScope `0.5.0`은 B3/B4/B5를 묶은 첫 usable release boundary이며 2026-09-02 KST에
+  [불변 GitHub Release](https://github.com/jihoon22-lee/toy-projects/releases/tag/buildscope-v0.5.0)로
+  공개됐다. 최종 publication evidence는 아래 절과 [BuildScope 문서](buildscope/README.md)에
+  기록하며, 그 이후의 작업은 같은 수준의 checkpoint가 마련될 때까지 `Unreleased`에 쌓는다.
 
 ## 프로젝트
 
@@ -28,7 +28,7 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 |---|---|---|
 | [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D2 cancellable/latest-generation scan complete (PR #28) · identity-safe scan · D3 next |
 | [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · L2 1 GiB benchmark merged in PR #26 · default capacity 8192 |
-| [buildscope](buildscope/) | compile DB explorer | 0.5.0 release-ready · fixed tag/GitHub Release pending |
+| [buildscope](buildscope/) | compile DB explorer | 0.5.0 stable · published 2026-09-02 · immutable GitHub Release |
 
 ### buildscope B0 hybrid skeleton — release-backed evidence
 
@@ -214,9 +214,10 @@ also succeeded on the same head.
 ### BuildScope 0.5.0 release evidence — reproducible packaging and guarded publication
 
 이 절은 구현된 B4를 배포 가능한 경계까지 연결한 BuildScope `0.5.0`의 release evidence를
-기록한다. 현재 상태는 release-ready이지만 미출시이며, 고정 annotated tag와 GitHub Release를
-실제로 만들고 최종 공개 asset을 독립적으로 검증하는 단계가 남아 있다. 이 문서는 그 완료를
-주장하지 않는다.
+기록한다. 2026-09-02 KST (`published_at` `2026-09-01T22:36:42Z`)에
+[GitHub Release](https://github.com/jihoon22-lee/toy-projects/releases/tag/buildscope-v0.5.0) ID
+`380863869`로 공개됐고 `immutable=true`, `draft=false`, `prerelease=false`다. 구현과 계약의
+상세는 [BuildScope README](buildscope/README.md)를 참조한다.
 `tools/build_standalone.py`는
 Python/CMake/ici 버전 surface를 일치시키고 고정 zip metadata·정렬된 payload·schema inventory로
 재현 가능한 `buildscope.pyz`를 만들며, direct test는 두 번의 산출물이 byte-identical인지와
@@ -272,8 +273,14 @@ PATCH가 모호하면 동일 release ID를 재조회해 exact final은 성공, e
 실패한 current-run-owned draft는 명시적 수동 검토를 위해 보존하며 remote draft를 자동 삭제하지
 않는다. empty-slot failure-report 단계는 create output ID가 유실돼도 paginated listing에서 exact
 current-run-owned zero-asset draft 중 expected body digest까지 일치하는 항목만 복구해 보고·보존한다.
-동등한 CI preflight와 exact-main 검증은 완료됐지만 tag-only workflow 자체는 아직 실행되지
-않았고, public tag/GitHub Release도 생성됐다고 주장하지 않는다.
+tag-only release workflow [run `33566464110`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33566464110)은
+exact `main` `fda8b5fb068b68c04c8c40e297812fbe79cee3da`에서 성공했다. annotated tag object
+`dcaaf83a5842f6d7fc6c47e3b212e26b9528c342`는 같은 exact `main` SHA로 peel됐고,
+[Merge Gate job `100050176790`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33565542193/job/100050176790)은
+[run `33565542193`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33565542193)에서 성공했다.
+최종 release body SHA-256은
+`9e58639c280655bf50b510ef676bb3e5f458cf2021c3c6c6b24c3b625945dd3b`이고, fresh download 기준
+정확히 `9`개 asset을 audit했다.
 
 현재 dependency-free CI helper discovery suite는 Python `3.10`/`3.14` 각각 `145/145` PASS이며,
 `actionlint`, Ruff check/format, mypy도 통과했다. 이는 현재 구현의 사전 검증 기록이며 새 PR, tag,
@@ -307,9 +314,11 @@ Zero-CDN이며 그 실행의 local artifact와 byte-match됐다.
 | loglens | [loglens/main](https://jihoon22-lee.github.io/toy-projects/loglens/main/) | 495,237 | `11e4c78eed957e237bcea8ec5ea64c3894751eafbe639c454e47ab0acd70df96` |
 
 `0.5.0`은 B3 include explanation, B4 semantic configuration diff, B5 hybrid packaging/integration을
-한데 묶는 첫 usable BuildScope release boundary로 release-ready지만 아직 미출시다. B5의 historical
-local candidate 기록이나 ici pin 변경만으로 stable release 또는 다음 버전 bump를 만들지 않으며,
-`0.5.0` 이후의 기능은 다음 comparable checkpoint가 마련될 때까지 `Unreleased`에 기록한다.
+한데 묶은 첫 usable BuildScope release boundary로, 위 GitHub Release를 통해 stable published됐다.
+최종 deep report와 9개 asset audit의 수치는 [CHANGELOG.md](CHANGELOG.md)와
+[ROADMAP.md](ROADMAP.md)에 고정했으며, B5의 historical local candidate 기록이나 ici pin 변경만으로
+다음 버전을 bump하지 않는다. `0.5.0` 이후의 기능은 다음 comparable checkpoint가 마련될 때까지
+`Unreleased`에 기록한다.
 
 ## 공통 구조 규칙
 

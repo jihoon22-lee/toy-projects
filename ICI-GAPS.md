@@ -13,7 +13,7 @@ Phase 5(Qt/CMake 어댑터) 설계의 입력이다. 각 항목은 **코드 위�
 버전 수치는 발견 당시의 historical evidence로 유지한다.
 
 
-## 현황 (2026-09-01)
+## 현황 (2026-09-02)
 
 **A-3 이 닫혔다.** ici 0.6.0 이 CMake/CTest 와 qmake/Make 빌드 어댑터를 갖췄고, 이 저장소의
 두 프로젝트가 그 실측 대상이었다 — `loglens` 는 CMake, `diskmap` 은 qmake 로 전환했다.
@@ -28,6 +28,14 @@ Phase 5(Qt/CMake 어댑터) 설계의 입력이다. 각 항목은 **코드 위�
 
 A-2 를 "수정됨" 으로 옮기지 않는 이유는 남은 거부 경로가 문서에서 사라지지 않게 하기
 위해서다. 실측 대상이 될 `Makefile` 전용 프로젝트가 없으므로 어댑터도 만들지 않았다.
+
+B-2의 BuildScope 외부 대조 보류 표기는 historical stale 상태였다. BuildScope B3의
+compiler-measured include explanation과 same-basename selection은 [PR #34](https://github.com/jihoon22-lee/toy-projects/pull/34)
+및 [CI run `33459294092`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33459294092)에서
+원격 검증됐고, 공개 `0.5.0` release의 최종 독립 audit [run `33566464110`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33566464110)에서도
+동일한 compiler-measured 경계를 재검사했다. 따라서 B-2의 BuildScope I3 target-by-target 외부
+대조는 완료로 기록한다. B-2 본문은 발견 당시 ici의 basename 휴리스틱 limitation을 historical
+재현 조건으로 보존한다.
 
 ### 어댑터 작업에서 새로 발견한 것
 
@@ -95,7 +103,7 @@ exact `main` `b87afba`의 [CI run `33419851128`](https://github.com/jihoon22-lee
 |---|---|---|
 | A-1 | C++ include 경로 설정 주입 | ✅ #57 |
 | B-1 | `cycle` 만 `source_dirs` 무시 | ✅ #62 |
-| B-2 | C++ include 해석이 basename 휴리스틱에 머묾 | ✅ #105 / v0.7.0 compiler-measured per configuration; BuildScope 외부 대조 pending |
+| B-2 | C++ include 해석이 basename 휴리스틱에 머묾 | ✅ #105 / v0.7.0 compiler-measured per configuration; BuildScope I3 target-by-target 외부 대조 complete (B3 PR #34, final release audit run `33566464110`) |
 | C-1 | 순수 C++ 프로젝트가 초록불 불가 | ✅ #68 |
 | C-2 | 스위트 상태와 콘솔 카운트 모순 | ✅ #70 |
 | C-3 | test 엔진이 실패 사유를 안 남김 | ✅ #70 |

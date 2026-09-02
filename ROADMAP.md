@@ -37,8 +37,9 @@
   native tests, released-ici verification, PR 및 exact-main CI/Pages, docs/limitations, 재현 가능한
   release assets를 모두 통과·기록해야 한다.
 - candidate, pre-release, unreleased는 stable로 세지 않는다.
-- BuildScope `0.5.0`은 B3/B4/B5를 함께 묶은 첫 usable release boundary로 유지한다. 그 이후 작업은
-  이에 상응하는 checkpoint가 생길 때까지 `Unreleased`에 누적한다.
+- BuildScope `0.5.0`은 B3/B4/B5를 함께 묶은 첫 usable release boundary이며 2026-09-02 KST에
+  stable release로 공개됐다. 그 이후 작업은 이에 상응하는 checkpoint가 생길 때까지
+  `Unreleased`에 누적한다.
 
 PR 제목과 요약은 plan code가 아니라 제품/기술 결과를 설명해야 한다. `T0`, `B1`, `D2` 같은 plan
 code는 본문이나 label의 보조 메타데이터로만 쓰며, 제목·요약의 유일하거나 주된 식별자로 삼지 않는다.
@@ -304,14 +305,14 @@ PR/remote/hosted evidence까지 완료됐다. PR #36는 `main`에
 같은 head에서 성공했다. 이 문단이 기록하는 B4 merge 시점에는 `0.5.0` product release artifact와
 B5 hybrid release integration이 pending/not started였다. 이후의 local B5 작업은 다음 절에 기록한다.
 
-## BuildScope 0.5.0 release readiness (remote acceptance complete; public release pending)
+## BuildScope 0.5.0 release evidence (published 2026-09-02; final audit complete)
 
 로드맵에서 B5로 추적한 release-boundary 작업은 B4 producer/consumer contract를 실제 배포
 경계까지 연결한다. standalone packaging, install layout, examples/tutorial, release-gate와
 공개 ici `v0.10.2` pin은 구현됐고, PR #38의 원격 검증 및 PR #39의 trusted `main` Pages
-검증까지 완료됐다. 따라서 `0.5.0`은 release-ready 상태지만 아직 미출시이며, 고정 annotated
-tag 대상, GitHub Release, 정확히 9개 공개 asset의 사후 byte/digest audit 전까지는 stable release로
-주장하지 않는다.
+검증까지 완료됐다. BuildScope `0.5.0`은 2026-09-02 KST (`published_at`
+`2026-09-01T22:36:42Z`)에 [GitHub Release](https://github.com/jihoon22-lee/toy-projects/releases/tag/buildscope-v0.5.0)
+ID `380863869`으로 공개됐고, `immutable=true`, `draft=false`, `prerelease=false`다.
 
 - [x] `buildscope/tools/build_standalone.py`가 Python/pyproject/CMake/ici version surface를
   일치시키고 fixed zip metadata와 정렬된 package/schema payload로 `buildscope.pyz`를 생성한다.
@@ -329,10 +330,11 @@ tag 대상, GitHub Release, 정확히 9개 공개 asset의 사후 byte/digest au
   local tool env에서 두 도구가 unavailable였던 기록은 별도의 local limitation으로 유지한다.
 - [x] PR #38 CI preflight에서 Python `3.10/3.14` 및 Qt `5/6` Release/CTest matrix,
   generated MOC/UIC/RCC path와 offscreen GUI smoke가 실행됐다. Tag-only release workflow의
-  실제 실행은 public release 단계에 남아 있다.
+  실제 실행도 [run `33566464110`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33566464110)에서
+  exact `main` `fda8b5fb068b68c04c8c40e297812fbe79cee3da`로 성공했다.
 - [x] PR #38 release contract가 wheel/pyz가 같은 snapshot을 만들고 native CLI가 두 결과를
-  소비하는 handoff와 Linux x86_64 bundle build를 검증했다. 실제 공개 asset 게시만 release
-  audit 단계에 남아 있다.
+  소비하는 handoff와 Linux x86_64 bundle build를 검증했다. 실제 공개 asset 게시와 final
+  byte/digest audit도 완료됐다.
 - [x] release payload checker가 exact nine-file inventory, exact-shebang/version pyz, pure wheel, sdist,
   Linux bundle, archive traversal/link/special-file 거부, schema-byte agreement, provenance,
   B5 deep JSON, Zero-CDN HTML을 함께 검증한다. ZIP은 `ZipFile` 이전에 bounded EOCD와
@@ -350,8 +352,26 @@ tag 대상, GitHub Release, 정확히 9개 공개 asset의 사후 byte/digest au
 - [x] GitHub immutable releases를 활성화하고, active tag ruleset
   [`buildscope-release-tags`](https://github.com/jihoon22-lee/toy-projects/rules/22049711)가
   `refs/tags/buildscope-v*`의 최초 생성은 허용하되 update/deletion을 empty bypass로 차단한다.
-- [ ] annotated `buildscope-v0.5.0` tag at exact green main, GitHub Release, 정확히 9개 asset의
+- [x] annotated `buildscope-v0.5.0` tag at exact green main, GitHub Release, 정확히 9개 asset의
   공개 업로드 및 독립적인 final byte/digest audit.
+
+**Final publication evidence (2026-09-02 KST):** annotated tag object
+`dcaaf83a5842f6d7fc6c47e3b212e26b9528c342`는 exact `main`
+`fda8b5fb068b68c04c8c40e297812fbe79cee3da`로 peel됐다. `Merge Gate`는 [job
+`100050176790`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33565542193/job/100050176790)으로
+[run `33565542193`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33565542193)에서 성공했다.
+최종 release body SHA-256은
+`9e58639c280655bf50b510ef676bb3e5f458cf2021c3c6c6b24c3b625945dd3b`이며, fresh download 기준
+정확히 `9`개 asset을 audit했다. public ici `v0.10.2`의 SHA-256 pin은
+`8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4`다.
+
+최종 deep report는 `WARN` (`11 PASS / 3 WARN / 0 FAIL / 0 ERROR / 0 SKIP`), tests `97/97`,
+line/function/branch coverage `93.5% / 99.0% / 77.2%`, compile DB `12/12` units·`27`
+configurations, Qt6 exact codegen (`MOC 1`, `UIC 1`, `RCC 1`), `clang-tidy`/`clazy` 각각
+exact `12` sources/configurations, TEM `4.95`였다. HTML은 `1,344,843` bytes, SHA-256
+`0a0b50f8e056ad561427fd2141dbd8649dd43fdf111b2d6e187c220b0a610ee9`, exact title
+`ici Verification Report — buildscope`,
+Zero-CDN이다. 구현 및 contract detail은 [BuildScope README](buildscope/README.md)에 둔다.
 
 ### Historical local ici evidence
 
@@ -390,7 +410,8 @@ fresh directory에 내려받은 manifest/sidecar, payload/archive, provenance, B
 위해 보존한다. empty-slot failure-report 단계는 create output ID가 유실돼도 paginated listing에서
 exact current-run-owned zero-asset draft 중 expected body digest까지 일치하는 항목을 복구해
 보고·보존만 수행한다. PR #38 CI의 동등한
-preflight contract는 원격 acceptance를 완료했지만 tag-only workflow 자체는 아직 실행되지 않았다. 예정된 asset 이름은
+preflight contract는 원격 acceptance를 완료했고, tag-only workflow도 [run `33566464110`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33566464110)에서
+성공해 공개 final audit까지 마쳤다. 최종 asset 이름은
 `buildscope.pyz`, `buildscope.pyz.sha256`,
 `buildscope-<version>-py3-none-any.whl`, `buildscope-<version>.tar.gz`,
 `buildscope-ici-deep.{json,html}`, `buildscope-provenance.json`,
@@ -436,11 +457,11 @@ Exact-main run `33549475034` 시점의 세 main report는 HTTP 200, `text/html`,
 | loglens | [loglens/main](https://jihoon22-lee.github.io/toy-projects/loglens/main/) | 495,237 | `11e4c78eed957e237bcea8ec5ea64c3894751eafbe639c454e47ab0acd70df96` |
 
 `0.5.0`은 include explanation, semantic configuration diff, hybrid packaging/integration을 묶은
-첫 usable BuildScope release boundary로 남긴다. 현재 remote integration, matrices, handoff,
-release contract, trusted main Pages와 guarded publication 구현은 기록됐지만, annotated tag와
-GitHub Release의 정확히 9개 final asset download/digest audit이 끝나기 전까지는 public stable
-release를 주장하지 않는다. 이후 기능과 CI/ici pin 작업은 다음 comparable checkpoint까지
-`Unreleased`에 쌓는다.
+첫 usable BuildScope release boundary이며, 위 GitHub Release로 2026-09-02 KST stable published됐다.
+annotated tag provenance, exact-main workflow, Merge Gate, 9개 asset final audit과 deep report
+수치는 위 final publication evidence에 고정했다. 이후 기능과 CI/ici pin 작업은 다음 comparable
+checkpoint까지 `Unreleased`에 쌓는다. 상세 contract는 [BuildScope README](buildscope/README.md)에서
+확인한다.
 
 ## 배경
 

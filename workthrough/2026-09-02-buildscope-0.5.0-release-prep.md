@@ -1,5 +1,8 @@
 # BuildScope 0.5.0 pre-tag release readiness
 
+> Historical pre-tag record. Publication subsequently completed; see
+> [Post-release closeout](#post-release-closeout-2026-09-02-kst).
+
 ## Overview
 
 This work records the release-readiness boundary for BuildScope `0.5.0`. The checkpoint combines
@@ -313,3 +316,32 @@ and the planned tag is exactly `buildscope-v0.5.0`. The ici `v0.10.2` checksum i
 dependency boundary, not a reason to bump BuildScope. The next BuildScope version must wait for a new
 cohesive user-facing checkpoint with its own full native, ici, CI/Pages, documentation, and
 reproducible-asset evidence.
+
+## Post-release closeout (2026-09-02 KST)
+
+The pre-tag statements above are intentionally time-scoped. The release gate subsequently completed
+successfully: the public [BuildScope 0.5.0 release](https://github.com/jihoon22-lee/toy-projects/releases/tag/buildscope-v0.5.0)
+has release ID `380863869`, `published_at=2026-09-01T22:36:42Z`, `draft=false`,
+`prerelease=false`, and `immutable=true`. The [BuildScope Release workflow run
+`33566464110`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33566464110) completed with
+`success` on a `push` event at exact main SHA
+`fda8b5fb068b68c04c8c40e297812fbe79cee3da`. Annotated tag object
+`dcaaf83a5842f6d7fc6c47e3b212e26b9528c342` peeled to that exact main commit. The final release-body
+SHA-256 is `9e58639c280655bf50b510ef676bb3e5f458cf2021c3c6c6b24c3b625945dd3b`.
+
+Merge Gate was job `100050176790` in run `33565542193`. GitHub immutable releases are enabled, and
+active ruleset [`buildscope-release-tags`](https://github.com/jihoon22-lee/toy-projects/rules/22049711)
+(`22049711`) blocks update and deletion for `refs/tags/buildscope-v*` with no bypass actor. Exactly
+nine release assets were fresh-downloaded and independently audited. The canonical
+[BuildScope README publication table](../buildscope/README.md#buildscope-050-publication-evidence-2026-09-02-kst)
+records every API-reported name, byte count, and SHA-256 digest.
+
+The final deep report used public ici `v0.10.2` (literal SHA-256
+`8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4`) and reported `Suite WARN`:
+`11 PASS / 3 WARN / 0 FAIL / 0 ERROR / 0 SKIP`, `97/97` tests, line/function/branch coverage
+`93.5% / 99.0% / 77.2%`, compile DB `12/12` production units across `27` configurations, lint
+`49` warnings, and TEM `4.95`. Qt6 code generation was exact for MOC `1`, UIC `1`, and RCC `1`;
+`clang-tidy` and `clazy` each checked exactly `12` sources/configurations. The Zero-CDN HTML is
+`1,344,843` bytes with SHA-256
+`0a0b50f8e056ad561427fd2141dbd8649dd43fdf111b2d6e187c220b0a610ee9`, exact title
+`ici Verification Report — buildscope`, and zero external resources.

@@ -10,6 +10,11 @@ BuildScope has two stages:
 The Python stage is offline and does not execute compiler commands. The native
 programs consume snapshots and diff reports, not a raw compilation database.
 
+The current stable release is [BuildScope 0.5.0](https://github.com/jihoon22-lee/toy-projects/releases/tag/buildscope-v0.5.0),
+published on 2026-09-02 KST. It is an immutable, non-draft, non-prerelease release with exactly
+nine independently audited assets; the canonical [README release table](../README.md#buildscope-050-publication-evidence-2026-09-02-kst)
+lists their API-reported sizes and SHA-256 digests.
+
 ## Prerequisites
 
 - Python 3.10 or newer
@@ -24,7 +29,7 @@ sample database for the producer.
 ## Produce a snapshot
 
 Set the repository and release paths once. Replace `release_root` with the
-directory containing the B5 release assets.
+directory containing the BuildScope 0.5.0 release assets.
 
 ```bash
 repo_root="$(git rev-parse --show-toplevel)"

@@ -1,11 +1,12 @@
 # BuildScope
 
-BuildScope 0.5.0 is the release-ready first usable checkpoint that combines include explanation,
+BuildScope 0.5.0 is the released first usable checkpoint that combines include explanation,
 semantic configuration diff, and reproducible hybrid packaging. Implementation, PR/remote CI,
 public ici `v0.10.2` integration, Python `3.10/3.14` and Qt `5/6` matrices, wheel/pyz/native
-handoff, release-contract acceptance, and trusted `main` Pages evidence are complete. The public
-annotated tag, GitHub Release, and final nine-asset digest audit are still pending, so this document
-does not claim a stable public release. B0 established the producer/consumer boundary:
+handoff, release-contract acceptance, trusted `main` Pages evidence, and the final public release
+audit are complete. The immutable [GitHub Release](https://github.com/jihoon22-lee/toy-projects/releases/tag/buildscope-v0.5.0)
+contains exactly the audited nine assets; the complete publication evidence is recorded below.
+B0 established the producer/consumer boundary:
 Python 3.10+ reads a `compile_commands.json` without executing its commands and emits a
 deterministic `buildscope.snapshot/v1` document; a C++20/Qt CLI and GUI validate and consume that
 document. B1 adds the Python compile-database normalization core and emits the additive
@@ -21,9 +22,8 @@ as a separate stable release. Semantic comparison of two raw compile databases i
 The implementation, native contract tests, PR/remote CI, sticky reports, hosted Pages evidence, and
 merged-main CI are complete on `main`. The release-boundary work tracked in the roadmap as B5 adds
 reproducible standalone packaging, installable native/docs/example assets, and a guarded release
-workflow contract; its CI preflight acceptance and trusted `main` Pages verification are complete,
-while the tag-only workflow, public release, and nine-asset post-release audit remain. Version
-`0.5.0` stays unchanged and unreleased until that boundary is executed.
+workflow contract; its CI preflight acceptance, trusted `main` Pages verification, public release,
+and nine-asset post-release audit are complete. Version `0.5.0` remains unchanged.
 
 ## B0 scope
 
@@ -57,8 +57,8 @@ the Python producer, while B2 presents the normalized view and retains the raw c
 B1 owns contract acceptance; B2 owns the normalized C++ model/UI transition and is complete. B3's
 include explanation is implemented and remotely verified in the historical `0.4.0` main candidate.
 B4's configuration diff implementation and PR/remote/hosted/merged-main evidence are recorded below;
-the `0.5.0` release-readiness implementation and remote acceptance are also complete; only the
-public release remains pending, and the ici I3 target-by-target comparison is complete and recorded
+the `0.5.0` release-readiness implementation and remote acceptance are also complete; the public
+release and final asset audit are complete, and the ici I3 target-by-target comparison is recorded
 at its current boundary.
 
 ## B1 compile-database normalization (`buildscope.snapshot/v2`)
@@ -479,14 +479,18 @@ with all 14 prerequisite jobs and `Merge Gate` successful; the PR-only publisher
 [Dependency Graph run `33488174425`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33488174425)
 also succeeded on the same head.
 
-## BuildScope 0.5.0 release readiness (remote acceptance complete; public release pending)
+## BuildScope 0.5.0 release readiness (historical pre-publication record)
+
+The contract and pending statements in this section are time-scoped to the pre-publication snapshot.
+The completed publication and final audit are recorded in the section below.
 
 The release-boundary work tracked in the roadmap as B5 connects the configuration-diff
 producer/consumer contract to a releasable, inspectable bundle. Local packaging and workflow
 implementation are complete, PR #38 accepted the remote integration/matrix/handoff/release gates,
-and PR #39 verified trusted `main` Pages publication. Version `0.5.0` remains release-ready but
-unreleased until the fixed annotated tag target, GitHub Release, and exact nine-asset final-byte audit
-complete. No public tag or Release is claimed by this document.
+and PR #39 verified trusted `main` Pages publication. At that pre-publication snapshot, version
+`0.5.0` remained release-ready but unreleased until the fixed annotated tag target, GitHub Release,
+and exact nine-asset final-byte audit completed. No public tag or Release was claimed by that
+snapshot.
 
 - `tools/build_standalone.py` validates the Python, pyproject, CMake, and ici version surfaces,
   writes a fixed-metadata zipapp containing the package and all four public schemas, and atomically
@@ -546,7 +550,10 @@ legs use public ici v0.10.2, pinned to literal SHA-256
 sidecar, literal hash, and downloaded bytes before executing the pyz from an absolute runner-temp
 path, and no ici source checkout/build remains in the workflow.
 
-### Release contract (accepted remotely; publication pending)
+### Release contract (historical pre-publication snapshot; accepted remotely)
+
+> The pending statements in this subsection are frozen pre-tag evidence and are superseded by the
+> publication section below.
 
 `buildscope-release.yml` runs only for a fixed annotated `buildscope-vX.Y.Z` tag, requires its peeled
 commit to equal exact `origin/main` with a successful `Merge Gate`, and checks all public version surfaces
@@ -646,6 +653,45 @@ publisher output:
 | BuildScope | [buildscope/main](https://jihoon22-lee.github.io/toy-projects/buildscope/main/) | 1,349,088 | `dd7ec9b49281875f812b9a9c6b4e18a028051936a37441f19d907098c05dcc65` |
 | diskmap | [diskmap/main](https://jihoon22-lee.github.io/toy-projects/diskmap/main/) | 339,929 | `1bd6ebdce2206e4538fb28c20c17f2d504f1a160e15f5d8d4e2923b15b399e65` |
 | loglens | [loglens/main](https://jihoon22-lee.github.io/toy-projects/loglens/main/) | 495,237 | `11e4c78eed957e237bcea8ec5ea64c3894751eafbe639c454e47ab0acd70df96` |
+
+## BuildScope 0.5.0 publication evidence (2026-09-02 KST)
+
+The public [BuildScope 0.5.0 release](https://github.com/jihoon22-lee/toy-projects/releases/tag/buildscope-v0.5.0)
+was published at `2026-09-01T22:36:42Z` (release ID `380863869`). Its tag is
+`buildscope-v0.5.0`, with `draft=false`, `prerelease=false`, and `immutable=true`. Workflow
+[run `33566464110`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33566464110) completed
+successfully on the `buildscope-v0.5.0` tag push at exact main SHA
+`fda8b5fb068b68c04c8c40e297812fbe79cee3da`. The annotated tag object
+`dcaaf83a5842f6d7fc6c47e3b212e26b9528c342` peels to that exact commit. The final release-body
+SHA-256 is `9e58639c280655bf50b510ef676bb3e5f458cf2021c3c6c6b24c3b625945dd3b`.
+
+The Merge Gate evidence is job `100050176790` in run
+`33565542193`. GitHub immutable releases are enabled, and active ruleset
+[`buildscope-release-tags`](https://github.com/jihoon22-lee/toy-projects/rules/22049711) (`22049711`)
+blocks update and deletion for `refs/tags/buildscope-v*` with no bypass actor. All nine assets were
+fresh-downloaded and independently audited; the API-reported names, sizes, and digests are:
+
+| Asset | Bytes | SHA-256 |
+|---|---:|---|
+| `buildscope-0.5.0-linux-x86_64.tar.gz` | 667672 | `sha256:b0a3ecaafc0b4951adb45e12f9249cf3b17ea7d847bc626df702301639631c83` |
+| `buildscope-0.5.0-py3-none-any.whl` | 63452 | `sha256:ee3b57bc1bc2f3e4c5b308a878845ce1e21c5659dfbc5870615dbef10955c3c1` |
+| `buildscope-0.5.0.tar.gz` | 147324 | `sha256:c6d8dcabb341b76e76ad661eda9c98453c3e40491b8f1ea4b9f133df5a20364c` |
+| `buildscope-ici-deep.html` | 1344843 | `sha256:0a0b50f8e056ad561427fd2141dbd8649dd43fdf111b2d6e187c220b0a610ee9` |
+| `buildscope-ici-deep.json` | 3012024 | `sha256:859da9c4371af12d4a58f56b49e8f7932c6946e6645e3acb123532eca6e855f6` |
+| `buildscope-provenance.json` | 704 | `sha256:abc08139ba1e826eb0671f3e2601dcd7fcaa2856b9e192f638612ac5d5ce7636` |
+| `buildscope.pyz` | 41619 | `sha256:0b55f2c6d4dac7d0cb0ac04ded62546768c335f136e4a9db7432748510e45149` |
+| `buildscope.pyz.sha256` | 81 | `sha256:cd891ca0ea7d50c22746a2817572db988b059ede0f28e2cffbe99e2f664424ea` |
+| `SHA256SUMS` | 737 | `sha256:87c44c5fd2c03f3613b5d600a469493e2a8e1a19ccc08f55c40866883820928e` |
+
+The final deep report uses public ici `v0.10.2` with literal SHA-256
+`8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4` and reports `Suite WARN`:
+`11 PASS / 3 WARN / 0 FAIL / 0 ERROR / 0 SKIP`, `97/97` tests, line/function/branch coverage
+`93.5% / 99.0% / 77.2%`, compile DB `12/12` production units across `27` configurations, lint
+`49` warnings, and TEM `4.95`. Qt6 code generation is exact for MOC `1`, UIC `1`, and RCC `1`;
+`clang-tidy` and `clazy` each checked exactly `12` sources/configurations. The deep HTML is
+`1,344,843` bytes with SHA-256
+`0a0b50f8e056ad561427fd2141dbd8649dd43fdf111b2d6e187c220b0a610ee9`, exact title
+`ici Verification Report — buildscope`, and zero external resources (Zero-CDN).
 
 ## Run without installing into the repository
 
