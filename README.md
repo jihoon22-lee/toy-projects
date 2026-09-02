@@ -21,12 +21,14 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
   [불변 GitHub Release](https://github.com/jihoon22-lee/toy-projects/releases/tag/buildscope-v0.5.0)로
   공개됐다. 최종 publication evidence는 아래 절과 [BuildScope 문서](buildscope/README.md)에
   기록하며, 그 이후의 작업은 같은 수준의 checkpoint가 마련될 때까지 `Unreleased`에 쌓는다.
+- `diskmap`은 현재 `0.1.0`/`Unreleased`의 로컬 explorer workbench milestone이다. 이 milestone은
+  PR, remote CI, `main`, Pages 또는 release evidence를 만들거나 주장하지 않는다.
 
 ## 프로젝트
 
 | 이름 | 설명 | 상태 |
 |---|---|---|
-| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D2 cancellable/latest-generation scan complete (PR #28) · D3 core projection merged (PR #45) · GUI explorer remains |
+| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D2 cancellable/latest-generation scan complete (PR #28) · D3 core projection merged (PR #45) · D3 explorer workbench complete locally (`0.1.0`/`Unreleased`) |
 | [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · L2 1 GiB benchmark merged in PR #26 · default capacity 8192 |
 | [buildscope](buildscope/) | compile DB explorer | 0.5.0 stable · published 2026-09-02 · immutable GitHub Release |
 
@@ -499,11 +501,23 @@ provenance, deterministic node key/issue, conjunctive search/type/size/age filte
 children와 largest-files의 안정적인 정렬을 제공한다. hard-link이 겹칠 수 있는 physical 값은
 non-additive 범위를 보존하므로 형제 subtree를 합산하지 않는다.
 
-이는 D3 전체 완료를 뜻하지 않는다. Qt treemap/table, breadcrumb, search/filter/largest-files
-화면, unknown/incomplete 시각화, rescan·selection 유지 UX와 회귀 테스트는 다음 GUI slice로
-남아 있다. D4~D7 cleanup/trash/snapshot 작업도 아직 시작하지 않았으며, 이 core slice만으로
-제품 버전을 올리거나 release하지 않는다. 상세한 native/ici 수치는
-[workthrough 기록](workthrough/2026-09-02-diskmap-view-projection.md)에 보존한다.
+이 문단은 PR #45 core-only 병합 시점의 historical snapshot이다. 당시 남아 있던 GUI 범위는
+아래 local explorer workbench milestone에서 구현됐고, 상세한 core native/ici 수치는
+[기존 workthrough 기록](workthrough/2026-09-02-diskmap-view-projection.md)에 보존한다.
+
+### diskmap D3 explorer workbench — local GUI milestone (2026-09-02)
+
+`feat/diskmap-explorer-ui`는 shared immutable scan document와 `NodeKey`를 기준으로 treemap,
+sortable table, accessible breadcrumb를 연결했다. 두 화면은 current root, filter, metric을
+공유하며 table은 recursive largest-files projection도 제공한다. Search와 type/size/age/state
+filter, logical/allocated/reclaimable 설명, uncertainty 표시, rescan 시 path/selection 복원,
+stale generation 차단과 worker lifetime 보호까지 포함한다.
+
+Qt 5.15.18/6.10.2 clean qmake(`-Werror`)와 native target `11/11`이 통과했다. Public ici
+`v0.10.2` deep no-cache 결과는 `10 PASS / 2 WARN / 0 FAIL / 0 ERROR / 2 SKIP`, TEM `4.95`,
+coverage `96.1% / 99.1% / 83.4%`다. 알려진 WARN과 정확한 asset/HTML provenance는
+[workthrough 기록](workthrough/2026-09-02-diskmap-explorer-workbench.md)에 보존한다.
+DiskMap은 계속 `0.1.0`/`Unreleased`이며 D4~D7 cleanup/trash/snapshot은 후속 범위다.
 
 ### GUI 는 빌드되고 테스트된다
 
@@ -770,8 +784,10 @@ background/Tail N 변경에 대한 것이며, 1 GiB benchmark는 PR26 병합과 
 ### Qt 셸 테스트 현황
 
 GUI는 헤드리스 QtTest와 실제 fixture 파일을 사용해 상태 전이를 검증한다. `loglens`는
-Qt5/Qt6 CMake/CTest에서 같은 12개 CTest target을 실행했고, `diskmap`의 내비게이션 셸도
-T0-4에서 완료했다. `buildscope` B2는 Qt5/Qt6 CMake/CTest에서 각각 6/6을 통과했다. T0-5의
+Qt5/Qt6 CMake/CTest에서 같은 12개 CTest target을 실행했고, `diskmap`의 explorer workbench는
+현재 native qmake target `11/11`을 통과했다. MainWindow는 29개, TreemapWidget은 12개,
+NodeTableModel은 11개의 focused QtTest case를 가진다. `buildscope` B2는 Qt5/Qt6 CMake/CTest에서
+각각 6/6을 통과했다. T0-5의
 CI matrix는 GUI 프로젝트를 Qt5와 Qt6로 각각 빌드·native test·실제 headless smoke까지
 실행한다.
 
@@ -779,10 +795,11 @@ CI matrix는 GUI 프로젝트를 Qt5와 Qt6로 각각 빌드·native test·실�
 |---|---|
 | `loglens/src/gui/log_model.cpp` | `QAbstractItemModelTester` 로 검증 |
 | `loglens/src/gui/log_load_worker.cpp` | `test_log_load_worker` — 전용 QThread, 512-record ACK backpressure, stale job/sequence, Tail N line number, invalid source와 rotation |
-| `diskmap/src/gui/treemap_widget.cpp` | `QSignalSpy` 로 검증 |
+| `diskmap/src/gui/treemap_widget.cpp` | `QSignalSpy` 로 검증 — treemap activation/hover/uncertainty (12 tests) |
 | `loglens/src/gui/main_window.cpp` | `test_main_window` — Tail N/From start, open/growth/truncation, retryable missing/reappear, follow stop/resume, search/filter during load, stale sequence와 status |
 | `loglens/src/gui/timeline_widget.cpp` | `test_main_window` — empty/populated paint branch |
-| `diskmap/src/gui/main_window.cpp` | `test_main_window` — scan, breadcrumb, descend/up, leaf no-op |
+| `diskmap/src/gui/main_window.cpp` | `test_main_window` — scan, filters, metric/largest-files, navigation, rescan/selection/generation/freeze (29 tests) |
+| `diskmap/src/gui/node_table_model.cpp` | `test_node_table_model` — shared document, keyed rows, sorting, filters, knownness and largest-files (11 tests) |
 | `buildscope/src/core/compilation_model.cpp` | `test_compilation_model` — normalized grouping, roles, v1 projection, status aggregation, entry view, JSON argv rendering |
 | `buildscope/src/gui/main_window.cpp` | `test_main_window` — v2 tree/detail population, raw-vs-JSON command view, status/source/define filters, malformed-input location |
 
