@@ -628,6 +628,19 @@ batch를 읽거나 발행하지 않는다. 새 파일을 열면 thread-safe job 
 구조화된 filter와 대소문자 구분 없는 raw-text search는 worker가 계속 batch를 보내는 중에도
 GUI thread에서 안전하게 바꿀 수 있으며, timeline 갱신은 debounce된다.
 
+### loglens filter contract
+
+구조화된 filter는 `level >= WARN`, `source == api`, `source ~ gateway`,
+`message ~ "request timeout"`, `message !~ "health"`와 `AND`/`OR`/`NOT`/괄호 조합을
+지원한다. `~`와 `!~`는 정규식이 아닌 대소문자 구분 없는 literal substring 연산이다.
+따옴표 안에서는 `\"`와 `\\`만 escape로 해석하며, 나머지 UTF-8 바이트는 그대로 보존한다.
+
+한 query는 입력 4,096 bytes, AST 256 nodes, decoded literal 1,024 bytes, nesting depth 64로
+제한된다. malformed 또는 제한 초과 query는 `ParseError::position`과 새
+`ParseError::end`가 가리키는 UTF-8 입력의 half-open byte range 및 deterministic message로
+거부된다. GUI filter 상태도 이 byte range를 표시하며, 이전에 적용된 정상 filter 화면은
+오류가 나도 유지한다. CLI도 같은 `[begin,end)` byte range를 stderr에 출력한다.
+
 2026-08-31에 canonical 1 GiB synthetic log(정확히 1,073,741,824 bytes, 1,000,000 records,
 SHA-256 `11186d3021e558c8ed5e33473198a6f9f281ca0605ae79739a928a87156435bb`)의 전체 sweep을
 완료했다. capacity `8192, 16384, 32768, 65536, 131072, 262144`를 각 3회, process timeout

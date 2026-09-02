@@ -389,7 +389,19 @@ L3 parser/filter와 L6 release 완료 조건은 이 결정으로 닫히지 않�
 - [ ] malformed line을 유실하지 않고 parse error metadata와 raw를 보존한다.
 - [ ] timestamp timezone/precision과 missing timestamp 정책을 정의한다.
 - [ ] filter AST에 syntax diagnostic range와 saved query를 추가한다.
-- [ ] regex catastrophic input에 timeout/limit 또는 안전 정책을 둔다.
+- [x] regex catastrophic input에 timeout/limit 또는 안전 정책을 둔다.
+  - filter 언어는 regex를 실행하지 않고 `~`/`!~`를 bounded literal substring으로 고정한다.
+
+#### L3 filter diagnostics slice — bounded recursive parser (2026-09-02)
+
+- [x] 기존 recursive-descent filter에 4,096-byte query, 256-node AST, 1,024-byte decoded
+  literal, depth 64 bounds를 적용하고, oversized/unknown/trailing/invalid syntax를
+  deterministic message로 거부한다.
+- [x] `ParseError::position`을 기존 시작 offset API로 유지하면서 `[position, end)` UTF-8
+  input byte range를 추가했다. quoted value의 `\\"`/`\\\\`만 해석하고 나머지 bytes는 보존하며,
+  `~`/`!~` literal substring 의미론과 기존 precedence를 유지한다.
+- [ ] saved query, source-profile parser, malformed log-line metadata와 나머지 L3 contract는
+  후속 slice에서 다룬다.
 
 ### L4. 실제 사용되는 highlight와 triage
 

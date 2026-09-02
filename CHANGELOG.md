@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### LogLens filter diagnostics and bounds
+
+- Hardened the recursive-descent filter parser with deterministic byte-based diagnostics. `ParseError::position`
+  remains the start offset for existing callers, and the new `ParseError::end` completes a half-open
+  `[position, end)` range; the GUI and CLI render the range in filter errors. The appended field keeps
+  existing `position`/`message` aggregate initialization source-compatible.
+- Added bounded filter queries (4,096 input bytes, 256 AST nodes, 1,024 decoded bytes per literal) while
+  retaining the 64-level nesting cap. Oversized queries, literals, and ASTs now fail before unbounded
+  parser state can grow, with stable messages and ranges.
+- Quoted filter values now decode only `\\"` and `\\\\`. Unsupported escapes and unterminated quotes are
+  rejected, while UTF-8 input bytes remain byte-preserving. `~` and `!~` continue to perform literal,
+  case-insensitive substring matching rather than regular-expression matching.
+
 ### Roadmap status reconciliation
 
 - Marked the master-plan T0 checkpoint complete after the merged Qt shell, native/ici, Qt5/Qt6,
