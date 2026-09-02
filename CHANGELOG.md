@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Sticky PR report comment cardinality
+
+- The pull-request report verifier now enumerates every paginated PR comment and fails closed unless
+  the exact `<!-- ici-report -->` marker occurs once in exactly one comment. Duplicate comments or
+  repeated markers are reported as a contract failure and are never deleted automatically. The
+  ordinary CI gate remains pinned to released ici `v0.10.2` with its existing SHA-256.
+
 ### LogLens filter diagnostics and bounds
 
 - Hardened the recursive-descent filter parser with deterministic byte-based diagnostics. `ParseError::position`
