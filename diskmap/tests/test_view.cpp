@@ -123,9 +123,11 @@ int main() {
         CHECK_EQ(diskmap::metricValue(root, SizeMetric::Logical),
                  (MetricValue{8193, true}));
         CHECK_EQ(diskmap::metricValue(root, SizeMetric::Allocated),
-                 (MetricValue{4096, true}));
+                 (MetricValue{4096, true, false}));
         CHECK_EQ(diskmap::metricValue(root, SizeMetric::Reclaimable),
-                 (MetricValue{4096, true}));
+                 (MetricValue{4096, true, false}));
+        CHECK(diskmap::metricValue(root, SizeMetric::Logical).additive);
+        CHECK(!diskmap::metricValue(root, SizeMetric::Allocated).additive);
 
         root.children.front().complete = false;
         CHECK_EQ(diskmap::metricValue(root, SizeMetric::Logical),
@@ -201,9 +203,28 @@ int main() {
         partial.reclaimable_size_known = true;
         partial.complete = false;
         CHECK_EQ(diskmap::metricValue(partial, SizeMetric::Allocated),
-                 (MetricValue{4096, false}));
+                 (MetricValue{4096, false, false}));
         CHECK_EQ(diskmap::metricValue(partial, SizeMetric::Reclaimable),
-                 (MetricValue{2048, false}));
+                 (MetricValue{2048, false, false}));
+    }
+
+    // View metric validation walks current descendants instead of trusting a
+    // stale aggregate known bit after the public value tree is modified.
+    {
+        FsNode root = makeDirectory("stale", "/tmp/stale", {
+            makeFile("child", "/tmp/stale/child", 12, 4096, true),
+        });
+        diskmap::aggregateSizes(root);
+        diskmap::aggregateStorage(root);
+        CHECK(diskmap::metricValue(root, SizeMetric::Allocated).known);
+        root.children.front().complete = false;
+        CHECK(!diskmap::metricValue(root, SizeMetric::Allocated).known);
+        CHECK(!diskmap::metricValue(root, SizeMetric::Reclaimable).known);
+
+        root.children.front().complete = true;
+        root.children.front().metadata.complete = false;
+        CHECK(!diskmap::metricValue(root, SizeMetric::Logical).known);
+        CHECK(!diskmap::metricValue(root, SizeMetric::Allocated).known);
     }
 
     // --- deterministic normalized NodeKey and optional identity ---------
@@ -515,6 +536,50 @@ int main() {
         if (result.files.size() == 1) {
             CHECK_EQ(result.files.front()->name, std::string("kept.bin"));
         }
+    }
+
+    // Unknown values cannot silently produce an "exhaustive" largest-files
+    // result when they affect filtering or ordering. A decisive text mismatch
+    // remains a complete exclusion because later conjunctive fields are moot.
+    {
+        FsNode root = makeDirectory("unknowns", "/tmp/unknowns", {
+            makeFile("selected", "/tmp/unknowns/selected", 20, 20, true, 20, true),
+            makeFile("unknown-size", "/tmp/unknowns/unknown-size", 30),
+            makeFile("unknown-age", "/tmp/unknowns/unknown-age", 10, 10, true, 0, false),
+        });
+        diskmap::aggregateSizes(root);
+        diskmap::aggregateStorage(root);
+
+        SortSpec physicalSort;
+        physicalSort.metric = SizeMetric::Allocated;
+        diskmap::LargestFilesResult result =
+            diskmap::largestFiles(root, 10, {}, physicalSort);
+        CHECK(!result.complete);
+        CHECK_EQ(result.files.size(), static_cast<std::size_t>(3));
+        CHECK_EQ(result.files.front()->name, std::string("selected"));
+
+        ViewFilter sizeBound;
+        sizeBound.metric = SizeMetric::Allocated;
+        sizeBound.min_size = 0;
+        result = diskmap::largestFiles(root, 10, sizeBound);
+        CHECK(!result.complete);
+        CHECK_EQ(result.files.size(), static_cast<std::size_t>(2));
+        CHECK(findByName(result.files, "unknown-size") == nullptr);
+
+        ViewFilter ageBound;
+        ageBound.modified_after_ns = 0;
+        result = diskmap::largestFiles(root, 10, ageBound);
+        CHECK(!result.complete);
+        CHECK_EQ(result.files.size(), static_cast<std::size_t>(2));
+        CHECK(findByName(result.files, "unknown-age") == nullptr);
+
+        ViewFilter decisiveSearch;
+        decisiveSearch.search = "selected";
+        decisiveSearch.modified_after_ns = 0;
+        result = diskmap::largestFiles(root, 10, decisiveSearch);
+        CHECK(result.complete);
+        CHECK_EQ(result.files.size(), static_cast<std::size_t>(1));
+        CHECK_EQ(result.files.front()->name, std::string("selected"));
     }
 
     // Hard-linked entries are one logical candidate. The representative is
