@@ -494,7 +494,7 @@ exact-main/Merge Gate evidence까지 완료됐다. 따라서 T0 checkpoint는 �
 | 프로젝트 | 빌드 | 검증 | Qt 테스트 |
 |---|---|---|---|
 | `loglens` | CMake · Qt5/Qt6 | L2 benchmark PR #26 merged · main Qt5/Qt6 sweep green · default 8192 | `QAbstractItemModelTester` + MainWindow QtTest |
-| `diskmap` | qmake · Qt5/Qt6 | D1 Slice 2 merged · D2 fully complete · D3 explorer workbench complete locally on `feat/diskmap-explorer-ui` (`0.1.0`/`Unreleased`; PR/remote/main evidence pending) | `QSignalSpy` + 11 native qmake targets + MainWindow/treemap/table QtTest |
+| `diskmap` | qmake · Qt5/Qt6 | D1/D2 complete · D3 explorer workbench merged by PR #46 and exact-main run green · `0.1.0`/`Unreleased` | `QSignalSpy` + 11 native qmake targets + MainWindow/treemap/table QtTest |
 | `ici/viewer` | CMake · Qt5/Qt6 | PASS · TEM 4.86 | MainWindow QtTest 4/4 |
 
 T0-5의 `discover`는 GUI 프로젝트 한 항목을 Qt5·Qt6 두 항목으로 확장한다. 따라서 현재
@@ -683,11 +683,12 @@ combined `summary.json`은 3567 bytes이며 SHA-256은
 `26391797763aed17fedb04e2a4aeb5cf8238ec4d5b5d040d473d32a513369251`이다. 이는 toy-projects
 `main`의 기능 병합 및 검증 기록이며, 별도 제품 버전 release를 의미하지 않는다. 따라서 D2는
 local/native/ici, PR CI, sticky report, Pages와 merged-main benchmark까지 모두 완료됐다. D3의
-Qt-free core projection은 아래 PR #45 historical evidence와 함께 병합됐고, GUI workbench는
-현재 `feat/diskmap-explorer-ui`에서 local implementation이 완료됐다. 다음 경계는 이 local
-milestone의 PR/remote/main verification이며, DiskMap product version은 아직 `0.1.0`/`Unreleased`다.
+Qt-free core projection은 PR #45로, GUI workbench는 PR #46으로 병합됐고 PR/exact-main
+verification도 완료됐다. DiskMap product version은 여전히 `0.1.0`/`Unreleased`다. exact
+PR/main artifact·Pages 표는 [D3 explorer workthrough](workthrough/2026-09-02-diskmap-explorer-workbench.md)에
+중앙화했다.
 
-### 완료(로컬): DiskMap D3 explorer UX — explorer workbench (2026-09-02)
+### 완료: DiskMap D3 explorer UX — merged GUI evidence (2026-09-02)
 
 PR #45는 merge commit `0688e44fa99d1ec69aba0c9bf9995a4a857fea9e`로 `main`에 병합됐다. PR
 workflow [`33607634973`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33607634973)와
@@ -698,10 +699,17 @@ metric projection, deterministic node key/issue, conjunctive filter, visible
 children/largest-files ordering과 incomplete·cycle·depth·mount·scanner-filtered provenance를
 제공하며, PR #45의 merge/remote/main evidence는 해당 시점의 기록으로 보존한다.
 
-현재 `feat/diskmap-explorer-ui` local milestone은 그 projection을 실제 GUI workbench로 연결했다.
+역사적 `feat/diskmap-explorer-ui` 구현은 그 projection을 실제 GUI workbench로 연결했다.
 `MainWindow`, treemap, sortable table은 하나의 shared immutable scan document를 읽고, 모든
 활성화·breadcrumb 이동은 `NodeKey`로 라우팅된다. 두 view는 current root, filters, metric을
 공유하고 table은 recursive largest-files projection도 제공한다.
+
+[PR #46](https://github.com/jihoon22-lee/toy-projects/pull/46)은 이 GUI 구현을
+`0cdd63953179a1dc885ed660e955b399d54243b7`로 `main`에 병합했다. PR workflow
+[`33627322683`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33627322683)와 exact-main
+workflow [`33628585439`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33628585439)는
+모두 green이며, PR sticky marker/links와 PR/main artifact·Pages byte-identical 검증은
+[canonical D3 workthrough](workthrough/2026-09-02-diskmap-explorer-workbench.md)에 기록했다.
 
 GUI는 name/path search, type/size/age/state filters, logical/allocated/reclaimable metric 선택,
 largest-files view를 제공한다. metric 설명은 logical entry bytes, identity별 allocated bytes,
@@ -728,8 +736,8 @@ Zero-CDN checker가 통과했다.
 지원되지 않는다. heuristic duplicate WARN은 `6.42%`/`34` groups로 ici I4-3의 robust
 duplicate backlog에 연결된다.
 false-positive clone shape를 없애려고 product code를 contort하지 않는다. DiskMap은 `0.1.0` /
-`Unreleased`를 유지하며, 이 local milestone에는 새 PR·remote CI·`main`·Pages·release evidence가
-없다. D4~D7 cleanup/trash/snapshot은 별도 후속 범위다.
+`Unreleased`를 유지하며, D1~D3 구현과 PR/exact-main evidence는 완료됐다. D4~D7
+cleanup/trash/snapshot/release는 pending 범위다.
 
 ### 4단계 — 여유가 되면
 

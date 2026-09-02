@@ -1,17 +1,18 @@
-# DiskMap explorer workbench local GUI milestone
+# DiskMap explorer workbench — merged PR and main evidence
 
 ## Overview
 
-The local `feat/diskmap-explorer-ui` branch completes the DiskMap explorer GUI
+The historical `feat/diskmap-explorer-ui` branch completed the DiskMap explorer GUI
 slice on top of the previously recorded D3 Qt-free projection. `MainWindow`,
 the treemap, and the sortable table now consume one shared immutable scan
 document and use `NodeKey` as their stable navigation identity. This gives the
 user one coherent workbench for navigating, filtering, comparing size
 meanings, and preserving selection while a scan is refreshed.
 
-This is a local implementation milestone only. It keeps DiskMap at `0.1.0`
-under `Unreleased`; it does not claim a new PR, remote CI run, `main` merge,
-Pages publication, or product release.
+The implementation was merged by [PR #46](https://github.com/jihoon22-lee/toy-projects/pull/46)
+as `main` commit `0cdd63953179a1dc885ed660e955b399d54243b7`. The feature branch
+and its local worktree were deleted after the merge. DiskMap remains `0.1.0`
+under `Unreleased`; this evidence does not create a product release.
 
 ## Context
 
@@ -150,6 +151,32 @@ title: ici Verification Report — diskmap
 exact-title / Zero-CDN checker: PASS
 ```
 
+### PR #46 and exact-main publication evidence
+
+PR workflow [run `33627322683`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33627322683)
+was green across the required matrix, including public ici `v0.10.2`. Its sticky
+comment has exactly one marker and exactly three project report links. Each PR
+report artifact is byte-identical to its corresponding Pages response.
+
+Exact-main workflow [run `33628585439`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33628585439)
+was also green. Each main artifact is byte-identical to Pages; all responses were
+HTTP `200` with `text/html; charset=utf-8`, the exact project title, and Zero-CDN
+resources.
+
+The complete PR/main artifact and Pages byte table is kept here as the canonical
+DiskMap D3 publication record:
+
+| Project | PR report (Pages path; bytes / SHA-256) | Main report (Pages path; bytes / SHA-256) | Exact title |
+|---|---|---|---|
+| diskmap | [diskmap/pr/46](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/46/) · 545,766 / `37fbf785ce2020a4ba95f41c61f737b52b6bc6a42fa31c5fd4487e9c2fe8e211` | [diskmap/main](https://jihoon22-lee.github.io/toy-projects/diskmap/main/) · 545,766 / `5966f59e747c278a0132758fe1b3958754330a4cf73a7ef86000ac89b3707376` | `ici Verification Report — diskmap` |
+| buildscope | [buildscope/pr/46](https://jihoon22-lee.github.io/toy-projects/buildscope/pr/46/) · 1,345,473 / `cc9f6f9091d2f054d7935481a643fa0d0e139100fa43b44ab8c51a112d4652cb` | [buildscope/main](https://jihoon22-lee.github.io/toy-projects/buildscope/main/) · 1,345,473 / `a62db54f81025dd8a19c008aedf57a830fb5dafdd3def2ff0510576b92f39ba7` | `ici Verification Report — buildscope` |
+| loglens | [loglens/pr/46](https://jihoon22-lee.github.io/toy-projects/loglens/pr/46/) · 487,150 / `eb1ae8fc0fda455b1918bf3ebd29f2b73ae5a5e6eacb503dd85cce887175febb` | [loglens/main](https://jihoon22-lee.github.io/toy-projects/loglens/main/) · 487,155 / `95db580822bf92e1f07038ee1728fbcb27b5d015c26e29a9462e7dcfe8212b9c` | `ici Verification Report — loglens` |
+
+This closes D3's implementation, PR, and exact-main evidence. It does not bump
+DiskMap's `0.1.0`/`Unreleased` status or imply a release; D4 cleanup staging,
+D5 trash/audit, D6 snapshot/duplicate candidates, and D7 release criteria remain
+pending.
+
 ### Known limitations
 
 - Local `clang-tidy` and `clazy` are unavailable.
@@ -158,13 +185,11 @@ exact-title / Zero-CDN checker: PASS
 - The heuristic duplicate check warns at `6.42%` across `34` groups. This is
   tracked with ici I4-3's robust duplicate backlog; false-positive clone shapes
   are not a reason to contort the DiskMap product code.
-- This evidence is local to `feat/diskmap-explorer-ui`. PR/remote/main/Pages
-  verification and a release decision remain future work.
+- The local tool limitation and heuristic duplicate warning remain historical
+  limitations of the D3 evidence; they do not reopen the merged PR/main result.
 
 ## Next Steps
 
-- Submit and verify the GUI milestone through the repository's PR and exact
-  `main` quality gates.
 - Keep DiskMap `0.1.0`/`Unreleased` until a comparable release checkpoint is
   complete.
 - Continue with D4 cleanup staging, then D5 trash/audit and D6 snapshot/

@@ -21,14 +21,16 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
   [불변 GitHub Release](https://github.com/jihoon22-lee/toy-projects/releases/tag/buildscope-v0.5.0)로
   공개됐다. 최종 publication evidence는 아래 절과 [BuildScope 문서](buildscope/README.md)에
   기록하며, 그 이후의 작업은 같은 수준의 checkpoint가 마련될 때까지 `Unreleased`에 쌓는다.
-- `diskmap`은 현재 `0.1.0`/`Unreleased`의 로컬 explorer workbench milestone이다. 이 milestone은
-  PR, remote CI, `main`, Pages 또는 release evidence를 만들거나 주장하지 않는다.
+- `diskmap`은 `0.1.0`/`Unreleased`를 유지하는 explorer workbench다. D1 identity-safe scan,
+  D2 cancellation/rescan, D3 explorer UX의 구현과 PR/exact-main evidence는 완료됐고, D4~D7
+  cleanup/trash/snapshot/release 범위는 아직 pending이다. D3의 exact PR/main artifact·Pages
+  표는 [workthrough](workthrough/2026-09-02-diskmap-explorer-workbench.md)에 모아 둔다.
 
 ## 프로젝트
 
 | 이름 | 설명 | 상태 |
 |---|---|---|
-| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D2 cancellable/latest-generation scan complete (PR #28) · D3 core projection merged (PR #45) · D3 explorer workbench complete locally (`0.1.0`/`Unreleased`) |
+| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D1/D2 complete · D3 explorer workbench merged (PR #46; exact-main green) · `0.1.0`/`Unreleased` |
 | [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · L2 1 GiB benchmark merged in PR #26 · default capacity 8192 |
 | [buildscope](buildscope/) | compile DB explorer | 0.5.0 stable · published 2026-09-02 · immutable GitHub Release |
 
@@ -501,23 +503,32 @@ provenance, deterministic node key/issue, conjunctive search/type/size/age filte
 children와 largest-files의 안정적인 정렬을 제공한다. hard-link이 겹칠 수 있는 physical 값은
 non-additive 범위를 보존하므로 형제 subtree를 합산하지 않는다.
 
-이 문단은 PR #45 core-only 병합 시점의 historical snapshot이다. 당시 남아 있던 GUI 범위는
-아래 local explorer workbench milestone에서 구현됐고, 상세한 core native/ici 수치는
+이 문단은 PR #45 core-only 병합 시점의 historical snapshot이다. 이후 GUI 범위도
+PR #46으로 병합됐고, 상세한 core native/ici 수치는
 [기존 workthrough 기록](workthrough/2026-09-02-diskmap-view-projection.md)에 보존한다.
 
-### diskmap D3 explorer workbench — local GUI milestone (2026-09-02)
+### diskmap D3 explorer workbench — merged GUI evidence (2026-09-02)
 
-`feat/diskmap-explorer-ui`는 shared immutable scan document와 `NodeKey`를 기준으로 treemap,
+역사적 `feat/diskmap-explorer-ui` 구현은 shared immutable scan document와 `NodeKey`를 기준으로 treemap,
 sortable table, accessible breadcrumb를 연결했다. 두 화면은 current root, filter, metric을
 공유하며 table은 recursive largest-files projection도 제공한다. Search와 type/size/age/state
 filter, logical/allocated/reclaimable 설명, uncertainty 표시, rescan 시 path/selection 복원,
 stale generation 차단과 worker lifetime 보호까지 포함한다.
 
+[PR #46](https://github.com/jihoon22-lee/toy-projects/pull/46)은 이 D3 GUI 구현을
+`0cdd63953179a1dc885ed660e955b399d54243b7`로 `main`에 병합했다. PR run
+[`33627322683`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33627322683)와 exact-main
+run [`33628585439`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33628585439)는
+모두 green이며, sticky marker/link 수와 PR/main artifact·Pages byte-identical 결과를 포함한
+정확한 HTML 표는 [D3 explorer workthrough](workthrough/2026-09-02-diskmap-explorer-workbench.md)에
+중앙화했다.
+
 Qt 5.15.18/6.10.2 clean qmake(`-Werror`)와 native target `11/11`이 통과했다. Public ici
 `v0.10.2` deep no-cache 결과는 `10 PASS / 2 WARN / 0 FAIL / 0 ERROR / 2 SKIP`, TEM `4.95`,
 coverage `96.1% / 99.1% / 83.4%`다. 알려진 WARN과 정확한 asset/HTML provenance는
 [workthrough 기록](workthrough/2026-09-02-diskmap-explorer-workbench.md)에 보존한다.
-DiskMap은 계속 `0.1.0`/`Unreleased`이며 D4~D7 cleanup/trash/snapshot은 후속 범위다.
+DiskMap은 계속 `0.1.0`/`Unreleased`이며 D1~D3 구현·PR/exact-main evidence는 완료됐다.
+D4~D7 cleanup/trash/snapshot/release는 pending 범위다.
 
 ### GUI 는 빌드되고 테스트된다
 

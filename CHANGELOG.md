@@ -31,9 +31,9 @@
   and Zero-CDN. LogLens version/release remains pending, and this evidence does not claim broader
   L3 completion.
 
-### DiskMap explorer workbench (local GUI milestone)
+### DiskMap explorer workbench (merged GUI milestone)
 
-- Completed the local `feat/diskmap-explorer-ui` GUI slice on top of the D3 core projection.
+- Completed the historical `feat/diskmap-explorer-ui` GUI slice on top of the D3 core projection.
   `MainWindow` owns one shared immutable scan document, and `NodeKey` is the navigation
   identity shared by the treemap, sortable table, and breadcrumb trail. Both views share the
   current root, filters, and metric; the table can additionally switch to a recursive
@@ -61,8 +61,15 @@
   C++ type analysis, and exact C++ dead-symbol analysis remains pending. The heuristic duplicate
   warning is `6.42%` across `34` groups; it is linked
   to ici I4-3's robust duplicate backlog, so product code is not contorted around false-positive
-  clone shapes. DiskMap remains `0.1.0` under `Unreleased`; this local milestone makes no PR,
-  remote CI, `main`, Pages, or release claim.
+  clone shapes. The implementation was subsequently merged by [PR #46](https://github.com/jihoon22-lee/toy-projects/pull/46)
+  as `main` commit `0cdd63953179a1dc885ed660e955b399d54243b7`. PR workflow
+  [`33627322683`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33627322683) and exact-main
+  workflow [`33628585439`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33628585439) were
+  all green; the PR sticky comment had exactly one marker and exactly three report links, and PR/main
+  artifact-to-Pages byte comparisons passed. The feature branch and local worktree were deleted
+  after merge. DiskMap remains `0.1.0` under `Unreleased` with no product release; D4~D7
+  cleanup/trash/snapshot/release remain pending. The exact PR/main artifact and Pages table is
+  centralized in the [D3 explorer workbench workthrough](workthrough/2026-09-02-diskmap-explorer-workbench.md).
 
 ### DiskMap explorer projection (first core slice)
 
