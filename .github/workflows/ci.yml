@@ -1169,22 +1169,21 @@ jobs:
 
           comments_pages = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
           comments = [comment for page in comments_pages for comment in page]
+          marker = "<!-- ici-report -->"
           marked = [
               comment
               for comment in comments
-              if "<!-- ici-report -->" in (comment.get("body") or "")
+              if marker in (comment.get("body") or "")
           ]
-          if not marked:
-              raise SystemExit("sticky comment not visible yet")
-          # ici updates the existing marker comment in place. Use the most
-          # recently updated marker so an old duplicate from a manual run
-          # cannot make this check inspect stale links.
-          marked.sort(
-              key=lambda comment: (
-                  comment.get("updated_at") or comment.get("created_at") or ""
-              )
+          marker_count = sum(
+              (comment.get("body") or "").count(marker) for comment in comments
           )
-          body = marked[-1].get("body") or ""
+          if len(marked) != 1 or marker_count != 1:
+              raise SystemExit(
+                  "sticky comment cardinality mismatch: expected one marker in "
+                  f"one comment, found {marker_count} markers across {len(marked)} comments"
+              )
+          body = marked[0].get("body") or ""
           pages_url = sys.argv[3].rstrip("/")
           pr_number = sys.argv[4]
           names = [name for name in sys.argv[5].split(",") if name]

@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import re
+import subprocess
+import sys
+import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -26,6 +31,50 @@ def _job_block(name: str) -> str:
     return WORKFLOW[start:end]
 
 
+def _sticky_verifier_script() -> str:
+    block = _job_block("report-pr")
+    start_marker = (
+        '              "$PROJECT_NAMES" "$EXPECTED_REPORTS" "$RUN_URL" <<\'PY\'\n'
+    )
+    start = block.index(start_marker) + len(start_marker)
+    end = block.index("\n          PY\n", start)
+    return textwrap.dedent(block[start:end])
+
+
+def _run_sticky_verifier(
+    comments_pages: list[list[dict[str, str]]],
+    *,
+    names: str = "buildscope,diskmap",
+    expected_count: int = 2,
+) -> subprocess.CompletedProcess[str]:
+    run_url = "https://github.com/example/toy-projects/actions/runs/99"
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        temporary_path = Path(temporary_directory)
+        comments_path = temporary_path / "comments.json"
+        comment_path = temporary_path / "comment.md"
+        comments_path.write_text(
+            json.dumps(comments_pages),
+            encoding="utf-8",
+        )
+        return subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                _sticky_verifier_script(),
+                str(comments_path),
+                str(comment_path),
+                "https://pages.example/toy-projects",
+                "42",
+                names,
+                str(expected_count),
+                run_url,
+            ],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+
+
 def _release_step_block(name: str) -> str:
     marker = f"      - name: {name}\n"
     start = RELEASE_WORKFLOW.index(marker)
@@ -41,6 +90,68 @@ class WorkflowPublicationContractTests(unittest.TestCase):
 
         self.assertIn("github.event_name == 'pull_request'", block)
         self.assertIn("group: gh-pages-${{ github.repository }}", block)
+
+    def test_pr_sticky_comment_requires_one_marker_in_one_comment(self) -> None:
+        block = _job_block("report-pr")
+
+        self.assertIn('marker = "<!-- ici-report -->"', block)
+        self.assertIn("marker_count = sum(", block)
+        self.assertIn("if len(marked) != 1 or marker_count != 1:", block)
+        self.assertIn("sticky comment cardinality mismatch", block)
+        self.assertIn('body = marked[0].get("body") or ""', block)
+        self.assertNotIn("most recently updated marker", block)
+        self.assertNotIn("marked.sort(", block)
+        self.assertNotRegex(block, r"gh api --method DELETE")
+
+    def test_pr_sticky_comment_verifier_accepts_one_marker_across_pages(self) -> None:
+        run_url = "https://github.com/example/toy-projects/actions/runs/99"
+        body = "\n".join(
+            (
+                "<!-- ici-report -->",
+                f"[workflow]({run_url})",
+                "[buildscope](https://pages.example/toy-projects/buildscope/pr/42/)",
+                "[diskmap](https://pages.example/toy-projects/diskmap/pr/42/)",
+            )
+        )
+
+        result = _run_sticky_verifier([[], [{"body": body}]])
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_pr_sticky_comment_verifier_rejects_duplicate_markers(self) -> None:
+        run_url = "https://github.com/example/toy-projects/actions/runs/99"
+        body = "\n".join(
+            (
+                "<!-- ici-report -->",
+                f"[workflow]({run_url})",
+                "[buildscope](https://pages.example/toy-projects/buildscope/pr/42/)",
+                "[diskmap](https://pages.example/toy-projects/diskmap/pr/42/)",
+            )
+        )
+
+        result = _run_sticky_verifier([[{"body": body}], [{"body": body}]])
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("sticky comment cardinality mismatch", result.stderr)
+
+    def test_pr_sticky_comment_verifier_rejects_multiple_markers_in_one_comment(
+        self,
+    ) -> None:
+        run_url = "https://github.com/example/toy-projects/actions/runs/99"
+        body = "\n".join(
+            (
+                "<!-- ici-report -->",
+                "<!-- ici-report -->",
+                f"[workflow]({run_url})",
+                "[buildscope](https://pages.example/toy-projects/buildscope/pr/42/)",
+                "[diskmap](https://pages.example/toy-projects/diskmap/pr/42/)",
+            )
+        )
+
+        result = _run_sticky_verifier([[{"body": body}]])
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("sticky comment cardinality mismatch", result.stderr)
 
     def test_main_publisher_is_exact_main_only_and_waits_for_quality(self) -> None:
         block = _job_block("publish-main")
