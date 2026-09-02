@@ -12,14 +12,28 @@ nearby positive counterpart that must not produce the same finding.
 
 ## Current status
 
-The scenario contract, dependency-free runner, candidate archive intake, and
-local candidate consumer are implemented and have passed local validation. The
-current PR rerun is still pending, so remote PR CI, sticky report publication,
-and exact-main evidence for this repository remain pending. The other corpus
-areas (C++, Qt, build/binary, and hybrid scenarios) have not been completed.
+The scenario contract, dependency-free runner, candidate archive intake, local
+candidate consumer, and remote Q0 acceptance are complete. PR #49 head
+`f6ad1dc4e745d3d1a2703000a00a5d7c4eed61a0` ran as
+[`33693241255`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33693241255):
+22 jobs succeeded and the main publisher was expectedly skipped. Its Quality Zoo
+artifact [`9870829400`](https://github.com/jihoon22-lee/toy-projects/actions/artifacts/9870829400)
+recorded contract `PASS` with the released ici `v0.10.2` executable
+(`8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4`). The PR
+comment [`5517587341`](https://github.com/jihoon22-lee/toy-projects/pull/49#issuecomment-5517587341)
+contains exactly one `<!-- ici-report -->` marker and exactly three ordinary
+product report links. Merge commit
+`ed5fea2e881da77ac95482cf665e4e40bfe172f1` passed exact-main run
+[`33694452357`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33694452357);
+the exact-main Quality Zoo artifact
+[`9871249913`](https://github.com/jihoon22-lee/toy-projects/actions/artifacts/9871249913)
+recorded stable contract `PASS`, observed suite `WARN`, and no errors, while the
+main product Pages were byte-identical to their artifacts. The other corpus areas
+(C++, Qt, build/binary, and hybrid scenarios) have not been completed; Q1–Q5
+(the Python/C++/Qt/build/binary/hybrid corpus expansion) remain future work.
 
-The local candidate evidence is recorded here so that a future remote run can be
-compared with a known boundary:
+The local candidate evidence is retained here alongside the remote acceptance so
+the released and candidate channels remain explicit and comparable:
 
 | Item | Evidence |
 |---|---|
@@ -246,7 +260,6 @@ candidate expectation. An identical package version does not make those
 expectations interchangeable.
 
 Quality Zoo is not a user-facing application and has no product release in this
-change. The local Q0 implementation and candidate consumer are complete, while
-remote PR CI, the sticky report, and exact-main verification remain follow-up
-work. The Python, C++, Qt, build/binary, and hybrid corpus expansions remain
-pending.
+change. Q0 (the scenario contract, candidate consumer, and remote PR/exact-main
+acceptance) is complete. Q1–Q5 (the Python, C++, Qt, build/binary, and hybrid
+corpus expansions) remain future work.

@@ -33,7 +33,46 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 | [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D1/D2 complete · D3 explorer workbench merged (PR #46; exact-main green) · `0.1.0`/`Unreleased` |
 | [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · L2 1 GiB benchmark merged in PR #26 · default capacity 8192 |
 | [buildscope](buildscope/) | compile DB explorer | 0.5.0 stable · published 2026-09-02 · immutable GitHub Release |
-| [quality-zoo](quality-zoo/) | ici known-answer expected-finding corpus | scenario contract and local candidate consumer complete · remote PR CI/sticky/exact-main pending · no product release |
+| [envlens](envlens/) | Python 환경 snapshot CLI/library | pure Python 3.10+ · deterministic snapshot core complete · path-aware manifest/CI matrix integrated locally · PR/exact-main/release pending · `0.1.0`/`Unreleased` |
+| [quality-zoo](quality-zoo/) | ici known-answer expected-finding corpus | Q0 contract/candidate intake/PR/exact-main complete · Q1~Q5 pending · no product release |
+
+### envlens deterministic snapshot — local core slice
+
+[envlens 문서](envlens/README.md)의 현재 slice는 하나의 명시적으로 선택한 Python interpreter를
+네트워크 없이 조사해 `envlens.snapshot/v1` JSON으로 남기는 pure-Python CLI/library다. 고정된
+`python -c` probe를 `shell=False`로 실행하고 implementation/version, executable/prefix,
+platform/compiler, `sysconfig`, environment와 설치 distribution metadata를 수집한다.
+`Requires-Python`, `Requires-Dist`, entry point, location과 distribution별 metadata error도
+보존하며, 오류가 있는 distribution이 있어도 `collection.status = partial`로 나머지 결과를
+확인할 수 있다.
+
+Object와 unordered collection은 정렬하고, `captured_at`은 source identity와 분리한 명시적
+UTC timestamp로 정규화한다. strict schema는 top-level source/environment/distribution/
+collection 구조와 10,000 distribution, 4,096 mapping field, 100,000 nested-item, 65,536-character
+string bound를 정의한다. 기본 redaction은 target/host home path를 `<USER_HOME>`으로 바꾸고,
+token/password/API/access/private-key/auth/cookie/credential/secret/registry/repository 계열과
+`_URL`/`_URI` 환경변수 값을 `<REDACTED>`로 바꾼다. URL userinfo와 token·API key 등 secret query
+value도 distribution 문자열과 metadata error를 포함해 전부 scrub한다. CLI에는 unredacted 옵션이
+없고, library의 명시적 `redact=False`는 통제된 환경에서만 사용할 수 있다.
+
+Probe stdout은 8 MiB, stderr 보존은 64 KiB, 기본 timeout은 10초다. POSIX process group 또는
+Windows process group으로 descendant cleanup을 bounded하게 수행해 상속된 pipe 때문에 무한히
+기다리지 않으며, malformed/duplicate/non-finite protocol JSON, nonzero/timeout/oversized probe,
+잘못된 interpreter와 출력 대상 오류는 traceback 없이 exit `2`로 실패한다. Snapshot file은 같은
+directory에 atomic replacement하고 POSIX mode `0600`을 사용하며 symlink/special file과 선택한
+interpreter(기존 hardlink alias 포함) 덮어쓰기를 거부한다. 이는 sandbox가 아니므로 대상 interpreter는
+현재 사용자 권한으로 실행된다.
+
+2026-09-03 현재 local Python 3.10에서 CLI/I/O/probe·process/redaction/normalization-schema
+`49/49` tests, Ruff check/format, strict mypy(6 source modules)가 통과했다. released ici
+`v0.10.2` local deep 검증도 14 total engines에서 `13 PASS / 0 WARN / 0 FAIL / 0 ERROR /
+1 compile_db SKIP`로 PASS했으며, TEM `5.00`, line/function/branch
+`92.5% / 100.0% / 84.6%`, complexity max `13`, cycle/sanitize `PASS`였다. `envlens/ici.toml`은
+test/coverage, TEM `≥ 4.0`, branch `≥ 80%`, function `≥ 90%`의 intended quality contract를
+기록한다. Path-aware manifest와 Python 3.10/3.14 quality matrix도 이 브랜치에 연결했지만 이
+slice의 remote PR CI, sticky report, exact-main verification과 stable release는 아직 pending이다.
+제품 버전은 `0.1.0`/`Unreleased`로 유지한다. 두 snapshot diff,
+dependency/wheel compatibility, project import와 runtime smoke는 후속 범위다.
 
 ### Quality Zoo known-answer corpus and candidate consumer
 
@@ -58,16 +97,21 @@ source `7872a7b80899cbd3d40d92d18e7920cd7e2283e7`, artifact `9869395069`, ZIP SH
 SHA-256 `53fc75f0a073a74689babfe9ef8a4b2378995002d7d563bdc52da548fdbb9ee8` (version `0.10.2`).
 Authenticated API evidence validation passed. `python.dead-private-function` had contract `PASS`
 with observed suite `WARN`, exactly one matched finding, and no clean-counterpart false positive.
-The current PR rerun is still pending, so remote PR CI, sticky report, and exact-main verification
-remain pending. Package version alone is not an expectation selector: released ici `v0.10.2` digest
+PR #49 and its exact-main run completed Q0 remote acceptance: [PR run
+`33693241255`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33693241255)
+passed, exactly one sticky comment contained exactly one marker and three product
+HTML links at that time, the PR merged as
+`ed5fea2e881da77ac95482cf665e4e40bfe172f1`, and [exact-main run
+`33694452357`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33694452357)
+passed. Package version alone is not an expectation selector: released ici `v0.10.2` digest
 `8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4` reports legacy `MEASURED`/`high`,
 while candidate digest `53fc75f0a073a74689babfe9ef8a4b2378995002d7d563bdc52da548fdbb9ee8` reports
 provenance-aware `ESTIMATED`/`medium`, despite the same package version. Schema-2 `scenario.json`
 therefore selects a full strict schema-1 expectation by exact executable SHA-256; unknown digests
 fail closed. Ordinary CI uses the released expectation, and candidate validation uses the candidate
-expectation. This candidate validation does not bump a toy version or create a release. The exact
-local evidence and remaining remote PR/sticky/exact-main work are captured in the [Quality Zoo
-workthrough](docs/workthroughs/2026-09-03-quality-zoo-contract.md).
+expectation. This candidate validation does not bump a toy version or create a release. Q0 remote
+acceptance is complete; Q1~Q5 corpus work remains pending. The exact local evidence and Q0 remote
+closeout are captured in the [Quality Zoo workthrough](docs/workthroughs/2026-09-03-quality-zoo-contract.md).
 
 ### buildscope B0 hybrid skeleton — release-backed evidence
 
