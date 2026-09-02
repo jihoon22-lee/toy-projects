@@ -31,7 +31,7 @@
 | 프로젝트 | 현재 형태 | 실측 | 제품 상태 |
 |---|---|---|---|
 | loglens | C++17, Qt, CMake | L2 bounded/background slice · PR #25 CI green · local Qt5/Qt6 12 CTest targets · 1 GiB benchmark PR #26 merged · main Qt5/Qt6 sweep green | Tail N/From start와 worker UX, benchmark/default 8192 완료 |
-| diskmap | C++17, Qt, qmake | D1 Slice 2 merged · D2 complete · D3 explorer workbench locally complete on `feat/diskmap-explorer-ui` (`0.1.0`/`Unreleased`; PR/remote/main evidence pending) | treemap/table, filters, uncertainty, accessible navigation, rescan restoration locally verified; cleanup UX는 D4~D6에서 확장 |
+| diskmap | C++17, Qt, qmake | D1/D2 complete · D3 explorer workbench merged by PR #46 · exact-main evidence green · `0.1.0`/`Unreleased` | treemap/table, filters, uncertainty, accessible navigation, rescan restoration verified; cleanup UX는 D4~D6에서 확장 |
 | buildscope | Python + C++17/Qt, CMake | B0~B5 implementation, remote acceptance, exact-main CI, trusted main Pages와 `0.5.0` tag/release/public asset audit complete | B3~B5 첫 usable release boundary published and audited |
 | ici/viewer | Qt-free core + Qt6 GUI | 3 tests, TEM 4.94 | core 중심, 셸과 report workflow 부족 |
 
@@ -377,9 +377,10 @@ L2 bounded/background 구현과 1 GiB benchmark, 성능 budget/default capacity 
 PR26의 원격 CI·ici·sticky report·Pages 검증과 main Qt5/Qt6 full sweep도 완료됐다. D2
 cancellable scan local candidate와 current ici main의 full local verify, PR #28 원격
 PR/CI·sticky·Pages evidence와 merged-main full benchmark도 모두 닫혔다. D3 core projection은
-PR #45로 병합됐고, GUI explorer workbench는 현재 `feat/diskmap-explorer-ui`에서 local
-implementation이 완료됐다. 다음 경계는 이 local milestone의 PR/remote/main verification이며,
-DiskMap product version은 `0.1.0`/`Unreleased`를 유지한다.
+PR #45로, GUI explorer workbench는 PR #46으로 병합됐고 exact-main verification도 완료됐다.
+DiskMap product version은 `0.1.0`/`Unreleased`를 유지한다. exact PR/main artifact·Pages 표는
+[D3 explorer workthrough](../../../workthrough/2026-09-02-diskmap-explorer-workbench.md)에
+중앙화했다.
 L3 parser/filter와 L6 release 완료 조건은 이 결정으로 닫히지 않으며 체크리스트를 유지한다.
 
 ### L3. parser와 filter 완성도
@@ -653,7 +654,7 @@ local/native/ici, PR CI, sticky report, Pages와 merged-main benchmark까지 모
 
 ### D3. 탐색과 설명 UX
 
-**브랜치:** `feat/diskmap-explorer-ui`
+**구현 브랜치(병합 후 삭제):** `feat/diskmap-explorer-ui`
 
 - [x] Qt-free core view projection slice: metric values, deterministic node keys/issues,
   conjunctive search/type/size/age filters, and stable child/largest-file ordering
@@ -672,10 +673,13 @@ PR #45는 merge commit `0688e44fa99d1ec69aba0c9bf9995a4a857fea9e`로 `main`에 �
 workflow [`33607634973`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33607634973)와
 exact-main workflow [`33608884643`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33608884643)는
 required checks, Qt5/Qt6, ici, benchmark, report publication과 Merge Gate를 확인했다. 이
-문단은 D3 core의 historical evidence다. 위 체크리스트의 GUI 항목은 현재
-`feat/diskmap-explorer-ui`에서 local implementation으로 완료됐고, 아래 수치는 그 local
-milestone에 대한 것이다. 새 GUI milestone의 PR·remote CI·`main`·Pages·release evidence는
-아직 없다.
+문단은 D3 core의 historical evidence다. 위 체크리스트의 GUI 항목은 역사적
+`feat/diskmap-explorer-ui` 구현으로 완료됐고, [PR #46](https://github.com/jihoon22-lee/toy-projects/pull/46)에서
+`main`에 병합됐다. PR workflow [`33627322683`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33627322683)와
+exact-main workflow [`33628585439`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33628585439)는
+모두 green이다. PR sticky marker/link 수와 PR/main artifact·Pages byte-identical 검증의 exact
+HTML 표는 [D3 explorer workthrough](../../../workthrough/2026-09-02-diskmap-explorer-workbench.md)에
+중앙화했다.
 
 로컬 native qmake는 Qt 5.15.18과 Qt 6.10.2에서 clean full build(`-Werror`)와 `make check`
 `11/11` PASS를 기록했다. Focused QtTest 수는 MainWindow `29`, TreemapWidget `12`,
@@ -691,8 +695,8 @@ Zero-CDN checker가 통과했다.
 지원되지 않는다. heuristic duplicate WARN은 `6.42%`/`34` groups로 ici I4-3의 robust
 duplicate backlog에 연결된다.
 false-positive clone shape를 없애려고 product code를 contort하지 않는다. DiskMap은
-`0.1.0`/`Unreleased`를 유지하며 D4~D7 cleanup/trash/snapshot과 새 GUI의 PR/remote/main 검증은
-후속 범위다.
+`0.1.0`/`Unreleased`를 유지하며 D1~D3 구현·PR/exact-main evidence는 완료됐다. D4~D7
+cleanup/trash/snapshot/release는 pending 범위다.
 
 ### D4. cleanup staging core
 
@@ -1504,9 +1508,9 @@ ici와 toy-projects가 함께 바뀌는 기능은 다음 순서를 따른다.
 - [ ] L1~L3: loglens streaming correctness, bounded storage, parser pipeline 완료 (L1/L2 완료;
   L3 parser/filter pipeline pending)
 - [ ] L4~L6: loglens triage/window analysis와 release 완료
-- [x] D1~D3: diskmap identity-safe scan, cancellation, explorer UX local implementation 완료
-  (D1/D2와 D3 core 및 GUI workbench 검증 완료; 새 GUI의 PR/remote/main evidence pending)
-- [ ] D4~D7: cleanup/trash/snapshot과 release 완료
+- [x] D1~D3: diskmap identity-safe scan, cancellation, explorer UX 구현·PR·exact-main evidence 완료
+  (D1/D2는 PR #23/#28, D3 core는 PR #45, D3 GUI는 PR #46 및 exact-main run으로 검증)
+- [ ] D4~D7: cleanup/trash/snapshot과 release 완료 (pending)
 - [x] B0~B5: buildscope hybrid compile explorer와 release 완료 (implementation·remote acceptance·trusted main Pages·`0.5.0` tag/release/public asset audit complete)
 - [ ] E0~E4: envlens pure-Python environment explorer와 release 완료
 - [ ] A0~A4: abilens Makefile/ELF explorer와 release 완료

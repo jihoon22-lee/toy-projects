@@ -36,8 +36,10 @@ contract.
   shadow builds do not depend on top-level configuration inheritance.
 - Corrected the README, master-plan, and `test_fs_node` overflow wording and
   assertion to document and verify `FsNode::logical_size_known`.
-- Recorded this as the completed D3 core projection checkbox and an Unreleased changelog entry;
-  overall D3 remains open because GUI treemap/table integration and explorer UX remain unchecked.
+- Recorded this as the completed D3 core projection checkbox and an Unreleased changelog entry.
+  The GUI treemap/table integration and explorer UX were subsequently completed and merged by
+  [PR #46](https://github.com/jihoon22-lee/toy-projects/pull/46); the canonical PR/main evidence
+  table is in the [D3 explorer workbench workthrough](2026-09-02-diskmap-explorer-workbench.md).
 
 ### Audit corrections
 
@@ -84,5 +86,6 @@ The generated HTML report is 356,798 bytes with SHA-256
 title, UTF-8 encoding, and zero-CDN invariant were verified.
 
 The project version and release were intentionally unchanged. PR #45 and its
-exact-main CI evidence are complete; the overall D3 GUI integration remains
-unfinished and is the next implementation slice.
+exact-main CI evidence are complete, and the overall D3 GUI integration was later
+merged by PR #46 with exact-main evidence. D4-D7 cleanup, trash, snapshot, and
+release criteria remain pending.
