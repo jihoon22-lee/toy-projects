@@ -1387,7 +1387,9 @@ quality-zoo/
     hybrid/<integration-case>/
 ```
 
-각 scenario는 다음을 선언한다.
+현재 schema-2 scenario는 `scenario.json`에 scenario identity와 exact ici executable SHA-256별
+expectation 경로를 선언하고, 각 경로가 가리키는 full strict schema-1 expectation에 다음을
+담는다.
 
 - project root와 ici profile/config
 - 실행할 command와 expected suite/engine status
@@ -1403,6 +1405,12 @@ local candidate consumer 구현은 완료됐다. Registry는 Python 3.10 표준 
 parser를 추가하지 않는다. `ICI_BIN`은 명시적인 local executable path이고, ordinary CI는
 released ici `v0.10.2` pin을 유지한다. Candidate ZIP과 optional exact five authenticated
 GitHub API snapshots의 provenance/digest/identity validation은 local evidence에서 통과했다.
+Released ici `v0.10.2` digest `8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4`는
+legacy `MEASURED`/`high`를, 같은 package version의 candidate digest
+`53fc75f0a073a74689babfe9ef8a4b2378995002d7d563bdc52da548fdbb9ee8`는 provenance-aware
+`ESTIMATED`/`medium`을 보고한다. 따라서 schema-2 selector는 exact executable SHA-256으로
+full strict schema-1 expectation을 고르고 unknown digest는 fail closed한다. Ordinary CI는
+released expectation을, candidate validation은 candidate expectation을 사용한다.
 
 - [x] runner는 `ICI_BIN`/`--ici-bin`으로 local pyz를 받고, archive consumer는 검증된 candidate를 받는다.
 - [x] scenario project 밖 path, symlink와 shell command를 거부한다.
@@ -1411,9 +1419,12 @@ GitHub API snapshots의 provenance/digest/identity validation은 local evidence�
 - [x] candidate ZIP의 digest/provenance, exact member/mode, sidecar, executable version과 optional
       `artifact.json`, `candidate-run.json`, `gate-check.json`, `gate-job.json`, `gate-run.json`
       five-snapshot evidence를 fail-closed로 검증한다.
+- [x] schema-2 `scenario.json`이 exact executable SHA-256으로 full strict schema-1 expectation을
+      선택하고, unknown digest를 fallback 없이 fail closed한다.
 - [x] contract verdict를 observed suite `WARN`/`FAIL`과 분리하고 expected finding 및 clean
       counterpart absence를 검증한다.
-- [ ] remote PR CI, sticky report publication과 exact-main evidence를 완료한다.
+- [ ] current PR rerun이 pending인 remote PR CI, sticky report publication과 exact-main evidence를
+      완료한다.
 
 첫 local candidate evidence는 candidate run `33689056008`, source/target
 `7872a7b80899cbd3d40d92d18e7920cd7e2283e7`, artifact `9869395069`, ZIP SHA-256
@@ -1421,7 +1432,8 @@ GitHub API snapshots의 provenance/digest/identity validation은 local evidence�
 `53fc75f0a073a74689babfe9ef8a4b2378995002d7d563bdc52da548fdbb9ee8`, version `0.10.2`다.
 Authenticated API evidence validation은 통과했다. `python.dead-private-function`은 observed
 suite `WARN`이지만 contract `PASS`였고, expected finding 하나만 match됐으며 clean counterpart
-false positive가 없었다. 이 evidence는 version/release bump를 의미하지 않는다.
+false positive가 없었다. 이 evidence는 version/release bump를 의미하지 않으며, same package
+version의 released/candidate report를 하나의 expectation으로 취급하지 않는다.
 
 ### Q1. Python stable corpus
 

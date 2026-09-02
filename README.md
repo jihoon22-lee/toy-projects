@@ -58,9 +58,16 @@ source `7872a7b80899cbd3d40d92d18e7920cd7e2283e7`, artifact `9869395069`, ZIP SH
 SHA-256 `53fc75f0a073a74689babfe9ef8a4b2378995002d7d563bdc52da548fdbb9ee8` (version `0.10.2`).
 Authenticated API evidence validation passed. `python.dead-private-function` had contract `PASS`
 with observed suite `WARN`, exactly one matched finding, and no clean-counterpart false positive.
-Ordinary CI remains pinned to released ici `v0.10.2`; this candidate validation does not bump a toy
-version or create a release. The exact local evidence and remaining remote PR/sticky/exact-main
-work are captured in the [Quality Zoo workthrough](docs/workthroughs/2026-09-03-quality-zoo-contract.md).
+The current PR rerun is still pending, so remote PR CI, sticky report, and exact-main verification
+remain pending. Package version alone is not an expectation selector: released ici `v0.10.2` digest
+`8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4` reports legacy `MEASURED`/`high`,
+while candidate digest `53fc75f0a073a74689babfe9ef8a4b2378995002d7d563bdc52da548fdbb9ee8` reports
+provenance-aware `ESTIMATED`/`medium`, despite the same package version. Schema-2 `scenario.json`
+therefore selects a full strict schema-1 expectation by exact executable SHA-256; unknown digests
+fail closed. Ordinary CI uses the released expectation, and candidate validation uses the candidate
+expectation. This candidate validation does not bump a toy version or create a release. The exact
+local evidence and remaining remote PR/sticky/exact-main work are captured in the [Quality Zoo
+workthrough](docs/workthroughs/2026-09-03-quality-zoo-contract.md).
 
 ### buildscope B0 hybrid skeleton — release-backed evidence
 

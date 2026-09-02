@@ -4,9 +4,9 @@
 
 The Quality Zoo scenario contract, dependency-free runner, candidate archive
 intake, and local candidate consumer are implemented. The first local candidate
-run passed its known-answer contract. Remote PR CI, sticky report publication,
-and exact-main verification for toy-projects remain pending. Q1 through Q5
-corpus expansion is not complete.
+run passed its known-answer contract. The current PR rerun is still pending, so
+remote PR CI, sticky report publication, and exact-main verification for
+toy-projects remain pending. Q1 through Q5 corpus expansion is not complete.
 
 This is a test-asset milestone, not a user-facing product milestone. No toy
 product version was changed and no release was created.
@@ -22,7 +22,9 @@ including a nearby clean counterpart where false positives are plausible.
 The first stable scenario is `python.dead-private-function`. It contains an
 unused module-level private function in `src/bad.py` and a used private helper in
 `src/clean.py`. The expected answer is one dead-code finding for the bad file and
-no corresponding finding for the clean file.
+no corresponding finding for the clean file. The finding location is shared by
+the released and candidate channels, but their report evidence and confidence
+are not interchangeable.
 
 ## Contract and format decisions
 
@@ -66,6 +68,39 @@ expects the dead engine and suite to be `WARN`, so a `WARN` report can have a
 contract `PASS`. A different `WARN`, an unexpected `FAIL`, or a missing/extra
 finding is a contract failure. A future scenario may expect a known `FAIL`,
 `ERROR`, or `SKIP`, but only the exact declared status and evidence pass.
+
+### Exact executable-SHA expectation selector
+
+The package version is not a sufficient identity for a strict expected answer.
+The released ici `v0.10.2` executable with SHA-256
+`8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4` reports
+legacy `MEASURED` evidence and `high` confidence. The candidate executable with
+SHA-256 `53fc75f0a073a74689babfe9ef8a4b2378995002d7d563bdc52da548fdbb9ee8`
+reports provenance-aware `ESTIMATED` evidence and `medium` confidence, despite
+reporting the same package version `0.10.2`.
+
+The scenario therefore uses schema-2 `scenario.json` as an exact SHA-256
+selector. Each known digest maps to one contained, full strict schema-1
+expectation (`expectations/released-v0.10.2.json` or
+`expectations/candidate-7872a7b.json`); the runner selects it before validating
+the report. An unknown digest has no default expectation and fails closed.
+Ordinary CI uses the released executable and released expectation; candidate
+validation uses the candidate executable and candidate expectation.
+
+The first PR run exposed this distinction rather than being treated as a flaky
+gate. Job `100453860515` in run `33692399796` used the public release and first
+rejected the candidate-only `engines.dead.cpp_unused` configuration key. After
+that key was removed from the shared fixture, both executables produced reports,
+but the release reported `MEASURED`/`high` while the candidate reported
+`ESTIMATED`/`medium`. That is why the correction binds expectations to executable
+digests instead of weakening evidence/confidence predicates. The obsolete run
+was cancelled after diagnosis; a full rerun is required.
+
+The same failure also showed that a missing report left the always-upload step
+with an empty directory. The runner now writes a bounded
+`quality-zoo.runner-error/v1` `run.json` before raising that error, rejects an
+executable symlink before path resolution, and rehashes the selected ici binary
+after its version probe and after scenario execution.
 
 ## Candidate archive and provenance boundary
 
@@ -152,8 +187,9 @@ clean counterpart:     no false positive in src/clean.py
 
 The candidate remains a candidate-channel artifact even though it reports
 version `0.10.2`. Ordinary CI continues to use the released ici `v0.10.2` pin
-and its existing checksum. Candidate validation does not update that pin, bump
-a toy version, or create a release.
+and its existing checksum and therefore selects the released expectation.
+Candidate validation selects the candidate expectation. Candidate validation
+does not update that pin, bump a toy version, or create a release.
 
 ## Verification results
 
@@ -161,7 +197,7 @@ The implementation and its trust boundaries were checked on Python 3.10:
 
 ```bash
 uv run --python 3.10 --no-project python -m unittest discover -s tests -v
-# 55 tests passed
+# 56 tests passed
 
 uvx ruff check quality-zoo
 uvx ruff format --check quality-zoo
@@ -190,8 +226,9 @@ documentation quality check for this change is:
 git diff --check
 ```
 
-The remaining acceptance work is remote PR CI, exactly one ordinary sticky
-comment containing the three released-ici product HTML links, the separate
-Quality Zoo result artifact, and exact-main evidence. The remaining Python,
-C++, Qt, build/binary, and hybrid scenario families stay pending until their
-known answers and clean counterparts are implemented and verified.
+The remaining acceptance work is the current PR rerun, then remote PR CI,
+exactly one ordinary sticky comment containing the three released-ici product
+HTML links, the separate Quality Zoo result artifact, and exact-main evidence.
+The remaining Python, C++, Qt, build/binary, and hybrid scenario families stay
+pending until their known answers and clean counterparts are implemented and
+verified.

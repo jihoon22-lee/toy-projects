@@ -14,9 +14,9 @@ nearby positive counterpart that must not produce the same finding.
 
 The scenario contract, dependency-free runner, candidate archive intake, and
 local candidate consumer are implemented and have passed local validation. The
-remote PR CI, sticky report publication, and exact-main evidence for this
-repository are still pending. The other corpus areas (C++, Qt, build/binary,
-and hybrid scenarios) have not been completed.
+current PR rerun is still pending, so remote PR CI, sticky report publication,
+and exact-main evidence for this repository remain pending. The other corpus
+areas (C++, Qt, build/binary, and hybrid scenarios) have not been completed.
 
 The local candidate evidence is recorded here so that a future remote run can be
 compared with a known boundary:
@@ -35,6 +35,31 @@ compared with a known boundary:
 The candidate is a candidate-channel artifact even though its package version is
 `0.10.2`. It does not change the toy repository version and does not create a
 release.
+
+## Exact executable expectations
+
+Package version alone is not a sufficient expectation selector. The released
+ici `v0.10.2` executable with SHA-256
+`8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4` reports
+the legacy `MEASURED` evidence and `high` confidence for the dead finding. The
+candidate executable with SHA-256
+`53fc75f0a073a74689babfe9ef8a4b2378995002d7d563bdc52da548fdbb9ee8` reports
+provenance-aware `ESTIMATED` evidence and `medium` confidence, even though both
+executables report package version `0.10.2`.
+
+The scenario's schema-2 `scenario.json` maps each exact executable SHA-256 to a
+contained, full strict schema-1 expectation:
+
+| Executable SHA-256 | Channel | Selected expectation |
+|---|---|---|
+| `8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4` | released ici `v0.10.2` | `expectations/released-v0.10.2.json` |
+| `53fc75f0a073a74689babfe9ef8a4b2378995002d7d563bdc52da548fdbb9ee8` | ici candidate | `expectations/candidate-7872a7b.json` |
+
+The runner selects one expectation by exact digest before checking the report;
+an unknown digest has no fallback and fails closed. Ordinary CI uses the
+released executable and released expectation, while candidate validation uses
+the candidate executable and candidate expectation. Thus the two channels do
+not share one expectation merely because their package versions match.
 
 ## Reproduce a local run
 
@@ -83,12 +108,15 @@ The manifest currently has schema `1` and one entry:
 }
 ```
 
-Each scenario directory contains `scenario.json`, an ici project directory with
-`ici.toml`, and the source fixture. `scenario.json` declares the scenario
-identity and class, project root, profile, fixed verify command, expected suite
-status, expected producer version, expected engine state, expected findings, and
-forbidden findings. Stable scenarios should include a nearby clean counterpart
-when the rule could overmatch ordinary code.
+Each scenario directory contains `scenario.json`, one or more full expectation
+files under `expectations/`, an ici project directory with `ici.toml`, and the
+source fixture. The current schema-2 `scenario.json` declares the scenario
+identity and maps exact ici executable SHA-256 values to contained expectation
+paths. Each selected schema-1 expectation declares the class, project root,
+profile, fixed verify command, expected suite status, expected producer version,
+expected engine state, expected findings, and forbidden findings. Stable
+scenarios should include a nearby clean counterpart when the rule could
+overmatch ordinary code.
 
 Commands are intentionally narrow. The runner accepts only an argv array of
 `verify --profile fast|standard|deep`, optionally followed by `--no-cache`; it
@@ -104,7 +132,8 @@ Quality Zoo reports two different concepts:
 - `contract_verdict` is whether the complete known answer matched. It is `PASS`
   only when the v3 report schema, count fields, producer version, expected
   engine status/evidence, expected finding predicates, forbidden-finding
-  absences, and ici exit code all agree with `scenario.json`.
+  absences, and ici exit code all agree with the selected full schema-1
+  expectation for the executable's exact SHA-256.
 
 Consequently, an observed `WARN` is not automatically a failed Quality Zoo
 scenario. The first scenario expects the dead-code engine to be `WARN` because
@@ -211,7 +240,10 @@ overall disk quota. The runner itself performs no network download.
 Ordinary toy-projects CI remains pinned to the released ici `v0.10.2` artifact
 and its existing checksum. A candidate archive is an explicit local/manual
 consumer input and must not replace that stable CI pin. Candidate evidence can
-be reviewed independently before a pin update is proposed.
+be reviewed independently before a pin update is proposed. The released CI
+digest selects the released expectation; candidate validation selects the
+candidate expectation. An identical package version does not make those
+expectations interchangeable.
 
 Quality Zoo is not a user-facing application and has no product release in this
 change. The local Q0 implementation and candidate consumer are complete, while
