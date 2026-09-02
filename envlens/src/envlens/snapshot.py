@@ -88,23 +88,29 @@ def _timestamp(value: datetime | None) -> str:
     )
 
 
-def _normalize_error(value: Any, homes: tuple[str, ...]) -> dict[str, str]:
+def _redact_if_enabled(value: str, homes: tuple[str, ...], enabled: bool) -> str:
+    return redact_text(value, homes) if enabled else value
+
+
+def _normalize_error(value: Any, homes: tuple[str, ...], *, redact: bool) -> dict[str, str]:
     error = _object(value, "distribution error")
     return {
         "code": _string(error.get("code"), "error.code", allow_empty=False),
         "field": _string(error.get("field"), "error.field", allow_empty=False),
         "type": _string(error.get("type"), "error.type", allow_empty=False),
-        "message": redact_text(_string(error.get("message"), "error.message"), homes),
+        "message": _redact_if_enabled(
+            _string(error.get("message"), "error.message"), homes, redact
+        ),
     }
 
 
-def _normalize_distribution(value: Any, homes: tuple[str, ...]) -> dict[str, Any]:
+def _normalize_distribution(value: Any, homes: tuple[str, ...], *, redact: bool) -> dict[str, Any]:
     raw = _object(value, "distribution")
-    name = redact_text(_string(raw.get("name"), "distribution.name"), homes)
-    version = redact_text(_string(raw.get("version"), "distribution.version"), homes)
+    name = _redact_if_enabled(_string(raw.get("name"), "distribution.name"), homes, redact)
+    version = _redact_if_enabled(_string(raw.get("version"), "distribution.version"), homes, redact)
     metadata = _object(raw.get("metadata"), "distribution.metadata")
     requirements = sorted(
-        redact_text(_string(item, "requires_dist item", allow_empty=False), homes)
+        _redact_if_enabled(_string(item, "requires_dist item", allow_empty=False), homes, redact)
         for item in _array(
             metadata.get("requires_dist"),
             "distribution.metadata.requires_dist",
@@ -120,14 +126,20 @@ def _normalize_distribution(value: Any, homes: tuple[str, ...]) -> dict[str, Any
         entry = _object(item, "entry point")
         entry_points.append(
             {
-                "group": redact_text(_string(entry.get("group"), "entry_point.group"), homes),
-                "name": redact_text(_string(entry.get("name"), "entry_point.name"), homes),
-                "value": redact_text(_string(entry.get("value"), "entry_point.value"), homes),
+                "group": _redact_if_enabled(
+                    _string(entry.get("group"), "entry_point.group"), homes, redact
+                ),
+                "name": _redact_if_enabled(
+                    _string(entry.get("name"), "entry_point.name"), homes, redact
+                ),
+                "value": _redact_if_enabled(
+                    _string(entry.get("value"), "entry_point.value"), homes, redact
+                ),
             }
         )
     entry_points.sort(key=lambda item: (item["group"], item["name"], item["value"]))
     errors = [
-        _normalize_error(item, homes)
+        _normalize_error(item, homes, redact=redact)
         for item in _array(raw.get("errors"), "distribution.errors", maximum=MAX_COLLECTION_ITEMS)
     ]
     if not name:
@@ -154,17 +166,20 @@ def _normalize_distribution(value: Any, homes: tuple[str, ...]) -> dict[str, Any
         "normalized_name": normalize_project_name(name),
         "version": version,
         "metadata": {
-            "requires_python": redact_text(
+            "requires_python": _redact_if_enabled(
                 _string(
                     metadata.get("requires_python"),
                     "distribution.metadata.requires_python",
                 ),
                 homes,
+                redact,
             ),
             "requires_dist": requirements,
         },
         "entry_points": entry_points,
-        "location": redact_text(_string(raw.get("location"), "distribution.location"), homes),
+        "location": _redact_if_enabled(
+            _string(raw.get("location"), "distribution.location"), homes, redact
+        ),
         "status": "ok" if not errors else "error",
         "errors": errors,
     }
@@ -208,7 +223,7 @@ def collect_snapshot(
         for name, value in raw_environment.items()
     }
     distributions = [
-        _normalize_distribution(item, homes)
+        _normalize_distribution(item, homes, redact=redact)
         for item in _array(
             raw.get("distributions"),
             "distributions",
@@ -268,12 +283,12 @@ def collect_snapshot(
         "redaction": {"policy": "envlens-redaction/v1", "enabled": redact},
         "source": {
             "kind": "python-interpreter",
-            "requested_executable": redact_text(requested, homes),
-            "resolved_executable": redact_text(str(resolved), homes),
-            "identity": redact_value(public_identity, homes),
+            "requested_executable": _redact_if_enabled(requested, homes, redact),
+            "resolved_executable": _redact_if_enabled(str(resolved), homes, redact),
+            "identity": redact_value(public_identity, homes) if redact else public_identity,
             "sysconfig": {
-                "paths": redact_value(paths, homes),
-                "variables": redact_value(variables, homes),
+                "paths": redact_value(paths, homes) if redact else paths,
+                "variables": redact_value(variables, homes) if redact else variables,
             },
         },
         "environment": {

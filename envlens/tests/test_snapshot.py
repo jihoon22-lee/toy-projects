@@ -204,6 +204,29 @@ def test_snapshot_redacts_url_secrets_from_every_distribution_string() -> None:
     assert result["environment"]["variables"]["PIP_INDEX_URL"] == "<REDACTED>"
 
 
+def test_snapshot_unredacted_library_mode_is_semantically_consistent() -> None:
+    secret_url = "https://alice:hunter2@example.invalid/simple?token=visible"
+    raw = _raw_probe(
+        [
+            _distribution(
+                "package",
+                "1.0",
+                location="/target/home/package",
+                requirements=["dependency @ " + secret_url],
+            )
+        ]
+    )
+    raw["environment"]["PIP_INDEX_URL"] = secret_url
+
+    result = _collect(raw, redact=False)
+    serialized = snapshot_module.dumps_snapshot(result)
+
+    assert result["redaction"]["enabled"] is False
+    assert "/target/home" in serialized
+    assert "alice:hunter2" in serialized
+    assert "token=visible" in serialized
+
+
 def test_snapshot_preserves_partial_per_distribution_errors_and_counts() -> None:
     errors = [
         {

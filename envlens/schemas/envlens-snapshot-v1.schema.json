@@ -98,11 +98,13 @@
             "paths": {
               "type": "object",
               "maxProperties": 4096,
+              "propertyNames": {"type": "string", "minLength": 1, "maxLength": 65536},
               "additionalProperties": {"$ref": "#/$defs/scalar"}
             },
             "variables": {
               "type": "object",
               "maxProperties": 4096,
+              "propertyNames": {"type": "string", "minLength": 1, "maxLength": 65536},
               "additionalProperties": {"$ref": "#/$defs/scalar"}
             }
           }
@@ -117,6 +119,7 @@
         "variables": {
           "type": "object",
           "maxProperties": 4096,
+          "propertyNames": {"type": "string", "minLength": 1, "maxLength": 65536},
           "additionalProperties": {"type": "string", "maxLength": 65536}
         }
       }
