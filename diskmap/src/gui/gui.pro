@@ -1,4 +1,5 @@
 TEMPLATE = lib
+include($$PWD/../../cxx17.pri)
 CONFIG += staticlib
 QT += core gui widgets concurrent
 

@@ -1,4 +1,5 @@
 TEMPLATE = app
+include($$PWD/../cxx17.pri)
 CONFIG += testcase console
 CONFIG -= app_bundle
 QT += core gui widgets concurrent testlib

@@ -1,6 +1,6 @@
 TEMPLATE = lib
+include($$PWD/../cxx17.pri)
 CONFIG += staticlib
-CONFIG += c++17
 CONFIG -= qt
 QT =
 

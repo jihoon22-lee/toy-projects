@@ -1,6 +1,6 @@
 TEMPLATE = app
+include($$PWD/../cxx17.pri)
 CONFIG += testcase console
-CONFIG += c++17
 CONFIG -= app_bundle qt
 QT =
 
