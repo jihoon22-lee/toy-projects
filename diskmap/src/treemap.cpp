@@ -120,24 +120,34 @@ std::vector<const FsNode*> sortedChildPointers(const FsNode& node) {
     return children;
 }
 
-// Converts child sizes into rect-area units. When every child is zero-size
-// (nothing to weight by), the bounds area is split evenly instead so the
-// partition still holds exactly.
-std::vector<double> computeChildAreas(const std::vector<const FsNode*>& children,
-                                      double boundsArea) {
+// Converts projected values into rect-area units. A non-zero conservative
+// subtotal remains useful as a weight, while an unknown zero gets one unit so
+// an unreadable entry cannot disappear from the view. When every exact value
+// is zero, the legacy path still splits the bounds evenly.
+std::vector<double> computeChildAreas(const std::vector<MetricValue>& metrics,
+                                      double boundsArea,
+                                      bool preserveUnknownZero) {
+    std::vector<long double> weights;
+    weights.reserve(metrics.size());
     long double totalSize = 0.0L;
-    for (const FsNode* child : children) {
-        totalSize += static_cast<long double>(child->size);
+    for (const MetricValue& metric : metrics) {
+        const long double weight =
+            preserveUnknownZero && !metric.known && metric.bytes == 0
+                ? 1.0L
+                : static_cast<long double>(metric.bytes);
+        weights.push_back(weight);
+        totalSize += weight;
     }
 
-    std::vector<double> areas(children.size());
+    std::vector<double> areas(metrics.size());
     if (totalSize == 0) {
-        const double share = children.empty() ? 0.0 : boundsArea / static_cast<double>(children.size());
+        const double share =
+            metrics.empty() ? 0.0 : boundsArea / static_cast<double>(metrics.size());
         std::fill(areas.begin(), areas.end(), share);
         return areas;
     }
-    for (std::size_t i = 0; i < children.size(); ++i) {
-        const long double share = static_cast<long double>(children[i]->size) / totalSize;
+    for (std::size_t i = 0; i < metrics.size(); ++i) {
+        const long double share = weights[i] / totalSize;
         areas[i] = boundsArea * static_cast<double>(share);
     }
     return areas;
@@ -145,15 +155,46 @@ std::vector<double> computeChildAreas(const std::vector<const FsNode*>& children
 
 struct LayoutFrame {
     std::vector<const FsNode*> children;
+    std::vector<MetricValue> metrics;
+    std::vector<NodeIssue> issues;
     std::vector<Rect> rects;
     std::size_t next_child = 0;
     int depth = 0;
 };
 
-LayoutFrame makeLayoutFrame(const FsNode& node, const Rect& rect, int depth) {
+LayoutFrame makeLegacyLayoutFrame(const FsNode& node, const Rect& rect, int depth) {
     LayoutFrame frame;
     frame.children = sortedChildPointers(node);
-    const std::vector<double> areas = computeChildAreas(frame.children, rect.w * rect.h);
+    frame.metrics.reserve(frame.children.size());
+    frame.issues.reserve(frame.children.size());
+    for (const FsNode* child : frame.children) {
+        frame.metrics.push_back(MetricValue{child->size, true, true});
+        frame.issues.push_back(NodeIssue::None);
+    }
+    const std::vector<double> areas =
+        computeChildAreas(frame.metrics, rect.w * rect.h, false);
+    frame.rects = squarifyAreas(areas, rect);
+    frame.depth = depth;
+    return frame;
+}
+
+LayoutFrame makeProjectedLayoutFrame(const FsNode& node,
+                                     const Rect& rect,
+                                     int depth,
+                                     const ViewFilter& filter,
+                                     const SortSpec& sort) {
+    LayoutFrame frame;
+    frame.children = visibleChildren(node, filter, sort);
+    frame.metrics.reserve(frame.children.size());
+    frame.issues.reserve(frame.children.size());
+    for (const FsNode* child : frame.children) {
+        frame.metrics.push_back(
+            metricValue(*child, sort.metric, filter.scanner_totals_filtered));
+        frame.issues.push_back(
+            classifyNodeIssue(*child, filter.scanner_totals_filtered));
+    }
+    const std::vector<double> areas =
+        computeChildAreas(frame.metrics, rect.w * rect.h, true);
     frame.rects = squarifyAreas(areas, rect);
     frame.depth = depth;
     return frame;
@@ -162,13 +203,17 @@ LayoutFrame makeLayoutFrame(const FsNode& node, const Rect& rect, int depth) {
 void layoutNode(const FsNode& node,
                 const Rect& rect,
                 int maxDepth,
+                const ViewFilter* filter,
+                const SortSpec* sort,
                 std::vector<Tile>& tiles) {
     if (node.children.empty()) {
         return;
     }
 
     std::vector<LayoutFrame> stack;
-    stack.push_back(makeLayoutFrame(node, rect, 0));
+    stack.push_back(filter == nullptr || sort == nullptr
+                        ? makeLegacyLayoutFrame(node, rect, 0)
+                        : makeProjectedLayoutFrame(node, rect, 0, *filter, *sort));
     while (!stack.empty()) {
         LayoutFrame& frame = stack.back();
         if (frame.next_child >= frame.children.size()) {
@@ -178,9 +223,15 @@ void layoutNode(const FsNode& node,
         const std::size_t index = frame.next_child++;
         const FsNode* child = frame.children[index];
         const Rect childRect = frame.rects[index];
-        tiles.push_back(Tile{child, childRect, frame.depth});
+        tiles.push_back(Tile{child, childRect, frame.depth, frame.metrics[index],
+                             frame.issues[index]});
         if (!child->children.empty() && (maxDepth < 0 || frame.depth < maxDepth)) {
-            stack.push_back(makeLayoutFrame(*child, childRect, frame.depth + 1));
+            stack.push_back(filter == nullptr || sort == nullptr
+                                ? makeLegacyLayoutFrame(*child, childRect,
+                                                        frame.depth + 1)
+                                : makeProjectedLayoutFrame(*child, childRect,
+                                                           frame.depth + 1, *filter,
+                                                           *sort));
         }
     }
 }
@@ -196,7 +247,24 @@ std::vector<Tile> squarify(const FsNode& root, const Rect& bounds, int maxDepth)
     if (!std::isfinite(safeBounds.h) || safeBounds.h < 0.0) {
         safeBounds.h = 0.0;
     }
-    layoutNode(root, safeBounds, maxDepth, tiles);
+    layoutNode(root, safeBounds, maxDepth, nullptr, nullptr, tiles);
+    return tiles;
+}
+
+std::vector<Tile> squarify(const FsNode& root,
+                           const Rect& bounds,
+                           int maxDepth,
+                           const ViewFilter& filter,
+                           const SortSpec& sort) {
+    std::vector<Tile> tiles;
+    Rect safeBounds = bounds;
+    if (!std::isfinite(safeBounds.w) || safeBounds.w < 0.0) {
+        safeBounds.w = 0.0;
+    }
+    if (!std::isfinite(safeBounds.h) || safeBounds.h < 0.0) {
+        safeBounds.h = 0.0;
+    }
+    layoutNode(root, safeBounds, maxDepth, &filter, &sort, tiles);
     return tiles;
 }
 
