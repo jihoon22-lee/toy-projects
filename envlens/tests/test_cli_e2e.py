@@ -125,6 +125,34 @@ def test_cli_runtime_forwards_matrix_and_writes_markdown(tmp_path: Path) -> None
     assert output_path.read_text(encoding="utf-8").startswith("# EnvLens runtime — PASSED")
 
 
+def test_cli_runtime_returns_failure_for_malformed_project_metadata(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname = bare\n",
+        encoding="utf-8",
+    )
+    output = io.StringIO()
+
+    with redirect_stdout(output):
+        result = cli.main(
+            [
+                "runtime",
+                "--project-root",
+                str(tmp_path),
+                "--format",
+                "json",
+            ]
+        )
+
+    report = json.loads(output.getvalue())
+    assert result == 1
+    assert report["summary"]["status"] == "failed"
+    assert report["summary"]["failure_count"] == 1
+    project_check = report["interpreters"][0]["checks"][-1]
+    assert project_check["kind"] == "project-inspection"
+    assert project_check["error_code"] == "unsupported-pyproject"
+    assert project_check["location"]["line"] == 2
+
+
 def test_cli_diff_rejects_missing_input_as_exit_two(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as caught:
         cli.main(["diff", "--before", str(tmp_path / "missing"), "--after", "-"])

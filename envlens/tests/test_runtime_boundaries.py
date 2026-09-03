@@ -89,6 +89,48 @@ def test_runtime_marks_unsupported_entry_point_when_execution_is_opted_in(tmp_pa
     assert result["summary"]["status"] == "unknown"
 
 
+def test_runtime_selection_preserves_qualified_matches_and_orders_missing_requests() -> None:
+    entries = [
+        {"group": "console_scripts", "name": "run"},
+        {"group": "sample.plugins", "name": "run"},
+    ]
+
+    selected = runtime._select_entry_points(
+        entries,
+        ["sample.plugins/run", "run", "missing-z", "missing-a"],
+        location_path="pyproject.toml",
+    )
+    assert runtime._select_entry_points(entries, ["sample.plugins/run"]) == [entries[1]]
+
+    assert selected[:2] == entries
+    missing = selected[2:]
+    assert [item["requested"] for item in missing] == ["missing-a", "missing-z"]
+    assert missing[0]["group"] == ""
+    assert missing[1]["group"] == ""
+    assert all(item["error_code"] == "missing-entry-point" for item in missing)
+    assert all(item["location"] == {"path": "pyproject.toml", "line": 0} for item in missing)
+
+
+def test_runtime_missing_entry_point_is_a_failure_check(tmp_path: Path) -> None:
+    _project(tmp_path)
+
+    result = runtime.run_runtime_checks(
+        tmp_path,
+        interpreters=[sys.executable],
+        imports=[],
+        compile_paths=[],
+        entry_points=["missing"],
+    )
+
+    check = result["interpreters"][0]["checks"][-1]
+    assert check["status"] == "failed"
+    assert check["error_code"] == "missing-entry-point"
+    assert check["requested"] == "missing"
+    assert check["location"] == {"path": str(tmp_path / "pyproject.toml"), "line": 0}
+    assert result["summary"]["status"] == "failed"
+    assert result["summary"]["failure_count"] == 1
+
+
 def test_runtime_distinguishes_probe_start_errors(tmp_path: Path) -> None:
     with patch.object(
         runtime,
@@ -109,8 +151,8 @@ def test_runtime_distinguishes_probe_start_errors(tmp_path: Path) -> None:
 def test_runtime_preserves_project_inspection_errors_and_rejects_bad_configuration(
     tmp_path: Path,
 ) -> None:
-    # A malformed project is reported as inspection evidence while runtime
-    # checks remain bounded and usable.
+    # A malformed project is reported as failure evidence while runtime checks
+    # remain bounded and usable.
     (tmp_path / "pyproject.toml").write_text("[project]\nname = bare\n", encoding="utf-8")
     result = runtime.run_runtime_checks(
         tmp_path,
@@ -119,6 +161,16 @@ def test_runtime_preserves_project_inspection_errors_and_rejects_bad_configurati
         compile_paths=[],
     )
     assert result["project"]["inspection_error"]["code"] == "unsupported-pyproject"
+    project_check = result["interpreters"][0]["checks"][-1]
+    assert project_check["kind"] == "project-inspection"
+    assert project_check["status"] == "failed"
+    assert project_check["error_code"] == "unsupported-pyproject"
+    assert project_check["location"] == {
+        "path": str(tmp_path / "pyproject.toml"),
+        "line": 2,
+    }
+    assert result["summary"]["status"] == "failed"
+    assert result["summary"]["failure_count"] == 1
 
     project_info = {
         "configuration": {"imports": "not-a-list"},
@@ -139,6 +191,42 @@ def test_runtime_preserves_project_inspection_errors_and_rejects_bad_configurati
         pytest.raises(runtime.RuntimeCheckError, match="entry_points must be a list"),
     ):
         runtime.run_runtime_checks(tmp_path)
+
+
+def test_runtime_missing_default_pyproject_is_a_normal_no_metadata_case(tmp_path: Path) -> None:
+    result = runtime.run_runtime_checks(
+        tmp_path,
+        interpreters=[sys.executable],
+        imports=[],
+        compile_paths=[],
+    )
+
+    assert "inspection_error" not in result["project"]
+    assert result["summary"]["status"] == "passed"
+    assert not any(
+        check.get("kind") == "project-inspection" for check in result["interpreters"][0]["checks"]
+    )
+
+
+def test_runtime_dangling_default_pyproject_is_not_treated_as_absent(tmp_path: Path) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    try:
+        pyproject.symlink_to(tmp_path / "missing-project-metadata.toml")
+    except OSError as error:
+        pytest.skip(f"symlinks are unavailable: {error}")
+
+    result = runtime.run_runtime_checks(
+        tmp_path,
+        interpreters=[sys.executable],
+        imports=[],
+        compile_paths=[],
+    )
+
+    check = result["interpreters"][0]["checks"][-1]
+    assert check["kind"] == "project-inspection"
+    assert check["status"] == "failed"
+    assert check["error_code"] == "project-read-failed"
+    assert result["summary"]["status"] == "failed"
 
 
 def test_runtime_rejects_non_directory_project_root() -> None:

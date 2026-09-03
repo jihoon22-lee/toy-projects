@@ -19,6 +19,9 @@ from envlens.runtime_execution import (
     interpreter_record as _interpreter_record,
 )
 from envlens.runtime_execution import (
+    missing_entry_check as _missing_entry_check,
+)
+from envlens.runtime_execution import (
     resolve_for_runtime as _resolve_for_runtime,
 )
 from envlens.runtime_execution import (
@@ -44,6 +47,7 @@ MAX_PATH_LENGTH = 65_536
 MAX_SOURCE_ENTRIES = 100_000
 MAX_OUTPUT_CHARS = 65_536
 MAX_COMPILE_COMMAND_CHARS = 64 * 1024
+_PROJECT_LINE_RE = re.compile(r"\bline (?P<line>[0-9]+)\b")
 MODULE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
 
 IMPORT_SCRIPT = r"""
@@ -195,6 +199,8 @@ def _entry_check(
     timeout_seconds: int,
     execute: bool,
 ) -> dict[str, Any]:
+    if entry.get("status") == "missing":
+        return _missing_entry_check(entry)
     result = {
         "kind": "entry-point",
         "group": entry.get("group", ""),
@@ -275,11 +281,50 @@ def _validate_paths(values: Sequence[str | Path] | None, label: str) -> None:
             )
 
 
+def _empty_project_info(path: Path) -> dict[str, Any]:
+    return {
+        "schema_version": "envlens.project/v1",
+        "path": str(path),
+        "project": {
+            "name": "",
+            "normalized_name": "",
+            "version": "",
+            "requires_python": "",
+            "dependencies": [],
+        },
+        "entry_points": [],
+        "warnings": [
+            "pyproject.toml was not found; project metadata inspection was skipped",
+        ],
+    }
+
+
+def _project_error_location(path: Path, message: str) -> dict[str, Any]:
+    match = _PROJECT_LINE_RE.search(message)
+    line = int(match.group("line")) if match is not None else 0
+    return {"path": str(path), "line": line}
+
+
+def _default_project_file_is_absent(path: Path) -> bool:
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        # Let inspect_pyproject preserve permission and other filesystem
+        # failures as explicit project-inspection evidence.
+        return False
+    return False
+
+
 def _project_info(root: Path, pyproject: str | Path | None) -> dict[str, Any]:
     path = Path(pyproject) if pyproject is not None else root / "pyproject.toml"
+    if pyproject is None and _default_project_file_is_absent(path):
+        return _empty_project_info(path)
     try:
         return inspect_pyproject(path)
     except ProjectError as error:
+        location = _project_error_location(path, error.message)
         return {
             "schema_version": "envlens.project/v1",
             "path": str(path),
@@ -292,8 +337,34 @@ def _project_info(root: Path, pyproject: str | Path | None) -> dict[str, Any]:
             },
             "entry_points": [],
             "warnings": [f"entry-point inspection unavailable: {error}"],
-            "inspection_error": {"code": error.code, "message": error.message},
+            "inspection_error": {
+                "code": error.code,
+                "message": error.message,
+                "location": location,
+            },
         }
+
+
+def _project_inspection_check(
+    project_info: dict[str, Any], default_path: Path
+) -> dict[str, Any] | None:
+    raw_error = project_info.get("inspection_error")
+    if not isinstance(raw_error, dict):
+        return None
+    raw_location = raw_error.get("location")
+    location = (
+        dict(raw_location)
+        if isinstance(raw_location, dict)
+        else {"path": str(project_info.get("path", default_path)), "line": 0}
+    )
+    return {
+        "kind": "project-inspection",
+        "name": str(project_info.get("path", default_path)),
+        "status": "failed",
+        "error_code": str(raw_error.get("code", "project-inspection-failed")),
+        "location": location,
+        "reason": str(raw_error.get("message", "project metadata inspection failed")),
+    }
 
 
 def _configured_list(
@@ -334,9 +405,12 @@ def _prepare_runtime(
     project_entries = project_info.get("entry_points", [])
     if not isinstance(project_entries, list):
         raise RuntimeCheckError("invalid-runtime-config", "project entry_points must be a list")
+    project_path = project_info.get("path")
+    location_path = project_path if isinstance(project_path, (str, Path)) else None
     entries = _select_entry_points(
         [dict(item) for item in project_entries if isinstance(item, dict)],
         selected_entries,
+        location_path=location_path,
     )
 
     raw_modules, _configured_modules = _configured_list(imports, configuration, "imports")
@@ -374,6 +448,7 @@ def _prepare_runtime(
         modules=modules,
         source_files=_python_files(paths),
         interpreters=configured,
+        project_check=_project_inspection_check(project_info, root / "pyproject.toml"),
     )
 
 
@@ -436,6 +511,8 @@ def _ready_record(
             )
             for entry in prepared.entries
         )
+        if prepared.project_check is not None:
+            record["checks"].append(dict(prepared.project_check))
     return record
 
 

@@ -147,6 +147,12 @@ resolver, package index, wheel download, or network request is performed.
 or executing project code, then runs compileall and each explicit import for
 every configured interpreter. Entry points are reported with their file and
 line location and remain dry-inspected unless execution is explicitly opted in.
+When `--pyproject` is omitted and the project root has no `pyproject.toml`,
+metadata inspection is skipped as a normal no-metadata case. A present but
+malformed or unreadable metadata file produces a `project-inspection` failed
+check with its `error_code` and `{path, line}` location; the runtime summary
+cannot pass merely because compileall and imports succeeded. An explicitly
+provided `--pyproject` path is inspected under the same rule.
 
 ```bash
 envlens runtime \
@@ -163,9 +169,17 @@ envlens runtime --project-root . --entry-point console-name \
   --execute-entry-points --format json --pretty
 ```
 
+`--entry-point` accepts either a bare name or an exact `group/name` selector.
+A bare name retains the existing behavior of selecting every matching group;
+qualified selection does not broaden that match. Every requested selector
+that is not found is retained as a deterministic failed check with
+`error_code: "missing-entry-point"` and contributes to the summary failure
+count. Missing selectors are reported without importing or executing code.
+
 Runtime results distinguish `passed`, `missing-interpreter`,
 `missing-import`, `import-error`, `timeout`, `signal`, and ordinary process
-failure. Source enumeration is bounded to 10,000 Python files and 64 MiB;
+failure, including project metadata and requested-entry-point failures.
+Source enumeration is bounded to 10,000 Python files and 64 MiB;
 probe/check output and process lifetime are bounded, and POSIX/Windows process
 groups are cleaned up on timeout. Compile bytecode is redirected to a temporary
 cache, and the compileall argv is capped at 65,536 UTF-8 bytes. Import checks
@@ -175,12 +189,12 @@ not a sandbox; inspect untrusted projects in an externally isolated environment.
 
 ## Validation and CI
 
-The current local E1–E3 slice is covered on Python 3.10 by 108/108 tests:
+The current local E1–E3 slice is covered on Python 3.10 by 112/112 tests:
 
 ```text
-15 CLI/E2-E3 CLI · 6 atomic I/O · 12 probe/process-boundary ·
+16 CLI/E2-E3 CLI · 6 atomic I/O · 12 probe/process-boundary ·
 7 redaction · 19 snapshot normalization/schema · 10 snapshot diff ·
-39 project/runtime/report/input boundaries
+42 project/runtime/report/input boundaries
 ```
 
 The same checkout also passes Ruff check and format validation, and strict mypy
