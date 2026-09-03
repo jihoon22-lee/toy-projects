@@ -1,0 +1,144 @@
+# envlens
+
+envlens is a pure-Python library and CLI for making a deterministic, offline
+inventory of one explicitly selected Python interpreter. It answers “what is in
+this environment?” before a later diff or compatibility decision is attempted.
+
+The package metadata and `--version` output are currently `0.1.0`. This is an
+unreleased development identity: no envlens tag, GitHub Release, or stable
+artifact has been published.
+
+## Capture a snapshot
+
+Select an executable path when inspecting another environment. envlens does not
+resolve command names through `PATH` and does not invoke a shell. With no
+`--interpreter`, it uses the interpreter running envlens.
+
+```bash
+envlens snapshot \
+  --interpreter /path/to/python \
+  --output snapshot.json \
+  --pretty
+
+# The default output is stdout; an explicit instant makes fixtures reproducible.
+python -m envlens snapshot \
+  --captured-at 2026-09-03T00:00:00Z \
+  --output -
+```
+
+The selected executable is run once with a fixed `python -c` probe and
+`shell=False`. The probe records:
+
+- implementation, Python version and `sys.version_info`, cache tag, executable
+  paths, prefixes, platform, machine, and compiler;
+- `sysconfig` paths and scalar configuration variables;
+- environment variables; and
+- every discovered distribution’s display name, PEP 503 normalized name,
+  version, raw `Requires-Python`, `Requires-Dist`, entry points, install
+  location, status, and any metadata errors.
+
+One malformed distribution does not discard healthy distributions. Its error
+records are retained in that distribution and the overall collection is marked
+`partial` while the command still succeeds.
+
+## The `envlens.snapshot/v1` contract
+
+The checked-in strict schema is
+[`schemas/envlens-snapshot-v1.schema.json`](schemas/envlens-snapshot-v1.schema.json).
+Its top-level fields are:
+
+```text
+schema_version  producer  captured_at  redaction
+source          environment  distributions  collection
+```
+
+`source` contains the requested and resolved executable plus `identity` and
+`sysconfig` objects. `environment.variables` contains the captured environment.
+Each distribution has `metadata`, `entry_points`, `location`, `status` (`ok` or
+`error`), and structured `errors`. `collection` reports `complete` or `partial`,
+the distribution count, and the total error count.
+
+The schema version and source identity are separate from `captured_at`.
+`captured_at` is normalized to a UTC ISO-8601 instant with second precision;
+tests and reproducible automation can provide it explicitly. By default,
+serialization sorts object keys and every unordered collection, emits compact
+ASCII-safe JSON, and ends with one newline. `--pretty` changes indentation only.
+
+The public normalization boundary is bounded: at most 10,000 distributions,
+4,096 environment or sysconfig fields, 100,000 items in a distribution’s
+requirements/entry-point/error arrays, and 65,536 characters in a string field.
+Malformed shapes, duplicate JSON keys, non-finite numbers, or values beyond
+these limits are rejected instead of being silently normalized.
+
+## Privacy and output safety
+
+Redaction is enabled by default for CLI snapshots. Host and target home paths
+are replaced with `<USER_HOME>` (including case and Windows slash variants).
+Environment-variable names that look secret-bearing retain their names but get
+`<REDACTED>` values. The detector covers token, password, API/access key,
+private key, authorization, cookie, credential, secret, registry, and repository
+families, as well as names ending in `_URL` or `_URI`.
+
+Every captured string is also scanned for URL credentials and common secret
+query parameters. For example, userinfo in
+`https://alice:password@example.invalid/` and values for `token`, `api_key`,
+`access_token`, `password`, `secret`, and related keys are replaced even when
+they occur in distribution requirements, entry points, locations, or metadata
+errors. A variable such as `PIP_INDEX_URL` is fully redacted by its sensitive
+name. The CLI deliberately has no unredacted option. Library callers may
+explicitly pass `redact=False` to `collect_snapshot` only in a controlled,
+trusted context; that mode is represented by `redaction.enabled: false`.
+
+Probe execution has bounded failure behavior:
+
+- the default timeout is 10 seconds (`--timeout-seconds` changes it);
+- probe stdout is capped at 8 MiB and retained stderr is capped at 64 KiB;
+- POSIX probes run in a new session/process group, and Windows probes in a new
+  process group; timeout or inherited-pipe cleanup terminates descendants
+  (`SIGTERM` then bounded `SIGKILL` on POSIX, `taskkill /T /F` on Windows); and
+- missing or non-executable interpreters, nonzero probe exits, timeouts,
+  oversized output, malformed protocol JSON, invalid protocol shapes, and
+  output failures produce exit status `2` with a concise user-facing error.
+
+The process-group handling prevents a child that inherits stdout/stderr from
+making envlens wait forever, but it is best-effort cleanup rather than an OS
+sandbox. envlens executes the selected interpreter as the current user and does
+not block that interpreter’s filesystem or network access. Inspect unknown
+interpreters without secrets and, when appropriate, inside an externally
+enforced disposable container or VM.
+
+Snapshot files are written by an atomic same-directory replacement. On POSIX a
+successful file is mode `0600`; symlink and special-file destinations, a
+directly symlinked output directory, and replacing the selected interpreter
+(including an existing hardlink alias) are rejected. `--output -` writes the
+canonical JSON to stdout.
+
+## Local validation and CI intent
+
+The current local E1 core slice is covered on Python 3.10 by 50/50 tests:
+
+```text
+7 CLI · 6 atomic I/O · 12 probe/process-boundary ·
+7 redaction · 18 snapshot normalization/schema
+```
+
+The same checkout also passes Ruff check and format validation, and strict mypy
+for the six envlens source modules. Released ici `v0.10.2` local deep verification
+passes with 14 total engines: 13 PASS, one `compile_db` SKIP, and no
+WARN/FAIL/ERROR; TEM is 5.00, line/function/branch coverage is
+93.0%/100.0%/84.6%, and complexity max is 13 (cycle and sanitize also PASS).
+`envlens/ici.toml` records the intended
+Python quality gate (test pass/fail with coverage, TEM at least 4.0, branch
+coverage at least 80%, and function coverage at least 90%). The branch adds
+envlens to the path-aware CI manifest and runs a dedicated Python 3.10/3.14
+matrix for tests, schema validation, strict typing, reproducible wheel/sdist
+builds, pure `py3-none-any` metadata, and clean-wheel smoke. Remote PR, sticky
+report, and exact-main evidence remain pending until that branch is accepted.
+
+## Deliberate current boundary
+
+This release-free snapshot slice inventories one interpreter; it does not yet
+compare two snapshots, resolve dependencies, decide compatibility, parse wheel
+tags, import project modules, run entry points, or perform runtime smoke tests.
+Those are separate E2 (diff/compatibility) and E3 (project/runtime check)
+policies. A snapshot is evidence for those later operations, not their result.

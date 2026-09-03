@@ -1,7 +1,7 @@
 # toy-projects 제품 포트폴리오와 ici 실물 검증 마스터 계획
 
 **상태:** 승인된 장기 마스터 계획. 2026-08-30 이후 toy-projects의 기능 우선순위, 신규 프로젝트 선정과 완료 조건은 이 문서를 기준으로 판단한다.
-**문서 기준일:** 2026-09-02. 이 계획은 toy-projects [PR #12](https://github.com/jihoon22-lee/toy-projects/pull/12)로 `main`에 병합됐다. 현재 완료 상태는 이 문서의 체크리스트와 병합된 PR을 함께 기준으로 삼는다.
+**문서 기준일:** 2026-09-03. 이 계획은 toy-projects [PR #12](https://github.com/jihoon22-lee/toy-projects/pull/12)로 `main`에 병합됐다. 현재 완료 상태는 이 문서의 체크리스트와 병합된 PR을 함께 기준으로 삼는다.
 
 **목표:** `loglens`와 `diskmap`을 실제로 쓸 만한 완성도 높은 Qt 제품으로 발전시키고, ici의 Python·C++·Qt 분석 공백을 메우는 `buildscope`, `envlens`, `abilens`와 `quality-zoo`를 단계적으로 구축한다.
 
@@ -33,7 +33,8 @@
 | loglens | C++17, Qt, CMake | L2 bounded/background slice · PR #25 CI green · local Qt5/Qt6 12 CTest targets · 1 GiB benchmark PR #26 merged · main Qt5/Qt6 sweep green | Tail N/From start와 worker UX, benchmark/default 8192 완료 |
 | diskmap | C++17, Qt, qmake | D1/D2 complete · D3 explorer workbench merged by PR #46 · exact-main evidence green · `0.1.0`/`Unreleased` | treemap/table, filters, uncertainty, accessible navigation, rescan restoration verified; cleanup UX는 D4~D6에서 확장 |
 | buildscope | Python + C++17/Qt, CMake | B0~B5 implementation, remote acceptance, exact-main CI, trusted main Pages와 `0.5.0` tag/release/public asset audit complete | B3~B5 첫 usable release boundary published and audited |
-| quality-zoo | Python 3.10, stdlib runner | scenario contract/local candidate consumer complete · remote PR CI/sticky/exact-main pending | test asset only; Q1~Q5 corpus pending |
+| envlens | pure Python 3.10+ package/CLI | deterministic snapshot core complete · path-aware manifest/CI matrix integrated locally · remote PR/sticky/exact-main pending | `0.1.0`/`Unreleased`; E2/E3 and release remain pending |
+| quality-zoo | Python 3.10, stdlib runner | scenario contract/local candidate consumer · PR #49 remote PR CI/sticky/exact-main complete | test asset only; Q1~Q5 corpus pending |
 | ici/viewer | Qt-free core + Qt6 GUI | 3 tests, TEM 4.94 | core 중심, 셸과 report workflow 부족 |
 
 현재 공백:
@@ -1225,7 +1226,7 @@ changes stay in `Unreleased` until a new cohesive checkpoint satisfies the same 
 
 ### E0. 제품 범위
 
-**브랜치:** `feat/envlens-skeleton`
+**초기 브랜치:** `feat/envlens-skeleton` · **현재 snapshot 구현:** `feat/envlens-snapshot`
 
 envlens는 네트워크 없이 다음 질문에 답한다.
 
@@ -1250,16 +1251,48 @@ envlens/
 - 필요 dependency는 pure wheel인지 ici와 CI에서 확인한다.
 - CLI와 importable library를 함께 제공한다.
 
-### E1. environment snapshot
+현재 snapshot 구현은 이 pure-Python skeleton과 CLI/library entry point를 포함한다. 한 interpreter의
+오프라인 inventory와 deterministic evidence까지만 이번 slice의 범위이며, 두 환경의 비교·호환성
+판정과 project/runtime smoke는 E2/E3로 남긴다. E0~E4 전체 checkpoint나 stable release를 닫은
+것으로 해석하지 않는다.
+
+### E1. environment snapshot — local core complete; remote evidence pending
 
 **브랜치:** `feat/envlens-snapshot`
 
-- [ ] interpreter를 shell 없이 argv로 실행해 identity와 sysconfig를 JSON으로 수집한다.
-- [ ] installed distribution, version, Requires-Python, dependency, entry point와 location을 기록한다.
-- [ ] snapshot schema version, source identity와 timestamp를 분리한다.
-- [ ] secret-bearing environment variables와 user path를 기본 redaction한다.
-- [ ] malformed metadata와 permission error를 distribution별로 보존한다.
-- [ ] atomic JSON write와 deterministic output을 테스트한다.
+- [x] interpreter를 shell 없이 argv로 실행해 identity와 sysconfig를 JSON으로 수집한다.
+- [x] installed distribution, version, Requires-Python, dependency, entry point와 location을 기록한다.
+- [x] snapshot schema version, source identity와 timestamp를 분리한다.
+- [x] secret-bearing environment variables와 user path를 기본 redaction한다.
+- [x] malformed metadata와 permission error를 distribution별로 보존한다.
+- [x] atomic JSON write와 deterministic output을 테스트한다.
+
+고정된 `python -c` probe는 명시적인 executable path를 `shell=False`로 실행한다. POSIX session/
+process group과 Windows process group을 사용해 timeout 또는 inherited-pipe cleanup에서 descendant를
+bounded하게 종료하며, stdout 8 MiB·stderr 보존 64 KiB·기본 timeout 10초 경계를 둔다. strict
+`envlens.snapshot/v1`은 interpreter identity/sysconfig, redacted environment, normalized
+distribution metadata, `complete`/`partial` collection accounting을 담고, object와 unordered
+collection을 정렬해 canonical JSON을 만든다. `captured_at`은 UTC second-precision evidence로
+source identity와 분리한다.
+
+기본 redaction은 target/host home path를 `<USER_HOME>`으로 바꾸고, secret-bearing environment
+name을 `<REDACTED>`로 치환한다. `_URL`/`_URI`와 token/password/API/access/private-key/auth/
+cookie/credential/secret/registry/repository 계열을 포함하며, URL userinfo와 secret query value는
+distribution requirement/entry point/location/error 문자열에서도 scrub한다. CLI에는 unredacted
+옵션이 없고 library의 `redact=False`는 명시적 통제 경계로만 남긴다. Snapshot file은 atomic
+same-directory replacement와 POSIX `0600`을 사용하며 symlink/special file과 selected interpreter
+(hardlink alias 포함) overwrite를 거부한다.
+
+2026-09-03 local Python 3.10에서 50/50 tests (CLI 7, I/O 6, probe/process 12, redaction 7,
+snapshot normalization/schema 18), Ruff check/format, strict mypy 6 source modules가 통과했다.
+Released ici `v0.10.2` local deep도 14 total engines에서 `13 PASS / 0 WARN / 0 FAIL / 0 ERROR /
+1 compile_db SKIP`로 PASS했으며, TEM `5.00`, line/function/branch `93.0% / 100.0% / 84.6%`,
+complexity max `13`, cycle/sanitize `PASS`였다.
+`envlens/ici.toml`은 test/coverage, TEM `≥ 4.0`, branch `≥ 80%`, function `≥ 90%`의 intended
+quality contract를 기록한다. Repository path-aware manifest와 Python 3.10/3.14 quality matrix는
+이 브랜치에서 완료했다. 제품 identity는 `0.1.0`/`Unreleased`로 유지한다. Remote PR/sticky/exact-main
+evidence와 stable release는 아직 pending이며 이 local
+core 완료를 stable release로 표시하지 않는다.
 
 ### E2. diff와 compatibility
 
@@ -1423,8 +1456,12 @@ released expectation을, candidate validation은 candidate expectation을 사용
       선택하고, unknown digest를 fallback 없이 fail closed한다.
 - [x] contract verdict를 observed suite `WARN`/`FAIL`과 분리하고 expected finding 및 clean
       counterpart absence를 검증한다.
-- [ ] current PR rerun이 pending인 remote PR CI, sticky report publication과 exact-main evidence를
-      완료한다.
+- [x] remote PR CI, sticky report publication과 exact-main evidence를 완료한다. [PR #49](https://github.com/jihoon22-lee/toy-projects/pull/49)의
+      [run `33693241255`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33693241255)는
+      통과했고, exactly one sticky comment 안에 marker 정확히 1개와 당시 product HTML link 3개가
+      게시됐다. Merge `ed5fea2e881da77ac95482cf665e4e40bfe172f1` 뒤 [exact-main run
+      `33694452357`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33694452357)도
+      통과했으며, 세 product Pages가 HTML artifact와 byte-identical했다.
 
 첫 local candidate evidence는 candidate run `33689056008`, source/target
 `7872a7b80899cbd3d40d92d18e7920cd7e2283e7`, artifact `9869395069`, ZIP SHA-256
@@ -1552,7 +1589,7 @@ ici와 toy-projects가 함께 바뀌는 기능은 다음 순서를 따른다.
 - [ ] E0~E4: envlens pure-Python environment explorer와 release 완료
 - [ ] A0~A4: abilens Makefile/ELF explorer와 release 완료
 - [ ] Q0~Q5: Python/C++/Qt/build/hybrid stable expected-finding corpus 완료 (Q0 implementation/local
-  candidate consumer complete; remote PR CI/sticky/exact-main pending; Q1~Q5 pending)
+  candidate consumer와 PR #49 remote PR CI/sticky/exact-main complete; Q1~Q5 pending)
 - [ ] repository path-aware CI, ici pin/candidate와 artifact 정책 완료
 
 체크포인트는 기능이 시연되는 것만으로 닫지 않는다. 공통 제품 완성 불변식, native tests, ici 실측, 문서와 오류 처리까지 모두 충족해야 한다.

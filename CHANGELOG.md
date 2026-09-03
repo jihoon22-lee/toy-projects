@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+### EnvLens deterministic environment snapshot core
+
+- Added the pure-Python `envlens` CLI/library on the Python 3.10 floor. The current package and
+  `--version` identity is `0.1.0`; it remains unreleased, with no tag, GitHub Release, or stable
+  artifact. This slice captures one explicitly selected interpreter and does not change the version
+  cadence of the other portfolio products.
+- Added a fixed `python -c` probe launched with an explicit executable path, `shell=False`, and no
+  `PATH` or shell lookup. The probe records interpreter identity, prefixes and platform/compiler
+  data, `sysconfig`, environment variables, and installed distribution metadata including normalized
+  names, versions, `Requires-Python`, `Requires-Dist`, entry points, locations, and per-distribution
+  errors. Metadata failures remain attached to the affected distribution and produce a `partial`
+  collection instead of discarding healthy results.
+- Added the strict `envlens.snapshot/v1` schema and canonical serialization. Object keys and
+  unordered collections are sorted; `captured_at` is a UTC, second-precision timestamp kept separate
+  from source identity; compact output is ASCII-safe and newline-terminated, while `--pretty` only
+  changes indentation. Collection limits are 10,000 distributions, 4,096 environment/sysconfig
+  fields, 100,000 nested collection items, and 65,536 characters per string field.
+- Added default-safe privacy handling. Host and target home paths become `<USER_HOME>`; secret-bearing
+  environment names retain their names but receive `<REDACTED>`, including token/password/API/access/
+  private-key/auth/cookie/credential/secret/registry/repository families and `_URL`/`_URI` suffixes.
+  URL userinfo and common secret query values are scrubbed from all captured strings, including
+  requirements, entry points, locations, and metadata errors. The CLI has no unredacted switch;
+  library callers can opt out only explicitly with `redact=False` in a controlled context.
+- Added bounded process and output handling: a 10-second default timeout, 8 MiB probe stdout limit,
+  64 KiB retained stderr limit, concurrent pipe draining, and process-group/session cleanup. POSIX
+  timeout or inherited-pipe cleanup uses `SIGTERM` followed by bounded `SIGKILL`; Windows uses
+  `taskkill /T /F`. Missing/invalid interpreters, nonzero exits, timeout/size/protocol failures, and
+  output errors return exit status `2` without a traceback. envlens remains a current-user process
+  boundary, not an operating-system sandbox.
+- Added atomic same-directory JSON replacement with POSIX mode `0600`, refusing symlink/special-file
+  destinations and replacement of the selected interpreter, including an existing hardlink alias.
+- Local Python 3.10 validation is `50/50` tests (CLI 7, I/O 6, probe/process 12, redaction 7,
+  snapshot normalization/schema 18), with Ruff check/format and strict mypy for six source modules
+  also passing. Released ici `v0.10.2` local deep verification is `PASS` across 14 total engines:
+  `13 PASS / 0 WARN / 0 FAIL / 0 ERROR / 1 compile_db SKIP`, with line/function/branch
+  `93.0% / 100.0% / 84.6%`, TEM `5.00`, complexity max `13`, and cycle/sanitize also `PASS`.
+  The path-aware manifest now includes envlens, while a Python 3.10/3.14 matrix validates tests,
+  schema, strict typing, reproducible pure wheel/sdist builds, package metadata, and a clean-wheel
+  smoke. Remote PR/sticky/exact-main and stable release evidence remain pending. Snapshot diff,
+  dependency/wheel compatibility, project import, and runtime smoke stay in future E2/E3 work.
+
 ### Quality Zoo known-answer contract
 
 - Added the Quality Zoo scenario contract and local candidate consumer. The registry is the
@@ -34,10 +75,15 @@
   Authenticated API evidence validation passed. The first `python.dead-private-function` scenario
   was contract `PASS` with observed suite `WARN`, exactly one matched finding, and no clean
   counterpart false positive.
-- The local implementation and candidate consumer are complete; the current PR rerun is still
-  pending, so remote PR CI, sticky report, and exact-main evidence remain pending. Ordinary CI stays
-  pinned to released ici `v0.10.2`. No toy product version or release was changed, and the remaining
-  Python/C++/Qt/build/binary/hybrid corpus work is not claimed complete.
+- Remote Q0 acceptance is complete. [PR #49](https://github.com/jihoon22-lee/toy-projects/pull/49)
+  passed run [`33693241255`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33693241255),
+  published exactly one sticky comment containing exactly one marker and three product HTML links
+  at that time, and merged as
+  `ed5fea2e881da77ac95482cf665e4e40bfe172f1`. Exact-main run
+  [`33694452357`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33694452357) also passed,
+  including the released-ici known-answer artifact and byte-identical trusted main Pages. Ordinary
+  CI remains pinned to released ici `v0.10.2`. No toy product version or release changed; Q1~Q5
+  Python/C++/Qt/build/binary/hybrid corpus expansion remains open.
 
 ### Sticky PR report comment cardinality
 

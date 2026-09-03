@@ -18,9 +18,10 @@ env:
   ICI_SHA256: "8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4"
 
 jobs:
-  # ci/projects.json is the only project list. Both verification and GUI jobs
-  # consume outputs from this job, so adding a project without adding its
-  # verification or GUI metadata fails before a matrix can silently omit it.
+  # ci/projects.json is the only project list. Verification, GUI, and project
+  # quality jobs consume outputs from this job, so adding a project without
+  # adding its verification or GUI metadata fails before a matrix can silently
+  # omit it.
   discover:
     name: Validate project manifest
     runs-on: ubuntu-latest
@@ -827,8 +828,8 @@ jobs:
           grep -Fq 'project_leak.cpp' <<<"$control_output"
 
       # Keep this artifact outside the ici-report-* namespace. report-pr's
-      # exact-three-project contract must continue to consume only its three
-      # manifest reports.
+      # manifest-report contract must continue to consume only its project
+      # reports.
       - name: Upload BuildScope B5 deep report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -916,10 +917,312 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  # Build each Python distribution, feed all three through the same consumer
-  # contract, and retain the native Qt6 CLI/GUI as release evidence. This is a
-  # validation job, not a publication step, so no tag or GitHub release is
-  # mutated by CI.
+  # Run envlens's Python quality surface at the supported floor and on the
+  # newest setup-python release. Each leg validates source behavior, typing,
+  # the checked-in schema, and both pure-Python distribution artifacts.
+  envlens-python-quality:
+    name: envlens Python quality (${{ matrix.label }})
+    needs: discover
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python_version: "3.10"
+            label: py310
+          - python_version: "3.14"
+            label: latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python ${{ matrix.label }}
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python_version }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
+      - name: Install pinned Python quality tools
+        run: |
+          set -euo pipefail
+          quality_root="$RUNNER_TEMP/envlens-python-${{ matrix.label }}"
+          tool_env="$quality_root/tools"
+          mkdir -p "$quality_root"
+          python_bin="$(python -c 'import sys; print(sys.executable)')"
+          uv venv --python "$python_bin" "$tool_env"
+          uv pip install --python "$tool_env/bin/python" \
+            ruff==0.16.5 \
+            pytest==9.1.1 \
+            mypy==2.3.1 \
+            jsonschema==4.25.1
+          echo "ENVLENS_PYTHON=$tool_env/bin/python" >> "$GITHUB_ENV"
+          "$tool_env/bin/ruff" --version
+          "$tool_env/bin/python" -m pytest --version
+          "$tool_env/bin/python" -m mypy --version
+          "$tool_env/bin/python" -c 'import importlib.metadata; print("jsonschema " + importlib.metadata.version("jsonschema"))'
+
+      - name: Run envlens tests, lint, format, and types
+        run: |
+          set -euo pipefail
+          quality_root="$RUNNER_TEMP/envlens-python-${{ matrix.label }}"
+          mkdir -p "$quality_root/artifacts"
+          (
+            cd envlens
+            PYTHONPATH=src "$ENVLENS_PYTHON" -m pytest tests
+            "$quality_root/tools/bin/ruff" check src tests
+            "$quality_root/tools/bin/ruff" format --check src tests
+            "$quality_root/tools/bin/mypy" --strict --python-version 3.10 src/envlens
+          )
+
+      - name: Validate schema metaschema and real snapshot
+        run: |
+          set -euo pipefail
+          quality_root="$RUNNER_TEMP/envlens-python-${{ matrix.label }}"
+          artifact_dir="$quality_root/artifacts"
+          PYTHONPATH=envlens/src "$ENVLENS_PYTHON" -m envlens snapshot \
+            --interpreter "$ENVLENS_PYTHON" \
+            --captured-at 2026-09-03T00:00:00Z \
+            --output "$artifact_dir/real.snapshot.json"
+          "$ENVLENS_PYTHON" - "$artifact_dir/real.snapshot.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          from jsonschema import Draft202012Validator, FormatChecker
+
+          schema_path = Path("envlens/schemas/envlens-snapshot-v1.schema.json")
+          schema = json.loads(schema_path.read_text(encoding="utf-8"))
+          Draft202012Validator.check_schema(schema)
+          snapshot = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          Draft202012Validator(
+              schema,
+              format_checker=FormatChecker(),
+          ).validate(snapshot)
+          if snapshot.get("schema_version") != "envlens.snapshot/v1":
+              raise SystemExit("real snapshot schema version mismatch")
+          print("envlens schema metaschema and real snapshot validation: PASS")
+          PY
+
+      - name: Build and audit pure Python wheel and sdist
+        run: |
+          set -euo pipefail
+          quality_root="$RUNNER_TEMP/envlens-python-${{ matrix.label }}"
+          artifact_dir="$quality_root/artifacts"
+          first_build="$artifact_dir/build-a"
+          second_build="$artifact_dir/build-b"
+          mkdir -p "$first_build" "$second_build"
+          (cd envlens && SOURCE_DATE_EPOCH=1700000000 uv build --out-dir "$first_build")
+          (cd envlens && SOURCE_DATE_EPOCH=1700000000 uv build --out-dir "$second_build")
+          cmp "$first_build/envlens-0.1.0-py3-none-any.whl" \
+            "$second_build/envlens-0.1.0-py3-none-any.whl"
+          cmp "$first_build/envlens-0.1.0.tar.gz" \
+            "$second_build/envlens-0.1.0.tar.gz"
+          sha256sum "$first_build"/* > "$artifact_dir/SHA256SUMS"
+          "$ENVLENS_PYTHON" - "$first_build" <<'PY'
+          from email.parser import Parser
+          import sys
+          import tarfile
+          import zipfile
+          from pathlib import Path
+
+          def exact_headers(
+              payload: bytes,
+              label: str,
+              expected: dict[str, str],
+          ) -> None:
+              message = Parser().parsestr(payload.decode("utf-8"))
+              for name, value in expected.items():
+                  if message.get_all(name, []) != [value]:
+                      raise SystemExit(
+                          f"{label} metadata field {name!r} is not exactly {value!r}"
+                      )
+
+          artifact_dir = Path(sys.argv[1])
+          wheel = artifact_dir / "envlens-0.1.0-py3-none-any.whl"
+          sdist = artifact_dir / "envlens-0.1.0.tar.gz"
+          for path in (wheel, sdist):
+              if not path.is_file() or path.stat().st_size == 0:
+                  raise SystemExit(f"missing envlens release artifact: {path}")
+
+          with zipfile.ZipFile(wheel) as archive:
+              archive_names = archive.namelist()
+              if len(archive_names) != len(set(archive_names)):
+                  raise SystemExit("envlens wheel contains duplicate members")
+              names = set(archive_names)
+              native = tuple(
+                  name
+                  for name in names
+                  if name.lower().endswith((".so", ".pyd", ".dylib", ".dll"))
+              )
+              if native:
+                  raise SystemExit(f"envlens wheel contains native extensions: {native!r}")
+              wheel_meta_names = sorted(
+                  name for name in names if name.endswith(".dist-info/WHEEL")
+              )
+              if len(wheel_meta_names) != 1:
+                  raise SystemExit("envlens wheel must contain exactly one WHEEL metadata file")
+              exact_headers(
+                  archive.read(wheel_meta_names[0]),
+                  "envlens wheel",
+                  {
+                      "Wheel-Version": "1.0",
+                      "Root-Is-Purelib": "true",
+                      "Tag": "py3-none-any",
+                  },
+              )
+              required_members = (
+                  "envlens/py.typed",
+                  "envlens/schemas/envlens-snapshot-v1.schema.json",
+              )
+              for required_member in required_members:
+                  if required_member not in names:
+                      raise SystemExit(f"envlens wheel is missing {required_member}")
+              metadata_names = sorted(
+                  name for name in names if name.endswith(".dist-info/METADATA")
+              )
+              if len(metadata_names) != 1:
+                  raise SystemExit(
+                      "envlens wheel must contain exactly one METADATA file"
+                  )
+              metadata = Parser().parsestr(
+                  archive.read(metadata_names[0]).decode("utf-8")
+              )
+              exact_headers(
+                  archive.read(metadata_names[0]),
+                  "envlens wheel",
+                  {
+                      "Name": "envlens",
+                      "Version": "0.1.0",
+                      "Requires-Python": ">=3.10",
+                  },
+              )
+              if metadata.get_all("Requires-Dist", []) != []:
+                  raise SystemExit("envlens wheel unexpectedly declares dependencies")
+
+          with tarfile.open(sdist, "r:gz") as archive:
+              archive_names = archive.getnames()
+              if len(archive_names) != len(set(archive_names)):
+                  raise SystemExit("envlens sdist contains duplicate members")
+              names = set(archive_names)
+              native = tuple(
+                  name
+                  for name in names
+                  if name.lower().endswith((".so", ".pyd", ".dylib", ".dll"))
+              )
+              if native:
+                  raise SystemExit(f"envlens sdist contains native extensions: {native!r}")
+              pyproject_names = sorted(
+                  name for name in names if name.endswith("/pyproject.toml")
+              )
+              if len(pyproject_names) != 1:
+                  raise SystemExit(
+                      "envlens sdist must contain exactly one pyproject.toml"
+                  )
+              schema_names = sorted(
+                  name
+                  for name in names
+                  if name.endswith("/schemas/envlens-snapshot-v1.schema.json")
+              )
+              if len(schema_names) != 1:
+                  raise SystemExit(
+                      "envlens sdist must contain exactly one snapshot schema"
+                  )
+              pkg_info_names = sorted(
+                  name for name in names if name.endswith("/PKG-INFO")
+              )
+              if len(pkg_info_names) != 1:
+                  raise SystemExit("envlens sdist must contain exactly one PKG-INFO")
+              pkg_info_file = archive.extractfile(pkg_info_names[0])
+              if pkg_info_file is None:
+                  raise SystemExit("envlens sdist PKG-INFO is not a regular file")
+              with pkg_info_file:
+                  pkg_info = pkg_info_file.read()
+                  exact_headers(
+                      pkg_info,
+                      "envlens sdist",
+                      {
+                          "Name": "envlens",
+                          "Version": "0.1.0",
+                          "Requires-Python": ">=3.10",
+                      },
+                  )
+                  if Parser().parsestr(pkg_info.decode("utf-8")).get_all(
+                      "Requires-Dist", []
+                  ) != []:
+                      raise SystemExit(
+                          "envlens sdist unexpectedly declares dependencies"
+                      )
+          print("envlens wheel/sdist pure-Python audit: PASS")
+          PY
+          consumer_env="$quality_root/wheel-consumer"
+          uv venv --python "$ENVLENS_PYTHON" "$consumer_env"
+          uv pip install --python "$consumer_env/bin/python" --no-deps \
+            "$first_build/envlens-0.1.0-py3-none-any.whl"
+          test "$("$consumer_env/bin/envlens" --version)" = "envlens 0.1.0"
+          "$consumer_env/bin/envlens" snapshot \
+            --interpreter "$consumer_env/bin/python" \
+            --captured-at 2026-09-03T00:00:00Z \
+            --output "$artifact_dir/wheel.snapshot.json"
+          wheel_schema="$artifact_dir/wheel.schema.json"
+          "$consumer_env/bin/python" - "$wheel_schema" <<'PY'
+          import sys
+          from importlib.resources import files
+          from pathlib import Path
+
+          schema = files("envlens") / "schemas" / "envlens-snapshot-v1.schema.json"
+          Path(sys.argv[1]).write_bytes(schema.read_bytes())
+          PY
+          cmp "$wheel_schema" envlens/schemas/envlens-snapshot-v1.schema.json
+          "$ENVLENS_PYTHON" - "$wheel_schema" "$artifact_dir/wheel.snapshot.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          from jsonschema import Draft202012Validator, FormatChecker
+
+          schema = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          Draft202012Validator.check_schema(schema)
+          snapshot = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+          Draft202012Validator(
+              schema,
+              format_checker=FormatChecker(),
+          ).validate(snapshot)
+          if snapshot.get("schema_version") != "envlens.snapshot/v1":
+              raise SystemExit("clean wheel snapshot schema version mismatch")
+          print("clean installed wheel snapshot schema validation: PASS")
+          PY
+          {
+            echo "python=${{ matrix.python_version }}"
+            "$ENVLENS_PYTHON" --version
+            "$quality_root/tools/bin/ruff" --version
+            "$quality_root/tools/bin/pytest" --version
+            "$quality_root/tools/bin/mypy" --version
+            echo "schema=metaschema+source and clean-wheel snapshots PASS"
+            echo "artifacts=reproducible wheel+sdist, py3-none-any, clean wheel smoke PASS"
+            echo "status=PASS"
+          } > "$quality_root/quality.txt"
+
+      - name: Upload envlens Python quality evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: envlens-python-quality-${{ matrix.label }}
+          path: |
+            ${{ runner.temp }}/envlens-python-${{ matrix.label }}/quality.txt
+            ${{ runner.temp }}/envlens-python-${{ matrix.label }}/artifacts
+          if-no-files-found: warn
+          retention-days: 14
+
+  # Build each Python distribution, feed every artifact through the same
+  # consumer contract, and retain the native Qt6 CLI/GUI as release evidence.
+  # This is a validation job, not a publication step, so no tag or GitHub
+  # release is mutated by CI.
   buildscope-release-contract:
     name: BuildScope release contract
     needs: [buildscope-ici-deep, buildscope-python-quality]
@@ -1128,12 +1431,13 @@ jobs:
           retention-days: 30
 
   # One comment for the whole run, not one per project. It always starts after
-  # both matrices have reached a terminal result, including failures, so a PR
-  # never loses the report job behind a skipped dependency.
+  # the report and quality prerequisites have reached a terminal result,
+  # including failures, so a PR never loses the report job behind a skipped
+  # dependency.
   report-pr:
     name: Publish Reports & Sticky Comment
     if: ${{ always() && github.event_name == 'pull_request' }}
-    needs: [discover, verify, gui-build, quality-zoo-contract]
+    needs: [discover, verify, gui-build, quality-zoo-contract, envlens-python-quality]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
@@ -1321,12 +1625,14 @@ jobs:
           VERIFY_RESULT: ${{ needs.verify.result }}
           GUI_RESULT: ${{ needs.gui-build.result }}
           QUALITY_ZOO_RESULT: ${{ needs.quality-zoo-contract.result }}
+          ENVLENS_RESULT: ${{ needs.envlens-python-quality.result }}
           GUI_COUNT: ${{ needs.discover.outputs.gui_count }}
         run: |
           set -euo pipefail
           test "$DISCOVER_RESULT" = success
           test "$VERIFY_RESULT" = success
           test "$QUALITY_ZOO_RESULT" = success
+          test "$ENVLENS_RESULT" = success
           if [ "$GUI_RESULT" != success ]; then
             test "$GUI_COUNT" = 0
             test "$GUI_RESULT" = skipped
@@ -1347,6 +1653,7 @@ jobs:
       - buildscope-benchmark-smoke
       - buildscope-ici-deep
       - buildscope-python-quality
+      - envlens-python-quality
       - buildscope-release-contract
       - quality-zoo-contract
     runs-on: ubuntu-latest
@@ -1369,6 +1676,7 @@ jobs:
           BUILDSCOPE_BENCHMARK_SMOKE_RESULT: ${{ needs.buildscope-benchmark-smoke.result }}
           BUILDSCOPE_DEEP_RESULT: ${{ needs.buildscope-ici-deep.result }}
           BUILDSCOPE_PYTHON_RESULT: ${{ needs.buildscope-python-quality.result }}
+          ENVLENS_RESULT: ${{ needs.envlens-python-quality.result }}
           BUILDSCOPE_RELEASE_RESULT: ${{ needs.buildscope-release-contract.result }}
           QUALITY_ZOO_RESULT: ${{ needs.quality-zoo-contract.result }}
           GUI_COUNT: ${{ needs.discover.outputs.gui_count }}
@@ -1381,6 +1689,7 @@ jobs:
           test "$BUILDSCOPE_BENCHMARK_SMOKE_RESULT" = success
           test "$BUILDSCOPE_DEEP_RESULT" = success
           test "$BUILDSCOPE_PYTHON_RESULT" = success
+          test "$ENVLENS_RESULT" = success
           test "$BUILDSCOPE_RELEASE_RESULT" = success
           test "$QUALITY_ZOO_RESULT" = success
           if [ "$GUI_RESULT" != success ]; then
@@ -1538,7 +1847,7 @@ jobs:
   merge-gate:
     name: Merge Gate
     if: ${{ always() }}
-    needs: [discover, verify, gui-build, quality-zoo-contract, benchmark-smoke, diskmap-benchmark-smoke, buildscope-benchmark-smoke, buildscope-ici-deep, buildscope-python-quality, buildscope-release-contract, report-pr, publish-main]
+    needs: [discover, verify, gui-build, quality-zoo-contract, benchmark-smoke, diskmap-benchmark-smoke, buildscope-benchmark-smoke, buildscope-ici-deep, buildscope-python-quality, envlens-python-quality, buildscope-release-contract, report-pr, publish-main]
     runs-on: ubuntu-latest
     steps:
       - name: Require every quality job
@@ -1553,6 +1862,7 @@ jobs:
           BUILDSCOPE_BENCHMARK_SMOKE_RESULT: ${{ needs.buildscope-benchmark-smoke.result }}
           BUILDSCOPE_DEEP_RESULT: ${{ needs.buildscope-ici-deep.result }}
           BUILDSCOPE_PYTHON_RESULT: ${{ needs.buildscope-python-quality.result }}
+          ENVLENS_RESULT: ${{ needs.envlens-python-quality.result }}
           BUILDSCOPE_RELEASE_RESULT: ${{ needs.buildscope-release-contract.result }}
           GUI_COUNT: ${{ needs.discover.outputs.gui_count }}
           REPORT_RESULT: ${{ needs.report-pr.result }}
@@ -1567,6 +1877,7 @@ jobs:
           test "$BUILDSCOPE_BENCHMARK_SMOKE_RESULT" = success
           test "$BUILDSCOPE_DEEP_RESULT" = success
           test "$BUILDSCOPE_PYTHON_RESULT" = success
+          test "$ENVLENS_RESULT" = success
           test "$BUILDSCOPE_RELEASE_RESULT" = success
           if [ "$GUI_RESULT" != success ]; then
             test "$GUI_COUNT" = 0

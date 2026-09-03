@@ -1,0 +1,216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jihoon22-lee/toy-projects/envlens/schemas/envlens-snapshot-v1.schema.json",
+  "title": "envlens snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "producer",
+    "captured_at",
+    "redaction",
+    "source",
+    "environment",
+    "distributions",
+    "collection"
+  ],
+  "properties": {
+    "schema_version": {"const": "envlens.snapshot/v1"},
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "envlens"},
+        "version": {"type": "string", "minLength": 1, "maxLength": 65536}
+      }
+    },
+    "captured_at": {"type": "string", "format": "date-time", "maxLength": 65536},
+    "redaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy", "enabled"],
+      "properties": {
+        "policy": {"const": "envlens-redaction/v1"},
+        "enabled": {"type": "boolean"}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "requested_executable",
+        "resolved_executable",
+        "identity",
+        "sysconfig"
+      ],
+      "properties": {
+        "kind": {"const": "python-interpreter"},
+        "requested_executable": {"type": "string", "maxLength": 65536},
+        "resolved_executable": {"type": "string", "maxLength": 65536},
+        "identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "implementation",
+            "version",
+            "version_info",
+            "cache_tag",
+            "platform",
+            "machine",
+            "reported_executable",
+            "prefix",
+            "base_prefix",
+            "exec_prefix",
+            "compiler"
+          ],
+          "properties": {
+            "implementation": {"type": "string", "maxLength": 65536},
+            "version": {"type": "string", "maxLength": 65536},
+            "version_info": {
+              "type": "array",
+              "prefixItems": [
+                {"type": "integer"},
+                {"type": "integer"},
+                {"type": "integer"},
+                {"type": "string", "maxLength": 65536},
+                {"type": "integer"}
+              ],
+              "minItems": 5,
+              "maxItems": 5
+            },
+            "cache_tag": {"type": "string", "maxLength": 65536},
+            "platform": {"type": "string", "maxLength": 65536},
+            "machine": {"type": "string", "maxLength": 65536},
+            "reported_executable": {"type": "string", "maxLength": 65536},
+            "prefix": {"type": "string", "maxLength": 65536},
+            "base_prefix": {"type": "string", "maxLength": 65536},
+            "exec_prefix": {"type": "string", "maxLength": 65536},
+            "compiler": {"type": "string", "maxLength": 65536}
+          }
+        },
+        "sysconfig": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["paths", "variables"],
+          "properties": {
+            "paths": {
+              "type": "object",
+              "maxProperties": 4096,
+              "propertyNames": {"type": "string", "minLength": 1, "maxLength": 65536},
+              "additionalProperties": {"$ref": "#/$defs/scalar"}
+            },
+            "variables": {
+              "type": "object",
+              "maxProperties": 4096,
+              "propertyNames": {"type": "string", "minLength": 1, "maxLength": 65536},
+              "additionalProperties": {"$ref": "#/$defs/scalar"}
+            }
+          }
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["variables"],
+      "properties": {
+        "variables": {
+          "type": "object",
+          "maxProperties": 4096,
+          "propertyNames": {"type": "string", "minLength": 1, "maxLength": 65536},
+          "additionalProperties": {"type": "string", "maxLength": 65536}
+        }
+      }
+    },
+    "distributions": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "normalized_name",
+          "version",
+          "metadata",
+          "entry_points",
+          "location",
+          "status",
+          "errors"
+        ],
+        "properties": {
+          "name": {"type": "string", "maxLength": 65536},
+          "normalized_name": {"type": "string", "maxLength": 65536},
+          "version": {"type": "string", "maxLength": 65536},
+          "metadata": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["requires_python", "requires_dist"],
+            "properties": {
+              "requires_python": {"type": "string", "maxLength": 65536},
+              "requires_dist": {
+                "type": "array",
+                "maxItems": 100000,
+                "items": {"type": "string", "minLength": 1, "maxLength": 65536}
+              }
+            }
+          },
+          "entry_points": {
+            "type": "array",
+            "maxItems": 100000,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["group", "name", "value"],
+              "properties": {
+                "group": {"type": "string", "maxLength": 65536},
+                "name": {"type": "string", "maxLength": 65536},
+                "value": {"type": "string", "maxLength": 65536}
+              }
+            }
+          },
+          "location": {"type": "string", "maxLength": 65536},
+          "status": {"enum": ["ok", "error"]},
+          "errors": {
+            "type": "array",
+            "maxItems": 100000,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["code", "field", "type", "message"],
+              "properties": {
+                "code": {"type": "string", "minLength": 1, "maxLength": 65536},
+                "field": {"type": "string", "minLength": 1, "maxLength": 65536},
+                "type": {"type": "string", "minLength": 1, "maxLength": 65536},
+                "message": {"type": "string", "maxLength": 65536}
+              }
+            }
+          }
+        }
+      }
+    },
+    "collection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "distribution_count", "error_count"],
+      "properties": {
+        "status": {"enum": ["complete", "partial"]},
+        "distribution_count": {"type": "integer", "minimum": 0},
+        "error_count": {"type": "integer", "minimum": 0}
+      }
+    }
+  },
+  "$defs": {
+    "scalar": {
+      "anyOf": [
+        {"type": "null"},
+        {"type": "boolean"},
+        {"type": "integer"},
+        {"type": "number"},
+        {"type": "string", "maxLength": 65536}
+      ]
+    }
+  }
+}

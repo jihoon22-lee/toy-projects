@@ -63,11 +63,12 @@ class ManifestDiscoveryTests(unittest.TestCase):
             json.dumps(manifest), encoding="utf-8"
         )
 
-    def test_current_gui_projects_expand_to_both_qt_majors(self) -> None:
+    def test_current_projects_expand_gui_projects_to_both_qt_majors(self) -> None:
         verify_projects, gui_projects, names = discover(CI_DIR.parent)
 
-        self.assertEqual(names, ["diskmap", "loglens", "buildscope"])
+        self.assertEqual(names, ["diskmap", "loglens", "buildscope", "envlens"])
         self.assertEqual([item["name"] for item in verify_projects], names)
+        self.assertNotIn("envlens", [item["name"] for item in gui_projects])
         self.assertEqual(
             [
                 (
@@ -174,6 +175,24 @@ class ManifestDiscoveryTests(unittest.TestCase):
         self.assertEqual(
             [item["qt_major"] for item in gui_projects], list(SUPPORTED_QT_MAJORS)
         )
+
+    def test_non_gui_project_stays_in_verify_matrix_without_gui_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self._manifest_for("sample")
+            manifest["projects"][0]["gui"]["enabled"] = False
+            self._write_repository(
+                root,
+                manifest,
+                descriptors=(),
+                smoke_files=(),
+            )
+
+            verify_projects, gui_projects, names = discover(root)
+
+        self.assertEqual(names, ["sample"])
+        self.assertEqual(verify_projects, [{"name": "sample"}])
+        self.assertEqual(gui_projects, [])
 
     def test_manifest_root_must_be_an_object(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

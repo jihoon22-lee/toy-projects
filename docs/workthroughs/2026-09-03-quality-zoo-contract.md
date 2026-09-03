@@ -3,10 +3,23 @@
 ## Outcome
 
 The Quality Zoo scenario contract, dependency-free runner, candidate archive
-intake, and local candidate consumer are implemented. The first local candidate
-run passed its known-answer contract. The current PR rerun is still pending, so
-remote PR CI, sticky report publication, and exact-main verification for
-toy-projects remain pending. Q1 through Q5 corpus expansion is not complete.
+intake, local candidate consumer, and remote Q0 acceptance are complete. PR #49
+head `f6ad1dc4e745d3d1a2703000a00a5d7c4eed61a0` ran as
+[`33693241255`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33693241255):
+22 jobs succeeded and the main publisher was expectedly skipped. Quality Zoo
+artifact [`9870829400`](https://github.com/jihoon22-lee/toy-projects/actions/artifacts/9870829400)
+recorded contract `PASS` with released ici `v0.10.2` SHA-256
+`8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4`. The PR
+comment [`5517587341`](https://github.com/jihoon22-lee/toy-projects/pull/49#issuecomment-5517587341)
+contains exactly one `<!-- ici-report -->` marker and exactly three ordinary
+product report links. Merge commit
+`ed5fea2e881da77ac95482cf665e4e40bfe172f1` passed exact-main run
+[`33694452357`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33694452357).
+Exact-main Quality Zoo artifact
+[`9871249913`](https://github.com/jihoon22-lee/toy-projects/actions/artifacts/9871249913)
+recorded stable contract `PASS`, observed suite `WARN`, and an empty error list;
+the main product Pages were byte-identical to their artifacts. Q1–Q5 (the
+Python/C++/Qt/build/binary/hybrid corpus expansion) remain future work.
 
 This is a test-asset milestone, not a user-facing product milestone. No toy
 product version was changed and no release was created.
@@ -94,7 +107,8 @@ that key was removed from the shared fixture, both executables produced reports,
 but the release reported `MEASURED`/`high` while the candidate reported
 `ESTIMATED`/`medium`. That is why the correction binds expectations to executable
 digests instead of weakening evidence/confidence predicates. The obsolete run
-was cancelled after diagnosis; a full rerun is required.
+was cancelled after diagnosis; the full rerun and exact-main closeout are
+recorded in the Outcome above.
 
 The same failure also showed that a missing report left the always-upload step
 with an empty directory. The runner now writes a bounded
@@ -226,9 +240,8 @@ documentation quality check for this change is:
 git diff --check
 ```
 
-The remaining acceptance work is the current PR rerun, then remote PR CI,
-exactly one ordinary sticky comment containing the three released-ici product
-HTML links, the separate Quality Zoo result artifact, and exact-main evidence.
-The remaining Python, C++, Qt, build/binary, and hybrid scenario families stay
-pending until their known answers and clean counterparts are implemented and
-verified.
+Q0 acceptance is closed: the PR CI rerun, exactly one ordinary sticky comment
+with the three released-ici product HTML links, the separate Quality Zoo result
+artifacts, and exact-main evidence are all recorded above. The remaining Python,
+C++, Qt, build/binary, and hybrid scenario families (Q1–Q5) stay future until
+their known answers and clean counterparts are implemented and verified.
