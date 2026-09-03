@@ -1609,7 +1609,8 @@ jobs:
                 body_file="$(mktemp)"
                 if curl -fsSL --location --max-time 20 -D "$header_file" -o "$body_file" "$url" \
                   && grep -Eiq '^content-type:[[:space:]]*text/html' "$header_file" \
-                  && grep -Eiq '<!doctype[[:space:]]+html|<html([[:space:]]>])' "$body_file"; then
+                  && grep -Eiq '<!doctype[[:space:]]+html|<html([[:space:]]>])' "$body_file" \
+                  && python3 ci/check_published_html.py "$body_file" --project "$project"; then
                   echo "verified HTML: $url"
                 else
                   echo "Pages not ready: $url"

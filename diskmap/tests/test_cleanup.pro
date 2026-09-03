@@ -1,5 +1,5 @@
 TEMPLATE = app
-CONFIG += console c++17
+CONFIG += testcase console c++17
 CONFIG -= app_bundle
 QT -= gui
 
