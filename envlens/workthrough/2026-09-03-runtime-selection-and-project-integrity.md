@@ -44,13 +44,17 @@ PASS for malformed metadata.
   the original project error code, location, and message. The existing
   summary failure logic therefore cannot be masked by successful compile or
   import checks.
+- Project metadata preparation lives in `runtime_project.py`, keeping
+  `runtime.py` below ici's 500 pure-code-line threshold. The absent-default
+  check uses `lstat()`, so a dangling `pyproject.toml` symlink remains an
+  explicit read failure instead of being mistaken for no metadata.
 
 ### Documentation and regression coverage
 
 - `README.md` documents missing-default metadata, metadata failure behavior,
   qualified entry-point selection, and `missing-entry-point` evidence.
 - Added focused selection, runtime, malformed-metadata, no-metadata, and CLI
-  regression tests. The local E1–E3 count is now 112 tests.
+  regression tests. The local E1–E3 count is now 113 tests.
 
 ## Code Examples
 
@@ -76,7 +80,7 @@ The internal marker is converted into a failed runtime check by
 ### Project error as a summary-visible check
 
 ```python
-# src/envlens/runtime.py
+# src/envlens/runtime_project.py
 {
     "kind": "project-inspection",
     "name": str(project_info["path"]),
@@ -89,13 +93,17 @@ The internal marker is converted into a failed runtime check by
 
 ## Verification Results
 
-All checks used `/tmp/toy-ici-python-tools/bin/python` (Python 3.10):
+The final checks used Python 3.10 with the same pinned analysis-tool versions
+as repository CI:
 
 ```text
-pytest: 112 passed in 2.13s
-ruff check src tests: All checks passed!
-ruff format --check src tests: 31 files already formatted
-mypy --strict src/envlens: Success: no issues found in 17 source files
+pytest: 113 passed
+ruff check: All checks passed!
+ruff format --check: 35 files already formatted
+mypy --strict src: Success: no issues found in 18 source files
+released ici v0.10.2: Suite WARN, no FAIL/ERROR; test/type/line/sanitize PASS
+coverage: line 92.4%, function 97.6%, branch 83.1%; TEM 4.88
+complexity: maximum 15, zero issues; line: zero issues
 ```
 
 A manual runtime probe also confirmed that an absent default metadata file

@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from envlens import runtime
+from envlens import runtime, runtime_project
 from envlens.probe import ProbeError
 
 
@@ -177,14 +177,14 @@ def test_runtime_preserves_project_inspection_errors_and_rejects_bad_configurati
         "entry_points": [],
     }
     with (
-        patch.object(runtime, "inspect_pyproject", return_value=project_info),
+        patch.object(runtime_project, "inspect_pyproject", return_value=project_info),
         pytest.raises(runtime.RuntimeCheckError, match="imports must be a list"),
     ):
         runtime.run_runtime_checks(tmp_path)
 
     with (
         patch.object(
-            runtime,
+            runtime_project,
             "inspect_pyproject",
             return_value={"configuration": {}, "entry_points": "bad"},
         ),
