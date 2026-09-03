@@ -12,8 +12,11 @@ nearby positive counterpart that must not produce the same finding.
 
 ## Current status
 
-The scenario contract, dependency-free runner, candidate archive intake, local
-candidate consumer, and remote Q0 acceptance are complete. PR #49 head
+The scenario contract, dependency-free runner, candidate archive intake, and local
+candidate consumer are complete. Released-artifact Q0 acceptance is complete through
+the toy repository's remote PR/exact-main path; candidate cross-repository acceptance
+through the ici-hosted workflow is still pending until that workflow is merged and
+dispatched. PR #49 head
 `f6ad1dc4e745d3d1a2703000a00a5d7c4eed61a0` ran as
 [`33693241255`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33693241255):
 22 jobs succeeded and the main publisher was expectedly skipped. Its Quality Zoo
@@ -41,7 +44,8 @@ contract `PASS`, one stable scenario with the expected observed `WARN`, and zero
 manifest produced four project Pages, all byte-identical to their artifacts and passing exact-title /
 Zero-CDN checks; their sizes and hashes are centralized in the [EnvLens workthrough](../workthrough/2026-09-03-envlens-snapshot.md).
 
-The local candidate evidence is retained here alongside the remote acceptance so
+The local candidate evidence is retained here alongside the released-artifact remote
+acceptance so
 the released and candidate channels remain explicit and comparable:
 
 | Item | Evidence |
@@ -59,6 +63,24 @@ The candidate is a candidate-channel artifact even though its package version is
 `0.10.2`. It does not change the toy repository version and does not create a
 release.
 
+### Sanitizer-normalization candidate selector (local authenticated evidence)
+
+The scenario selector now includes the candidate executable produced from ici target
+`9d470edca7ab037a24dcd6594531a822f116548b`. The producer workflow run
+[`33706057540`](https://github.com/jihoon22-lee/ici/actions/runs/33706057540) succeeded and
+published artifact [`9875319095`](https://github.com/jihoon22-lee/ici/actions/artifacts/9875319095).
+The raw candidate archive SHA-256 is
+`4aec084b3a30ac01a1df5124fa3b42b7f51d23f66c12b490194a84549be9db27`, and the executable inside
+it has SHA-256
+`e7f1a2ce7147057538873a802715c7bf2b12e530a85070af862e02e378caceb8`. The exact digest selects
+`expectations/candidate-9d470ed.json`; package version alone is not used as a selector.
+
+Authenticated local intake evidence succeeded for this archive. Running the Q0 scenario with the
+selected candidate expectation returned contract `PASS`, observed suite `WARN`, one matched finding,
+and no runner errors. This is local candidate evidence only: it does not claim that the ici-hosted
+candidate-to-Quality-Zoo workflow has been merged or remotely accepted. The scenario remains the
+Python dead-code known-answer case; it does not yet validate ASan/UBSan/LSan sanitizer findings.
+
 ## Exact executable expectations
 
 Package version alone is not a sufficient expectation selector. The released
@@ -68,7 +90,8 @@ the legacy `MEASURED` evidence and `high` confidence for the dead finding. The
 candidate executable with SHA-256
 `53fc75f0a073a74689babfe9ef8a4b2378995002d7d563bdc52da548fdbb9ee8` reports
 provenance-aware `ESTIMATED` evidence and `medium` confidence, even though both
-executables report package version `0.10.2`.
+executables report package version `0.10.2`. The sanitizer-normalization candidate has its own
+strict expectation even though it reports the same package version.
 
 The scenario's schema-2 `scenario.json` maps each exact executable SHA-256 to a
 contained, full strict schema-1 expectation:
@@ -77,6 +100,7 @@ contained, full strict schema-1 expectation:
 |---|---|---|
 | `8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4` | released ici `v0.10.2` | `expectations/released-v0.10.2.json` |
 | `53fc75f0a073a74689babfe9ef8a4b2378995002d7d563bdc52da548fdbb9ee8` | ici candidate | `expectations/candidate-7872a7b.json` |
+| `e7f1a2ce7147057538873a802715c7bf2b12e530a85070af862e02e378caceb8` | ici sanitizer candidate | `expectations/candidate-9d470ed.json` |
 
 The runner selects one expectation by exact digest before checking the report;
 an unknown digest has no fallback and fails closed. Ordinary CI uses the
@@ -269,6 +293,8 @@ candidate expectation. An identical package version does not make those
 expectations interchangeable.
 
 Quality Zoo is not a user-facing application and has no product release in this
-change. Q0 (the scenario contract, candidate consumer, and remote PR/exact-main
-acceptance) is complete. Q1–Q5 (the Python, C++, Qt, build/binary, and hybrid
-corpus expansions) remain future work.
+change. Released-artifact Q0 (the scenario contract, local runner, and toy
+PR/exact-main acceptance) is complete, as is the local candidate intake/selector
+evidence. Candidate cross-repository acceptance through the ici-hosted workflow is
+still pending until that workflow is merged and dispatched. Q1–Q5 (the Python, C++,
+Qt, build/binary, and hybrid corpus expansions) remain future work.

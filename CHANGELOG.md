@@ -86,6 +86,16 @@
   Authenticated API evidence validation passed. The first `python.dead-private-function` scenario
   was contract `PASS` with observed suite `WARN`, exactly one matched finding, and no clean
   counterpart false positive.
+- Added an exact-SHA expectation for the sanitizer-normalization candidate target
+  `9d470edca7ab037a24dcd6594531a822f116548b`. Its producer run
+  `33706057540` succeeded and artifact `9875319095` supplied a raw ZIP SHA-256 of
+  `4aec084b3a30ac01a1df5124fa3b42b7f51d23f66c12b490194a84549be9db27`; the contained executable
+  SHA-256 is `e7f1a2ce7147057538873a802715c7bf2b12e530a85070af862e02e378caceb8`. Authenticated
+  local intake evidence succeeded, and the Q0 runner returned contract `PASS`, observed suite
+  `WARN`, one matched finding, and no errors. This is local candidate evidence for the Python
+  dead-code known-answer scenario, not sanitizer rule coverage or remote cross-repository
+  acceptance. The ici-hosted candidate workflow must merge and be dispatched before that remote
+  acceptance can be claimed; ordinary toy CI remains pinned to released ici `v0.10.2`.
 - Remote Q0 acceptance is complete. [PR #49](https://github.com/jihoon22-lee/toy-projects/pull/49)
   passed run [`33693241255`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33693241255),
   published exactly one sticky comment containing exactly one marker and three product HTML links
