@@ -5,11 +5,13 @@ small scenarios separate from the user-facing toy products and checks that ici
 reports the expected finding at the expected location. A scenario is therefore a
 test asset, not an application to install or a product release.
 
-The current checked-in corpus contains six scenario entries: the Python
-`python.dead-private-function` case, four C++ sanitizer cases, and a Qt 6 C++
-clazy lifetime case. The first five scenarios are the existing stable
-known-answer slice. The Python scenario gives the `dead` engine one deliberately
-unused private function in
+The released-artifact corpus in `manifest.json` intentionally remains six
+scenario entries: the Python `python.dead-private-function` case, four C++
+sanitizer cases, and a Qt 6 C++ clazy lifetime case. The candidate-only
+`candidate-manifest.json` adds two CMake/CTest ThreadSanitizer cases without
+changing the released ici `v0.10.2` validation path. These six released
+scenarios form the stable known-answer slice. The Python scenario gives
+the `dead` engine one deliberately unused private function in
 `src/bad.py`, while `src/clean.py` provides the nearby positive counterpart that
 must not produce the same finding. The C++ scenarios keep AddressSanitizer,
 LeakSanitizer, and UndefinedBehaviorSanitizer defects, plus a sanitizer-clean
@@ -26,7 +28,10 @@ acceptance is complete through the toy repository's remote PR/exact-main path, a
 candidate cross-repository acceptance is now complete through the exact-revision
 dispatch of the ici-hosted workflow recorded below. The Qt lifetime fixture and
 digest-bound expectations are checked in, but its candidate remote acceptance,
-PR CI, exact-main CI, and Pages evidence remain pending. PR #49 head
+PR CI, exact-main CI, and Pages evidence remain pending. The candidate-only TSan
+pair is checked in with an all-zero SHA-256 selector placeholder; its candidate
+producer, remote acceptance, PR CI, exact-main CI, and Pages evidence remain
+pending. PR #49 head
 `f6ad1dc4e745d3d1a2703000a00a5d7c4eed61a0` ran as
 [`33693241255`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33693241255):
 22 jobs succeeded and the main publisher was expectedly skipped. Its Quality Zoo
@@ -102,6 +107,31 @@ This is local known-answer evidence for the sanitizer subset. The later remote
 candidate acceptance is recorded separately below; this local run itself did not
 claim PR CI, a merge, or a release, and it does not close the broader C++ or other
 corpus areas.
+
+### Candidate-only ThreadSanitizer scenarios
+
+The candidate manifest adds two isolated CMake/CTest projects for the deep-only
+`thread_sanitize` engine. `cpp.tsan-data-race` is a red scenario: two threads
+release an atomic start gate and then update one project-owned non-atomic integer,
+so TSan reports a real `data-race` at `src/race.cpp:15`. The bounded fixture uses
+two threads, a short atomic readiness loop, and one update per thread; it does not
+depend on timing sleeps or unbounded work. `cpp.tsan-synchronized` runs the same
+shape of two-thread update under a `std::mutex` and must produce no non-info TSan
+finding.
+
+Both projects require `g++` and `cmake`, run only
+`verify --profile deep --no-cache`, enable only the required `thread_sanitize`
+engine, and forbid capability skips. Their schema-2 selectors currently contain
+the documented all-zero placeholder
+`0000000000000000000000000000000000000000000000000000000000000000` because the
+merged ici TSan candidate executable digest is produced later. Root-level
+candidate work must replace that selector and add the same final digest to the
+existing six scenarios before a full candidate-manifest run can be accepted.
+
+The local native CMake checks already establish the fixture behavior: the red
+binary reports one TSan data race and exits nonzero under the TSan flags, while the
+synchronized binary passes. This is fixture evidence only; it does not claim
+candidate runner, PR, exact-main, Pages, merge, or release completion.
 
 ### Qt lifetime scenario (candidate contract; remote evidence pending)
 
@@ -239,6 +269,12 @@ add `--scenario python.dead-private-function`. The runner records the exact
 candidate path, SHA-256, and version in `suite.json`, and writes each scenario's
 `report.json`, `report.html`, and `run.json` below the output directory.
 
+Candidate-only validation opts in explicitly with
+`--manifest candidate-manifest.json`; it must not be used with the released
+ici `v0.10.2` binary because the TSan engine is not present there. Until the
+all-zero selectors are replaced by the produced candidate digest, this command
+is intentionally expected to fail closed with `unsupported-ici`.
+
 `ICI_BIN` is deliberately a local path. The Quality Zoo runner does not resolve
 URLs, download an executable, or silently substitute the released tool. This
 makes the tool identity explicit for local candidate testing and keeps ordinary
@@ -246,15 +282,20 @@ CI's released-tool path separate.
 
 ## Registry and scenario format
 
-`manifest.json` is the registry of scenario IDs and paths. It is intentionally
-JSON rather than TOML: the runner is dependency-free and must run on Python
+`manifest.json` is the released-artifact registry of scenario IDs and paths, while
+`candidate-manifest.json` is an explicit candidate-only registry. The latter
+contains the released six plus the two TSan scenarios; ordinary CI must continue
+to select `manifest.json` until a candidate artifact and its exact expectations
+have been independently accepted. Both files are intentionally JSON rather than
+TOML: the runner is dependency-free and must run on Python
 3.10, where JSON parsing is provided by the standard library. Using a TOML
 parser would add a dependency or create a Python-version compatibility question
 for a file that only maps an ID to a directory. The scenario's `ici.toml` is
 still present because ici consumes it; the Quality Zoo runner does not parse
 that TOML file.
 
-The manifest currently has schema `1` and six entries:
+The released manifest has schema `1` and six entries. The candidate manifest has
+the same schema and adds `cpp.tsan-data-race` and `cpp.tsan-synchronized`:
 
 ```json
 {
@@ -437,4 +478,5 @@ Qt 6 lifetime fixture and digest-specific expectations are checked in, but its
 candidate remote acceptance, PR CI, exact-main CI, and Pages remain pending. The
 remote evidence closes only the Q2 runtime ASan/LSan/UBSan-plus-clean sub-scope;
 broader Q2 and Q1–Q5 (the Python, C++, Qt, build/binary, and hybrid corpus
-expansions) remain future work. No version or release changed.
+expansions) remain future work. The TSan pair is candidate-only and its all-zero
+selector is not an accepted digest. No version or release changed.

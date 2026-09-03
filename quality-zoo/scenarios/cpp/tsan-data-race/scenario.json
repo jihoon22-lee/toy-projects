@@ -1,0 +1,7 @@
+{
+  "schema": 2,
+  "scenario_id": "cpp.tsan-data-race",
+  "expectations": {
+    "0000000000000000000000000000000000000000000000000000000000000000": "expectations/candidate-thread-sanitize.json"
+  }
+}

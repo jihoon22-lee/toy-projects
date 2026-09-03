@@ -357,6 +357,47 @@ class RunContractTests(unittest.TestCase):
             },
         )
 
+    def test_candidate_registry_keeps_stable_slice_and_adds_tsan_pair(self) -> None:
+        quality_zoo_root = Path(__file__).resolve().parents[1]
+        _, registry = run._load_registry(quality_zoo_root / "candidate-manifest.json")
+        self.assertEqual(
+            set(registry),
+            {
+                "cpp.asan-use-after-free",
+                "cpp.lsan-memory-leak",
+                "cpp.qt-missing-parent-constructor",
+                "cpp.sanitizer-clean",
+                "cpp.tsan-data-race",
+                "cpp.tsan-synchronized",
+                "cpp.ubsan-signed-overflow",
+                "python.dead-private-function",
+            },
+        )
+        stable_root = quality_zoo_root / "manifest.json"
+        _, stable_registry = run._load_registry(stable_root)
+        self.assertTrue(set(stable_registry) < set(registry))
+
+        for scenario_id in ("cpp.tsan-data-race", "cpp.tsan-synchronized"):
+            with self.subTest(scenario_id=scenario_id):
+                selector = json.loads(
+                    (registry[scenario_id] / "scenario.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                self.assertEqual(
+                    set(selector["expectations"]),
+                    {"0" * 64},
+                )
+                expectation = run._load_scenario(
+                    scenario_id,
+                    registry[scenario_id],
+                    "0" * 64,
+                )
+                report_contract._validate_expectation(expectation)
+
+        self.assertNotIn("cpp.tsan-data-race", stable_registry)
+        self.assertNotIn("cpp.tsan-synchronized", stable_registry)
+
     def test_run_manifest_success_copies_reports_and_records_reproducible_summary(
         self,
     ) -> None:

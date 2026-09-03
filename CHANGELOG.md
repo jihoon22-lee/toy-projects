@@ -169,6 +169,22 @@
   exact-main CI, and Pages remain pending. The candidate is non-stable; no version or release
   changed.
 
+- Added the candidate-only CMake/CTest ThreadSanitizer pair
+  `cpp.tsan-data-race` and `cpp.tsan-synchronized`. The red fixture uses two
+  threads released by an atomic readiness gate to perform one unsynchronized
+  update of project-owned `src/race.cpp:15`; the clean counterpart protects the
+  same two-thread update with `std::mutex`. Both fixtures require `g++` and
+  `cmake`, select only the required deep `thread_sanitize` engine, forbid skips,
+  and use the fixed `verify --profile deep --no-cache` command. The native CMake
+  smoke confirms the red binary emits one real TSan data race and fails, while
+  the synchronized binary passes. `quality-zoo/manifest.json` is unchanged so
+  released ici `v0.10.2` CI remains compatible; the new
+  `quality-zoo/candidate-manifest.json` contains the existing six plus these two
+  candidate-only entries. Their schema-2 selectors intentionally use an all-zero
+  SHA-256 placeholder until the merged ici TSan candidate artifact is produced;
+  candidate runner acceptance, remote acceptance, PR CI, exact-main CI, Pages,
+  merge, and release evidence remain pending. No version or release changed.
+
 ### Sticky PR report comment cardinality
 
 - The pull-request report verifier now enumerates every paginated PR comment and fails closed unless
