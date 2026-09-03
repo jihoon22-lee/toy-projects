@@ -94,8 +94,9 @@
   local intake evidence succeeded, and the Q0 runner returned contract `PASS`, observed suite
   `WARN`, one matched finding, and no errors. This is local candidate evidence for the Python
   dead-code known-answer scenario, not sanitizer rule coverage or remote cross-repository
-  acceptance. The ici-hosted candidate workflow must merge and be dispatched before that remote
-  acceptance can be claimed; ordinary toy CI remains pinned to released ici `v0.10.2`.
+  acceptance. The ici-hosted candidate workflow is merged, but an exact-revision dispatch must
+  succeed before remote acceptance can be claimed; ordinary toy CI remains pinned to released
+  ici `v0.10.2`.
 - Remote Q0 acceptance is complete. [PR #49](https://github.com/jihoon22-lee/toy-projects/pull/49)
   passed run [`33693241255`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33693241255),
   published exactly one sticky comment containing exactly one marker and three product HTML links
@@ -108,6 +109,20 @@
   merge also passed the Quality Zoo contract: artifact `9872561713` recorded one stable scenario
   with the expected observed `WARN` and zero errors. No toy product version or release changed;
   Q1~Q5 Python/C++/Qt/build/binary/hybrid corpus expansion remains open.
+
+- Added four stable C++ sanitizer scenarios: `cpp.asan-use-after-free`,
+  `cpp.lsan-memory-leak`, `cpp.ubsan-signed-overflow`, and `cpp.sanitizer-clean`. Their strict
+  expectations cover AddressSanitizer use-after-free, LeakSanitizer memory leak,
+  UndefinedBehaviorSanitizer signed-integer overflow, and a clean sanitizer run with clean
+  counterparts where applicable. Each scenario binds both the released ici `v0.10.2` executable
+  SHA-256 `8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4` and the candidate
+  executable SHA-256 `e7f1a2ce7147057538873a802715c7bf2b12e530a85070af862e02e378caceb8` to
+  separate digest-selected expectations. Local all-scenario runs passed the contract for both
+  digests (`5/5` scenarios, zero errors); the three defect scenarios intentionally observed
+  `FAIL`, the clean scenario observed `PASS`, and the existing Python scenario observed its
+  expected `WARN`. This closes only the C++ sanitizer ASan/UBSan/LSan-plus-clean subitem; the
+  broader corpus remains open, and no sanitizer-scenario candidate remote acceptance, PR CI,
+  merge, or release is claimed. There is no version change.
 
 ### Sticky PR report comment cardinality
 

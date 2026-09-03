@@ -8,7 +8,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-from runner import run
+from runner import report_contract, run
 from runner.common import ContractError, sha256_file
 from tests.helpers import (
     PRODUCER_VERSION,
@@ -295,6 +295,47 @@ class RunContractTests(unittest.TestCase):
             "python.example",
             scenario_root,
         )
+
+    def test_checked_in_registry_has_valid_digest_bound_expectations(self) -> None:
+        quality_zoo_root = Path(__file__).resolve().parents[1]
+        _, registry = run._load_registry(quality_zoo_root / "manifest.json")
+        self.assertEqual(
+            set(registry),
+            {
+                "cpp.asan-use-after-free",
+                "cpp.lsan-memory-leak",
+                "cpp.sanitizer-clean",
+                "cpp.ubsan-signed-overflow",
+                "python.dead-private-function",
+            },
+        )
+
+        for scenario_id, scenario_root in registry.items():
+            selector = json.loads(
+                (scenario_root / "scenario.json").read_text(encoding="utf-8")
+            )
+            with self.subTest(scenario_id=scenario_id):
+                self.assertEqual(selector["schema"], 2)
+                self.assertTrue(selector["expectations"])
+            for digest in selector["expectations"]:
+                with self.subTest(scenario_id=scenario_id, digest=digest):
+                    expectation = run._load_scenario(
+                        scenario_id, scenario_root, digest
+                    )
+                    report_contract._validate_expectation(expectation)
+
+        cpp_ids = {name for name in registry if name.startswith("cpp.")}
+        for scenario_id in cpp_ids:
+            selector = json.loads(
+                (registry[scenario_id] / "scenario.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                set(selector["expectations"]),
+                {
+                    "8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4",
+                    "e7f1a2ce7147057538873a802715c7bf2b12e530a85070af862e02e378caceb8",
+                },
+            )
 
     def test_run_manifest_success_copies_reports_and_records_reproducible_summary(
         self,

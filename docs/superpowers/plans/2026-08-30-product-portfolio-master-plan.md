@@ -34,7 +34,7 @@
 | diskmap | C++17, Qt, qmake | D1/D2 complete · D3 explorer workbench merged by PR #46 · exact-main evidence green · `0.1.0`/`Unreleased` | treemap/table, filters, uncertainty, accessible navigation, rescan restoration verified; cleanup UX는 D4~D6에서 확장 |
 | buildscope | Python + C++17/Qt, CMake | B0~B5 implementation, remote acceptance, exact-main CI, trusted main Pages와 `0.5.0` tag/release/public asset audit complete | B3~B5 첫 usable release boundary published and audited |
 | envlens | pure Python 3.10+ package/CLI | deterministic snapshot core · path-aware manifest/CI matrix · PR #50 merged · exact-main green | `0.1.0`/`Unreleased`; E2/E3 and release remain pending |
-| quality-zoo | Python 3.10, stdlib runner | scenario contract/local candidate consumer · released-artifact PR #49 remote PR CI/sticky/exact-main complete · candidate cross-repo acceptance pending | test asset only; Q1~Q5 corpus pending |
+| quality-zoo | Python 3.10, stdlib runner | scenario contract/local candidate consumer · four C++ sanitizer scenarios locally verified for released/candidate digests · released-artifact PR #49 remote PR CI/sticky/exact-main complete · candidate cross-repo acceptance pending | test asset only; broader Q1~Q5 corpus pending |
 | ici/viewer | Qt-free core + Qt6 GUI | 3 tests, TEM 4.94 | core 중심, 셸과 report workflow 부족 |
 
 현재 공백:
@@ -54,7 +54,7 @@
 | ELF/ABI/RPATH | 없음 | abilens |
 | Python runtime/package matrix | ici self뿐 | envlens |
 | hybrid process contract | 없음 | buildscope |
-| known-bad detection recall | quality-zoo의 1개 stable Python scenario와 작은 ici fixture | C++/Qt/build/binary/hybrid corpus 확장 |
+| known-bad detection recall | quality-zoo의 1개 stable Python scenario와 4개 C++ sanitizer scenario | broader C++/Qt/build/binary/hybrid corpus 확장 |
 
 새 프로젝트가 ici 기능보다 먼저 빈 껍데기로 만들어지지 않도록 각 신규 프로젝트는 대응 ici milestone과 함께 시작한다.
 
@@ -1489,8 +1489,19 @@ SHA-256은 `e7f1a2ce7147057538873a802715c7bf2b12e530a85070af862e02e378caceb8`다
 성공했다. 해당 Q0 runner는 contract `PASS`, observed suite `WARN`, one matched finding,
 zero errors를 기록했다. 이는 기존 Python dead-code known-answer에 대한 local candidate
 evidence이며 sanitizer rule 자체를 검증하거나 remote cross-repository acceptance를 닫는
-증거가 아니다. ici-hosted candidate workflow merge/dispatch와 ASan/UBSan/LSan scenario는
-여전히 pending이다.
+증거가 아니다.
+
+2026-09-03 local C++ sanitizer subset은 `cpp.asan-use-after-free`,
+`cpp.lsan-memory-leak`, `cpp.ubsan-signed-overflow`, `cpp.sanitizer-clean` 네 stable
+scenario로 구성했다. Released ici `v0.10.2` executable SHA-256
+`8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4`와 candidate executable
+SHA-256 `e7f1a2ce7147057538873a802715c7bf2b12e530a85070af862e02e378caceb8`를 각각 exact
+schema-2 selector로 실행했다. 두 all-scenario run 모두 five scenarios의 contract `PASS`,
+zero errors를 기록했다. ASan UAF/LSan leak/UBSan signed overflow defect scenario는 expected
+observed `FAIL`, clean scenario는 expected observed `PASS`, 기존 Python scenario는 expected
+observed `WARN`이었다. 따라서 Q2의 ASan/UBSan/LSan 및 clean counterpart 한 항목만 local
+evidence 기준으로 완료했으며, broader Q2와 Q1/Q3~Q5, candidate remote acceptance는 여전히
+pending이다. 이 local evidence는 PR CI, merge 또는 release를 의미하지 않는다.
 
 Quality Zoo의 다음 exact-main push [run `33698248293`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33698248293)에서도
 artifact `9872561713`의 contract는 `PASS`였고, stable scenario 하나의 observed `WARN`은 예상된
@@ -1519,7 +1530,7 @@ Q1~Q5 corpus expansion은 여전히 pending이다.
 - [ ] same-basename include와 actual search order
 - [ ] header/include cycle과 unresolved generated header
 - [ ] complexity/duplicate/unused finding
-- [ ] ASan UAF, UBSan overflow, leak와 clean counterpart
+- [x] ASan UAF, UBSan overflow, leak와 clean counterpart (released/candidate exact-digest local runs; broader C++ corpus remains pending)
 - [ ] gcov function/branch location
 - [ ] malformed compile DB와 missing TU
 
@@ -1615,9 +1626,10 @@ ici와 toy-projects가 함께 바뀌는 기능은 다음 순서를 따른다.
   merge·exact-main evidence complete; E2~E4 pending)
 - [ ] A0~A4: abilens Makefile/ELF explorer와 release 완료
 - [ ] Q0~Q5: Python/C++/Qt/build/hybrid stable expected-finding corpus 완료 (released-artifact Q0
-  implementation과 PR #49 remote acceptance, EnvLens merge의 exact-main QZ artifact, 그리고 새
-  candidate SHA selector/local authenticated evidence는 complete; ici-hosted candidate workflow의
-  remote cross-repository acceptance와 Q1~Q5는 pending)
+  implementation과 PR #49 remote acceptance, EnvLens merge의 exact-main QZ artifact, 새
+  candidate SHA selector/local authenticated evidence, 그리고 C++ sanitizer ASan/UBSan/LSan 및
+  clean counterpart local evidence는 기록됐다. broader Q2 corpus, ici-hosted candidate workflow의
+  remote cross-repository acceptance와 Q1/Q3~Q5는 pending)
 - [ ] repository path-aware CI, ici pin/candidate와 artifact 정책 완료
 
 체크포인트는 기능이 시연되는 것만으로 닫지 않는다. 공통 제품 완성 불변식, native tests, ici 실측, 문서와 오류 처리까지 모두 충족해야 한다.
