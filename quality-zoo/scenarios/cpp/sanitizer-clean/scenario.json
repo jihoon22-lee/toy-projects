@@ -3,6 +3,7 @@
   "scenario_id": "cpp.sanitizer-clean",
   "expectations": {
     "8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4": "expectations/released-v0.10.2.json",
-    "e7f1a2ce7147057538873a802715c7bf2b12e530a85070af862e02e378caceb8": "expectations/candidate-9d470ed.json"
+    "e7f1a2ce7147057538873a802715c7bf2b12e530a85070af862e02e378caceb8": "expectations/candidate-9d470ed.json",
+    "985c81a63363356619207870cddb0d8cd9854a46925a3e0a745e54bd543d5b51": "expectations/candidate-9d470ed.json"
   }
 }

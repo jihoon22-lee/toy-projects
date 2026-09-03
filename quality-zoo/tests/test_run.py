@@ -340,6 +340,7 @@ class RunContractTests(unittest.TestCase):
                 {
                     "8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4",
                     "e7f1a2ce7147057538873a802715c7bf2b12e530a85070af862e02e378caceb8",
+                    "985c81a63363356619207870cddb0d8cd9854a46925a3e0a745e54bd543d5b51",
                 },
             )
 
@@ -350,7 +351,10 @@ class RunContractTests(unittest.TestCase):
         )
         self.assertEqual(
             set(qt_selector["expectations"]),
-            {"8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4"},
+            {
+                "8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4",
+                "985c81a63363356619207870cddb0d8cd9854a46925a3e0a745e54bd543d5b51",
+            },
         )
 
     def test_run_manifest_success_copies_reports_and_records_reproducible_summary(
