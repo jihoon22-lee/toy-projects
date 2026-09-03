@@ -24,7 +24,7 @@ selected expectation.
 
 ### C++ sanitizer fixtures and expectations
 
-The existing core change (`55e2a92`) adds these stable scenarios under
+The core change adds these stable scenarios under
 `quality-zoo/scenarios/cpp/`:
 
 | Scenario | Known answer |
