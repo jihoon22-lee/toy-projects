@@ -11,10 +11,15 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <system_error>
 #include <utility>
 #include <vector>
+
+#if defined(__linux__)
+#include <sys/stat.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -22,9 +27,11 @@ namespace {
 
 class ScopedTempDirectory {
 public:
-    ScopedTempDirectory() {
+    explicit ScopedTempDirectory(fs::path parent = {}) {
         std::error_code error;
-        const fs::path parent = fs::temp_directory_path(error);
+        if (parent.empty()) {
+            parent = fs::temp_directory_path(error);
+        }
         if (error) {
             return;
         }
@@ -59,6 +66,18 @@ public:
 private:
     fs::path path_;
 };
+
+std::uint64_t deviceFor(const fs::path& path) {
+#if defined(__linux__)
+    struct stat status{};
+    if (::stat(path.c_str(), &status) == 0) {
+        return static_cast<std::uint64_t>(status.st_dev);
+    }
+#else
+    (void)path;
+#endif
+    return 0;
+}
 
 bool writeFile(const fs::path& path, const std::string& contents) {
     std::ofstream output(path, std::ios::binary);
@@ -110,6 +129,82 @@ diskmap::TrashOptions optionsFor(const fs::path& root) {
     options.data_home = root / "xdg data home";
     return options;
 }
+
+bool ensurePrivateTrash(const diskmap::TrashOptions& options) {
+    std::error_code error;
+    fs::create_directories(options.data_home / "Trash" / "files", error);
+    if (error) {
+        return false;
+    }
+    fs::create_directories(options.data_home / "Trash" / "info", error);
+    return !error;
+}
+
+std::string kindName(diskmap::FsKind kind) {
+    switch (kind) {
+    case diskmap::FsKind::RegularFile: return "file";
+    case diskmap::FsKind::Directory: return "directory";
+    case diskmap::FsKind::Symlink: return "symlink";
+    case diskmap::FsKind::Other: return "other";
+    }
+    return "other";
+}
+
+std::string restoreInfo(const std::string& encodedPath,
+                        const diskmap::CleanupTarget& target,
+                        const std::string& kind = {}) {
+    return "[Trash Info]\nPath=" + encodedPath
+           + "\nDeletionDate=2026-09-04T00:00:00\nX-DiskMap-Device="
+           + std::to_string(target.identity.device) + "\nX-DiskMap-File="
+           + std::to_string(target.identity.file) + "\nX-DiskMap-Kind="
+           + (kind.empty() ? kindName(target.kind) : kind) + "\n";
+}
+
+bool writeRestoreInfo(const diskmap::TrashOptions& options,
+                      const std::string& token,
+                      const std::string& content) {
+    return writeFile(options.data_home / "Trash" / "info"
+                         / (token + ".trashinfo"),
+                     content);
+}
+
+std::string restoreInfoFields(const std::string& encodedPath,
+                              const std::string& device,
+                              const std::string& file,
+                              const std::string& kind) {
+    return "[Trash Info]\nPath=" + encodedPath
+           + "\nDeletionDate=2026-09-04T00:00:00\nX-DiskMap-Device="
+           + device + "\nX-DiskMap-File=" + file + "\nX-DiskMap-Kind="
+           + kind + "\n";
+}
+
+class ScopedEnvironment {
+public:
+    ScopedEnvironment(const char* name, const std::string& value)
+        : name_(name), had_value_(std::getenv(name) != nullptr),
+          old_value_(had_value_ ? std::getenv(name) : "") {
+        ::setenv(name_.c_str(), value.c_str(), 1);
+    }
+
+    ScopedEnvironment(const char* name, std::nullptr_t)
+        : name_(name), had_value_(std::getenv(name) != nullptr),
+          old_value_(had_value_ ? std::getenv(name) : "") {
+        ::unsetenv(name_.c_str());
+    }
+
+    ~ScopedEnvironment() {
+        if (had_value_) {
+            ::setenv(name_.c_str(), old_value_.c_str(), 1);
+        } else {
+            ::unsetenv(name_.c_str());
+        }
+    }
+
+private:
+    std::string name_;
+    bool had_value_;
+    std::string old_value_;
+};
 
 bool linuxTrashReady(const diskmap::CleanupTarget& target,
                      const diskmap::TrashOptions& options) {
@@ -196,6 +291,10 @@ void testCapabilityAndInvalidRestore(const fs::path& root) {
     CHECK(writeFile(blockedDataHome, "not a directory"));
     diskmap::TrashOptions broken = options;
     broken.data_home = blockedDataHome;
+    const auto blockedCapability =
+        diskmap::inspectTrashCapability(target, broken);
+    CHECK(!blockedCapability.available);
+    CHECK(blockedCapability.status == diskmap::TrashStatus::IoError);
     const auto failedBackend = diskmap::movePlanToTrash(planFor({target}), broken);
     CHECK_EQ(failedBackend.size(), static_cast<std::size_t>(1));
     if (!failedBackend.empty()) {
@@ -465,6 +564,421 @@ void testMultiTargetPartialOutcome(const fs::path& root) {
     CHECK_EQ(readFile(secondPath), "second target changed");
 }
 
+void testStatusTokensAndEnvironment(const fs::path& root) {
+    const std::vector<std::pair<diskmap::TrashStatus, const char*>> statuses = {
+        {diskmap::TrashStatus::Ready, "ready"},
+        {diskmap::TrashStatus::Moved, "moved"},
+        {diskmap::TrashStatus::Restored, "restored"},
+        {diskmap::TrashStatus::UnsupportedPlatform, "unsupported-platform"},
+        {diskmap::TrashStatus::InvalidRequest, "invalid-request"},
+        {diskmap::TrashStatus::RevalidationFailed, "revalidation-failed"},
+        {diskmap::TrashStatus::DifferentFilesystem, "different-filesystem"},
+        {diskmap::TrashStatus::DestinationExists, "destination-exists"},
+        {diskmap::TrashStatus::MissingToken, "missing-token"},
+        {diskmap::TrashStatus::IoError, "io-error"},
+    };
+    for (const auto& item : statuses) {
+        CHECK_EQ(std::string(diskmap::trashStatusName(item.first)),
+                 std::string(item.second));
+    }
+    CHECK_EQ(std::string(diskmap::trashStatusName(
+                 static_cast<diskmap::TrashStatus>(255))),
+             std::string("unknown"));
+
+    const diskmap::TrashOptions options = optionsFor(root);
+    CHECK(ensurePrivateTrash(options));
+    const std::vector<std::string> invalidTokens = {
+        "",
+        "not-diskmap",
+        "diskmap-../escape",
+        "diskmap-!",
+        "diskmap-" + std::string(121, 'a'),
+    };
+    for (const std::string& token : invalidTokens) {
+        CHECK(diskmap::restoreFromTrash(token, options).status
+              == diskmap::TrashStatus::InvalidRequest);
+    }
+    CHECK(diskmap::restoreFromTrash("diskmap-", options).status
+          == diskmap::TrashStatus::MissingToken);
+
+    const fs::path source = root / "environment-source.txt";
+    CHECK(writeFile(source, "environment"));
+    const diskmap::CleanupTarget target = targetFor(source);
+
+    // Empty options use XDG_DATA_HOME first, then HOME/.local/share, and
+    // refuse to guess when both environment variables are unavailable.
+    const fs::path xdg = root / "environment-xdg";
+    const fs::path home = root / "environment-home";
+    std::error_code error;
+    fs::create_directory(home, error);
+    CHECK(!error);
+    {
+        ScopedEnvironment xdgEnvironment("XDG_DATA_HOME", xdg.string());
+        ScopedEnvironment homeEnvironment("HOME", home.string());
+        diskmap::TrashOptions emptyOptions;
+        const auto capability = diskmap::inspectTrashCapability(target, emptyOptions);
+        CHECK(capability.status == diskmap::TrashStatus::Ready);
+        CHECK(capability.trash_root == xdg / "Trash");
+    }
+    {
+        ScopedEnvironment xdgEnvironment("XDG_DATA_HOME", nullptr);
+        ScopedEnvironment homeEnvironment("HOME", home.string());
+        diskmap::TrashOptions emptyOptions;
+        const auto capability = diskmap::inspectTrashCapability(target, emptyOptions);
+        CHECK(capability.status == diskmap::TrashStatus::Ready);
+        CHECK(capability.trash_root == home / ".local" / "share" / "Trash");
+    }
+    {
+        ScopedEnvironment xdgEnvironment("XDG_DATA_HOME", nullptr);
+        ScopedEnvironment homeEnvironment("HOME", nullptr);
+        diskmap::TrashOptions emptyOptions;
+        CHECK(diskmap::inspectTrashCapability(target, emptyOptions).status
+              == diskmap::TrashStatus::InvalidRequest);
+    }
+}
+
+void testFilesystemRefusalsAndLimits(const fs::path& root) {
+    const diskmap::TrashOptions options = optionsFor(root);
+    const fs::path sourcePath = root / "refusal-source.txt";
+    CHECK(writeFile(sourcePath, "refusal"));
+    const diskmap::CleanupTarget target = targetFor(sourcePath);
+
+    // Empty plans are a no-op, while a zero execution bound rejects before
+    // opening or mutating any source entry.
+    const auto emptyReceipts = diskmap::movePlanToTrash(planFor({}, 1), options);
+    CHECK(emptyReceipts.empty());
+    checkNoPermanentDelete(sourcePath, options);
+
+    diskmap::CleanupTarget invalid = target;
+    invalid.path = "/";
+    auto receipts = diskmap::movePlanToTrash(planFor({invalid}), options);
+    CHECK_EQ(receipts.size(), static_cast<std::size_t>(1));
+    if (!receipts.empty()) {
+        CHECK(receipts[0].status == diskmap::TrashStatus::InvalidRequest);
+    }
+    CHECK(fs::is_regular_file(sourcePath));
+
+    invalid = target;
+    invalid.path = "relative-source";
+    receipts = diskmap::movePlanToTrash(planFor({invalid}), options);
+    CHECK_EQ(receipts.size(), static_cast<std::size_t>(1));
+    if (!receipts.empty()) {
+        CHECK(receipts[0].status == diskmap::TrashStatus::InvalidRequest);
+    }
+    CHECK(fs::is_regular_file(sourcePath));
+
+    // The anchored backend checks the entry type and allocation evidence even
+    // when a caller supplies a malformed reviewed target directly.
+    const fs::path directoryPath = root / "wrong-type-directory";
+    std::error_code error;
+    CHECK(fs::create_directory(directoryPath, error));
+    CHECK(!error);
+    invalid = targetFor(directoryPath);
+    invalid.kind = diskmap::FsKind::RegularFile;
+    receipts = diskmap::movePlanToTrash(planFor({invalid}), options);
+    CHECK_EQ(receipts.size(), static_cast<std::size_t>(1));
+    if (!receipts.empty()) {
+        CHECK(receipts[0].status == diskmap::TrashStatus::RevalidationFailed);
+    }
+    CHECK(fs::is_directory(directoryPath));
+    fs::remove(directoryPath, error);
+    CHECK(!error);
+
+    const fs::path allocationPath = root / "wrong-allocation.txt";
+    CHECK(writeFile(allocationPath, "allocation"));
+    invalid = targetFor(allocationPath);
+    invalid.allocated_size += 512;
+    receipts = diskmap::movePlanToTrash(planFor({invalid}), options);
+    CHECK_EQ(receipts.size(), static_cast<std::size_t>(1));
+    if (!receipts.empty()) {
+        CHECK(receipts[0].status == diskmap::TrashStatus::RevalidationFailed);
+    }
+    CHECK(fs::is_regular_file(allocationPath));
+
+    // A reviewed source that disappears is a revalidation error, and a
+    // missing parent is reported before any rename is attempted.
+    const fs::path missingPath = root / "missing-before-move.txt";
+    CHECK(writeFile(missingPath, "missing"));
+    invalid = targetFor(missingPath);
+    fs::remove(missingPath, error);
+    CHECK(!error);
+    receipts = diskmap::movePlanToTrash(planFor({invalid}), options);
+    CHECK_EQ(receipts.size(), static_cast<std::size_t>(1));
+    if (!receipts.empty()) {
+        CHECK(receipts[0].status == diskmap::TrashStatus::RevalidationFailed);
+    }
+
+    const fs::path missingParent = root / "removed-parent" / "child.txt";
+    CHECK(fs::create_directories(missingParent.parent_path(), error));
+    CHECK(!error);
+    CHECK(writeFile(missingParent, "parent disappears"));
+    invalid = targetFor(missingParent);
+    fs::remove_all(missingParent.parent_path(), error);
+    CHECK(!error);
+    receipts = diskmap::movePlanToTrash(planFor({invalid}), options);
+    CHECK_EQ(receipts.size(), static_cast<std::size_t>(1));
+    if (!receipts.empty()) {
+        CHECK(receipts[0].status == diskmap::TrashStatus::RevalidationFailed);
+    }
+
+    // Directory setup fails closed both when the data home is a file and when
+    // the second Trash directory is blocked.
+    const fs::path blockedInfoRoot = root / "blocked-info-home";
+    CHECK(fs::create_directories(blockedInfoRoot / "Trash" / "files", error));
+    CHECK(!error);
+    CHECK(writeFile(blockedInfoRoot / "Trash" / "info", "not a directory"));
+    diskmap::TrashOptions blockedInfo = options;
+    blockedInfo.data_home = blockedInfoRoot;
+    const fs::path blockedSource = root / "blocked-info-source.txt";
+    CHECK(writeFile(blockedSource, "blocked"));
+    const auto blockedInfoCapability =
+        diskmap::inspectTrashCapability(targetFor(blockedSource), blockedInfo);
+    CHECK(!blockedInfoCapability.available);
+    CHECK(blockedInfoCapability.status == diskmap::TrashStatus::IoError);
+    receipts = diskmap::movePlanToTrash(
+        planFor({targetFor(blockedSource)}), blockedInfo);
+    CHECK_EQ(receipts.size(), static_cast<std::size_t>(1));
+    if (!receipts.empty()) {
+        CHECK(receipts[0].status == diskmap::TrashStatus::IoError);
+    }
+    CHECK(fs::is_regular_file(blockedSource));
+
+    const fs::path symlinkDataTarget = root / "real-data-home";
+    const fs::path symlinkDataHome = root / "symlink-data-home";
+    CHECK(fs::create_directory(symlinkDataTarget, error));
+    CHECK(!error);
+    error.clear();
+    fs::create_symlink(symlinkDataTarget, symlinkDataHome, error);
+    if (error) {
+        std::printf("SKIP symlink data-home refusal: %s\n", error.message().c_str());
+    } else {
+        diskmap::TrashOptions symlinkOptions = options;
+        symlinkOptions.data_home = symlinkDataHome;
+        const fs::path symlinkSource = root / "symlink-data-source.txt";
+        CHECK(writeFile(symlinkSource, "symlink data home"));
+        const auto symlinkCapability = diskmap::inspectTrashCapability(
+            targetFor(symlinkSource), symlinkOptions);
+        CHECK(!symlinkCapability.available);
+        CHECK(symlinkCapability.status == diskmap::TrashStatus::IoError);
+        receipts = diskmap::movePlanToTrash(
+            planFor({targetFor(symlinkSource)}), symlinkOptions);
+        CHECK_EQ(receipts.size(), static_cast<std::size_t>(1));
+        if (!receipts.empty()) {
+            CHECK(receipts[0].status == diskmap::TrashStatus::IoError);
+        }
+        CHECK(fs::is_regular_file(symlinkSource));
+        CHECK(!fs::exists(symlinkDataTarget / "Trash"));
+    }
+
+#if defined(__linux__)
+    // /dev/shm is normally a separate tmpfs in CI.  If the host does not
+    // provide it, the safety assertion is skipped rather than assuming mount
+    // topology.
+    ScopedTempDirectory alternate("/dev/shm");
+    if (alternate.valid() && deviceFor(root) != deviceFor(alternate.path())) {
+        diskmap::TrashOptions different = options;
+        different.data_home = alternate.path() / "xdg-data";
+        const auto capability = diskmap::inspectTrashCapability(target, different);
+        CHECK(capability.status == diskmap::TrashStatus::DifferentFilesystem);
+        receipts = diskmap::movePlanToTrash(planFor({target}), different);
+        CHECK_EQ(receipts.size(), static_cast<std::size_t>(1));
+        if (!receipts.empty()) {
+            CHECK(receipts[0].status == diskmap::TrashStatus::DifferentFilesystem);
+        }
+        CHECK(fs::is_regular_file(sourcePath));
+    } else {
+        std::printf("SKIP different-filesystem Trash test: no alternate device\n");
+    }
+
+    // A FIFO exercises the unsupported stat kind while the reviewed target is
+    // intentionally made inconsistent; it must remain in place.
+    const fs::path fifoPath = root / "reviewed-fifo";
+    if (::mkfifo(fifoPath.c_str(), 0600) != 0) {
+        std::printf("SKIP FIFO Trash validation: cannot create FIFO\n");
+    } else {
+        invalid = targetFor(fifoPath);
+        invalid.kind = diskmap::FsKind::RegularFile;
+        receipts = diskmap::movePlanToTrash(planFor({invalid}), options);
+        CHECK_EQ(receipts.size(), static_cast<std::size_t>(1));
+        if (!receipts.empty()) {
+            CHECK(receipts[0].status == diskmap::TrashStatus::RevalidationFailed);
+        }
+        CHECK(fs::exists(fifoPath));
+        fs::remove(fifoPath, error);
+        CHECK(!error);
+    }
+#endif
+}
+
+void testMetadataAndRestoreFailures(const fs::path& root) {
+    const diskmap::TrashOptions options = optionsFor(root);
+    CHECK(ensurePrivateTrash(options));
+    const fs::path files = options.data_home / "Trash" / "files";
+
+#if defined(__linux__)
+    // A raced or malicious metadata FIFO must fail immediately; opening it
+    // for restore must never wait indefinitely for a writer.
+    {
+        const std::string token = "diskmap-metadata-fifo";
+        const fs::path fifo = options.data_home / "Trash" / "info"
+                              / (token + ".trashinfo");
+        if (::mkfifo(fifo.c_str(), 0600) == 0) {
+            const auto receipt = diskmap::restoreFromTrash(token, options);
+            CHECK(receipt.status == diskmap::TrashStatus::IoError);
+            std::error_code error;
+            fs::remove(fifo, error);
+            CHECK(!error);
+        } else {
+            std::printf("SKIP restore metadata FIFO test: cannot create FIFO\n");
+        }
+    }
+#endif
+
+    // Lower-case hexadecimal escapes and directory kind metadata both remain
+    // valid restore inputs, while the destination is still chosen solely by
+    // trusted metadata rather than by the opaque token.
+    {
+        const std::string token = "diskmap-manual-lower";
+        const fs::path payload = files / token;
+        const fs::path destination = root / "lowercase-restore.txt";
+        CHECK(writeFile(payload, "lowercase payload"));
+        const auto target = targetFor(payload);
+        std::string encoded = destination.generic_string();
+        const std::size_t base = encoded.rfind("/lowercase");
+        CHECK(base != std::string::npos);
+        if (base != std::string::npos) {
+            encoded.replace(base + 1, 1, "%6c");
+        }
+        CHECK(writeRestoreInfo(options, token, restoreInfo(encoded, target)));
+        const auto restored = diskmap::restoreFromTrash(token, options);
+        CHECK(restored.status == diskmap::TrashStatus::Restored);
+        CHECK(fs::is_regular_file(destination));
+        CHECK_EQ(readFile(destination), "lowercase payload");
+    }
+
+    {
+        const std::string token = "diskmap-manual-directory";
+        const fs::path payload = files / token;
+        const fs::path destination = root / "directory-restore";
+        std::error_code error;
+        CHECK(fs::create_directory(payload, error));
+        CHECK(!error);
+        CHECK(writeFile(payload / "child.txt", "directory payload"));
+        const auto target = targetFor(payload);
+        CHECK(writeRestoreInfo(options, token,
+                               restoreInfo(destination.generic_string(), target)));
+        const auto restored = diskmap::restoreFromTrash(token, options);
+        CHECK(restored.status == diskmap::TrashStatus::Restored);
+        CHECK(fs::is_directory(destination));
+        CHECK_EQ(readFile(destination / "child.txt"), "directory payload");
+    }
+
+    // Valid metadata without its data entry is a missing token, distinct from
+    // malformed metadata and from an unavailable Trash location.
+    {
+        const fs::path seed = root / "metadata-seed.txt";
+        CHECK(writeFile(seed, "seed"));
+        const auto target = targetFor(seed);
+        std::error_code error;
+        fs::remove(seed, error);
+        CHECK(!error);
+        const std::string token = "diskmap-missing-payload";
+        CHECK(writeRestoreInfo(options, token,
+                               restoreInfo((root / "missing-payload.txt").generic_string(),
+                                           target)));
+        CHECK(diskmap::restoreFromTrash(token, options).status
+              == diskmap::TrashStatus::MissingToken);
+    }
+
+    // The identity recorded in metadata is checked before restore, and a
+    // mismatch never consumes the parked entry.
+    {
+        const std::string token = "diskmap-metadata-identity";
+        const fs::path payload = files / token;
+        CHECK(writeFile(payload, "identity payload"));
+        auto target = targetFor(payload);
+        target.identity.file += 1;
+        CHECK(writeRestoreInfo(options, token,
+                               restoreInfo((root / "identity.txt").generic_string(), target)));
+        CHECK(diskmap::restoreFromTrash(token, options).status
+              == diskmap::TrashStatus::RevalidationFailed);
+        CHECK(fs::is_regular_file(payload));
+    }
+
+    auto malformed = [&](const std::string& token, const std::string& content) {
+        const fs::path payload = files / token;
+        CHECK(writeFile(payload, "malformed payload"));
+        CHECK(writeRestoreInfo(options, token, content));
+        const auto receipt = diskmap::restoreFromTrash(token, options);
+        CHECK(receipt.status == diskmap::TrashStatus::IoError);
+        CHECK(fs::is_regular_file(payload));
+    };
+
+    const std::string absoluteDestination = (root / "malformed.txt").generic_string();
+    malformed("diskmap-bad-header", "not a trash info file\n");
+    malformed("diskmap-short-percent",
+              "[Trash Info]\nPath=" + absoluteDestination + "%\n");
+    malformed("diskmap-bad-hex",
+              "[Trash Info]\nPath=" + absoluteDestination + "%G0\n");
+    malformed("diskmap-nul-percent",
+              "[Trash Info]\nPath=" + absoluteDestination + "%00\n");
+    malformed("diskmap-relative-path",
+              "[Trash Info]\nPath=relative.txt\n");
+    malformed("diskmap-root-path", "[Trash Info]\nPath=/.\n");
+    malformed("diskmap-missing-identity",
+              "[Trash Info]\nPath=" + absoluteDestination + "\n");
+    malformed("diskmap-invalid-number",
+              restoreInfoFields(absoluteDestination, "abc", "1", "file"));
+    malformed("diskmap-overflow-number",
+              restoreInfoFields(absoluteDestination,
+                                "184467440737095516160", "1", "file"));
+    malformed("diskmap-invalid-kind",
+              restoreInfoFields(absoluteDestination, "1", "1", "other"));
+
+    // Metadata bounds and file type are enforced before parsing content.
+    {
+        const std::string token = "diskmap-oversized-metadata";
+        const fs::path payload = files / token;
+        CHECK(writeFile(payload, "oversized payload"));
+        CHECK(writeRestoreInfo(options, token, std::string(16 * 1024 + 1, 'x')));
+        CHECK(diskmap::restoreFromTrash(token, options).status
+              == diskmap::TrashStatus::IoError);
+        CHECK(fs::is_regular_file(payload));
+    }
+    {
+        const std::string token = "diskmap-directory-metadata";
+        const fs::path payload = files / token;
+        const fs::path info = options.data_home / "Trash" / "info"
+                              / (token + ".trashinfo");
+        CHECK(writeFile(payload, "directory metadata payload"));
+        std::error_code error;
+        fs::remove(info, error);
+        CHECK(!error);
+        CHECK(fs::create_directory(info, error));
+        CHECK(!error);
+        CHECK(diskmap::restoreFromTrash(token, options).status
+              == diskmap::TrashStatus::IoError);
+        CHECK(fs::is_regular_file(payload));
+    }
+
+    // A valid item with a missing destination parent fails closed and leaves
+    // both the data and metadata available for a later retry.
+    {
+        const std::string token = "diskmap-missing-destination-parent";
+        const fs::path payload = files / token;
+        const fs::path destination = root / "gone-parent" / "child.txt";
+        CHECK(writeFile(payload, "parent payload"));
+        const auto target = targetFor(payload);
+        CHECK(writeRestoreInfo(options, token,
+                               restoreInfo(destination.generic_string(), target)));
+        CHECK(diskmap::restoreFromTrash(token, options).status
+              == diskmap::TrashStatus::IoError);
+        CHECK(fs::is_regular_file(payload));
+        CHECK(fs::exists(options.data_home / "Trash" / "info"
+                         / (token + ".trashinfo")));
+    }
+}
+
 } // namespace
 
 int main() {
@@ -478,6 +992,9 @@ int main() {
         return testSummary();
     }
 
+    testStatusTokensAndEnvironment(temp.path());
+    testFilesystemRefusalsAndLimits(temp.path());
+    testMetadataAndRestoreFailures(temp.path());
     testCapabilityAndInvalidRestore(temp.path());
     testMoveInfoEncodingAndTokenRestore(temp.path());
     testRestoreNeverOverwrites(temp.path());

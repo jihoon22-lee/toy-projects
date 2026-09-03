@@ -406,6 +406,13 @@ void MainWindow::updatePartialBanner() {
         partialBanner_->hide();
         return;
     }
+    if (documentIsSnapshot_) {
+        partialBanner_->setText(
+            tr("This is a read-only snapshot. Rescan the live folder before staging "
+               "or moving anything to recoverable Trash."));
+        partialBanner_->show();
+        return;
+    }
     if (!filterError_.isEmpty()) {
         partialBanner_->setText(filterError_);
         partialBanner_->show();

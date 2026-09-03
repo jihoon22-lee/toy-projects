@@ -4,13 +4,16 @@ CONFIG += testcase console
 CONFIG -= app_bundle qt
 QT =
 
-TARGET = test_cleanup
+TARGET = test_storage_cli
+INCLUDEPATH += $$PWD/../include $$PWD/../src $$PWD
 
-INCLUDEPATH += $$PWD/../include $$PWD
+SOURCES += \
+    test_storage_cli.cpp \
+    ../src/storage_cli.cpp
 
-SOURCES += test_cleanup.cpp
 LIBS += -L$$OUT_PWD/../src -ldiskmap_core
 PRE_TARGETDEPS += $$OUT_PWD/../src/libdiskmap_core.a
 
 HEADERS += \
-    assert.hpp
+    assert.hpp \
+    ../src/storage_cli.hpp

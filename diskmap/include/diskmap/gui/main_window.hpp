@@ -9,12 +9,15 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <utility>
 #include <vector>
 
 #include "diskmap/gui/node_key_metatype.hpp"
 #include "diskmap/gui/node_table_model.hpp"
 #include "diskmap/cleanup.hpp"
+#include "diskmap/duplicates.hpp"
 #include "diskmap/scanner.hpp"
+#include "diskmap/snapshot.hpp"
 #include "diskmap/trash.hpp"
 
 class QComboBox;
@@ -51,6 +54,11 @@ public:
         std::function<diskmap::TrashReceipt(const std::string&)>;
     using CleanupConfirmer =
         std::function<bool(const diskmap::CleanupPlan&)>;
+    using DuplicateRunner = std::function<diskmap::DuplicateAnalysis(
+        const diskmap::ScanResult&,
+        const diskmap::DuplicateAnalysisOptions&,
+        const std::shared_ptr<diskmap::ScanCancellationToken>&,
+        const diskmap::DuplicateProgressFn&)>;
 
     struct CleanupServices {
         TrashMover move;
@@ -60,7 +68,8 @@ public:
 
     explicit MainWindow(QWidget* parent = nullptr,
                         ScanRunner scanRunner = {},
-                        CleanupServices cleanupServices = {});
+                        CleanupServices cleanupServices = {},
+                        DuplicateRunner duplicateRunner = {});
     ~MainWindow() override;
 
     // Starts a scan without going through the folder dialog, so
@@ -68,10 +77,18 @@ public:
     void scanPath(const QString& path);
     void cancelScan();
     void setScanOptions(const diskmap::ScanOptions& options);
+    void saveSnapshotPath(const QString& path);
+    void loadSnapshotPath(const QString& path);
+    void compareSnapshotPath(const QString& path);
+    void analyzeDuplicatesNow();
 
 private slots:
     void chooseFolder();
     void rescan();
+    void saveSnapshot();
+    void loadSnapshot();
+    void compareSnapshot();
+    void analyzeDuplicates();
     void goUp();
     void applyFilters();
     void onTableActivated(const QModelIndex& index);
@@ -82,6 +99,7 @@ private slots:
     void onNodeHovered(diskmap::NodeKey key);
     void clearHover();
     void stageSelectedRows();
+    void stageDuplicateCandidates();
     void clearCleanupStaging();
     void executeCleanup();
     void restoreSelectedTrashItem();
@@ -92,8 +110,16 @@ private:
         std::atomic<std::size_t> files{0};
     };
 
+    struct DuplicateProgressState {
+        std::atomic<std::size_t> files{0};
+        std::atomic<std::uint64_t> bytes{0};
+    };
+
     QPushButton* chooseButton_ = nullptr;
     QPushButton* rescanButton_ = nullptr;
+    QPushButton* saveSnapshotButton_ = nullptr;
+    QPushButton* loadSnapshotButton_ = nullptr;
+    QPushButton* compareSnapshotButton_ = nullptr;
     TreemapWidget* treemap_ = nullptr;
     NodeTableModel* tableModel_ = nullptr;
     QTableView* table_ = nullptr;
@@ -124,15 +150,26 @@ private:
     QPushButton* restoreTrashButton_ = nullptr;
     QTableWidget* cleanupReviewTable_ = nullptr;
     QTableWidget* cleanupAuditTable_ = nullptr;
+    QPushButton* analyzeDuplicatesButton_ = nullptr;
+    QPushButton* stageDuplicatesButton_ = nullptr;
+    QTableWidget* duplicateEvidenceTable_ = nullptr;
+    QTableWidget* snapshotChangesTable_ = nullptr;
+    QLabel* duplicateSummary_ = nullptr;
+    QLabel* snapshotSummary_ = nullptr;
     QLabel* cleanupSummary_ = nullptr;
     QComboBox* restoreTokenCombo_ = nullptr;
     QUndoStack* cleanupUndo_ = nullptr;
     std::shared_ptr<diskmap::ScanCancellationToken> activeCancellation_;
     std::shared_ptr<ScanProgressState> activeProgress_;
+    std::shared_ptr<diskmap::ScanCancellationToken> activeDuplicateCancellation_;
+    std::shared_ptr<DuplicateProgressState> activeDuplicateProgress_;
+    QFutureWatcher<diskmap::DuplicateAnalysis>* duplicateWatcher_ = nullptr;
     ScanRunner scanRunner_;
     CleanupServices cleanupServices_;
+    DuplicateRunner duplicateRunner_;
     diskmap::ScanOptions scanOptions_;
     std::uint64_t activeGeneration_ = 0;
+    std::uint64_t activeDuplicateGeneration_ = 0;
 
     std::shared_ptr<const diskmap::ScanResult> document_;
     // Stable keys, never borrowed pointers, survive filter changes and rescan.
@@ -146,12 +183,19 @@ private:
     bool pendingRestore_ = false;
     bool refreshingProjection_ = false;
     bool modelResetInProgress_ = false;
+    bool documentIsSnapshot_ = false;
+    QString loadedSnapshotPath_;
     std::vector<diskmap::NodeKey> stagedCleanupKeys_;
     diskmap::CleanupPlan cleanupPlan_;
+    diskmap::Snapshot loadedSnapshot_;
+    bool hasLoadedSnapshot_ = false;
+    diskmap::DuplicateAnalysis duplicateAnalysis_;
+    std::vector<std::pair<std::size_t, std::size_t>> duplicateRows_;
 
     void buildNavigationBar(QWidget* central, QVBoxLayout* layout);
     void buildFilterPanel(QWidget* central, QVBoxLayout* layout);
     void buildExplorer(QWidget* central, QVBoxLayout* layout);
+    void buildEvidencePanel(QWidget* central, QVBoxLayout* layout);
     void buildCleanupPanel(QWidget* central, QVBoxLayout* layout);
     void connectUi();
     void startScan(const QString& path, bool restoreNavigation = false);
@@ -161,6 +205,9 @@ private:
                         const QString& path);
     void onScanFinished(QFutureWatcher<diskmap::ScanResult>* watcher,
                         std::uint64_t generation);
+    void onDuplicatesFinished(QFutureWatcher<diskmap::DuplicateAnalysis>* watcher,
+                              std::uint64_t generation,
+                              std::shared_ptr<const diskmap::ScanResult> source);
     void discardPendingRestore();
     void restoreNavigation(const std::vector<diskmap::NodeKey>& previousTrail);
     void navigateToKey(const diskmap::NodeKey& key);
@@ -174,8 +221,23 @@ private:
     void updateDocumentStatus();
     void updatePartialBanner();
     void updateControlState();
+    void updateActivityControls(bool scanning, bool analyzing);
+    void updateNavigationControls(bool busy);
+    void updateExplorerControls(bool busy);
+    void updateCleanupControls(bool busy);
+    void updateEvidenceControls(bool busy);
+    void updateRestoreControls(bool busy);
+    bool hasReclaimableDuplicateCandidates() const;
     void restoreSelection();
+    void stageCleanupKeysWithUndo(std::vector<diskmap::NodeKey> keys,
+                                  const QString& text);
     void setStagedCleanupKeys(std::vector<diskmap::NodeKey> keys);
     void refreshCleanupReview();
     void appendCleanupAudit(const diskmap::TrashReceipt& receipt);
+    void refreshDuplicateEvidence();
+    void clearDuplicateEvidence();
+    void clearSnapshotChanges();
+    void cancelDuplicateAnalysis();
+    diskmap::Snapshot currentSnapshot() const;
+    void installLoadedSnapshot(diskmap::Snapshot snapshot, const QString& path);
 };

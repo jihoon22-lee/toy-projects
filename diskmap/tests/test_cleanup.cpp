@@ -3,16 +3,21 @@
 #include "assert.hpp"
 #include "diskmap/cleanup.hpp"
 
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <limits>
 #include <map>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
 
 using diskmap::CleanupPolicy;
 using diskmap::CleanupSkipReason;
+using diskmap::CleanupTarget;
 using diskmap::FileIdentity;
 using diskmap::FsKind;
 using diskmap::FsMetadata;
@@ -21,6 +26,77 @@ using diskmap::NodeKey;
 using diskmap::ScanResult;
 
 namespace {
+
+class ScopedTempDirectory {
+public:
+    ScopedTempDirectory() {
+        std::error_code error;
+        const std::filesystem::path parent = std::filesystem::temp_directory_path(error);
+        if (error) {
+            return;
+        }
+        const auto stamp =
+            std::chrono::steady_clock::now().time_since_epoch().count();
+        for (unsigned attempt = 0; attempt != 100; ++attempt) {
+            const std::filesystem::path candidate =
+                parent / ("diskmap_cleanup_test_" + std::to_string(stamp) + "_"
+                          + std::to_string(attempt));
+            error.clear();
+            if (std::filesystem::create_directory(candidate, error)) {
+                path_ = candidate;
+                return;
+            }
+            if (error && error != std::make_error_code(std::errc::file_exists)) {
+                return;
+            }
+        }
+    }
+
+    ~ScopedTempDirectory() {
+        if (!path_.empty()) {
+            std::error_code error;
+            std::filesystem::remove_all(path_, error);
+        }
+    }
+
+    bool valid() const { return !path_.empty(); }
+    const std::filesystem::path& path() const { return path_; }
+
+private:
+    std::filesystem::path path_;
+};
+
+bool writeFile(const std::filesystem::path& path, const std::string& contents) {
+    std::ofstream output(path, std::ios::binary);
+    if (!output) {
+        return false;
+    }
+    output.write(contents.data(), static_cast<std::streamsize>(contents.size()));
+    return output.good();
+}
+
+CleanupTarget targetFor(const std::filesystem::path& path,
+                        std::uint64_t generation = 1) {
+    diskmap::RealFsSource source;
+    const std::filesystem::path absolute =
+        std::filesystem::absolute(path).lexically_normal();
+    const FsMetadata value = source.inspect(absolute, false);
+    CleanupTarget target;
+    target.path = absolute;
+    target.kind = value.kind;
+    target.identity = value.identity;
+    target.logical_size = value.logical_size;
+    target.allocated_size = value.allocated_size;
+    target.allocated_size_known = value.allocated_size_known;
+    target.hard_link_count = value.hard_link_count;
+    target.hard_link_count_known = value.hard_link_count_known;
+    target.symlink = value.kind == FsKind::Symlink;
+    target.scan_generation = generation;
+    target.key.normalized_path = absolute.generic_string();
+    target.key.kind = value.kind;
+    target.key.identity = value.identity;
+    return target;
+}
 
 FsMetadata metadata(FsKind kind,
                     std::uint64_t file,
@@ -120,9 +196,233 @@ public:
     std::map<std::string, FsMetadata> records;
 };
 
+void testCleanupReasonNamesAndEvidence() {
+    const std::vector<std::pair<CleanupSkipReason, const char*>> names = {
+        {CleanupSkipReason::None, "none"},
+        {CleanupSkipReason::MissingSelection, "missing-selection"},
+        {CleanupSkipReason::RootTarget, "root-target"},
+        {CleanupSkipReason::ProtectedRoot, "protected-root"},
+        {CleanupSkipReason::MountBoundary, "mount-boundary"},
+        {CleanupSkipReason::SymlinkDescendant, "symlink-descendant"},
+        {CleanupSkipReason::IncompleteScan, "incomplete-scan"},
+        {CleanupSkipReason::ScannerFiltered, "scanner-filtered"},
+        {CleanupSkipReason::StaleGeneration, "stale-generation"},
+        {CleanupSkipReason::MetadataUnknown, "metadata-unknown"},
+        {CleanupSkipReason::UnsupportedType, "unsupported-type"},
+        {CleanupSkipReason::CoveredByParent, "covered-by-parent"},
+        {CleanupSkipReason::Missing, "missing"},
+        {CleanupSkipReason::IdentityChanged, "identity-changed"},
+        {CleanupSkipReason::TypeChanged, "type-changed"},
+        {CleanupSkipReason::SizeChanged, "size-changed"},
+        {CleanupSkipReason::HardLinkChanged, "hard-link-changed"},
+    };
+    for (const auto& item : names) {
+        CHECK_EQ(std::string(diskmap::cleanupSkipReasonName(item.first)),
+                 std::string(item.second));
+    }
+    CHECK_EQ(std::string(diskmap::cleanupSkipReasonName(
+                 static_cast<CleanupSkipReason>(255))),
+             std::string("unknown"));
+
+    // A key not present in the retained tree remains a visible rejection.
+    ScanResult scan = result(directory("/scan", 100, {file("/scan/item", 101, 1, 512)}));
+    NodeKey missing;
+    missing.normalized_path = "/scan/not-retained";
+    missing.kind = FsKind::RegularFile;
+    const auto missingPlan = diskmap::planCleanup(scan, {missing});
+    CHECK_EQ(missingPlan.targets.size(), static_cast<std::size_t>(0));
+    CHECK(rejectedFor(missingPlan, missing, CleanupSkipReason::MissingSelection));
+
+    // Unsupported entries are rejected by cleanup planning, while a valid
+    // identity with incomplete allocation evidence remains selectable but
+    // cannot claim an exact reclaimable total.
+    FsNode other = file("/scan/socket", 102, 0, 0);
+    other.metadata.kind = FsKind::Other;
+    const NodeKey otherKey = diskmap::nodeKey(other);
+    const auto unsupported = diskmap::planCleanup(
+        result(directory("/scan", 103, {std::move(other)})), {otherKey});
+    CHECK(rejectedFor(unsupported, otherKey, CleanupSkipReason::UnsupportedType));
+
+    FsNode unknown = file("/scan/unknown", 104, 4, 512);
+    unknown.metadata.allocated_size_known = false;
+    unknown.allocated_size_known = false;
+    const NodeKey unknownKey = diskmap::nodeKey(unknown);
+    const auto unknownPlan = diskmap::planCleanup(
+        result(directory("/scan", 105, {std::move(unknown)})), {unknownKey});
+    CHECK_EQ(unknownPlan.targets.size(), static_cast<std::size_t>(1));
+    CHECK(!unknownPlan.reclaimable_bytes_known);
+
+    // Conflicting observations of one physical identity are conservative.
+    FsNode left = file("/scan/left", 106, 1, 512, 2);
+    FsNode right = file("/scan/right", 106, 1, 1024, 2);
+    left.metadata.identity.device = 9;
+    right.metadata.identity.device = 9;
+    const NodeKey leftKey = diskmap::nodeKey(left);
+    const NodeKey rightKey = diskmap::nodeKey(right);
+    const auto inconsistent = diskmap::planCleanup(
+        result(directory("/scan", 107, {std::move(left), std::move(right)})),
+        {leftKey, rightKey});
+    CHECK_EQ(inconsistent.targets.size(), static_cast<std::size_t>(2));
+    CHECK(!inconsistent.reclaimable_bytes_known);
+
+    // Saturating the identity-aware sum must not wrap to a small value.
+    FsNode huge = file("/scan/huge-a", 108, 1,
+                       std::numeric_limits<std::uint64_t>::max());
+    FsNode hugeOther = file("/scan/huge-b", 109, 1,
+                            std::numeric_limits<std::uint64_t>::max());
+    const NodeKey hugeKey = diskmap::nodeKey(huge);
+    const NodeKey hugeOtherKey = diskmap::nodeKey(hugeOther);
+    const auto saturated = diskmap::planCleanup(
+        result(directory("/scan", 110, {std::move(huge), std::move(hugeOther)})),
+        {hugeKey, hugeOtherKey});
+    CHECK_EQ(saturated.reclaimable_bytes,
+             std::numeric_limits<std::uint64_t>::max());
+    CHECK(!saturated.reclaimable_bytes_known);
+
+    // Structural scan flags on a selected subtree are fail-closed, including
+    // flags discovered below an otherwise complete directory.
+    FsNode cycleChild = file("/scan/cycle/child", 111, 1, 512);
+    cycleChild.cycle_skipped = true;
+    FsNode cycleParent = directory("/scan/cycle", 112, {std::move(cycleChild)});
+    const NodeKey cycleKey = diskmap::nodeKey(cycleParent);
+    const auto cyclePlan = diskmap::planCleanup(
+        result(directory("/scan", 113, {std::move(cycleParent)})), {cycleKey});
+    CHECK(rejectedFor(cyclePlan, cycleKey, CleanupSkipReason::IncompleteScan));
+
+    FsNode mountChild = file("/scan/mount/child", 114, 1, 512);
+    mountChild.mount_boundary_skipped = true;
+    FsNode mountParent = directory("/scan/mount", 115, {std::move(mountChild)});
+    const NodeKey mountParentKey = diskmap::nodeKey(mountParent);
+    const auto mountPlan = diskmap::planCleanup(
+        result(directory("/scan", 116, {std::move(mountParent)})),
+        {mountParentKey});
+    CHECK(rejectedFor(mountPlan, mountParentKey, CleanupSkipReason::IncompleteScan));
+
+    ScanResult cancelledScan =
+        result(directory("/scan", 117, {file("/scan/cancelled", 118, 1, 512)}));
+    const NodeKey cancelledKey = diskmap::nodeKey(cancelledScan.root.children[0]);
+    cancelledScan.cancelled = true;
+    CHECK(rejectedFor(diskmap::planCleanup(cancelledScan, {cancelledKey}),
+                      cancelledKey, CleanupSkipReason::IncompleteScan));
+    cancelledScan.cancelled = false;
+    cancelledScan.fatal_error = "listing failed";
+    CHECK(rejectedFor(diskmap::planCleanup(cancelledScan, {cancelledKey}),
+                      cancelledKey, CleanupSkipReason::IncompleteScan));
+
+    // Exercise both sides of the policy switches and component-aware mount
+    // matching without depending on the host's real mount table.
+    FsNode protectedChild = file("/scan/protected/item", 119, 1, 512);
+    const NodeKey protectedChildKey = diskmap::nodeKey(protectedChild);
+    ScanResult policyScan =
+        result(directory("/scan", 120, {std::move(protectedChild)}));
+    CleanupPolicy policy;
+    policy.protected_roots = {"/scan/protected"};
+    policy.protect_filesystem_roots = false;
+    policy.protect_home_root = false;
+    policy.protect_subtrees = false;
+    const auto unprotected =
+        diskmap::planCleanup(policyScan, {protectedChildKey}, policy);
+    CHECK_EQ(unprotected.targets.size(), static_cast<std::size_t>(1));
+    policy.protect_subtrees = true;
+    CHECK(rejectedFor(diskmap::planCleanup(policyScan, {protectedChildKey}, policy),
+                      protectedChildKey, CleanupSkipReason::ProtectedRoot));
+
+    FsNode mounted = file("/scan/mount-target", 121, 1, 512);
+    const NodeKey mountedKey = diskmap::nodeKey(mounted);
+    ScanResult mountPolicyScan =
+        result(directory("/scan", 122, {std::move(mounted)}));
+    policy.protected_roots.clear();
+    policy.protect_subtrees = false;
+    policy.mount_roots = {"/scan/other-mount"};
+    CHECK_EQ(diskmap::planCleanup(mountPolicyScan, {mountedKey}, policy)
+                 .targets.size(),
+             static_cast<std::size_t>(1));
+    policy.mount_roots = {"/scan/mount-target"};
+    CHECK(rejectedFor(diskmap::planCleanup(mountPolicyScan, {mountedKey}, policy),
+                      mountedKey, CleanupSkipReason::MountBoundary));
+}
+
+void testTemporaryFilesystemRevalidation(const std::filesystem::path& root) {
+    diskmap::RealFsSource source;
+
+    const std::filesystem::path path = root / "reviewed.txt";
+    CHECK(writeFile(path, "reviewed content"));
+    CleanupTarget target = targetFor(path);
+    CHECK(target.identity.valid);
+    CHECK(diskmap::revalidateCleanupTarget(target, source).accepted);
+
+    // Deleting the reviewed entry is reported as missing, not as a request to
+    // operate on a newly-created path.
+    std::error_code error;
+    std::filesystem::remove(path, error);
+    CHECK(!error);
+    const auto missing = diskmap::revalidateCleanupTarget(target, source);
+    CHECK(!missing.accepted);
+    CHECK(missing.reason == CleanupSkipReason::Missing);
+
+    // Replacing the pathname with a same-size file changes its identity.
+    CHECK(writeFile(path, "reviewed content"));
+    const CleanupTarget original = targetFor(path);
+    CHECK(std::filesystem::remove(path, error));
+    CHECK(!error);
+    CHECK(writeFile(path, "reviewed content"));
+    const auto replacement = diskmap::revalidateCleanupTarget(original, source);
+    CHECK(replacement.reason == CleanupSkipReason::IdentityChanged);
+
+    // Allocation evidence is independently part of the final check.
+    const CleanupTarget allocationTarget = targetFor(path);
+    FakeSource allocationSource;
+    FsMetadata allocation = source.inspect(path, false);
+    allocation.allocated_size = allocationTarget.allocated_size + 512;
+    allocationSource.records[path.generic_string()] = allocation;
+    CHECK(diskmap::revalidateCleanupTarget(allocationTarget, allocationSource).reason
+          == CleanupSkipReason::SizeChanged);
+
+    // Unknown hard-link evidence is deliberately not strengthened into a
+    // rejection by this conservative revalidator.
+    CleanupTarget linkEvidenceUnknown = allocationTarget;
+    linkEvidenceUnknown.hard_link_count_known = false;
+    allocation.allocated_size = allocationTarget.allocated_size;
+    allocation.hard_link_count = allocationTarget.hard_link_count + 1;
+    allocationSource.records[path.generic_string()] = allocation;
+    CHECK(diskmap::revalidateCleanupTarget(linkEvidenceUnknown, allocationSource)
+              .accepted);
+
+    const std::filesystem::path alias = root / "reviewed.alias";
+    error.clear();
+    std::filesystem::create_hard_link(path, alias, error);
+    CHECK(!error);
+    if (!error) {
+        const auto linksChanged =
+            diskmap::revalidateCleanupTarget(allocationTarget, source);
+        CHECK(linksChanged.reason == CleanupSkipReason::HardLinkChanged);
+        std::filesystem::remove(alias, error);
+        CHECK(!error);
+    }
+
+    const std::filesystem::path directoryPath = root / "reviewed-directory";
+    error.clear();
+    CHECK(std::filesystem::create_directory(directoryPath, error));
+    CHECK(!error);
+    CleanupTarget wrongType = targetFor(directoryPath);
+    wrongType.kind = FsKind::RegularFile;
+    CHECK(diskmap::revalidateCleanupTarget(wrongType, source).reason
+          == CleanupSkipReason::TypeChanged);
+    std::filesystem::remove(directoryPath, error);
+    CHECK(!error);
+}
+
 } // namespace
 
 int main() {
+    testCleanupReasonNamesAndEvidence();
+
+    ScopedTempDirectory temp;
+    CHECK(temp.valid());
+    if (temp.valid()) {
+        testTemporaryFilesystemRevalidation(temp.path());
+    }
+
     // Parent directories cover descendants, while a similarly prefixed path
     // is not accidentally treated as a child.
     {

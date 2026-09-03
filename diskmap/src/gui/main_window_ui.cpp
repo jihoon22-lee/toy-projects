@@ -19,6 +19,8 @@
 #include <QUndoStack>
 #include <QVBoxLayout>
 
+#include <algorithm>
+#include <initializer_list>
 #include <optional>
 
 #include "main_window_filter_data.hpp"
@@ -38,6 +40,15 @@ void MainWindow::buildNavigationBar(QWidget* central, QVBoxLayout* layout) {
     cancelButton_ = new QPushButton(tr("Cancel"), central);
     cancelButton_->setObjectName(QStringLiteral("cancelScanButton"));
     cancelButton_->setAccessibleName(tr("Cancel current scan"));
+    saveSnapshotButton_ = new QPushButton(tr("Save snapshot…"), central);
+    saveSnapshotButton_->setObjectName(QStringLiteral("saveSnapshotButton"));
+    saveSnapshotButton_->setAccessibleName(tr("Save the current scan as a snapshot"));
+    loadSnapshotButton_ = new QPushButton(tr("Load snapshot…"), central);
+    loadSnapshotButton_->setObjectName(QStringLiteral("loadSnapshotButton"));
+    loadSnapshotButton_->setAccessibleName(tr("Load a snapshot for read-only inspection"));
+    compareSnapshotButton_ = new QPushButton(tr("Compare snapshot…"), central);
+    compareSnapshotButton_->setObjectName(QStringLiteral("compareSnapshotButton"));
+    compareSnapshotButton_->setAccessibleName(tr("Compare the current scan with a snapshot"));
 
     breadcrumbBar_ = new QWidget(central);
     breadcrumbBar_->setObjectName(QStringLiteral("breadcrumb"));
@@ -50,6 +61,9 @@ void MainWindow::buildNavigationBar(QWidget* central, QVBoxLayout* layout) {
     bar->addWidget(rescanButton_);
     bar->addWidget(upButton_);
     bar->addWidget(cancelButton_);
+    bar->addWidget(saveSnapshotButton_);
+    bar->addWidget(loadSnapshotButton_);
+    bar->addWidget(compareSnapshotButton_);
     bar->addWidget(breadcrumbBar_, 1);
     layout->addLayout(bar);
 }
@@ -220,6 +234,70 @@ void MainWindow::buildExplorer(QWidget* central, QVBoxLayout* layout) {
     layout->addLayout(footer);
 }
 
+void MainWindow::buildEvidencePanel(QWidget* central, QVBoxLayout* layout) {
+    auto* heading = new QLabel(
+        tr("Storage evidence — snapshots and duplicate candidates are review-only"), central);
+    heading->setObjectName(QStringLiteral("evidenceHeading"));
+    heading->setAccessibleName(tr("Storage evidence"));
+    layout->addWidget(heading);
+
+    auto* actions = new QHBoxLayout();
+    analyzeDuplicatesButton_ = new QPushButton(tr("Analyze duplicates"), central);
+    analyzeDuplicatesButton_->setObjectName(QStringLiteral("analyzeDuplicatesButton"));
+    analyzeDuplicatesButton_->setAccessibleName(tr("Analyze duplicate file evidence"));
+    stageDuplicatesButton_ = new QPushButton(tr("Stage safe duplicate copies"), central);
+    stageDuplicatesButton_->setObjectName(QStringLiteral("stageDuplicatesButton"));
+    stageDuplicatesButton_->setAccessibleName(
+        tr("Stage certain reclaimable duplicate copies for cleanup review"));
+    actions->addWidget(analyzeDuplicatesButton_);
+    actions->addWidget(stageDuplicatesButton_);
+    actions->addStretch(1);
+
+    snapshotSummary_ = new QLabel(tr("No snapshot comparison"), central);
+    snapshotSummary_->setObjectName(QStringLiteral("snapshotSummary"));
+    snapshotSummary_->setAccessibleName(tr("Snapshot comparison summary"));
+    snapshotSummary_->setTextFormat(Qt::PlainText);
+    actions->addWidget(snapshotSummary_);
+    layout->addLayout(actions);
+
+    duplicateSummary_ = new QLabel(tr("No duplicate analysis"), central);
+    duplicateSummary_->setObjectName(QStringLiteral("duplicateSummary"));
+    duplicateSummary_->setAccessibleName(tr("Duplicate analysis summary"));
+    duplicateSummary_->setTextFormat(Qt::PlainText);
+    duplicateSummary_->setWordWrap(true);
+    layout->addWidget(duplicateSummary_);
+
+    auto* splitter = new QSplitter(Qt::Horizontal, central);
+    splitter->setObjectName(QStringLiteral("evidenceSplitter"));
+    duplicateEvidenceTable_ = new QTableWidget(splitter);
+    duplicateEvidenceTable_->setObjectName(QStringLiteral("duplicateEvidenceTable"));
+    duplicateEvidenceTable_->setAccessibleName(tr("Duplicate evidence"));
+    duplicateEvidenceTable_->setColumnCount(6);
+    duplicateEvidenceTable_->setHorizontalHeaderLabels(
+        {tr("Group"), tr("Confidence"), tr("Path"), tr("Size"), tr("Content hash"),
+         tr("Reclamation")});
+    duplicateEvidenceTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    duplicateEvidenceTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
+    duplicateEvidenceTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    duplicateEvidenceTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    duplicateEvidenceTable_->setSelectionMode(QAbstractItemView::SingleSelection);
+
+    snapshotChangesTable_ = new QTableWidget(splitter);
+    snapshotChangesTable_->setObjectName(QStringLiteral("snapshotChangesTable"));
+    snapshotChangesTable_->setAccessibleName(tr("Snapshot comparison changes"));
+    snapshotChangesTable_->setColumnCount(5);
+    snapshotChangesTable_->setHorizontalHeaderLabels(
+        {tr("Change"), tr("Confidence"), tr("Before"), tr("After"), tr("Reason")});
+    snapshotChangesTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
+    snapshotChangesTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    snapshotChangesTable_->setSelectionMode(QAbstractItemView::NoSelection);
+    splitter->addWidget(duplicateEvidenceTable_);
+    splitter->addWidget(snapshotChangesTable_);
+    splitter->setStretchFactor(0, 1);
+    splitter->setStretchFactor(1, 1);
+    layout->addWidget(splitter);
+}
+
 void MainWindow::buildCleanupPanel(QWidget* central, QVBoxLayout* layout) {
     auto* heading = new QLabel(tr("Cleanup staging — review only until Move to Trash"),
                                central);
@@ -303,6 +381,14 @@ void MainWindow::connectUi() {
     connect(rescanButton_, &QPushButton::clicked, this, &MainWindow::rescan);
     connect(upButton_, &QPushButton::clicked, this, &MainWindow::goUp);
     connect(cancelButton_, &QPushButton::clicked, this, &MainWindow::cancelScan);
+    connect(saveSnapshotButton_, &QPushButton::clicked, this, &MainWindow::saveSnapshot);
+    connect(loadSnapshotButton_, &QPushButton::clicked, this, &MainWindow::loadSnapshot);
+    connect(compareSnapshotButton_, &QPushButton::clicked, this,
+            &MainWindow::compareSnapshot);
+    connect(analyzeDuplicatesButton_, &QPushButton::clicked, this,
+            &MainWindow::analyzeDuplicates);
+    connect(stageDuplicatesButton_, &QPushButton::clicked, this,
+            &MainWindow::stageDuplicateCandidates);
     connect(stageCleanupButton_, &QPushButton::clicked, this,
             &MainWindow::stageSelectedRows);
     connect(clearCleanupButton_, &QPushButton::clicked, this,
@@ -388,31 +474,70 @@ void MainWindow::updateMetricExplanation() {
 
 void MainWindow::updateControlState() {
     const bool scanning = activeCancellation_ != nullptr;
-    cancelButton_->setEnabled(scanning && !activeCancellation_->isCancelled());
-    rescanButton_->setEnabled(document_ != nullptr && !scanning);
-    upButton_->setEnabled(trail_.size() > 1 && !scanning);
-    const bool explorerEnabled = document_ != nullptr && !scanning;
-    breadcrumbBar_->setEnabled(explorerEnabled);
-    table_->setEnabled(explorerEnabled);
-    treemap_->setEnabled(explorerEnabled);
-    searchEdit_->setEnabled(explorerEnabled);
-    minimumSizeEdit_->setEnabled(explorerEnabled);
-    maximumSizeEdit_->setEnabled(explorerEnabled);
-    metricCombo_->setEnabled(explorerEnabled);
-    typeCombo_->setEnabled(explorerEnabled);
-    ageCombo_->setEnabled(explorerEnabled);
-    issueCombo_->setEnabled(explorerEnabled);
-    modeCombo_->setEnabled(explorerEnabled);
-    stageCleanupButton_->setEnabled(explorerEnabled
-                                    && table_->selectionModel() != nullptr
-                                    && table_->selectionModel()->hasSelection());
-    clearCleanupButton_->setEnabled(explorerEnabled
-                                    && !stagedCleanupKeys_.empty());
-    undoCleanupButton_->setEnabled(explorerEnabled && cleanupUndo_->canUndo());
-    redoCleanupButton_->setEnabled(explorerEnabled && cleanupUndo_->canRedo());
-    executeCleanupButton_->setEnabled(explorerEnabled
+    const bool analyzing = activeDuplicateCancellation_ != nullptr;
+    const bool busy = scanning || analyzing;
+    updateActivityControls(scanning, analyzing);
+    updateNavigationControls(busy);
+    updateExplorerControls(busy);
+    updateCleanupControls(busy);
+    updateEvidenceControls(busy);
+    updateRestoreControls(busy);
+}
+
+void MainWindow::updateActivityControls(bool scanning, bool analyzing) {
+    const bool scanCancellable = scanning && !activeCancellation_->isCancelled();
+    const bool duplicateCancellable =
+        analyzing && !activeDuplicateCancellation_->isCancelled();
+    cancelButton_->setEnabled(scanCancellable || duplicateCancellable);
+}
+
+void MainWindow::updateNavigationControls(bool busy) {
+    rescanButton_->setEnabled(document_ != nullptr && !busy && !documentIsSnapshot_);
+    upButton_->setEnabled(trail_.size() > 1 && !busy);
+    saveSnapshotButton_->setEnabled(document_ != nullptr && !busy);
+    loadSnapshotButton_->setEnabled(!busy);
+    compareSnapshotButton_->setEnabled(document_ != nullptr && !busy);
+}
+
+void MainWindow::updateExplorerControls(bool busy) {
+    const bool enabled = document_ != nullptr && !busy;
+    const std::initializer_list<QWidget*> widgets = {
+        breadcrumbBar_, table_, treemap_, searchEdit_, minimumSizeEdit_,
+        maximumSizeEdit_, metricCombo_, typeCombo_, ageCombo_, issueCombo_, modeCombo_};
+    for (QWidget* widget : widgets) {
+        widget->setEnabled(enabled);
+    }
+}
+
+void MainWindow::updateCleanupControls(bool busy) {
+    const bool enabled = document_ != nullptr && !busy;
+    const bool hasSelection = table_->selectionModel() != nullptr
+                              && table_->selectionModel()->hasSelection();
+    stageCleanupButton_->setEnabled(enabled && !documentIsSnapshot_ && hasSelection);
+    clearCleanupButton_->setEnabled(enabled && !stagedCleanupKeys_.empty());
+    undoCleanupButton_->setEnabled(enabled && cleanupUndo_->canUndo());
+    redoCleanupButton_->setEnabled(enabled && cleanupUndo_->canRedo());
+    executeCleanupButton_->setEnabled(enabled && !documentIsSnapshot_
                                       && !cleanupPlan_.targets.empty());
-    restoreTokenCombo_->setEnabled(!scanning && restoreTokenCombo_->count() > 0);
-    restoreTrashButton_->setEnabled(!scanning
-                                    && restoreTokenCombo_->currentIndex() >= 0);
+}
+
+void MainWindow::updateEvidenceControls(bool busy) {
+    const bool enabled = document_ != nullptr && !busy;
+    analyzeDuplicatesButton_->setEnabled(enabled);
+    stageDuplicatesButton_->setEnabled(enabled && !documentIsSnapshot_
+                                        && hasReclaimableDuplicateCandidates());
+}
+
+void MainWindow::updateRestoreControls(bool busy) {
+    restoreTokenCombo_->setEnabled(!busy && restoreTokenCombo_->count() > 0);
+    restoreTrashButton_->setEnabled(!busy && restoreTokenCombo_->currentIndex() >= 0);
+}
+
+bool MainWindow::hasReclaimableDuplicateCandidates() const {
+    for (const diskmap::DuplicateGroup& group : duplicateAnalysis_.groups) {
+        if (group.reclaimable && group.certain && group.entries.size() > 1) {
+            return true;
+        }
+    }
+    return false;
 }

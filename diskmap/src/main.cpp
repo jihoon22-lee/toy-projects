@@ -2,13 +2,15 @@
 #include "diskmap/fs_node.hpp"
 #include "diskmap/fs_source.hpp"
 #include "diskmap/scanner.hpp"
+#include "diskmap/snapshot.hpp"
+#include "storage_cli.hpp"
 
 #include <algorithm>
 #include <charconv>
-#include <cstdio>
 #include <cstdint>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -25,6 +27,10 @@ struct CliOptions {
     bool follow_symlinks = false;
     bool one_file_system = false;
     std::vector<std::string> exclude_patterns;
+    std::string save_snapshot;
+    std::string load_snapshot;
+    std::string compare_snapshot;
+    bool duplicates = false;
     bool help = false;
     bool valid = true;
     std::string error;
@@ -32,6 +38,7 @@ struct CliOptions {
 
 void printUsage(std::ostream& out) {
     out << "Usage: diskmap <path> [options]\n"
+        << "   or: diskmap --load-snapshot FILE [options]\n"
         << "  --max-depth N       limit scan traversal depth\n"
         << "  --follow-symlinks   follow symlinked directories\n"
         << "  --min-size BYTES    skip files smaller than BYTES\n"
@@ -40,6 +47,10 @@ void printUsage(std::ostream& out) {
         << "  --depth N           limit printed tree depth\n"
         << "  --top N             show the N largest files (default 10)\n"
         << "  --json              emit the tree as JSON instead of text\n"
+        << "  --save-snapshot FILE save the scan as a bounded snapshot\n"
+        << "  --load-snapshot FILE inspect a saved snapshot without scanning\n"
+        << "  --compare-snapshot FILE compare the scan with a saved snapshot\n"
+        << "  --duplicates        inspect duplicate evidence (review-only)\n"
         << "  --help              show this message\n";
 }
 
@@ -118,6 +129,10 @@ bool applyFlag(const std::string& arg, CliOptions& options) {
         options.one_file_system = true;
         return true;
     }
+    if (arg == "--duplicates") {
+        options.duplicates = true;
+        return true;
+    }
     return false;
 }
 
@@ -166,15 +181,29 @@ bool applyStringOption(const std::vector<std::string>& args,
                        std::size_t& index,
                        const std::string& arg,
                        CliOptions& options) {
-    if (arg != "--exclude") {
-        return false;
-    }
-    std::string pattern;
-    if (!takeStringOption(args, index, pattern)) {
-        markInvalid(options, "--exclude expects a non-empty glob");
+    std::string* destination = nullptr;
+    if (arg == "--exclude") {
+        std::string pattern;
+        if (!takeStringOption(args, index, pattern)) {
+            markInvalid(options, "--exclude expects a non-empty glob");
+            return true;
+        }
+        options.exclude_patterns.push_back(std::move(pattern));
         return true;
     }
-    options.exclude_patterns.push_back(std::move(pattern));
+    if (arg == "--save-snapshot") {
+        destination = &options.save_snapshot;
+    } else if (arg == "--load-snapshot") {
+        destination = &options.load_snapshot;
+    } else if (arg == "--compare-snapshot") {
+        destination = &options.compare_snapshot;
+    } else {
+        return false;
+    }
+    if (!takeStringOption(args, index, *destination)) {
+        markInvalid(options, arg + " expects a non-empty file path");
+        return true;
+    }
     return true;
 }
 
@@ -240,40 +269,6 @@ void printTopFiles(const diskmap::FsNode& root, std::size_t topN, std::ostream& 
     }
 }
 
-// Returns the short JSON escape for c, or nullptr when c has none.
-// A lookup keeps each mapping on one line; the previous switch repeated a
-// three-line case/append/break block per character, which reads as a clone.
-const char* shortJsonEscape(unsigned char c) {
-    switch (c) {
-        case '"': return "\\\"";
-        case '\\': return "\\\\";
-        case '\b': return "\\b";
-        case '\f': return "\\f";
-        case '\n': return "\\n";
-        case '\r': return "\\r";
-        case '\t': return "\\t";
-        default: return nullptr;
-    }
-}
-
-std::string jsonEscape(const std::string& text) {
-    std::string escaped;
-    escaped.reserve(text.size());
-    for (unsigned char c : text) {
-        const char* shortForm = shortJsonEscape(c);
-        if (shortForm != nullptr) {
-            escaped += shortForm;
-        } else if (c < 0x20) {
-            char buf[8];
-            std::snprintf(buf, sizeof(buf), "\\u%04x", c);
-            escaped += buf;
-        } else {
-            escaped += static_cast<char>(c);
-        }
-    }
-    return escaped;
-}
-
 void printJson(const diskmap::FsNode& node, int depth, int depthCap, std::ostream& out);
 
 // Serializes the "children" array. Split out of printJson so neither function
@@ -289,7 +284,8 @@ void printJsonChildren(const diskmap::FsNode& node, int depth, int depthCap, std
 }
 
 void printJson(const diskmap::FsNode& node, int depth, int depthCap, std::ostream& out) {
-    out << "{\"name\":\"" << jsonEscape(node.name) << "\",\"is_dir\":"
+    out << "{\"name\":\"" << diskmap_cli::escapeJsonStringContent(node.name)
+        << "\",\"is_dir\":"
         << (node.is_dir ? "true" : "false") << ",\"size\":" << node.size;
     if (node.is_dir && !node.children.empty() && depth < depthCap) {
         printJsonChildren(node, depth, depthCap, out);
@@ -307,7 +303,60 @@ bool scanFailedFatally(const diskmap::ScanResult& result) {
     return !result.fatal_error.empty();
 }
 
+void printSnapshotTree(diskmap::Snapshot snapshot,
+                       const CliOptions& options,
+                       std::ostream& out) {
+    diskmap::sortBySizeDesc(snapshot.root);
+    const int depthCap = effectiveDepthCap(options.depth);
+    if (options.json) {
+        // Snapshot JSON intentionally uses the versioned storage contract,
+        // rather than the scan tree's display-only JSON shape.
+        out << diskmap::serializeSnapshot(snapshot) << '\n';
+    } else {
+        printTree(snapshot.root, 0, depthCap, out);
+        printTopFiles(snapshot.root, options.top, out);
+    }
+}
+
+int runLoadedSnapshot(const CliOptions& options) {
+    try {
+        diskmap::Snapshot snapshot =
+            diskmap::readSnapshotFile(options.load_snapshot);
+        if (!options.save_snapshot.empty()) {
+            diskmap::writeSnapshotAtomically(snapshot, options.save_snapshot);
+        }
+        if (options.duplicates) {
+            const diskmap::ScanResult result =
+                diskmap::scanEvidenceFromSnapshot(snapshot);
+            const diskmap::DuplicateAnalysis analysis =
+                diskmap::analyzeDuplicates(result);
+            diskmap_cli::printDuplicateAnalysis(analysis, options.json, std::cout);
+            return 0;
+        }
+        printSnapshotTree(std::move(snapshot), options, std::cout);
+        return 0;
+    } catch (const std::exception& error) {
+        std::cerr << "snapshot: " << error.what() << "\n";
+        return 1;
+    } catch (...) {
+        std::cerr << "snapshot: unknown error\n";
+        return 1;
+    }
+}
+
 int runDiskmap(const CliOptions& options) {
+    std::optional<diskmap::Snapshot> before;
+    if (!options.compare_snapshot.empty()) {
+        try {
+            before = diskmap::readSnapshotFile(options.compare_snapshot);
+        } catch (const std::exception& error) {
+            std::cerr << "snapshot: " << error.what() << "\n";
+            return 1;
+        } catch (...) {
+            std::cerr << "snapshot: unknown error\n";
+            return 1;
+        }
+    }
     diskmap::RealFsSource source;
     // --depth caps how much is printed. --max-depth is a scanner bound and is
     // intentionally passed through so callers can trade complete totals for
@@ -328,6 +377,32 @@ int runDiskmap(const CliOptions& options) {
     diskmap::sortBySizeDesc(result.root);
     printScanErrors(result.errors);
 
+    const diskmap::Snapshot current = diskmap::snapshotFromNode(result.root);
+    if (!options.save_snapshot.empty()) {
+        try {
+            diskmap::writeSnapshotAtomically(current, options.save_snapshot);
+        } catch (const std::exception& error) {
+            std::cerr << "snapshot: " << error.what() << "\n";
+            return 1;
+        } catch (...) {
+            std::cerr << "snapshot: unknown error\n";
+            return 1;
+        }
+    }
+    if (before.has_value()) {
+        diskmap::SnapshotDiffOptions diffOptions;
+        const diskmap::SnapshotDiff diff =
+            diskmap::diffSnapshots(*before, current, diffOptions);
+        diskmap_cli::printSnapshotDiff(diff, options.json, std::cout);
+        return 0;
+    }
+    if (options.duplicates) {
+        const diskmap::DuplicateAnalysis analysis =
+            diskmap::analyzeDuplicates(result);
+        diskmap_cli::printDuplicateAnalysis(analysis, options.json, std::cout);
+        return 0;
+    }
+
     const int depthCap = effectiveDepthCap(options.depth);
     if (options.json) {
         printJson(result.root, 0, depthCap, std::cout);
@@ -347,12 +422,31 @@ int main(int argc, char** argv) {
         printUsage(std::cout);
         return 0;
     }
-    if (!options.valid || options.path.empty()) {
+    const bool hasLoadedSnapshot = !options.load_snapshot.empty();
+    if (!options.valid) {
         if (!options.error.empty()) {
             std::cerr << "error: " << options.error << "\n";
         }
         printUsage(std::cerr);
         return 1;
+    }
+    if (hasLoadedSnapshot && !options.path.empty()) {
+        std::cerr << "error: --load-snapshot cannot be combined with a scan path\n";
+        printUsage(std::cerr);
+        return 1;
+    }
+    if (!hasLoadedSnapshot && options.path.empty()) {
+        std::cerr << "error: a scan path or --load-snapshot is required\n";
+        printUsage(std::cerr);
+        return 1;
+    }
+    if (hasLoadedSnapshot && !options.compare_snapshot.empty()) {
+        std::cerr << "error: --compare-snapshot requires a live scan path\n";
+        printUsage(std::cerr);
+        return 1;
+    }
+    if (hasLoadedSnapshot) {
+        return runLoadedSnapshot(options);
     }
     return runDiskmap(options);
 }

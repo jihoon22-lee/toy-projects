@@ -38,6 +38,15 @@ diskmap::ScanResult runScan(
     return result;
 }
 
+diskmap::DuplicateAnalysis runDuplicateAnalysis(
+    const diskmap::ScanResult& scan,
+    const diskmap::DuplicateAnalysisOptions& options,
+    const std::shared_ptr<diskmap::ScanCancellationToken>& cancellation,
+    const diskmap::DuplicateProgressFn& progress) {
+    return diskmap::analyzeDuplicates(scan, options, nullptr, progress,
+                                       cancellation.get());
+}
+
 int pluralCount(std::size_t value) {
     const auto maximum = static_cast<std::size_t>(std::numeric_limits<int>::max());
     return value > maximum ? std::numeric_limits<int>::max() : static_cast<int>(value);
@@ -62,9 +71,11 @@ diskmap::ScanResult failedScanResult(const QString& path,
 
 MainWindow::MainWindow(QWidget* parent,
                        ScanRunner scanRunner,
-                       CleanupServices cleanupServices)
+                       CleanupServices cleanupServices,
+                       DuplicateRunner duplicateRunner)
     : QMainWindow(parent), scanRunner_(std::move(scanRunner)),
-      cleanupServices_(std::move(cleanupServices)) {
+      cleanupServices_(std::move(cleanupServices)),
+      duplicateRunner_(std::move(duplicateRunner)) {
     if (!scanRunner_) {
         scanRunner_ = runScan;
     }
@@ -73,6 +84,7 @@ MainWindow::MainWindow(QWidget* parent,
     buildNavigationBar(central, layout);
     buildFilterPanel(central, layout);
     buildExplorer(central, layout);
+    buildEvidencePanel(central, layout);
     buildCleanupPanel(central, layout);
     setCentralWidget(central);
 
@@ -107,6 +119,9 @@ MainWindow::MainWindow(QWidget* parent,
                    == QMessageBox::Yes;
         };
     }
+    if (!duplicateRunner_) {
+        duplicateRunner_ = runDuplicateAnalysis;
+    }
 
     status_ = new QLabel(tr("Ready"), this);
     status_->setObjectName(QStringLiteral("status"));
@@ -123,6 +138,14 @@ MainWindow::MainWindow(QWidget* parent,
                            activeProgress_->files.load(std::memory_order_relaxed),
                            requestedScanPath_);
         }
+        if (activeDuplicateProgress_ && activeDuplicateCancellation_
+            && !activeDuplicateCancellation_->isCancelled()) {
+            status_->setText(
+                tr("Analyzing duplicates… %1 files, %2 read")
+                    .arg(activeDuplicateProgress_->files.load(std::memory_order_relaxed))
+                    .arg(QString::fromStdString(diskmap::humanBytes(
+                        activeDuplicateProgress_->bytes.load(std::memory_order_relaxed)))));
+        }
     });
 
     connectUi();
@@ -138,6 +161,9 @@ MainWindow::~MainWindow() {
     if (activeCancellation_) {
         activeCancellation_->cancel();
     }
+    if (activeDuplicateCancellation_) {
+        activeDuplicateCancellation_->cancel();
+    }
     filterTimer_->stop();
     progressTimer_->stop();
 }
@@ -152,17 +178,27 @@ void MainWindow::chooseFolder() {
 void MainWindow::scanPath(const QString& path) { startScan(path, false); }
 
 void MainWindow::rescan() {
+    if (documentIsSnapshot_) {
+        status_->setText(tr("Loaded snapshots are read-only; scan the live folder again first"));
+        return;
+    }
     if (!currentScanPath_.isEmpty()) {
         startScan(currentScanPath_, true);
     }
 }
 
 void MainWindow::cancelScan() {
-    if (!activeCancellation_) {
+    if (!activeCancellation_ && !activeDuplicateCancellation_) {
         return;
     }
-    activeCancellation_->cancel();
-    status_->setText(tr("Cancelling scan…"));
+    if (activeCancellation_) {
+        activeCancellation_->cancel();
+    }
+    if (activeDuplicateCancellation_) {
+        activeDuplicateCancellation_->cancel();
+    }
+    status_->setText(activeCancellation_ ? tr("Cancelling scan…")
+                                         : tr("Cancelling duplicate analysis…"));
     updateControlState();
 }
 
@@ -178,6 +214,7 @@ void MainWindow::startScan(const QString& path, bool restoreNavigation) {
     if (activeCancellation_) {
         activeCancellation_->cancel();
     }
+    cancelDuplicateAnalysis();
 
     pendingRestore_ = restoreNavigation && document_ != nullptr
                       && path == currentScanPath_;
@@ -277,6 +314,11 @@ void MainWindow::onScanFinished(QFutureWatcher<diskmap::ScanResult>* watcher,
     const std::vector<diskmap::NodeKey> previousTrail = pendingTrail_;
     const std::optional<diskmap::NodeKey> previousSelection = pendingSelectedKey_;
     document_ = std::make_shared<diskmap::ScanResult>(std::move(completed));
+    documentIsSnapshot_ = false;
+    hasLoadedSnapshot_ = false;
+    loadedSnapshotPath_.clear();
+    clearDuplicateEvidence();
+    clearSnapshotChanges();
     cleanupUndo_->clear();
     stagedCleanupKeys_.clear();
     refreshCleanupReview();
@@ -293,7 +335,18 @@ void MainWindow::onScanFinished(QFutureWatcher<diskmap::ScanResult>* watcher,
 }
 
 void MainWindow::updateDocumentStatus() {
-    if (!document_ || activeCancellation_) {
+    if (!document_ || activeCancellation_ || activeDuplicateCancellation_) {
+        return;
+    }
+    if (documentIsSnapshot_) {
+        status_->setText(
+            tr("Loaded read-only snapshot · %1 node(s) · %2 evidence")
+                .arg(hasLoadedSnapshot_ ? loadedSnapshot_.nodes_retained
+                                        : diskmap::countNodes(document_->root))
+                .arg(hasLoadedSnapshot_ && loadedSnapshot_.complete
+                         && !loadedSnapshot_.truncated
+                         ? tr("complete")
+                         : tr("conservative")));
         return;
     }
     const diskmap::SizeMetric metric = static_cast<diskmap::SizeMetric>(

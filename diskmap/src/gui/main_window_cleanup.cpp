@@ -80,7 +80,8 @@ private:
 } // namespace
 
 void MainWindow::stageSelectedRows() {
-    if (!document_ || activeCancellation_ || table_->selectionModel() == nullptr) {
+    if (!document_ || documentIsSnapshot_ || activeCancellation_
+        || activeDuplicateCancellation_ || table_->selectionModel() == nullptr) {
         return;
     }
     std::vector<diskmap::NodeKey> after = stagedCleanupKeys_;
@@ -95,22 +96,26 @@ void MainWindow::stageSelectedRows() {
     if (after == stagedCleanupKeys_) {
         return;
     }
-    cleanupUndo_->push(new StagingCommand(
-        [this](std::vector<diskmap::NodeKey> keys) {
-            setStagedCleanupKeys(std::move(keys));
-        },
-        stagedCleanupKeys_, std::move(after), tr("Stage cleanup selection")));
+    stageCleanupKeysWithUndo(std::move(after), tr("Stage cleanup selection"));
 }
 
 void MainWindow::clearCleanupStaging() {
     if (stagedCleanupKeys_.empty() || activeCancellation_) {
         return;
     }
+    stageCleanupKeysWithUndo({}, tr("Clear cleanup staging"));
+}
+
+void MainWindow::stageCleanupKeysWithUndo(std::vector<diskmap::NodeKey> keys,
+                                          const QString& text) {
+    if (keys == stagedCleanupKeys_) {
+        return;
+    }
     cleanupUndo_->push(new StagingCommand(
-        [this](std::vector<diskmap::NodeKey> keys) {
-            setStagedCleanupKeys(std::move(keys));
+        [this](std::vector<diskmap::NodeKey> values) {
+            setStagedCleanupKeys(std::move(values));
         },
-        stagedCleanupKeys_, {}, tr("Clear cleanup staging")));
+        stagedCleanupKeys_, std::move(keys), text));
 }
 
 void MainWindow::setStagedCleanupKeys(std::vector<diskmap::NodeKey> keys) {
@@ -175,7 +180,8 @@ void MainWindow::appendCleanupAudit(const diskmap::TrashReceipt& receipt) {
 
 void MainWindow::executeCleanup() {
     refreshCleanupReview();
-    if (!document_ || activeCancellation_ || cleanupPlan_.targets.empty()
+    if (!document_ || documentIsSnapshot_ || activeCancellation_
+        || activeDuplicateCancellation_ || cleanupPlan_.targets.empty()
         || !cleanupServices_.confirm(cleanupPlan_)) {
         updateControlState();
         return;

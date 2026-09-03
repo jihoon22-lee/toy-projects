@@ -1,5 +1,6 @@
 #include "diskmap/cleanup.hpp"
 
+#include <array>
 #include <algorithm>
 #include <cstdlib>
 #include <limits>
@@ -15,6 +16,46 @@ namespace diskmap {
 namespace {
 
 namespace fs = std::filesystem;
+
+constexpr std::array<const char*, 17> kCleanupSkipMessages = {
+    "",
+    "selected entry is absent from the retained scan",
+    "the scan root cannot be staged for cleanup",
+    "the entry is inside a protected root",
+    "mount roots and observed mount boundaries are protected",
+    "descendants reached through a symlink cannot be staged",
+    "the entry has incomplete scan or metadata evidence",
+    "scanner filtering makes cleanup evidence incomplete",
+    "the entry belongs to a stale scan generation",
+    "the entry identity or metadata is unknown",
+    "the filesystem entry type is not supported for cleanup",
+    "an already staged directory covers this descendant",
+    "the entry no longer exists or cannot be inspected",
+    "the filesystem identity changed after scanning",
+    "the filesystem entry type changed after scanning",
+    "the filesystem size changed after scanning",
+    "the filesystem hard-link count changed after scanning",
+};
+
+constexpr std::array<const char*, 17> kCleanupSkipReasonNames = {
+    "none",
+    "missing-selection",
+    "root-target",
+    "protected-root",
+    "mount-boundary",
+    "symlink-descendant",
+    "incomplete-scan",
+    "scanner-filtered",
+    "stale-generation",
+    "metadata-unknown",
+    "unsupported-type",
+    "covered-by-parent",
+    "missing",
+    "identity-changed",
+    "type-changed",
+    "size-changed",
+    "hard-link-changed",
+};
 
 fs::path normalizedAbsolute(const fs::path& value) {
     std::error_code error;
@@ -295,41 +336,9 @@ CleanupSkipReason basicRejection(const ScanResult& scan,
 }
 
 std::string skipMessage(CleanupSkipReason reason) {
-    switch (reason) {
-    case CleanupSkipReason::MissingSelection:
-        return "selected entry is absent from the retained scan";
-    case CleanupSkipReason::RootTarget:
-        return "the scan root cannot be staged for cleanup";
-    case CleanupSkipReason::ProtectedRoot:
-        return "the entry is inside a protected root";
-    case CleanupSkipReason::MountBoundary:
-        return "mount roots and observed mount boundaries are protected";
-    case CleanupSkipReason::SymlinkDescendant:
-        return "descendants reached through a symlink cannot be staged";
-    case CleanupSkipReason::IncompleteScan:
-        return "the entry has incomplete scan or metadata evidence";
-    case CleanupSkipReason::ScannerFiltered:
-        return "scanner filtering makes cleanup evidence incomplete";
-    case CleanupSkipReason::StaleGeneration:
-        return "the entry belongs to a stale scan generation";
-    case CleanupSkipReason::MetadataUnknown:
-        return "the entry identity or metadata is unknown";
-    case CleanupSkipReason::UnsupportedType:
-        return "the filesystem entry type is not supported for cleanup";
-    case CleanupSkipReason::CoveredByParent:
-        return "an already staged directory covers this descendant";
-    case CleanupSkipReason::Missing:
-        return "the entry no longer exists or cannot be inspected";
-    case CleanupSkipReason::IdentityChanged:
-        return "the filesystem identity changed after scanning";
-    case CleanupSkipReason::TypeChanged:
-        return "the filesystem entry type changed after scanning";
-    case CleanupSkipReason::SizeChanged:
-        return "the filesystem size changed after scanning";
-    case CleanupSkipReason::HardLinkChanged:
-        return "the filesystem hard-link count changed after scanning";
-    case CleanupSkipReason::None:
-        return {};
+    const auto index = static_cast<std::size_t>(reason);
+    if (index < kCleanupSkipMessages.size()) {
+        return kCleanupSkipMessages[index];
     }
     return "cleanup target was rejected";
 }
@@ -337,24 +346,9 @@ std::string skipMessage(CleanupSkipReason reason) {
 } // namespace
 
 const char* cleanupSkipReasonName(CleanupSkipReason reason) {
-    switch (reason) {
-    case CleanupSkipReason::None: return "none";
-    case CleanupSkipReason::MissingSelection: return "missing-selection";
-    case CleanupSkipReason::RootTarget: return "root-target";
-    case CleanupSkipReason::ProtectedRoot: return "protected-root";
-    case CleanupSkipReason::MountBoundary: return "mount-boundary";
-    case CleanupSkipReason::SymlinkDescendant: return "symlink-descendant";
-    case CleanupSkipReason::IncompleteScan: return "incomplete-scan";
-    case CleanupSkipReason::ScannerFiltered: return "scanner-filtered";
-    case CleanupSkipReason::StaleGeneration: return "stale-generation";
-    case CleanupSkipReason::MetadataUnknown: return "metadata-unknown";
-    case CleanupSkipReason::UnsupportedType: return "unsupported-type";
-    case CleanupSkipReason::CoveredByParent: return "covered-by-parent";
-    case CleanupSkipReason::Missing: return "missing";
-    case CleanupSkipReason::IdentityChanged: return "identity-changed";
-    case CleanupSkipReason::TypeChanged: return "type-changed";
-    case CleanupSkipReason::SizeChanged: return "size-changed";
-    case CleanupSkipReason::HardLinkChanged: return "hard-link-changed";
+    const auto index = static_cast<std::size_t>(reason);
+    if (index < kCleanupSkipReasonNames.size()) {
+        return kCleanupSkipReasonNames[index];
     }
     return "unknown";
 }
