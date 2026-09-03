@@ -14,6 +14,7 @@ from collections.abc import Mapping
 from typing import Any, cast
 
 from envlens.snapshot_input import (
+    MAX_INPUT_BYTES,
     MAX_REQUIREMENTS,
     DiffError,
     _object,
@@ -22,6 +23,7 @@ from envlens.snapshot_input import (
 )
 
 __all__ = [
+    "MAX_INPUT_BYTES",
     "DiffError",
     "check_compatibility",
     "check_snapshot_compatibility",
