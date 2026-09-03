@@ -34,7 +34,7 @@
 | diskmap | C++17, Qt, qmake | D1/D2 complete · D3 explorer workbench merged by PR #46 · exact-main evidence green · `0.1.0`/`Unreleased` | treemap/table, filters, uncertainty, accessible navigation, rescan restoration verified; cleanup UX는 D4~D6에서 확장 |
 | buildscope | Python + C++17/Qt, CMake | B0~B5 implementation, remote acceptance, exact-main CI, trusted main Pages와 `0.5.0` tag/release/public asset audit complete | B3~B5 첫 usable release boundary published and audited |
 | envlens | pure Python 3.10+ package/CLI | deterministic snapshot core · path-aware manifest/CI matrix · PR #50 merged · exact-main green | `0.1.0`/`Unreleased`; E2/E3 and release remain pending |
-| quality-zoo | Python 3.10, stdlib runner | scenario contract/local candidate consumer · four C++ sanitizer scenarios locally verified for released/candidate digests · released-artifact PR #49 remote PR CI/sticky/exact-main complete · candidate cross-repo acceptance pending | test asset only; broader Q1~Q5 corpus pending |
+| quality-zoo | Python 3.10, stdlib runner | scenario contract/local candidate consumer · four C++ sanitizer scenarios locally verified for released/candidate digests · released-artifact PR #49 remote PR CI/sticky/exact-main complete · exact-revision candidate cross-repo acceptance complete (run `33710695336`) · Q2 runtime ASan/LSan/UBSan-plus-clean sub-scope complete | test asset only; broader Q2 and Q1~Q5 corpus pending |
 | ici/viewer | Qt-free core + Qt6 GUI | 3 tests, TEM 4.94 | core 중심, 셸과 report workflow 부족 |
 
 현재 공백:
@@ -1440,9 +1440,9 @@ expectation 경로를 선언하고, 각 경로가 가리키는 full strict schem
 - 필요한 capability와 skip 조건
 
 **현재 상태 (2026-09-03):** scenario contract, dependency-free runner, candidate archive intake와
-local candidate consumer 구현은 완료됐다. Released-artifact Q0의 toy PR/exact-main acceptance도
-완료됐지만, ici-hosted candidate consumer의 remote cross-repository acceptance는 ici workflow가
-병합·dispatch될 때까지 pending이다. Registry는 Python 3.10 표준 라이브러리만 사용하는
+local candidate consumer 구현은 완료됐다. Released-artifact Q0의 toy PR/exact-main acceptance와
+ici-hosted candidate consumer의 exact-revision remote cross-repository acceptance도 완료됐다.
+정확한 원격 증거는 아래 run `33710695336`에 기록한다. Registry는 Python 3.10 표준 라이브러리만 사용하는
 `manifest.json`으로 고정했으며, scenario의 `ici.toml`은 ici 입력으로 남기고 runner가 TOML
 parser를 추가하지 않는다. `ICI_BIN`은 명시적인 local executable path이고, ordinary CI는
 released ici `v0.10.2` pin을 유지한다. Candidate ZIP과 optional exact five authenticated
@@ -1471,6 +1471,10 @@ released expectation을, candidate validation은 candidate expectation을 사용
       게시됐다. Merge `ed5fea2e881da77ac95482cf665e4e40bfe172f1` 뒤 [exact-main run
       `33694452357`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33694452357)도
       통과했으며, 세 product Pages가 HTML artifact와 byte-identical했다.
+- [x] ici-hosted exact-revision candidate acceptance도 [run `33710695336`](https://github.com/jihoon22-lee/ici/actions/runs/33710695336)에서
+      toy main `2d0d7c0b2dcc137a782d6042438fc287bffdf570`과 candidate target
+      `9d470edca7ab037a24dcd6594531a822f116548b`를 사용해 완료했다. 다섯 scenario contract는
+      `PASS`/zero errors였고, 결과는 별도 acceptance artifact로만 보존됐다.
 
 첫 local candidate evidence는 candidate run `33689056008`, source/target
 `7872a7b80899cbd3d40d92d18e7920cd7e2283e7`, artifact `9869395069`, ZIP SHA-256
@@ -1488,8 +1492,8 @@ SHA-256은 `e7f1a2ce7147057538873a802715c7bf2b12e530a85070af862e02e378caceb8`다
 `expectations/candidate-9d470ed.json`을 선택하며 authenticated local intake evidence가
 성공했다. 해당 Q0 runner는 contract `PASS`, observed suite `WARN`, one matched finding,
 zero errors를 기록했다. 이는 기존 Python dead-code known-answer에 대한 local candidate
-evidence이며 sanitizer rule 자체를 검증하거나 remote cross-repository acceptance를 닫는
-증거가 아니다.
+evidence이며, sanitizer rule 자체나 remote cross-repository acceptance를 단독으로 닫는 증거는
+아니다. Remote acceptance는 아래 exact-revision run `33710695336`으로 별도 완료됐다.
 
 2026-09-03 local C++ sanitizer subset은 `cpp.asan-use-after-free`,
 `cpp.lsan-memory-leak`, `cpp.ubsan-signed-overflow`, `cpp.sanitizer-clean` 네 stable
@@ -1499,9 +1503,31 @@ SHA-256 `e7f1a2ce7147057538873a802715c7bf2b12e530a85070af862e02e378caceb8`를 �
 schema-2 selector로 실행했다. 두 all-scenario run 모두 five scenarios의 contract `PASS`,
 zero errors를 기록했다. ASan UAF/LSan leak/UBSan signed overflow defect scenario는 expected
 observed `FAIL`, clean scenario는 expected observed `PASS`, 기존 Python scenario는 expected
-observed `WARN`이었다. 따라서 Q2의 ASan/UBSan/LSan 및 clean counterpart 한 항목만 local
-evidence 기준으로 완료했으며, broader Q2와 Q1/Q3~Q5, candidate remote acceptance는 여전히
-pending이다. 이 local evidence는 PR CI, merge 또는 release를 의미하지 않는다.
+observed `WARN`이었다. 따라서 Q2의 ASan/UBSan/LSan 및 clean counterpart sub-scope만 local
+evidence 기준으로 완료했다. 이후 exact-revision remote run `33710695336`이 동일한
+five-scenario contract를 authenticated provenance/API evidence와 함께 통과시켜 candidate
+cross-repository acceptance도 완료했다. broader Q2와 Q1/Q3~Q5는 여전히 pending이며, 이
+local evidence와 candidate acceptance는 PR comment/Pages, merge 또는 release를 의미하지 않는다.
+
+원격 acceptance는 ici workflow head `6df011f98be1a19092b112cb56c596dc35bcae4d`에서 toy main
+`2d0d7c0b2dcc137a782d6042438fc287bffdf570`을 exact checkout하고, candidate target
+`9d470edca7ab037a24dcd6594531a822f116548b`의 producer run `33706057540`/artifact `9875319095`를
+재검증한 결과다. Candidate ZIP은 `2,285,368` bytes / SHA-256
+`4aec084b3a30ac01a1df5124fa3b42b7f51d23f66c12b490194a84549be9db27`, contained `ici.pyz`는
+`2,284,045` bytes / SHA-256 `e7f1a2ce7147057538873a802715c7bf2b12e530a85070af862e02e378caceb8`,
+별도 acceptance artifact `9876797536`은 `1,104,307` bytes / SHA-256
+`e66ae2b65988abe10fc5ddb92a5c3bb6fc238ec2f77b7fd27ccfe75c24194a5f`다. 다섯 scenario 모두
+contract `PASS`, zero errors였고, expected/observed는 ASan UAF `FAIL` /
+`ici.legacy.sanitize.target` + `asan.heap-use-after-free` / correctness / `src/fault.cpp:5`,
+LSan leak `FAIL` / `ici.legacy.sanitize.target` + `lsan.memory-leak` / resource / `src/fault.cpp:3`,
+sanitizer-clean `PASS` / `ici.legacy.sanitize.target` + no tool rule / correctness /
+`tests/test_clean.cpp:1`, UBSan signed overflow `FAIL` / `ici.legacy.sanitize.target` +
+`ubsan.signed-integer-overflow` / correctness / `src/fault.cpp:3:18`, Python dead private `WARN` /
+`ici.legacy.dead.target` + no tool rule / maintainability / `src/bad.py:1`이다 (`src/clean.py`는
+forbidden). Workflow는 read-only API evidence와 별도 artifact만 만들고 Pages, PR comment, release,
+tag, branch mutation을 만들지 않았다. 이는 Q2 runtime ASan/LSan/UBSan-plus-clean sub-scope와
+candidate remote acceptance만 닫으며, Qt lifetime, broader Q2, Q1/Q3~Q5, I4 및 product release/
+version 변경은 닫지 않는다.
 
 Quality Zoo의 다음 exact-main push [run `33698248293`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33698248293)에서도
 artifact `9872561713`의 contract는 `PASS`였고, stable scenario 하나의 observed `WARN`은 예상된
@@ -1627,9 +1653,9 @@ ici와 toy-projects가 함께 바뀌는 기능은 다음 순서를 따른다.
 - [ ] A0~A4: abilens Makefile/ELF explorer와 release 완료
 - [ ] Q0~Q5: Python/C++/Qt/build/hybrid stable expected-finding corpus 완료 (released-artifact Q0
   implementation과 PR #49 remote acceptance, EnvLens merge의 exact-main QZ artifact, 새
-  candidate SHA selector/local authenticated evidence, 그리고 C++ sanitizer ASan/UBSan/LSan 및
-  clean counterpart local evidence는 기록됐다. broader Q2 corpus, ici-hosted candidate workflow의
-  remote cross-repository acceptance와 Q1/Q3~Q5는 pending)
+  candidate SHA selector/local authenticated evidence, ici-hosted exact-revision candidate
+  cross-repository acceptance, 그리고 C++ sanitizer ASan/UBSan/LSan 및 clean counterpart
+  Q2 runtime sub-scope evidence는 기록됐다. broader Q2 corpus와 Q1/Q3~Q5는 pending)
 - [ ] repository path-aware CI, ici pin/candidate와 artifact 정책 완료
 
 체크포인트는 기능이 시연되는 것만으로 닫지 않는다. 공통 제품 완성 불변식, native tests, ici 실측, 문서와 오류 처리까지 모두 충족해야 한다.
