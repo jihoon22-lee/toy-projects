@@ -32,6 +32,15 @@ main product Pages were byte-identical to their artifacts. The other corpus area
 (C++, Qt, build/binary, and hybrid scenarios) have not been completed; Q1–Q5
 (the Python/C++/Qt/build/binary/hybrid corpus expansion) remain future work.
 
+After EnvLens was merged by [PR #50](https://github.com/jihoon22-lee/toy-projects/pull/50) as
+`c307ac1ab01e12e4ac81a34623eb669da0e43641`, exact-main [run `33698248293`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33698248293)
+also succeeded across all jobs, the main publisher, and `Merge Gate`; the PR-only publisher was
+skipped as expected for a push. The exact-main Quality Zoo artifact
+[`9872561713`](https://github.com/jihoon22-lee/toy-projects/actions/artifacts/9872561713) recorded
+contract `PASS`, one stable scenario with the expected observed `WARN`, and zero errors. The current
+manifest produced four project Pages, all byte-identical to their artifacts and passing exact-title /
+Zero-CDN checks; their sizes and hashes are centralized in the [EnvLens workthrough](../workthrough/2026-09-03-envlens-snapshot.md).
+
 The local candidate evidence is retained here alongside the remote acceptance so
 the released and candidate channels remain explicit and comparable:
 

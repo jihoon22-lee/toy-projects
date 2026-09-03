@@ -21,6 +21,14 @@ recorded stable contract `PASS`, observed suite `WARN`, and an empty error list;
 the main product Pages were byte-identical to their artifacts. Q1–Q5 (the
 Python/C++/Qt/build/binary/hybrid corpus expansion) remain future work.
 
+The later EnvLens merge, [PR #50](https://github.com/jihoon22-lee/toy-projects/pull/50) at
+`c307ac1ab01e12e4ac81a34623eb669da0e43641`, passed exact-main [run `33698248293`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33698248293)
+with all jobs, the main publisher, and `Merge Gate` successful; the PR-only publisher was skipped as
+expected for a push. Its Quality Zoo artifact [`9872561713`](https://github.com/jihoon22-lee/toy-projects/actions/artifacts/9872561713)
+still recorded contract `PASS`, one stable scenario with the expected observed `WARN`, and zero
+errors. The current four-project Page artifact/hash table is centralized in the [EnvLens snapshot
+workthrough](../../workthrough/2026-09-03-envlens-snapshot.md); Q1–Q5 remain pending.
+
 This is a test-asset milestone, not a user-facing product milestone. No toy
 product version was changed and no release was created.
 
@@ -242,6 +250,8 @@ git diff --check
 
 Q0 acceptance is closed: the PR CI rerun, exactly one ordinary sticky comment
 with the three released-ici product HTML links, the separate Quality Zoo result
-artifacts, and exact-main evidence are all recorded above. The remaining Python,
-C++, Qt, build/binary, and hybrid scenario families (Q1–Q5) stay future until
-their known answers and clean counterparts are implemented and verified.
+artifacts, and exact-main evidence are all recorded above. The later merged-main
+run and four-project Page evidence are linked above as the current portfolio
+record. The remaining Python, C++, Qt, build/binary, and hybrid scenario
+families (Q1–Q5) stay future until their known answers and clean counterparts
+are implemented and verified.

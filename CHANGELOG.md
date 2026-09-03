@@ -38,10 +38,21 @@
   also passing. Released ici `v0.10.2` local deep verification is `PASS` across 14 total engines:
   `13 PASS / 0 WARN / 0 FAIL / 0 ERROR / 1 compile_db SKIP`, with line/function/branch
   `93.0% / 100.0% / 84.6%`, TEM `5.00`, complexity max `13`, and cycle/sanitize also `PASS`.
-  The path-aware manifest now includes envlens, while a Python 3.10/3.14 matrix validates tests,
+  The path-aware manifest now includes envlens, while a Python 3.10/latest matrix validates tests,
   schema, strict typing, reproducible pure wheel/sdist builds, package metadata, and a clean-wheel
-  smoke. Remote PR/sticky/exact-main and stable release evidence remain pending. Snapshot diff,
-  dependency/wheel compatibility, project import, and runtime smoke stay in future E2/E3 work.
+  smoke. PR #50 merged as `c307ac1ab01e12e4ac81a34623eb669da0e43641`; exact-main run
+  [`33698248293`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33698248293) passed all jobs,
+  the main publisher, and `Merge Gate`, with the PR-only publisher skipped as expected. Stable
+  release evidence remains pending; snapshot diff, dependency/wheel compatibility, project import,
+  and runtime smoke stay in future E2/E3 work and E4 remains the release boundary.
+- Exact-main artifacts include EnvLens ici `9872574260`, Python 3.10 `9872561889`, latest Python
+  `9872564898`, and Quality Zoo `9872561713`. Python 3.10/latest emitted the same wheel SHA-256
+  `906c86270b2cad5c693816d43fa4d143e50be0cc3f3a852fdd538a453f51e3df` and sdist SHA-256
+  `d8bf786c6bb6569371bc27092f3ade01e03315abca4fb862b66d22cd6ac9e63e`. The exact-main EnvLens
+  report was `PASS` with 13 total engines, 12 `PASS`, one C++ `SKIP`, test `50/50`, line/function/
+  branch coverage `93.0% / 100.0% / 84.6%`, and TEM `5.0`. The four main Pages were byte-identical
+  to their artifacts and passed exact-title/Zero-CDN checks. The complete page sizes and hashes are
+  recorded in the [EnvLens workthrough](workthrough/2026-09-03-envlens-snapshot.md).
 
 ### Quality Zoo known-answer contract
 
@@ -82,8 +93,11 @@
   `ed5fea2e881da77ac95482cf665e4e40bfe172f1`. Exact-main run
   [`33694452357`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33694452357) also passed,
   including the released-ici known-answer artifact and byte-identical trusted main Pages. Ordinary
-  CI remains pinned to released ici `v0.10.2`. No toy product version or release changed; Q1~Q5
-  Python/C++/Qt/build/binary/hybrid corpus expansion remains open.
+  CI remains pinned to released ici `v0.10.2`. The later exact-main run
+  [`33698248293`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33698248293) after EnvLens
+  merge also passed the Quality Zoo contract: artifact `9872561713` recorded one stable scenario
+  with the expected observed `WARN` and zero errors. No toy product version or release changed;
+  Q1~Q5 Python/C++/Qt/build/binary/hybrid corpus expansion remains open.
 
 ### Sticky PR report comment cardinality
 

@@ -33,7 +33,7 @@
 | loglens | C++17, Qt, CMake | L2 bounded/background slice · PR #25 CI green · local Qt5/Qt6 12 CTest targets · 1 GiB benchmark PR #26 merged · main Qt5/Qt6 sweep green | Tail N/From start와 worker UX, benchmark/default 8192 완료 |
 | diskmap | C++17, Qt, qmake | D1/D2 complete · D3 explorer workbench merged by PR #46 · exact-main evidence green · `0.1.0`/`Unreleased` | treemap/table, filters, uncertainty, accessible navigation, rescan restoration verified; cleanup UX는 D4~D6에서 확장 |
 | buildscope | Python + C++17/Qt, CMake | B0~B5 implementation, remote acceptance, exact-main CI, trusted main Pages와 `0.5.0` tag/release/public asset audit complete | B3~B5 첫 usable release boundary published and audited |
-| envlens | pure Python 3.10+ package/CLI | deterministic snapshot core complete · path-aware manifest/CI matrix integrated locally · remote PR/sticky/exact-main pending | `0.1.0`/`Unreleased`; E2/E3 and release remain pending |
+| envlens | pure Python 3.10+ package/CLI | deterministic snapshot core · path-aware manifest/CI matrix · PR #50 merged · exact-main green | `0.1.0`/`Unreleased`; E2/E3 and release remain pending |
 | quality-zoo | Python 3.10, stdlib runner | scenario contract/local candidate consumer · PR #49 remote PR CI/sticky/exact-main complete | test asset only; Q1~Q5 corpus pending |
 | ici/viewer | Qt-free core + Qt6 GUI | 3 tests, TEM 4.94 | core 중심, 셸과 report workflow 부족 |
 
@@ -1256,7 +1256,7 @@ envlens/
 판정과 project/runtime smoke는 E2/E3로 남긴다. E0~E4 전체 checkpoint나 stable release를 닫은
 것으로 해석하지 않는다.
 
-### E1. environment snapshot — local core complete; remote evidence pending
+### E1. environment snapshot — implementation and exact-main evidence complete
 
 **브랜치:** `feat/envlens-snapshot`
 
@@ -1289,10 +1289,17 @@ Released ici `v0.10.2` local deep도 14 total engines에서 `13 PASS / 0 WARN / 
 1 compile_db SKIP`로 PASS했으며, TEM `5.00`, line/function/branch `93.0% / 100.0% / 84.6%`,
 complexity max `13`, cycle/sanitize `PASS`였다.
 `envlens/ici.toml`은 test/coverage, TEM `≥ 4.0`, branch `≥ 80%`, function `≥ 90%`의 intended
-quality contract를 기록한다. Repository path-aware manifest와 Python 3.10/3.14 quality matrix는
-이 브랜치에서 완료했다. 제품 identity는 `0.1.0`/`Unreleased`로 유지한다. Remote PR/sticky/exact-main
-evidence와 stable release는 아직 pending이며 이 local
-core 완료를 stable release로 표시하지 않는다.
+quality contract를 기록한다. Repository path-aware manifest와 Python 3.10/latest quality matrix는
+완료됐다. [PR #50](https://github.com/jihoon22-lee/toy-projects/pull/50)은
+`c307ac1ab01e12e4ac81a34623eb669da0e43641`로 병합됐고, exact-head push
+[run `33698248293`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33698248293)에서 모든
+job, main publisher와 `Merge Gate`가 성공했다. PR-only publisher는 push에서 expected skip이다.
+Exact-main artifact는 EnvLens ici `9872574260`, Python 3.10 `9872561889`, latest Python
+`9872564898`, Quality Zoo `9872561713`이며, 네 project Page는 artifact와 byte-identical이고
+exact title/Zero-CDN 검사를 통과했다. 상세 size/hash는 [EnvLens workthrough](../../workthrough/2026-09-03-envlens-snapshot.md)에
+중앙화한다. 제품 identity는 `0.1.0`/`Unreleased`로 유지하며 stable release는 아직 pending이다.
+E2 snapshot diff/compatibility, E3 project/runtime smoke와 E4 release 조건은 이 E1 완료에 포함되지
+않는다.
 
 ### E2. diff와 compatibility
 
@@ -1472,6 +1479,11 @@ suite `WARN`이지만 contract `PASS`였고, expected finding 하나만 match됐
 false positive가 없었다. 이 evidence는 version/release bump를 의미하지 않으며, same package
 version의 released/candidate report를 하나의 expectation으로 취급하지 않는다.
 
+Quality Zoo의 다음 exact-main push [run `33698248293`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33698248293)에서도
+artifact `9872561713`의 contract는 `PASS`였고, stable scenario 하나의 observed `WARN`은 예상된
+결과였으며 error는 0개였다. EnvLens merge와 함께 current manifest가 네 project Page를 생성했지만,
+Q1~Q5 corpus expansion은 여전히 pending이다.
+
 ### Q1. Python stable corpus
 
 **브랜치:** `test/quality-zoo-python`
@@ -1586,10 +1598,12 @@ ici와 toy-projects가 함께 바뀌는 기능은 다음 순서를 따른다.
   (D1/D2는 PR #23/#28, D3 core는 PR #45, D3 GUI는 PR #46 및 exact-main run으로 검증)
 - [ ] D4~D7: cleanup/trash/snapshot과 release 완료 (pending)
 - [x] B0~B5: buildscope hybrid compile explorer와 release 완료 (implementation·remote acceptance·trusted main Pages·`0.5.0` tag/release/public asset audit complete)
-- [ ] E0~E4: envlens pure-Python environment explorer와 release 완료
+- [ ] E0~E4: envlens pure-Python environment explorer와 release 완료 (E1 snapshot 구현·PR #50
+  merge·exact-main evidence complete; E2~E4 pending)
 - [ ] A0~A4: abilens Makefile/ELF explorer와 release 완료
 - [ ] Q0~Q5: Python/C++/Qt/build/hybrid stable expected-finding corpus 완료 (Q0 implementation/local
-  candidate consumer와 PR #49 remote PR CI/sticky/exact-main complete; Q1~Q5 pending)
+  candidate consumer와 PR #49 remote acceptance, 그리고 EnvLens merge의 exact-main QZ artifact complete;
+  Q1~Q5 pending)
 - [ ] repository path-aware CI, ici pin/candidate와 artifact 정책 완료
 
 체크포인트는 기능이 시연되는 것만으로 닫지 않는다. 공통 제품 완성 불변식, native tests, ici 실측, 문서와 오류 처리까지 모두 충족해야 한다.

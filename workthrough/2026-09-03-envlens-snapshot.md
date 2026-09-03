@@ -82,24 +82,19 @@ Files: `envlens/src/envlens/redaction.py`, `envlens/src/envlens/probe.py`,
 
 ### 4. User and portfolio documentation
 
-Files: `envlens/README.md`, `README.md`, `CHANGELOG.md`,
+Files: `envlens/README.md`, `quality-zoo/README.md`, `README.md`, `CHANGELOG.md`,
 `docs/superpowers/2026-08-30-product-portfolio-master-plan.md`,
-`docs/superpowers/2026-08-30-handover.md`
+`docs/superpowers/2026-08-30-handover.md`, and the related Quality Zoo workthrough.
 
 - Documented the quick start, schema shape, privacy policy, bounds, process
   tree behavior, atomic output, local gates, and deliberate future boundary.
-- Added envlens to the portfolio status table as a local snapshot-core result
-  with its path-aware manifest and Python 3.10/3.14 CI matrix integrated; EnvLens
-  PR/exact-main/release evidence remains pending.
-- Reconciled the shared Quality Zoo portfolio records with complete Q0 remote
-  evidence: [PR #49 run `33693241255`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33693241255), exactly one sticky comment containing
-  exactly one marker and three product HTML links at that time, merge
-  `ed5fea2e881da77ac95482cf665e4e40bfe172f1`, and exact-main run
-  [`33694452357`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33694452357).
-  Q1~Q5 remain pending.
-- Marked only the six local EnvLens snapshot tasks complete in the master plan.
-  The full E0~E4 checkpoint, diff/compatibility, runtime smoke, EnvLens remote
-  evidence, and release remain open.
+- Recorded the merged PR and exact-main evidence for the path-aware EnvLens
+  manifest. The exact-main run has four current project outputs; the full
+  artifact/Page table is kept below as the canonical byte-level record.
+- Reconciled the shared Quality Zoo portfolio records with the same exact-main
+  run and retained Q1~Q5 as pending.
+- Marked E1 complete in the master plan while leaving E2, E3, and the E4 release
+  boundary open.
 - Kept the product identity at `0.1.0`/`Unreleased`; no tag, release, or version
   bump was made.
 
@@ -196,18 +191,59 @@ pure `py3-none-any` wheel tag. A clean wheel install produced a real snapshot
 that validated against the byte-identical packaged schema. These are local
 candidate artifacts only; they were not published as a release.
 
+### Merged PR and exact-main evidence
+
+[PR #50](https://github.com/jihoon22-lee/toy-projects/pull/50) merged as
+`c307ac1ab01e12e4ac81a34623eb669da0e43641`. Its exact-head push passed exact-main
+run [`33698248293`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33698248293):
+all jobs, the main publisher, and `Merge Gate` succeeded; the PR-only publisher
+was skipped as expected for a push. The dynamic manifest-backed ici verify now
+contains four project outputs; the PR-only sticky publisher derives its link
+cardinality from that same manifest. The exact-main artifacts were:
+
+| Artifact | ID |
+|---|---:|
+| EnvLens ici report | [`9872574260`](https://github.com/jihoon22-lee/toy-projects/actions/artifacts/9872574260) |
+| EnvLens Python 3.10 | [`9872561889`](https://github.com/jihoon22-lee/toy-projects/actions/artifacts/9872561889) |
+| EnvLens latest Python | [`9872564898`](https://github.com/jihoon22-lee/toy-projects/actions/artifacts/9872564898) |
+| Quality Zoo | [`9872561713`](https://github.com/jihoon22-lee/toy-projects/actions/artifacts/9872561713) |
+
+The EnvLens report was `PASS` with 13 total engines, 12 `PASS`, and one C++
+`SKIP`; its test result was `50/50`, with line/function/branch coverage
+`93.0% / 100.0% / 84.6%` and TEM `5.0`. Python 3.10 and latest produced the
+same pure wheel SHA-256
+`906c86270b2cad5c693816d43fa4d143e50be0cc3f3a852fdd538a453f51e3df` and sdist
+SHA-256 `d8bf786c6bb6569371bc27092f3ade01e03315abca4fb862b66d22cd6ac9e63e`.
+The Quality Zoo artifact recorded contract `PASS`, one stable scenario with the
+expected observed `WARN`, zero errors, and released ici `v0.10.2` executable
+SHA-256 `8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4`.
+
+All four main Pages were byte-identical to their exact-main artifacts and passed
+the exact title and Zero-CDN checks:
+
+| Project | Main Page | Bytes | SHA-256 |
+|---|---|---:|---|
+| buildscope | [buildscope/main](https://jihoon22-lee.github.io/toy-projects/buildscope/main/) | 1,345,473 | `301e18c625928cccc5e4b69fb2f132229156751d2b1b2e8b28fbb34d840bb86e` |
+| diskmap | [diskmap/main](https://jihoon22-lee.github.io/toy-projects/diskmap/main/) | 545,766 | `b85f2276e6a57a680ee20a80b0e66fe39da390e991e03f0474b0c864e38a5af6` |
+| envlens | [envlens/main](https://jihoon22-lee.github.io/toy-projects/envlens/main/) | 279,859 | `03ecc3b3e852d22ec233b37c1a86478cf3ea8a361aabaf329ae1e03648e50279` |
+| loglens | [loglens/main](https://jihoon22-lee.github.io/toy-projects/loglens/main/) | 487,155 | `f72fe631339edc4d954bb45235627527befd35b21fa33e1a9fcca833fac11712` |
+
+This closes EnvLens E1 and Quality Zoo Q0 remote/main acceptance. EnvLens
+remains `0.1.0`/`Unreleased`; E2 snapshot diff/compatibility, E3 project/runtime
+smoke, E4 release criteria, and Quality Zoo Q1~Q5 remain pending.
+
 ## Status and Next Steps
 
 - Local snapshot-core implementation and its Python 3.10 test/static gates are
   complete.
-- `ci/projects.json` now includes envlens, and the Python 3.10/3.14 CI matrix
+- `ci/projects.json` includes envlens, and the Python 3.10/latest CI matrix
   covers tests, schema validation, strict typing, reproducible wheel/sdist
-  builds, pure `py3-none-any` metadata, and clean-wheel smoke. EnvLens remote PR
-  CI, sticky report, exact-main verification, and a built/released wheel or
-  source distribution are pending; the local released-ici evidence above is
-  complete.
+  builds, pure `py3-none-any` metadata, and clean-wheel smoke. PR #50 and the
+  exact-main verification are complete; a published stable wheel or source
+  distribution remains an E4 release concern.
 - E2 will add snapshot diff and offline compatibility policies; E3 will add
-  project/runtime smoke. Neither is implied by the v1 snapshot.
+  project/runtime smoke. E4 covers the release boundary. None is implied by
+  the v1 snapshot.
 - A stable release requires the portfolio’s native/package tests, released-ici
   verification, PR and exact-main evidence, user documentation/limitations,
   and reproducible release assets.
