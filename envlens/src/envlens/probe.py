@@ -110,7 +110,7 @@ def distribution_record(distribution):
                     candidate = first[:-3]
                     if candidate != "__init__":
                         import_names.add(candidate)
-                elif len(parts) > 1 and first not in {"", "."}:
+                elif len(parts) > 1 and first not in {"", ".", ".."}:
                     import_names.add(first)
         except Exception:
             pass
