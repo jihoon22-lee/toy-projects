@@ -1509,6 +1509,28 @@ five-scenario contract를 authenticated provenance/API evidence와 함께 통과
 cross-repository acceptance도 완료했다. broader Q2와 Q1/Q3~Q5는 여전히 pending이며, 이
 local evidence와 candidate acceptance는 PR comment/Pages, merge 또는 release를 의미하지 않는다.
 
+**Qt6 lifetime candidate contract (2026-09-03; remote evidence pending).**
+`cpp.qt-missing-parent-constructor`는 Qt6 Core CMake bad/clean fixture다. `src/bad.cpp:3`의
+`MissingParent`는 `QObject *parent` 인자를 받지 않고, `src/clean.cpp`의 `ParentAware`는
+parent를 받아 전달한다. Released ici `v0.10.2` expectation은 `WARN`/`MEASURED`/`exact`,
+`ici.legacy.lint.target` + `clazy-ctor-missing-parent-argument`, category
+`maintainability`, `src/bad.cpp:3`을 기대한다. Candidate target
+`e7a9f55be8893d91497a6e1d0bff6e2e5f4af5f3`의 expectation은 같은 rule/status/evidence/
+confidence/path/line을 유지하되 `cpp_diagnostic_category_policy = tool-rule-v1`에 따라
+category `resource`를 기대하며, 두 채널 모두 `src/clean.cpp` lint finding을 금지한다.
+
+Candidate producer [run `33715173073`](https://github.com/jihoon22-lee/ici/actions/runs/33715173073) /
+[artifact `9878317009`](https://github.com/jihoon22-lee/ici/actions/artifacts/9878317009)의 raw ZIP은
+`2,288,897` bytes / SHA-256 `1165312e36344244fe0591e4fbcf869d126a0a7160a21099ee13c34ae8144d5e`,
+contained `ici.pyz`는 `2,287,574` bytes / SHA-256
+`985c81a63363356619207870cddb0d8cd9854a46925a3e0a745e54bd543d5b51`이다. Provenance는 main
+`Merge Gate` [run `33714515219`](https://github.com/jihoon22-lee/ici/actions/runs/33714515219)을
+해당 target에 결합한다. Quality Zoo local unit은 `57/57` PASS였고, 새 candidate로 Qt를
+제외한 기존 five-scenario manifest는 contract `5/5 PASS`였다. 이는 [Qt lifetime
+workthrough](../../../workthrough/2026-09-03-qt-lifetime-category-corpus.md)에 기록한
+local candidate contract evidence이며, Qt candidate remote acceptance, PR CI, exact-main CI와
+Pages는 pending이다. Version/release 변경은 없다.
+
 원격 acceptance는 ici workflow head `6df011f98be1a19092b112cb56c596dc35bcae4d`에서 toy main
 `2d0d7c0b2dcc137a782d6042438fc287bffdf570`을 exact checkout하고, candidate target
 `9d470edca7ab037a24dcd6594531a822f116548b`의 producer run `33706057540`/artifact `9875319095`를
@@ -1563,6 +1585,10 @@ Q1~Q5 corpus expansion은 여전히 pending이다.
 ### Q3. Qt stable corpus
 
 **브랜치:** `test/quality-zoo-qt`
+
+2026-09-03에 `cpp.qt-missing-parent-constructor` Qt6 bad/clean fixture와 released/candidate
+exact-digest expectation을 추가했지만, 이는 Q3 완료 증거가 아니다. Candidate remote
+acceptance, PR CI, exact-main CI와 Pages 검증이 끝날 때까지 아래 Qt lifetime 항목은 pending이다.
 
 - [ ] Q_OBJECT/AUTOMOC success와 missing header/build declaration failure
 - [ ] AUTOUIC/AUTORCC generated asset
@@ -1655,7 +1681,9 @@ ici와 toy-projects가 함께 바뀌는 기능은 다음 순서를 따른다.
   implementation과 PR #49 remote acceptance, EnvLens merge의 exact-main QZ artifact, 새
   candidate SHA selector/local authenticated evidence, ici-hosted exact-revision candidate
   cross-repository acceptance, 그리고 C++ sanitizer ASan/UBSan/LSan 및 clean counterpart
-  Q2 runtime sub-scope evidence는 기록됐다. broader Q2 corpus와 Q1/Q3~Q5는 pending)
+  Q2 runtime sub-scope evidence, Qt6 lifetime candidate fixture/expectation과 local
+  five-scenario candidate evidence는 기록됐다. Qt remote/PR/main CI·Pages와 broader Q2
+  corpus 및 Q1/Q3~Q5는 pending)
 - [ ] repository path-aware CI, ici pin/candidate와 artifact 정책 완료
 
 체크포인트는 기능이 시연되는 것만으로 닫지 않는다. 공통 제품 완성 불변식, native tests, ici 실측, 문서와 오류 처리까지 모두 충족해야 한다.

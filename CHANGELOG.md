@@ -148,6 +148,26 @@
   workflow used read-only evidence and a separate artifact and caused no Pages, PR comment,
   release, tag, or branch mutation; broader Q2, Qt lifetime, Q1/Q3~Q5, I4, and product release
   remain open, and the stable toy pin/version remains ici `v0.10.2` with no version change.
+- Added the Qt 6 Core `cpp.qt-missing-parent-constructor` bad/clean fixture. The bad
+  `MissingParent` omits the `QObject *parent` constructor argument at `src/bad.cpp:3`, while the
+  clean `ParentAware` counterpart in `src/clean.cpp` accepts and forwards it. The released ici
+  `v0.10.2` expectation is `WARN` / `MEASURED` / `exact` for
+  `ici.legacy.lint.target` + `clazy-ctor-missing-parent-argument`, category `maintainability`,
+  at `src/bad.cpp:3`; the candidate expectation keeps the same rule/status/evidence/confidence/
+  path/line but records category `resource` under `cpp_diagnostic_category_policy = tool-rule-v1`.
+  Both expectations forbid a lint finding in `src/clean.cpp`.
+- The candidate target is `e7a9f55be8893d91497a6e1d0bff6e2e5f4af5f3`; producer
+  [run `33715173073`](https://github.com/jihoon22-lee/ici/actions/runs/33715173073) published
+  [artifact `9878317009`](https://github.com/jihoon22-lee/ici/actions/artifacts/9878317009). The raw
+  candidate ZIP is `2,288,897` bytes with SHA-256
+  `1165312e36344244fe0591e4fbcf869d126a0a7160a21099ee13c34ae8144d5e`; its contained `ici.pyz`
+  is `2,287,574` bytes with SHA-256
+  `985c81a63363356619207870cddb0d8cd9854a46925a3e0a745e54bd543d5b51`. Its provenance binds
+  successful main `Merge Gate` [run `33714515219`](https://github.com/jihoon22-lee/ici/actions/runs/33714515219).
+  Local Quality Zoo unit validation is `57/57` passed, and the new candidate run with Qt excluded
+  returned contract `5/5 PASS` for the existing scenarios. Qt candidate remote acceptance, PR CI,
+  exact-main CI, and Pages remain pending. The candidate is non-stable; no version or release
+  changed.
 
 ### Sticky PR report comment cardinality
 
