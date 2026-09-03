@@ -319,3 +319,27 @@ def report_to_markdown(report: Mapping[str, Any]) -> str:
     """Compatibility alias for :func:`render_markdown`."""
 
     return render_markdown(report)
+
+
+def dumps_diff(report: Mapping[str, Any], *, pretty: bool = False) -> str:
+    """Compatibility helper for canonical JSON diff reports."""
+
+    return dumps_report(report, pretty=pretty)
+
+
+def dumps_runtime(report: Mapping[str, Any], *, pretty: bool = False) -> str:
+    """Compatibility helper for canonical JSON runtime reports."""
+
+    return dumps_report(report, pretty=pretty)
+
+
+def render_diff(report: Mapping[str, Any], *, format: str = "text", pretty: bool = False) -> str:
+    """Compatibility helper for rendering a diff report."""
+
+    return render_report(report, format=format, pretty=pretty)
+
+
+def render_runtime(report: Mapping[str, Any], *, format: str = "text", pretty: bool = False) -> str:
+    """Compatibility helper for rendering a runtime report."""
+
+    return render_report(report, format=format, pretty=pretty)

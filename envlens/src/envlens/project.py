@@ -6,7 +6,7 @@ import ast
 import re
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from envlens.snapshot import normalize_project_name
 
@@ -471,3 +471,15 @@ def inspect_project(path: str | Path = "pyproject.toml") -> dict[str, Any]:
     """Compatibility alias for :func:`inspect_pyproject`."""
 
     return inspect_pyproject(path)
+
+
+def load_pyproject(path: str | Path = "pyproject.toml") -> dict[str, Any]:
+    """Compatibility alias for :func:`inspect_pyproject`."""
+
+    return inspect_pyproject(path)
+
+
+def inspect_entry_points(path: str | Path = "pyproject.toml") -> list[dict[str, Any]]:
+    """Return only the dry-inspected entry-point records for one project."""
+
+    return cast(list[dict[str, Any]], inspect_pyproject(path)["entry_points"])
