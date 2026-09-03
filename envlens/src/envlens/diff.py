@@ -48,6 +48,7 @@ def _normalized_name(distribution: Mapping[str, Any]) -> str:
 
 
 _NUMERIC_VERSION_RE = re.compile(r"^v?\d+(?:\.\d+)*$")
+_MAX_VERSION_PART_DIGITS = 18
 
 
 def _version_tokens(value: str) -> tuple[int, ...] | None:
@@ -61,7 +62,10 @@ def _version_tokens(value: str) -> tuple[int, ...] | None:
     text = value.strip()
     if not _NUMERIC_VERSION_RE.fullmatch(text):
         return None
-    result = tuple(int(part) for part in text.lstrip("v").split("."))
+    parts = text.lstrip("v").split(".")
+    if any(len(part) > _MAX_VERSION_PART_DIGITS for part in parts):
+        return None
+    result = tuple(int(part) for part in parts)
     while len(result) > 1 and result[-1] == 0:
         result = result[:-1]
     return result
@@ -135,7 +139,10 @@ def _version_tuple(value: str) -> tuple[int, ...] | None:
     match = re.fullmatch(r"\s*v?(\d+(?:\.\d+)*)\s*", value)
     if match is None:
         return None
-    return tuple(int(part) for part in match.group(1).split("."))
+    parts = match.group(1).split(".")
+    if any(len(part) > _MAX_VERSION_PART_DIGITS for part in parts):
+        return None
+    return tuple(int(part) for part in parts)
 
 
 def _compare_release(left: tuple[int, ...], right: tuple[int, ...]) -> int:
@@ -174,12 +181,12 @@ def _marker_matches(marker: str | None, identity: Mapping[str, Any]) -> bool | N
         actual = values.get(key)
         if actual is None:
             return None
+        # PEP 508 defines membership against an arbitrary version/string
+        # value, not a comma-separated set. Keep it unknown until this bounded
+        # evaluator implements those exact typed semantics.
         if operator in {"in", "not in"}:
-            candidates = [part.strip() for part in expected.split(",")]
-            result = actual in candidates
-            if operator == "not in":
-                result = not result
-        elif key in {"python_version", "python_full_version"}:
+            return None
+        if key in {"python_version", "python_full_version"}:
             actual_release = _version_tuple(actual)
             expected_release = _version_tuple(expected)
             if actual_release is None or expected_release is None:
@@ -238,6 +245,8 @@ def satisfies_requires_python(expression: str, identity: Mapping[str, Any]) -> b
             continue
         required = _version_tuple(raw_version)
         if required is None:
+            return None
+        if operator == "~=" and len(required) < 2:
             return None
         ordering = _compare_release(current, required)
         if operator == "==" and ordering != 0:
@@ -636,7 +645,7 @@ def _satisfies_specifier(version: str, specifier: str) -> bool | None:
             return False
         if operator == "~=":
             release = _version_tuple(expected_text)
-            if release is None:
+            if release is None or len(release) < 2:
                 return None
             upper = _compatible_upper_bound(release)
             upper_text = ".".join(str(part) for part in upper)

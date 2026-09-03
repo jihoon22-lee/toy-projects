@@ -162,6 +162,8 @@ def test_version_evaluator_is_conservative_for_non_numeric_pep440_forms() -> Non
     for expression in (">=3.10rc1", ">=3.10.post1", ">=3.10+local", ">=1!3.10"):
         assert satisfies_requires_python(expression, identity) is None
     assert satisfies_requires_python("===3.10", identity) is None
+    assert satisfies_requires_python("~=3", identity) is None
+    assert compare_versions("9" * 100_000, "1.0") is None
 
 
 def test_marker_versions_use_numeric_ordering_and_unknown_unsupported_logic() -> None:
@@ -175,6 +177,7 @@ def test_marker_versions_use_numeric_ordering_and_unknown_unsupported_logic() ->
     assert _marker_matches("python_version >= '3.10' and sys_platform == 'linux'", identity)
     assert _marker_matches("python_version < '3.9' or sys_platform == 'linux'", identity) is None
     assert _marker_matches("python_version >= '3.10rc1'", identity) is None
+    assert _marker_matches("sys_platform in 'linux,win32'", identity) is None
 
 
 def test_wheel_matching_is_fail_safe_for_platform_abi_and_compound_tags() -> None:
