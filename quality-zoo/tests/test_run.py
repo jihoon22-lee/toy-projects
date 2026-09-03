@@ -320,9 +320,7 @@ class RunContractTests(unittest.TestCase):
                 self.assertTrue(selector["expectations"])
             for digest in selector["expectations"]:
                 with self.subTest(scenario_id=scenario_id, digest=digest):
-                    expectation = run._load_scenario(
-                        scenario_id, scenario_root, digest
-                    )
+                    expectation = run._load_scenario(scenario_id, scenario_root, digest)
                     report_contract._validate_expectation(expectation)
 
         runtime_sanitizer_ids = {
@@ -341,21 +339,66 @@ class RunContractTests(unittest.TestCase):
                     "8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4",
                     "e7f1a2ce7147057538873a802715c7bf2b12e530a85070af862e02e378caceb8",
                     "985c81a63363356619207870cddb0d8cd9854a46925a3e0a745e54bd543d5b51",
+                    "424108397858470b1209bc2749b580a858fb06c8b09aaa2e4772c94e43690bb5",
                 },
             )
 
         qt_selector = json.loads(
-            (
-                registry["cpp.qt-missing-parent-constructor"] / "scenario.json"
-            ).read_text(encoding="utf-8")
+            (registry["cpp.qt-missing-parent-constructor"] / "scenario.json").read_text(
+                encoding="utf-8"
+            )
         )
         self.assertEqual(
             set(qt_selector["expectations"]),
             {
                 "8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4",
                 "985c81a63363356619207870cddb0d8cd9854a46925a3e0a745e54bd543d5b51",
+                "424108397858470b1209bc2749b580a858fb06c8b09aaa2e4772c94e43690bb5",
             },
         )
+
+    def test_candidate_registry_keeps_stable_slice_and_adds_tsan_pair(self) -> None:
+        quality_zoo_root = Path(__file__).resolve().parents[1]
+        _, registry = run._load_registry(quality_zoo_root / "candidate-manifest.json")
+        self.assertEqual(
+            set(registry),
+            {
+                "cpp.asan-use-after-free",
+                "cpp.lsan-memory-leak",
+                "cpp.qt-missing-parent-constructor",
+                "cpp.sanitizer-clean",
+                "cpp.tsan-data-race",
+                "cpp.tsan-synchronized",
+                "cpp.ubsan-signed-overflow",
+                "python.dead-private-function",
+            },
+        )
+        stable_root = quality_zoo_root / "manifest.json"
+        _, stable_registry = run._load_registry(stable_root)
+        self.assertTrue(set(stable_registry) < set(registry))
+
+        for scenario_id in ("cpp.tsan-data-race", "cpp.tsan-synchronized"):
+            with self.subTest(scenario_id=scenario_id):
+                selector = json.loads(
+                    (registry[scenario_id] / "scenario.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                self.assertEqual(
+                    set(selector["expectations"]),
+                    {
+                        "424108397858470b1209bc2749b580a858fb06c8b09aaa2e4772c94e43690bb5"
+                    },
+                )
+                expectation = run._load_scenario(
+                    scenario_id,
+                    registry[scenario_id],
+                    "424108397858470b1209bc2749b580a858fb06c8b09aaa2e4772c94e43690bb5",
+                )
+                report_contract._validate_expectation(expectation)
+
+        self.assertNotIn("cpp.tsan-data-race", stable_registry)
+        self.assertNotIn("cpp.tsan-synchronized", stable_registry)
 
     def test_run_manifest_success_copies_reports_and_records_reproducible_summary(
         self,

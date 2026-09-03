@@ -146,7 +146,7 @@
   maintainability / `src/bad.py:1` (with `src/clean.py` remaining forbidden). This closes only
   candidate remote acceptance and the Q2 runtime ASan/LSan/UBSan-plus-clean sub-scope. The
   workflow used read-only evidence and a separate artifact and caused no Pages, PR comment,
-  release, tag, or branch mutation; broader Q2, Qt lifetime, Q1/Q3~Q5, I4, and product release
+  release, tag, or branch mutation; broader Q2, Q1/Q3~Q5, I4, and product release
   remain open, and the stable toy pin/version remains ici `v0.10.2` with no version change.
 - Added the Qt 6 Core `cpp.qt-missing-parent-constructor` bad/clean fixture. The bad
   `MissingParent` omits the `QObject *parent` constructor argument at `src/bad.cpp:3`, while the
@@ -165,9 +165,51 @@
   `985c81a63363356619207870cddb0d8cd9854a46925a3e0a745e54bd543d5b51`. Its provenance binds
   successful main `Merge Gate` [run `33714515219`](https://github.com/jihoon22-lee/ici/actions/runs/33714515219).
   Local Quality Zoo unit validation is `57/57` passed, and the new candidate run with Qt excluded
-  returned contract `5/5 PASS` for the existing scenarios. Qt candidate remote acceptance, PR CI,
-  exact-main CI, and Pages remain pending. The candidate is non-stable; no version or release
-  changed.
+  returned contract `5/5 PASS` for the existing scenarios. The Qt candidate was subsequently
+  accepted end-to-end: [toy PR #55](https://github.com/jihoon22-lee/toy-projects/pull/55) passed
+  [run `33716728288`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33716728288) and
+  published [artifact `9878794296`](https://github.com/jihoon22-lee/toy-projects/actions/artifacts/9878794296);
+  sticky report comment [#5520667737](https://github.com/jihoon22-lee/toy-projects/pull/55#issuecomment-5520667737)
+  recorded the PR evidence. The PR squash-merged to `main` as
+  `a59461acaf0f2e967e6ba51e07e56ac7e73acbc6`; exact-main [run `33717415609`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33717415609)
+  published [artifact `9879023706`](https://github.com/jihoon22-lee/toy-projects/actions/artifacts/9879023706).
+  The ici-hosted candidate acceptance [run `33718024450`](https://github.com/jihoon22-lee/ici/actions/runs/33718024450)
+  published [artifact `9879217928`](https://github.com/jihoon22-lee/ici/actions/artifacts/9879217928)
+  and recorded a six-scenario contract of `6/6 PASS`. The candidate is non-stable; no version or
+  release changed.
+
+- Added the candidate-only CMake/CTest ThreadSanitizer pair
+  `cpp.tsan-data-race` and `cpp.tsan-synchronized`. The red fixture uses two
+  threads released by an atomic readiness gate to perform one unsynchronized
+  update of project-owned `src/race.cpp:15`; the clean counterpart protects the
+  same two-thread update with `std::mutex`. Both fixtures require `g++` and
+  `cmake`, select only the required deep `thread_sanitize` engine, forbid skips,
+  and use the fixed `verify --profile deep --no-cache` command. The native CMake
+  smoke confirms the red binary emits one real TSan data race and fails, while
+  the synchronized binary passes. `quality-zoo/manifest.json` is unchanged so
+  released ici `v0.10.2` CI remains compatible; the new
+  `quality-zoo/candidate-manifest.json` contains the existing six plus these two
+  candidate-only entries. The current candidate is bound to exact ici main
+  `6ee08b14fa598a19074af7afed4368fd79b19b2b`; main CI run
+  [`33732817172`](https://github.com/jihoon22-lee/ici/actions/runs/33732817172) is all
+  green. Candidate producer run
+  [`33733780877`](https://github.com/jihoon22-lee/ici/actions/runs/33733780877)
+  published artifact
+  [`9884927798`](https://github.com/jihoon22-lee/ici/actions/artifacts/9884927798).
+  The raw ZIP is `2,293,522` bytes with SHA-256
+  `9a50972a5cb4ad96b2b0cf912e27c17a600fc19d6d899c6e33028d4449b1122d`; the contained
+  `ici.pyz` is `2,292,199` bytes with SHA-256
+  `424108397858470b1209bc2749b580a858fb06c8b09aaa2e4772c94e43690bb5`. It reports
+  version `0.10.2` with `stable=false`, and authenticated five-file intake is `PASS`.
+  All 58 Quality Zoo unit tests pass. The local seven-scenario candidate run
+  excluding Qt is `7/7 PASS`; `cpp.tsan-data-race` observed `FAIL` with one
+  `tsan.data-race` at `src/race.cpp:15` and ici exit `1`, while
+  `cpp.tsan-synchronized` observed `PASS` with zero TSan issues and ici exit `0`.
+  The full local eight-scenario aggregate has only the Qt contract failure because
+  local `clazy` is unavailable, while CI installs `clazy`. Exact toy PR/main
+  acceptance and the remote `8/8` candidate workflow remain pending; no remote
+  acceptance, PR CI, exact-main CI, Pages, merge, release, or version change is
+  claimed here.
 
 ### Sticky PR report comment cardinality
 

@@ -5,11 +5,13 @@ small scenarios separate from the user-facing toy products and checks that ici
 reports the expected finding at the expected location. A scenario is therefore a
 test asset, not an application to install or a product release.
 
-The current checked-in corpus contains six scenario entries: the Python
-`python.dead-private-function` case, four C++ sanitizer cases, and a Qt 6 C++
-clazy lifetime case. The first five scenarios are the existing stable
-known-answer slice. The Python scenario gives the `dead` engine one deliberately
-unused private function in
+The released-artifact corpus in `manifest.json` intentionally remains six
+scenario entries: the Python `python.dead-private-function` case, four C++
+sanitizer cases, and a Qt 6 C++ clazy lifetime case. The candidate-only
+`candidate-manifest.json` adds two CMake/CTest ThreadSanitizer cases without
+changing the released ici `v0.10.2` validation path. These six released
+scenarios form the stable known-answer slice. The Python scenario gives
+the `dead` engine one deliberately unused private function in
 `src/bad.py`, while `src/clean.py` provides the nearby positive counterpart that
 must not produce the same finding. The C++ scenarios keep AddressSanitizer,
 LeakSanitizer, and UndefinedBehaviorSanitizer defects, plus a sanitizer-clean
@@ -23,10 +25,17 @@ The scenario contract, dependency-free runner, candidate archive intake, and loc
 candidate consumer are complete. The C++ sanitizer subset is locally complete for
 both the released and candidate ici digests documented below. Released-artifact Q0
 acceptance is complete through the toy repository's remote PR/exact-main path, and
-candidate cross-repository acceptance is now complete through the exact-revision
-dispatch of the ici-hosted workflow recorded below. The Qt lifetime fixture and
-digest-bound expectations are checked in, but its candidate remote acceptance,
-PR CI, exact-main CI, and Pages evidence remain pending. PR #49 head
+the earlier six-scenario candidate cross-repository acceptance is complete through
+the exact-revision dispatch of the ici-hosted workflow recorded below. The Qt lifetime
+fixture and digest-bound expectations are covered by that completed six-scenario
+toy PR/exact-main path and ici candidate acceptance. The current TSan candidate is
+bound to exact ici main `6ee08b14fa598a19074af7afed4368fd79b19b2b`; its main CI run
+`33732817172` is all green, and its authenticated five-file intake is `PASS`.
+The local seven-scenario candidate run excluding Qt is `7/7 PASS`; the full local
+eight-scenario aggregate has only the Qt contract failure because `clazy` is
+unavailable locally, while CI installs it. Exact toy PR/main acceptance and the
+remote `8/8` candidate workflow remain pending. No version or release changed.
+PR #49 head
 `f6ad1dc4e745d3d1a2703000a00a5d7c4eed61a0` ran as
 [`33693241255`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33693241255):
 22 jobs succeeded and the main publisher was expectedly skipped. Its Quality Zoo
@@ -42,7 +51,7 @@ the exact-main Quality Zoo artifact
 [`9871249913`](https://github.com/jihoon22-lee/toy-projects/actions/artifacts/9871249913)
 recorded stable contract `PASS`, observed suite `WARN`, and no errors, while the
 main product Pages were byte-identical to their artifacts. The remaining corpus
-areas (the broader Python and C++ cases, Qt, build/binary, and hybrid scenarios)
+areas (the broader Python and C++ cases, build/binary, and hybrid scenarios)
 have not been completed; the broader Python/C++/Qt/build/binary/hybrid expansion
 remains future work.
 
@@ -103,7 +112,45 @@ candidate acceptance is recorded separately below; this local run itself did not
 claim PR CI, a merge, or a release, and it does not close the broader C++ or other
 corpus areas.
 
-### Qt lifetime scenario (candidate contract; remote evidence pending)
+### Candidate-only ThreadSanitizer scenarios
+
+The candidate manifest adds two isolated CMake/CTest projects for the deep-only
+`thread_sanitize` engine. `cpp.tsan-data-race` is a red scenario: two threads
+release an atomic start gate and then update one project-owned non-atomic integer,
+so TSan reports a real `data-race` at `src/race.cpp:15`. The bounded fixture uses
+two threads, a short atomic readiness loop, and one update per thread; it does not
+depend on timing sleeps or unbounded work. `cpp.tsan-synchronized` runs the same
+shape of two-thread update under a `std::mutex` and must produce no non-info TSan
+finding.
+
+Both projects require `g++` and `cmake`, run only
+`verify --profile deep --no-cache`, enable only the required `thread_sanitize`
+engine, and forbid capability skips. The current candidate is bound to exact ici
+main `6ee08b14fa598a19074af7afed4368fd79b19b2b`, whose all-green main CI run is
+[`33732817172`](https://github.com/jihoon22-lee/ici/actions/runs/33732817172).
+Candidate producer run
+[`33733780877`](https://github.com/jihoon22-lee/ici/actions/runs/33733780877)
+published artifact
+[`9884927798`](https://github.com/jihoon22-lee/ici/actions/artifacts/9884927798).
+The raw ZIP is `2,293,522` bytes with SHA-256
+`9a50972a5cb4ad96b2b0cf912e27c17a600fc19d6d899c6e33028d4449b1122d`; its contained
+`ici.pyz` is `2,292,199` bytes with SHA-256
+`424108397858470b1209bc2749b580a858fb06c8b09aaa2e4772c94e43690bb5`. The
+candidate reports version `0.10.2` with `stable=false`, and authenticated five-file
+intake is `PASS`.
+
+The local native CMake checks already establish the fixture behavior: the red
+binary reports one TSan data race and exits nonzero under the TSan flags, while the
+synchronized binary passes. All 58 Quality Zoo unit tests pass. Running the current
+candidate with Qt excluded returned `7/7 PASS`: `cpp.tsan-data-race` observed
+suite/engine `FAIL`, one `tsan.data-race` at `src/race.cpp:15`, and ici exit `1`;
+`cpp.tsan-synchronized` observed `PASS`, zero TSan issues, and ici exit `0`. A full
+local eight-scenario aggregate has only the Qt contract failure because `clazy` is
+unavailable locally; CI installs `clazy`. This is local candidate evidence only:
+exact toy PR/main acceptance and the remote `8/8` candidate workflow remain pending,
+and no PR, merge, Pages, release, or version change is claimed.
+
+### Qt lifetime scenario (candidate contract; completed remote evidence)
 
 `cpp.qt-missing-parent-constructor` is a Qt 6 Core CMake fixture with a bad
 `MissingParent` constructor at `src/bad.cpp:3` and a clean `ParentAware`
@@ -134,9 +181,18 @@ to successful main `Merge Gate` [run `33714515219`](https://github.com/jihoon22-
 
 Local Quality Zoo unit validation is `57/57` passed. Running the new candidate
 with the Qt scenario excluded against the existing five scenarios returned
-contract `5/5 PASS`. This is local candidate evidence only: Qt candidate remote
-acceptance, PR CI, exact-main CI, and Pages remain pending. The candidate is
-non-stable and no version or release changed.
+contract `5/5 PASS`. This is historical local candidate evidence for the pre-acceptance
+five-scenario subset. The Qt candidate was then accepted end-to-end: [toy PR #55](https://github.com/jihoon22-lee/toy-projects/pull/55)
+passed [run `33716728288`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33716728288)
+and published [artifact `9878794296`](https://github.com/jihoon22-lee/toy-projects/actions/artifacts/9878794296);
+sticky report comment [#5520667737](https://github.com/jihoon22-lee/toy-projects/pull/55#issuecomment-5520667737)
+recorded the PR evidence. The PR squash-merged to `main` as
+`a59461acaf0f2e967e6ba51e07e56ac7e73acbc6`; exact-main [run `33717415609`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33717415609)
+published [artifact `9879023706`](https://github.com/jihoon22-lee/toy-projects/actions/artifacts/9879023706).
+The ici-hosted candidate acceptance [run `33718024450`](https://github.com/jihoon22-lee/ici/actions/runs/33718024450)
+published [artifact `9879217928`](https://github.com/jihoon22-lee/ici/actions/artifacts/9879217928)
+and recorded the six-scenario contract as `6/6 PASS`. The candidate is non-stable and no version or
+release changed.
 
 ### Sanitizer-normalization candidate selector (local authenticated evidence)
 
@@ -187,12 +243,11 @@ and the following exact expected/observed statuses and finding predicates:
 | `python.dead-private-function` | `WARN` / `WARN` | `ici.legacy.dead.target` / no tool rule | maintainability | `src/bad.py:1` |
 
 The Python scenario still forbids a finding in `src/clean.py`; all five scenario contract results
-have `errors: []`. The remote run closes only candidate cross-repository acceptance and the Q2
-runtime ASan/LSan/UBSan-plus-clean sub-scope. It does not close Qt lifetime, broader Q2, Q1/Q3~Q5,
-or I4. The workflow uses read-only API evidence, stages a separate acceptance artifact, and does
-not publish Pages, a PR comment, a release, a tag, or a branch mutation. Ordinary toy CI remains
-pinned to released ici `v0.10.2`; the candidate is still non-stable and no version or product
-release changed.
+have `errors: []`. This is the earlier sanitizer-subset acceptance; the later Qt-complete,
+six-scenario acceptance is recorded in the Qt section above. The workflow uses read-only API
+evidence, stages a separate acceptance artifact, and does not publish Pages, a PR comment, a
+release, a tag, or a branch mutation. Ordinary toy CI remains pinned to released ici `v0.10.2`;
+the candidate is still non-stable and no version or product release changed.
 
 ## Exact executable expectations
 
@@ -239,6 +294,15 @@ add `--scenario python.dead-private-function`. The runner records the exact
 candidate path, SHA-256, and version in `suite.json`, and writes each scenario's
 `report.json`, `report.html`, and `run.json` below the output directory.
 
+Candidate-only validation opts in explicitly with
+`--manifest candidate-manifest.json`; it must not be used with the released
+ici `v0.10.2` binary because the TSan engine is not present there. The current
+candidate binds the TSan expectations to executable SHA-256
+`424108397858470b1209bc2749b580a858fb06c8b09aaa2e4772c94e43690bb5`; its
+seven-scenario local run is `7/7 PASS`, while the full local eight-scenario
+aggregate has only the Qt contract failure because local `clazy` is unavailable.
+Exact toy PR/main acceptance and the remote `8/8` candidate workflow remain pending.
+
 `ICI_BIN` is deliberately a local path. The Quality Zoo runner does not resolve
 URLs, download an executable, or silently substitute the released tool. This
 makes the tool identity explicit for local candidate testing and keeps ordinary
@@ -246,15 +310,21 @@ CI's released-tool path separate.
 
 ## Registry and scenario format
 
-`manifest.json` is the registry of scenario IDs and paths. It is intentionally
-JSON rather than TOML: the runner is dependency-free and must run on Python
+`manifest.json` is the released-artifact registry of scenario IDs and paths, while
+`candidate-manifest.json` is an explicit candidate-only registry. The latter
+contains the released six plus the two TSan scenarios; ordinary CI must continue
+to select `manifest.json` while it consumes released ici `v0.10.2`; candidate
+validation alone selects `candidate-manifest.json`. The current candidate artifact
+and its exact expectations have passed authenticated local intake. Both files are
+intentionally JSON rather than TOML: the runner is dependency-free and must run on Python
 3.10, where JSON parsing is provided by the standard library. Using a TOML
 parser would add a dependency or create a Python-version compatibility question
 for a file that only maps an ID to a directory. The scenario's `ici.toml` is
 still present because ici consumes it; the Quality Zoo runner does not parse
 that TOML file.
 
-The manifest currently has schema `1` and six entries:
+The released manifest has schema `1` and six entries. The candidate manifest has
+the same schema and adds `cpp.tsan-data-race` and `cpp.tsan-synchronized`:
 
 ```json
 {
@@ -431,10 +501,15 @@ expectations interchangeable.
 
 Quality Zoo is not a user-facing application and has no product release in this
 change. Released-artifact Q0 (the scenario contract, local runner, and toy
-PR/exact-main acceptance) and the exact-revision candidate cross-repository
-acceptance are complete, as is the local candidate intake/selector evidence. The
-Qt 6 lifetime fixture and digest-specific expectations are checked in, but its
-candidate remote acceptance, PR CI, exact-main CI, and Pages remain pending. The
-remote evidence closes only the Q2 runtime ASan/LSan/UBSan-plus-clean sub-scope;
-broader Q2 and Q1–Q5 (the Python, C++, Qt, build/binary, and hybrid corpus
-expansions) remain future work. No version or release changed.
+PR/exact-main acceptance) and the earlier exact-revision candidate
+cross-repository acceptance are complete, as is the current candidate's
+authenticated local intake/selector evidence. The Qt 6 lifetime fixture and
+digest-specific expectations are checked in, and its earlier toy PR/exact-main
+and ici candidate acceptance are complete; that six-scenario candidate contract
+is `6/6 PASS` (see the linked evidence above). The current TSan candidate is
+bound to exact ici main `6ee08b14fa598a19074af7afed4368fd79b19b2b`, with local
+seven-scenario contract `7/7 PASS`; its full local eight-scenario aggregate has
+only the Qt contract failure because local `clazy` is unavailable, while CI
+installs `clazy`. Exact toy PR/main acceptance and the remote `8/8` candidate
+workflow remain pending. Broader Q2 and Q1–Q5 (the Python, C++, Qt, build/binary,
+and hybrid corpus expansions) remain future work. No version or release changed.
