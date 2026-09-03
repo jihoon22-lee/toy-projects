@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import signal
 import sys
 from pathlib import Path
@@ -52,6 +53,16 @@ def test_pyproject_inspection_is_dry_and_preserves_locations(tmp_path: Path) -> 
     }
     assert result["entry_points"][0]["location"]["line"] > 0
     assert "dry" in result["warnings"][0]
+
+
+def test_pyproject_rejects_unsupported_bare_toml_values(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = bare-name\nversion = "1.0"\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(project.ProjectError, match="unsupported bare TOML value"):
+        project.inspect_pyproject(tmp_path / "pyproject.toml")
 
 
 def test_runtime_compile_import_and_dry_entrypoint_e2e(tmp_path: Path) -> None:
@@ -118,6 +129,51 @@ def test_runtime_entrypoint_execution_requires_explicit_opt_in(tmp_path: Path) -
         execute_entry_points=True,
     )
     assert result["interpreters"][0]["checks"][-1]["status"] == "passed"
+
+
+def test_runtime_entrypoint_resets_argv_to_console_name(tmp_path: Path) -> None:
+    source = _write_project(tmp_path)
+    (source / "samplemod.py").write_text(
+        "import pathlib\n"
+        "import sys\n"
+        "def main():\n"
+        "    pathlib.Path('argv.txt').write_text(repr(sys.argv), encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+
+    result = runtime.run_runtime_checks(
+        tmp_path,
+        interpreters=[sys.executable],
+        imports=[],
+        compile_paths=[],
+        entry_points=["hello"],
+        execute_entry_points=True,
+    )
+
+    assert result["interpreters"][0]["checks"][-1]["status"] == "passed"
+    assert (tmp_path / "argv.txt").read_text(encoding="utf-8") == "['hello']"
+
+
+def test_runtime_environment_replaces_host_pythonpath(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    with patch.dict(os.environ, {"PYTHONPATH": "/host/contamination"}):
+        environment = runtime._runtime_env(tmp_path)
+
+    assert environment["PYTHONPATH"] == os.pathsep.join([str(tmp_path), str(tmp_path / "src")])
+
+
+def test_runtime_rejects_oversized_compile_command(tmp_path: Path) -> None:
+    source = _write_project(tmp_path)
+    with (
+        patch.object(runtime, "MAX_COMPILE_COMMAND_CHARS", 1),
+        pytest.raises(runtime.RuntimeCheckError, match="compileall command exceeds"),
+    ):
+        runtime.run_runtime_checks(
+            tmp_path,
+            interpreters=[sys.executable],
+            imports=[],
+            compile_paths=[source],
+        )
 
 
 def test_runtime_distinguishes_missing_interpreter_and_import(tmp_path: Path) -> None:

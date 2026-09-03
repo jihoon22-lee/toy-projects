@@ -168,21 +168,23 @@ Runtime results distinguish `passed`, `missing-interpreter`,
 failure. Source enumeration is bounded to 10,000 Python files and 64 MiB;
 probe/check output and process lifetime are bounded, and POSIX/Windows process
 groups are cleaned up on timeout. Compile bytecode is redirected to a temporary
-cache. Runtime checks execute with the current user’s permissions and are not a
-sandbox; inspect untrusted projects in an externally isolated environment.
+cache, and the compileall argv is capped at 65,536 UTF-8 bytes. Import checks
+set `PYTHONPATH` to the project root and `src/` only; a host `PYTHONPATH` is not
+inherited. Runtime checks execute with the current user’s permissions and are
+not a sandbox; inspect untrusted projects in an externally isolated environment.
 
 ## Validation and CI
 
-The current local E1–E3 slice is covered on Python 3.10 by 65/65 tests:
+The current local E1–E3 slice is covered on Python 3.10 by 78/78 tests:
 
 ```text
-10 CLI · 6 atomic I/O · 12 probe/process-boundary ·
-7 redaction · 18 snapshot normalization/schema · 5 snapshot diff ·
-7 project/runtime smoke
+10 CLI/E2-E3 CLI · 6 atomic I/O · 12 probe/process-boundary ·
+7 redaction · 19 snapshot normalization/schema · 10 snapshot diff ·
+8 project/runtime smoke
 ```
 
 The same checkout also passes Ruff check and format validation, and strict mypy
-for the six envlens source modules. Released ici `v0.10.2` local deep verification
+for the eleven envlens source modules. Released ici `v0.10.2` local deep verification
 passes with 14 total engines: 13 PASS, one `compile_db` SKIP, and no
 WARN/FAIL/ERROR; TEM is 5.00, line/function/branch coverage is
 93.0%/100.0%/84.6%, and complexity max is 13 (cycle and sanitize also PASS).

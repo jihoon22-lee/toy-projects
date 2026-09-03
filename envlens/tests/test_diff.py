@@ -9,6 +9,9 @@ import pytest
 
 from envlens.diff import (
     DiffError,
+    _marker_matches,
+    _wheel_tag_match,
+    check_compatibility,
     compare_snapshots,
     compare_versions,
     load_snapshot,
@@ -150,6 +153,67 @@ def test_compatibility_helpers_cover_unknown_and_wildcard_cases() -> None:
     assert satisfies_requires_python("not-a-specifier", identity) is None
     assert compare_versions("1.0", "1.0.0") == 0
     assert compare_versions("not-a-version", "1.0") is None
+
+
+def test_version_evaluator_is_conservative_for_non_numeric_pep440_forms() -> None:
+    identity = {"version": "3.10.12", "version_info": [3, 10, 12, "final", 0]}
+    for value in ("1.0rc1", "1.0.dev1", "1.0.post1", "1.0+local", "1!1.0"):
+        assert compare_versions(value, "1.0") is None
+    for expression in (">=3.10rc1", ">=3.10.post1", ">=3.10+local", ">=1!3.10"):
+        assert satisfies_requires_python(expression, identity) is None
+    assert satisfies_requires_python("===3.10", identity) is None
+
+
+def test_marker_versions_use_numeric_ordering_and_unknown_unsupported_logic() -> None:
+    identity = {
+        "version": "3.10.12",
+        "version_info": [3, 10, 12, "final", 0],
+        "platform": "linux",
+        "machine": "x86_64",
+    }
+    assert _marker_matches("python_version < '3.9'", identity) is False
+    assert _marker_matches("python_version >= '3.10' and sys_platform == 'linux'", identity)
+    assert _marker_matches("python_version < '3.9' or sys_platform == 'linux'", identity) is None
+    assert _marker_matches("python_version >= '3.10rc1'", identity) is None
+
+
+def test_wheel_matching_is_fail_safe_for_platform_abi_and_compound_tags() -> None:
+    linux = {
+        "implementation": "cpython",
+        "version": "3.10.12",
+        "version_info": [3, 10, 12, "final", 0],
+        "platform": "linux",
+        "machine": "x86_64",
+    }
+    windows = {**linux, "platform": "win32", "machine": "AMD64"}
+    mac = {**linux, "platform": "darwin"}
+    assert _wheel_tag_match("py3-none-any", linux) is True
+    assert _wheel_tag_match("cp310-cp310-linux_x86_64", linux) is True
+    assert _wheel_tag_match("cp310-cp310-win_amd64", windows) is True
+    assert _wheel_tag_match("cp310-cp310-win_arm64", windows) is False
+    assert _wheel_tag_match("cp310-cp310-manylinux_2_17_x86_64", linux) is None
+    assert _wheel_tag_match("cp39-abi3-manylinux_2_17_x86_64", linux) is None
+    assert _wheel_tag_match("cp310.cp311-cp310-linux_x86_64", linux) is None
+    assert _wheel_tag_match("cp310-cp310-macosx_11_0_x86_64", mac) is None
+
+
+def test_duplicate_normalized_distributions_are_an_ambiguous_change() -> None:
+    before = _snapshot([_distribution("duplicate", "1.0"), _distribution("duplicate", "2.0")])
+    after = _snapshot([_distribution("duplicate", "3.0")])
+
+    result = compare_snapshots(before, after)
+
+    assert result["upgraded"] == []
+    assert result["changed"][0]["certainty"] == "unknown"
+    assert "ambiguous" in result["changed"][0]["reason"]
+
+
+def test_single_snapshot_compatibility_helper_is_offline_and_public() -> None:
+    report = check_compatibility(_snapshot([_distribution("one", "1.0")]))
+
+    assert report["schema_version"] == "envlens.compatibility/v1"
+    assert report["status"] == "compatible"
+    assert report["dependencies"] == []
 
 
 def test_diff_reports_are_canonical_and_have_all_requested_formats(tmp_path: Path) -> None:
