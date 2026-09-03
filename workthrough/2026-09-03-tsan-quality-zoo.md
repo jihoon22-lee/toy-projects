@@ -5,8 +5,9 @@
 This slice adds two bounded CMake/CTest fixtures for validating ici's merged
 deep-only `thread_sanitize` engine. The released-artifact registry remains
 unchanged, while an explicit candidate registry includes the race and clean
-counterpart. Candidate executable SHA selection is intentionally left at an
-all-zero placeholder until the parent workflow produces the exact artifact.
+counterpart. The two candidate-only TSan scenarios remain awaiting the
+post-hermetic exact candidate digest/run; the released six-scenario path remains
+separate.
 
 ## Context
 
@@ -23,8 +24,8 @@ candidate manifest therefore opts in to the additional scenarios while ordinary
 - Added `quality-zoo/candidate-manifest.json` with the six released scenarios plus
   `cpp.tsan-data-race` and `cpp.tsan-synchronized`.
 - Added a registry contract test in `quality-zoo/tests/test_run.py` asserting the
-  two registries remain distinct and both TSan selectors are exactly the documented
-  all-zero digest placeholder.
+  two registries remain distinct and the TSan entries remain candidate-only while
+  their post-hermetic exact candidate digest/run is pending.
 
 ### Race fixture
 
@@ -57,7 +58,23 @@ OK
 
 The checked-in released manifest remains six entries; the candidate registry
 test covers all eight candidate entries. No candidate digest gate is claimed by
-this workthrough.
+this workthrough. The completed Qt six-scenario remote evidence is recorded below;
+the TSan pair remains candidate-only pending its post-hermetic exact candidate
+digest/run.
+
+### Qt-complete remote evidence
+
+The Qt candidate was accepted through the toy repository and the ici-hosted
+candidate workflow. [Toy PR #55](https://github.com/jihoon22-lee/toy-projects/pull/55)
+passed [run `33716728288`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33716728288)
+and published [artifact `9878794296`](https://github.com/jihoon22-lee/toy-projects/actions/artifacts/9878794296);
+sticky report comment [#5520667737](https://github.com/jihoon22-lee/toy-projects/pull/55#issuecomment-5520667737)
+recorded the PR evidence. The PR squash-merged to `main` as
+`a59461acaf0f2e967e6ba51e07e56ac7e73acbc6`, and exact-main [run `33717415609`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33717415609)
+published [artifact `9879023706`](https://github.com/jihoon22-lee/toy-projects/actions/artifacts/9879023706).
+The ici candidate acceptance [run `33718024450`](https://github.com/jihoon22-lee/ici/actions/runs/33718024450)
+published [artifact `9879217928`](https://github.com/jihoon22-lee/ici/actions/artifacts/9879217928)
+and recorded a six-scenario contract of `6/6 PASS`.
 
 ### Native CMake/TSan smoke
 
@@ -79,13 +96,14 @@ Running the merged ici source from commit `cfd7066` with Python 3.10 produced:
 
 The local `/home/jihoon/projects/ici/dist/ici.pyz` was an older pre-TSan build
 and rejected `engines.thread_sanitize`; it was not used as candidate evidence.
-The exact candidate pyz must be produced and its digest substituted before the
-Quality Zoo candidate runner can be executed.
+The Qt-complete six-scenario candidate acceptance is recorded above. The two TSan
+scenarios remain awaiting the post-hermetic exact candidate digest/run, so this
+workthrough does not claim a full eight-scenario candidate runner result.
 
 ## Follow-up
 
-- Replace the all-zero selectors with the exact merged ici candidate pyz SHA.
-- Add that digest to expectations for the existing six scenarios and update the
-  candidate workflow to use `candidate-manifest.json`.
+- Complete the post-hermetic exact candidate digest/run for the two TSan scenarios.
+- Add that final digest to expectations for the existing six scenarios and update
+  the candidate workflow to use `candidate-manifest.json`.
 - Run and independently audit candidate intake, the full eight-scenario contract,
   cross-repository acceptance, PR comment/Pages evidence, and exact-main evidence.

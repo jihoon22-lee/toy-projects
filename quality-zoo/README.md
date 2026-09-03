@@ -27,11 +27,11 @@ both the released and candidate ici digests documented below. Released-artifact 
 acceptance is complete through the toy repository's remote PR/exact-main path, and
 candidate cross-repository acceptance is now complete through the exact-revision
 dispatch of the ici-hosted workflow recorded below. The Qt lifetime fixture and
-digest-bound expectations are checked in, but its candidate remote acceptance,
-PR CI, exact-main CI, and Pages evidence remain pending. The candidate-only TSan
-pair is checked in with an all-zero SHA-256 selector placeholder; its candidate
-producer, remote acceptance, PR CI, exact-main CI, and Pages evidence remain
-pending. PR #49 head
+digest-bound expectations are now covered by the completed toy PR/exact-main path
+and ici candidate acceptance recorded below; its six-scenario contract is `6/6 PASS`.
+The candidate-only TSan pair remains candidate-only and awaits the post-hermetic
+exact candidate digest/run; no full eight-scenario candidate acceptance is claimed.
+PR #49 head
 `f6ad1dc4e745d3d1a2703000a00a5d7c4eed61a0` ran as
 [`33693241255`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33693241255):
 22 jobs succeeded and the main publisher was expectedly skipped. Its Quality Zoo
@@ -47,7 +47,7 @@ the exact-main Quality Zoo artifact
 [`9871249913`](https://github.com/jihoon22-lee/toy-projects/actions/artifacts/9871249913)
 recorded stable contract `PASS`, observed suite `WARN`, and no errors, while the
 main product Pages were byte-identical to their artifacts. The remaining corpus
-areas (the broader Python and C++ cases, Qt, build/binary, and hybrid scenarios)
+areas (the broader Python and C++ cases, build/binary, and hybrid scenarios)
 have not been completed; the broader Python/C++/Qt/build/binary/hybrid expansion
 remains future work.
 
@@ -121,19 +121,18 @@ finding.
 
 Both projects require `g++` and `cmake`, run only
 `verify --profile deep --no-cache`, enable only the required `thread_sanitize`
-engine, and forbid capability skips. Their schema-2 selectors currently contain
-the documented all-zero placeholder
-`0000000000000000000000000000000000000000000000000000000000000000` because the
-merged ici TSan candidate executable digest is produced later. Root-level
-candidate work must replace that selector and add the same final digest to the
-existing six scenarios before a full candidate-manifest run can be accepted.
+engine, and forbid capability skips. The two candidate-only scenarios await the
+post-hermetic exact candidate digest/run; root-level candidate work must complete
+that exact binding and add the final digest to the existing six scenarios before a
+full candidate-manifest run can be accepted.
 
 The local native CMake checks already establish the fixture behavior: the red
 binary reports one TSan data race and exits nonzero under the TSan flags, while the
-synchronized binary passes. This is fixture evidence only; it does not claim
+synchronized binary passes. This is fixture evidence only; the two scenarios remain
+awaiting the post-hermetic exact candidate digest/run, so it does not claim a full
 candidate runner, PR, exact-main, Pages, merge, or release completion.
 
-### Qt lifetime scenario (candidate contract; remote evidence pending)
+### Qt lifetime scenario (candidate contract; completed remote evidence)
 
 `cpp.qt-missing-parent-constructor` is a Qt 6 Core CMake fixture with a bad
 `MissingParent` constructor at `src/bad.cpp:3` and a clean `ParentAware`
@@ -164,9 +163,18 @@ to successful main `Merge Gate` [run `33714515219`](https://github.com/jihoon22-
 
 Local Quality Zoo unit validation is `57/57` passed. Running the new candidate
 with the Qt scenario excluded against the existing five scenarios returned
-contract `5/5 PASS`. This is local candidate evidence only: Qt candidate remote
-acceptance, PR CI, exact-main CI, and Pages remain pending. The candidate is
-non-stable and no version or release changed.
+contract `5/5 PASS`. This is historical local candidate evidence for the pre-acceptance
+five-scenario subset. The Qt candidate was then accepted end-to-end: [toy PR #55](https://github.com/jihoon22-lee/toy-projects/pull/55)
+passed [run `33716728288`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33716728288)
+and published [artifact `9878794296`](https://github.com/jihoon22-lee/toy-projects/actions/artifacts/9878794296);
+sticky report comment [#5520667737](https://github.com/jihoon22-lee/toy-projects/pull/55#issuecomment-5520667737)
+recorded the PR evidence. The PR squash-merged to `main` as
+`a59461acaf0f2e967e6ba51e07e56ac7e73acbc6`; exact-main [run `33717415609`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33717415609)
+published [artifact `9879023706`](https://github.com/jihoon22-lee/toy-projects/actions/artifacts/9879023706).
+The ici-hosted candidate acceptance [run `33718024450`](https://github.com/jihoon22-lee/ici/actions/runs/33718024450)
+published [artifact `9879217928`](https://github.com/jihoon22-lee/ici/actions/artifacts/9879217928)
+and recorded the six-scenario contract as `6/6 PASS`. The candidate is non-stable and no version or
+release changed.
 
 ### Sanitizer-normalization candidate selector (local authenticated evidence)
 
@@ -217,12 +225,11 @@ and the following exact expected/observed statuses and finding predicates:
 | `python.dead-private-function` | `WARN` / `WARN` | `ici.legacy.dead.target` / no tool rule | maintainability | `src/bad.py:1` |
 
 The Python scenario still forbids a finding in `src/clean.py`; all five scenario contract results
-have `errors: []`. The remote run closes only candidate cross-repository acceptance and the Q2
-runtime ASan/LSan/UBSan-plus-clean sub-scope. It does not close Qt lifetime, broader Q2, Q1/Q3~Q5,
-or I4. The workflow uses read-only API evidence, stages a separate acceptance artifact, and does
-not publish Pages, a PR comment, a release, a tag, or a branch mutation. Ordinary toy CI remains
-pinned to released ici `v0.10.2`; the candidate is still non-stable and no version or product
-release changed.
+have `errors: []`. This is the earlier sanitizer-subset acceptance; the later Qt-complete,
+six-scenario acceptance is recorded in the Qt section above. The workflow uses read-only API
+evidence, stages a separate acceptance artifact, and does not publish Pages, a PR comment, a
+release, a tag, or a branch mutation. Ordinary toy CI remains pinned to released ici `v0.10.2`;
+the candidate is still non-stable and no version or product release changed.
 
 ## Exact executable expectations
 
@@ -272,8 +279,9 @@ candidate path, SHA-256, and version in `suite.json`, and writes each scenario's
 Candidate-only validation opts in explicitly with
 `--manifest candidate-manifest.json`; it must not be used with the released
 ici `v0.10.2` binary because the TSan engine is not present there. Until the
-all-zero selectors are replaced by the produced candidate digest, this command
-is intentionally expected to fail closed with `unsupported-ici`.
+post-hermetic exact candidate digest/run is complete, a full eight-scenario
+candidate-manifest invocation is not accepted and may fail closed with
+`unsupported-ici`.
 
 `ICI_BIN` is deliberately a local path. The Quality Zoo runner does not resolve
 URLs, download an executable, or silently substitute the released tool. This
@@ -474,9 +482,10 @@ Quality Zoo is not a user-facing application and has no product release in this
 change. Released-artifact Q0 (the scenario contract, local runner, and toy
 PR/exact-main acceptance) and the exact-revision candidate cross-repository
 acceptance are complete, as is the local candidate intake/selector evidence. The
-Qt 6 lifetime fixture and digest-specific expectations are checked in, but its
-candidate remote acceptance, PR CI, exact-main CI, and Pages remain pending. The
-remote evidence closes only the Q2 runtime ASan/LSan/UBSan-plus-clean sub-scope;
-broader Q2 and Q1–Q5 (the Python, C++, Qt, build/binary, and hybrid corpus
-expansions) remain future work. The TSan pair is candidate-only and its all-zero
-selector is not an accepted digest. No version or release changed.
+Qt 6 lifetime fixture and digest-specific expectations are checked in, and its
+toy PR/exact-main and ici candidate acceptance are complete; the six-scenario
+candidate contract is `6/6 PASS` (see the linked evidence above). The TSan pair
+remains candidate-only and awaits the post-hermetic exact candidate digest/run, so
+no full eight-scenario candidate result is claimed. Broader Q2 and Q1–Q5 (the
+Python, C++, Qt, build/binary, and hybrid corpus expansions) remain future work.
+No version or release changed.
