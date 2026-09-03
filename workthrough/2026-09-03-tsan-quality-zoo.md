@@ -5,9 +5,11 @@
 This slice adds two bounded CMake/CTest fixtures for validating ici's merged
 deep-only `thread_sanitize` engine. The released-artifact registry remains
 unchanged, while an explicit candidate registry includes the race and clean
-counterpart. The two candidate-only TSan scenarios remain awaiting the
-post-hermetic exact candidate digest/run; the released six-scenario path remains
-separate.
+counterpart. The current candidate is bound to exact ici main
+`6ee08b14fa598a19074af7afed4368fd79b19b2b`; its all-green main CI run is
+`33732817172`, and its authenticated five-file intake is `PASS`. The released
+six-scenario path remains separate. Exact toy PR/main acceptance and the remote
+`8/8` candidate workflow remain pending.
 
 ## Context
 
@@ -25,7 +27,8 @@ candidate manifest therefore opts in to the additional scenarios while ordinary
   `cpp.tsan-data-race` and `cpp.tsan-synchronized`.
 - Added a registry contract test in `quality-zoo/tests/test_run.py` asserting the
   two registries remain distinct and the TSan entries remain candidate-only while
-  their post-hermetic exact candidate digest/run is pending.
+  binding their expectations to the current candidate executable digest
+  `424108397858470b1209bc2749b580a858fb06c8b09aaa2e4772c94e43690bb5`.
 
 ### Race fixture
 
@@ -57,10 +60,20 @@ OK
 ```
 
 The checked-in released manifest remains six entries; the candidate registry
-test covers all eight candidate entries. No candidate digest gate is claimed by
-this workthrough. The completed Qt six-scenario remote evidence is recorded below;
-the TSan pair remains candidate-only pending its post-hermetic exact candidate
-digest/run.
+test covers all eight candidate entries. All 58 unit tests pass. The current
+candidate producer run
+[`33733780877`](https://github.com/jihoon22-lee/ici/actions/runs/33733780877)
+published artifact
+[`9884927798`](https://github.com/jihoon22-lee/ici/actions/artifacts/9884927798)
+for exact ici main `6ee08b14fa598a19074af7afed4368fd79b19b2b`; main CI run
+[`33732817172`](https://github.com/jihoon22-lee/ici/actions/runs/33732817172)
+was all green. The raw ZIP is `2,293,522` bytes with SHA-256
+`9a50972a5cb4ad96b2b0cf912e27c17a600fc19d6d899c6e33028d4449b1122d`; the contained
+`ici.pyz` is `2,292,199` bytes with SHA-256
+`424108397858470b1209bc2749b580a858fb06c8b09aaa2e4772c94e43690bb5`. The
+candidate reports version `0.10.2` with `stable=false`, and authenticated five-file
+intake is `PASS`. The completed Qt six-scenario remote evidence is recorded below;
+the exact toy PR/main and remote `8/8` candidate workflow remain pending.
 
 ### Qt-complete remote evidence
 
@@ -96,14 +109,21 @@ Running the merged ici source from commit `cfd7066` with Python 3.10 produced:
 
 The local `/home/jihoon/projects/ici/dist/ici.pyz` was an older pre-TSan build
 and rejected `engines.thread_sanitize`; it was not used as candidate evidence.
-The Qt-complete six-scenario candidate acceptance is recorded above. The two TSan
-scenarios remain awaiting the post-hermetic exact candidate digest/run, so this
-workthrough does not claim a full eight-scenario candidate runner result.
+The current candidate run excluding Qt returned `7/7 PASS`: the race scenario
+observed suite/engine `FAIL`, one `tsan.data-race` at `src/race.cpp:15`, and ici
+exit `1`; the synchronized scenario observed `PASS`, zero TSan issues, and ici
+exit `0`. A full local eight-scenario aggregate has only the Qt contract failure
+because `clazy` is unavailable locally, while CI installs `clazy`. The
+Qt-complete six-scenario candidate acceptance is recorded above. This workthrough
+does not claim exact toy PR/main acceptance or the remote `8/8` candidate workflow;
+both remain pending. No version or release changed.
 
 ## Follow-up
 
-- Complete the post-hermetic exact candidate digest/run for the two TSan scenarios.
-- Add that final digest to expectations for the existing six scenarios and update
-  the candidate workflow to use `candidate-manifest.json`.
-- Run and independently audit candidate intake, the full eight-scenario contract,
-  cross-repository acceptance, PR comment/Pages evidence, and exact-main evidence.
+- Complete exact toy PR/main acceptance for this candidate-only TSan slice.
+- Independently audit the toy PR's single sticky ici comment, its published HTML,
+  exact-main CI, and Pages evidence.
+- Run and independently audit the remote `8/8` candidate workflow against exact toy
+  main and its immutable acceptance artifact.
+- Keep the TSan pair candidate-only and the released six-scenario manifest unchanged;
+  no version or release change is planned.

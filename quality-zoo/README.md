@@ -25,12 +25,16 @@ The scenario contract, dependency-free runner, candidate archive intake, and loc
 candidate consumer are complete. The C++ sanitizer subset is locally complete for
 both the released and candidate ici digests documented below. Released-artifact Q0
 acceptance is complete through the toy repository's remote PR/exact-main path, and
-candidate cross-repository acceptance is now complete through the exact-revision
-dispatch of the ici-hosted workflow recorded below. The Qt lifetime fixture and
-digest-bound expectations are now covered by the completed toy PR/exact-main path
-and ici candidate acceptance recorded below; its six-scenario contract is `6/6 PASS`.
-The candidate-only TSan pair remains candidate-only and awaits the post-hermetic
-exact candidate digest/run; no full eight-scenario candidate acceptance is claimed.
+the earlier six-scenario candidate cross-repository acceptance is complete through
+the exact-revision dispatch of the ici-hosted workflow recorded below. The Qt lifetime
+fixture and digest-bound expectations are covered by that completed six-scenario
+toy PR/exact-main path and ici candidate acceptance. The current TSan candidate is
+bound to exact ici main `6ee08b14fa598a19074af7afed4368fd79b19b2b`; its main CI run
+`33732817172` is all green, and its authenticated five-file intake is `PASS`.
+The local seven-scenario candidate run excluding Qt is `7/7 PASS`; the full local
+eight-scenario aggregate has only the Qt contract failure because `clazy` is
+unavailable locally, while CI installs it. Exact toy PR/main acceptance and the
+remote `8/8` candidate workflow remain pending. No version or release changed.
 PR #49 head
 `f6ad1dc4e745d3d1a2703000a00a5d7c4eed61a0` ran as
 [`33693241255`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33693241255):
@@ -121,16 +125,30 @@ finding.
 
 Both projects require `g++` and `cmake`, run only
 `verify --profile deep --no-cache`, enable only the required `thread_sanitize`
-engine, and forbid capability skips. The two candidate-only scenarios await the
-post-hermetic exact candidate digest/run; root-level candidate work must complete
-that exact binding and add the final digest to the existing six scenarios before a
-full candidate-manifest run can be accepted.
+engine, and forbid capability skips. The current candidate is bound to exact ici
+main `6ee08b14fa598a19074af7afed4368fd79b19b2b`, whose all-green main CI run is
+[`33732817172`](https://github.com/jihoon22-lee/ici/actions/runs/33732817172).
+Candidate producer run
+[`33733780877`](https://github.com/jihoon22-lee/ici/actions/runs/33733780877)
+published artifact
+[`9884927798`](https://github.com/jihoon22-lee/ici/actions/artifacts/9884927798).
+The raw ZIP is `2,293,522` bytes with SHA-256
+`9a50972a5cb4ad96b2b0cf912e27c17a600fc19d6d899c6e33028d4449b1122d`; its contained
+`ici.pyz` is `2,292,199` bytes with SHA-256
+`424108397858470b1209bc2749b580a858fb06c8b09aaa2e4772c94e43690bb5`. The
+candidate reports version `0.10.2` with `stable=false`, and authenticated five-file
+intake is `PASS`.
 
 The local native CMake checks already establish the fixture behavior: the red
 binary reports one TSan data race and exits nonzero under the TSan flags, while the
-synchronized binary passes. This is fixture evidence only; the two scenarios remain
-awaiting the post-hermetic exact candidate digest/run, so it does not claim a full
-candidate runner, PR, exact-main, Pages, merge, or release completion.
+synchronized binary passes. All 58 Quality Zoo unit tests pass. Running the current
+candidate with Qt excluded returned `7/7 PASS`: `cpp.tsan-data-race` observed
+suite/engine `FAIL`, one `tsan.data-race` at `src/race.cpp:15`, and ici exit `1`;
+`cpp.tsan-synchronized` observed `PASS`, zero TSan issues, and ici exit `0`. A full
+local eight-scenario aggregate has only the Qt contract failure because `clazy` is
+unavailable locally; CI installs `clazy`. This is local candidate evidence only:
+exact toy PR/main acceptance and the remote `8/8` candidate workflow remain pending,
+and no PR, merge, Pages, release, or version change is claimed.
 
 ### Qt lifetime scenario (candidate contract; completed remote evidence)
 
@@ -278,10 +296,12 @@ candidate path, SHA-256, and version in `suite.json`, and writes each scenario's
 
 Candidate-only validation opts in explicitly with
 `--manifest candidate-manifest.json`; it must not be used with the released
-ici `v0.10.2` binary because the TSan engine is not present there. Until the
-post-hermetic exact candidate digest/run is complete, a full eight-scenario
-candidate-manifest invocation is not accepted and may fail closed with
-`unsupported-ici`.
+ici `v0.10.2` binary because the TSan engine is not present there. The current
+candidate binds the TSan expectations to executable SHA-256
+`424108397858470b1209bc2749b580a858fb06c8b09aaa2e4772c94e43690bb5`; its
+seven-scenario local run is `7/7 PASS`, while the full local eight-scenario
+aggregate has only the Qt contract failure because local `clazy` is unavailable.
+Exact toy PR/main acceptance and the remote `8/8` candidate workflow remain pending.
 
 `ICI_BIN` is deliberately a local path. The Quality Zoo runner does not resolve
 URLs, download an executable, or silently substitute the released tool. This
@@ -293,9 +313,10 @@ CI's released-tool path separate.
 `manifest.json` is the released-artifact registry of scenario IDs and paths, while
 `candidate-manifest.json` is an explicit candidate-only registry. The latter
 contains the released six plus the two TSan scenarios; ordinary CI must continue
-to select `manifest.json` until a candidate artifact and its exact expectations
-have been independently accepted. Both files are intentionally JSON rather than
-TOML: the runner is dependency-free and must run on Python
+to select `manifest.json` while it consumes released ici `v0.10.2`; candidate
+validation alone selects `candidate-manifest.json`. The current candidate artifact
+and its exact expectations have passed authenticated local intake. Both files are
+intentionally JSON rather than TOML: the runner is dependency-free and must run on Python
 3.10, where JSON parsing is provided by the standard library. Using a TOML
 parser would add a dependency or create a Python-version compatibility question
 for a file that only maps an ID to a directory. The scenario's `ici.toml` is
@@ -480,12 +501,15 @@ expectations interchangeable.
 
 Quality Zoo is not a user-facing application and has no product release in this
 change. Released-artifact Q0 (the scenario contract, local runner, and toy
-PR/exact-main acceptance) and the exact-revision candidate cross-repository
-acceptance are complete, as is the local candidate intake/selector evidence. The
-Qt 6 lifetime fixture and digest-specific expectations are checked in, and its
-toy PR/exact-main and ici candidate acceptance are complete; the six-scenario
-candidate contract is `6/6 PASS` (see the linked evidence above). The TSan pair
-remains candidate-only and awaits the post-hermetic exact candidate digest/run, so
-no full eight-scenario candidate result is claimed. Broader Q2 and Q1–Q5 (the
-Python, C++, Qt, build/binary, and hybrid corpus expansions) remain future work.
-No version or release changed.
+PR/exact-main acceptance) and the earlier exact-revision candidate
+cross-repository acceptance are complete, as is the current candidate's
+authenticated local intake/selector evidence. The Qt 6 lifetime fixture and
+digest-specific expectations are checked in, and its earlier toy PR/exact-main
+and ici candidate acceptance are complete; that six-scenario candidate contract
+is `6/6 PASS` (see the linked evidence above). The current TSan candidate is
+bound to exact ici main `6ee08b14fa598a19074af7afed4368fd79b19b2b`, with local
+seven-scenario contract `7/7 PASS`; its full local eight-scenario aggregate has
+only the Qt contract failure because local `clazy` is unavailable, while CI
+installs `clazy`. Exact toy PR/main acceptance and the remote `8/8` candidate
+workflow remain pending. Broader Q2 and Q1–Q5 (the Python, C++, Qt, build/binary,
+and hybrid corpus expansions) remain future work. No version or release changed.

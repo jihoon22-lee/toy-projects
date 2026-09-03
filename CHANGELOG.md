@@ -189,10 +189,27 @@
   the synchronized binary passes. `quality-zoo/manifest.json` is unchanged so
   released ici `v0.10.2` CI remains compatible; the new
   `quality-zoo/candidate-manifest.json` contains the existing six plus these two
-  candidate-only entries. The two TSan scenarios remain candidate-only and await the
-  post-hermetic exact candidate digest/run; no full eight-scenario candidate runner,
-  remote acceptance, PR CI, exact-main CI, Pages, merge, or release evidence is claimed
-  here. No version or release changed.
+  candidate-only entries. The current candidate is bound to exact ici main
+  `6ee08b14fa598a19074af7afed4368fd79b19b2b`; main CI run
+  [`33732817172`](https://github.com/jihoon22-lee/ici/actions/runs/33732817172) is all
+  green. Candidate producer run
+  [`33733780877`](https://github.com/jihoon22-lee/ici/actions/runs/33733780877)
+  published artifact
+  [`9884927798`](https://github.com/jihoon22-lee/ici/actions/artifacts/9884927798).
+  The raw ZIP is `2,293,522` bytes with SHA-256
+  `9a50972a5cb4ad96b2b0cf912e27c17a600fc19d6d899c6e33028d4449b1122d`; the contained
+  `ici.pyz` is `2,292,199` bytes with SHA-256
+  `424108397858470b1209bc2749b580a858fb06c8b09aaa2e4772c94e43690bb5`. It reports
+  version `0.10.2` with `stable=false`, and authenticated five-file intake is `PASS`.
+  All 58 Quality Zoo unit tests pass. The local seven-scenario candidate run
+  excluding Qt is `7/7 PASS`; `cpp.tsan-data-race` observed `FAIL` with one
+  `tsan.data-race` at `src/race.cpp:15` and ici exit `1`, while
+  `cpp.tsan-synchronized` observed `PASS` with zero TSan issues and ici exit `0`.
+  The full local eight-scenario aggregate has only the Qt contract failure because
+  local `clazy` is unavailable, while CI installs `clazy`. Exact toy PR/main
+  acceptance and the remote `8/8` candidate workflow remain pending; no remote
+  acceptance, PR CI, exact-main CI, Pages, merge, release, or version change is
+  claimed here.
 
 ### Sticky PR report comment cardinality
 
