@@ -5,18 +5,22 @@ small scenarios separate from the user-facing toy products and checks that ici
 reports the expected finding at the expected location. A scenario is therefore a
 test asset, not an application to install or a product release.
 
-The current checked-in corpus contains one stable Python scenario:
-`python.dead-private-function`. It gives the `dead` engine one deliberately
-unused private function in `src/bad.py`, while `src/clean.py` provides the
-nearby positive counterpart that must not produce the same finding.
+The current checked-in corpus contains five stable scenarios: the Python
+`python.dead-private-function` case and four C++ sanitizer cases. The Python
+scenario gives the `dead` engine one deliberately unused private function in
+`src/bad.py`, while `src/clean.py` provides the nearby positive counterpart that
+must not produce the same finding. The C++ scenarios keep AddressSanitizer,
+LeakSanitizer, and UndefinedBehaviorSanitizer defects, plus a sanitizer-clean
+fixture, isolated from the user-facing products.
 
 ## Current status
 
 The scenario contract, dependency-free runner, candidate archive intake, and local
-candidate consumer are complete. Released-artifact Q0 acceptance is complete through
-the toy repository's remote PR/exact-main path; candidate cross-repository acceptance
-through the ici-hosted workflow is still pending until that workflow is merged and
-dispatched. PR #49 head
+candidate consumer are complete. The C++ sanitizer subset is locally complete for
+both the released and candidate ici digests documented below. Released-artifact Q0
+acceptance is complete through the toy repository's remote PR/exact-main path;
+candidate cross-repository acceptance through the now-merged ici-hosted workflow
+is still pending until an exact-revision dispatch succeeds. PR #49 head
 `f6ad1dc4e745d3d1a2703000a00a5d7c4eed61a0` ran as
 [`33693241255`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33693241255):
 22 jobs succeeded and the main publisher was expectedly skipped. Its Quality Zoo
@@ -31,9 +35,10 @@ product report links. Merge commit
 the exact-main Quality Zoo artifact
 [`9871249913`](https://github.com/jihoon22-lee/toy-projects/actions/artifacts/9871249913)
 recorded stable contract `PASS`, observed suite `WARN`, and no errors, while the
-main product Pages were byte-identical to their artifacts. The other corpus areas
-(C++, Qt, build/binary, and hybrid scenarios) have not been completed; Q1–Q5
-(the Python/C++/Qt/build/binary/hybrid corpus expansion) remain future work.
+main product Pages were byte-identical to their artifacts. The remaining corpus
+areas (the broader Python and C++ cases, Qt, build/binary, and hybrid scenarios)
+have not been completed; the broader Python/C++/Qt/build/binary/hybrid expansion
+remains future work.
 
 After EnvLens was merged by [PR #50](https://github.com/jihoon22-lee/toy-projects/pull/50) as
 `c307ac1ab01e12e4ac81a34623eb669da0e43641`, exact-main [run `33698248293`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33698248293)
@@ -63,6 +68,34 @@ The candidate is a candidate-channel artifact even though its package version is
 `0.10.2`. It does not change the toy repository version and does not create a
 release.
 
+### C++ sanitizer scenarios (local digest-bound evidence)
+
+The C++ sanitizer subset contains one intentionally defective fixture for each
+diagnostic family and a clean counterpart or clean scenario. The expected observed
+status is part of the known answer: defect fixtures are expected to make ici report
+`FAIL`, while the clean fixture is expected to report `PASS`.
+
+| Scenario | Intended result | Clean constraint |
+|---|---|---|
+| `cpp.asan-use-after-free` | AddressSanitizer heap use-after-free | no sanitizer finding for `src/clean.cpp` |
+| `cpp.lsan-memory-leak` | LeakSanitizer memory leak | no sanitizer finding for `src/clean.cpp` |
+| `cpp.ubsan-signed-overflow` | UndefinedBehaviorSanitizer signed-integer overflow | no sanitizer finding for `src/clean.cpp` |
+| `cpp.sanitizer-clean` | sanitizer completes with zero issues and an informational completion record | no active non-info sanitizer defect finding is allowed |
+
+Both exact executable channels were run against the complete five-scenario
+manifest locally. In each channel all five contract verdicts were `PASS` with no
+runner errors; the three defect scenarios observed `FAIL`, the clean scenario
+observed `PASS`, and `python.dead-private-function` observed its expected `WARN`.
+
+| ici channel | Version | Executable SHA-256 | Contract result |
+|---|---|---|---|
+| released ici | `0.10.2` | `8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4` | `5/5 PASS`, 0 errors |
+| ici candidate | `0.10.2` | `e7f1a2ce7147057538873a802715c7bf2b12e530a85070af862e02e378caceb8` | `5/5 PASS`, 0 errors |
+
+This is local known-answer evidence for the sanitizer subset. It does not claim
+candidate cross-repository acceptance, PR CI, a merge, or a release, and it does
+not close the broader C++ or other corpus areas.
+
 ### Sanitizer-normalization candidate selector (local authenticated evidence)
 
 The scenario selector now includes the candidate executable produced from ici target
@@ -77,9 +110,10 @@ it has SHA-256
 
 Authenticated local intake evidence succeeded for this archive. Running the Q0 scenario with the
 selected candidate expectation returned contract `PASS`, observed suite `WARN`, one matched finding,
-and no runner errors. This is local candidate evidence only: it does not claim that the ici-hosted
-candidate-to-Quality-Zoo workflow has been merged or remotely accepted. The scenario remains the
-Python dead-code known-answer case; it does not yet validate ASan/UBSan/LSan sanitizer findings.
+and no runner errors. This particular evidence is still for the Python dead-code known-answer case;
+the separate C++ sanitizer all-scenario evidence above uses the same candidate executable digest and
+its sanitizer-specific expectations. Neither local result claims remote acceptance
+through the merged candidate-to-Quality-Zoo workflow.
 
 ## Exact executable expectations
 
@@ -141,12 +175,28 @@ for a file that only maps an ID to a directory. The scenario's `ici.toml` is
 still present because ici consumes it; the Quality Zoo runner does not parse
 that TOML file.
 
-The manifest currently has schema `1` and one entry:
+The manifest currently has schema `1` and five entries:
 
 ```json
 {
   "schema": 1,
   "scenarios": [
+    {
+      "id": "cpp.asan-use-after-free",
+      "path": "scenarios/cpp/asan-use-after-free"
+    },
+    {
+      "id": "cpp.lsan-memory-leak",
+      "path": "scenarios/cpp/lsan-memory-leak"
+    },
+    {
+      "id": "cpp.sanitizer-clean",
+      "path": "scenarios/cpp/sanitizer-clean"
+    },
+    {
+      "id": "cpp.ubsan-signed-overflow",
+      "path": "scenarios/cpp/ubsan-signed-overflow"
+    },
     {
       "id": "python.dead-private-function",
       "path": "scenarios/python/dead-private-function"
@@ -186,6 +236,10 @@ Consequently, an observed `WARN` is not automatically a failed Quality Zoo
 scenario. The first scenario expects the dead-code engine to be `WARN` because
 the Python analysis is heuristic, and it expects exactly one finding. Its
 contract verdict is `PASS` even though its observed suite status is `WARN`.
+The C++ sanitizer defect scenarios similarly expect an observed `FAIL`, while
+the sanitizer-clean scenario expects `PASS`; each is a contract pass only when
+the exact status, evidence, diagnostic location, and clean-finding constraints
+match the selected executable expectation.
 Conversely, an observed `FAIL` or an unexpected `WARN` is not accepted merely
 because a finding happened to appear: status, evidence, location, and exit
 semantics remain part of the contract. A scenario may explicitly expect a
@@ -295,6 +349,6 @@ expectations interchangeable.
 Quality Zoo is not a user-facing application and has no product release in this
 change. Released-artifact Q0 (the scenario contract, local runner, and toy
 PR/exact-main acceptance) is complete, as is the local candidate intake/selector
-evidence. Candidate cross-repository acceptance through the ici-hosted workflow is
-still pending until that workflow is merged and dispatched. Q1–Q5 (the Python, C++,
-Qt, build/binary, and hybrid corpus expansions) remain future work.
+evidence. Candidate cross-repository acceptance through the merged ici-hosted
+workflow is still pending until an exact-revision dispatch succeeds. Q1–Q5 (the
+Python, C++, Qt, build/binary, and hybrid corpus expansions) remain future work.
