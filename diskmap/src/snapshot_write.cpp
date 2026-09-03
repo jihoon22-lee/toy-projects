@@ -17,6 +17,7 @@
 
 #if defined(__linux__)
 #include <fcntl.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
@@ -223,6 +224,8 @@ FileState checkedRegularStateAt(int parent,
 }
 
 void installTemporaryAt(int parent,
+                        const detail::FileDescriptor& parentDirectory,
+                        const fs::path& parentPath,
                         const std::string& temporary,
                         const std::string& target,
                         const FileState& expected,
@@ -240,6 +243,13 @@ void installTemporaryAt(int parent,
             preserveTemporary = true;
             throw SnapshotError(
                 "snapshot destination changed during atomic installation; "
+                "the temporary snapshot was preserved as "
+                + temporary);
+        }
+        if (!detail::directoryPathMatches(parentPath, parentDirectory, error)) {
+            preserveTemporary = true;
+            throw SnapshotError(
+                "snapshot destination directory changed during atomic installation; "
                 "the temporary snapshot was preserved as "
                 + temporary);
         }
@@ -261,7 +271,8 @@ void installTemporaryAt(int parent,
     if (!inspectFileAt(parent, temporary, displaced, error)
         || !sameRenamedState(expected, displaced)
         || !inspectFileAt(parent, target, targetState, error)
-        || !sameRenamedState(installed, targetState)) {
+        || !sameRenamedState(installed, targetState)
+        || !detail::directoryPathMatches(parentPath, parentDirectory, error)) {
         preserveTemporary = true;
         throw SnapshotError(
             "snapshot destination raced during atomic exchange; displaced "
@@ -275,6 +286,19 @@ void installTemporaryAt(int parent,
     }
 }
 
+void lockSnapshotDirectory(const detail::FileDescriptor& parent) {
+    if (::flock(parent.get(), LOCK_EX | LOCK_NB) == 0) {
+        return;
+    }
+    const int value = errno;
+    if (value == EWOULDBLOCK) {
+        throw SnapshotError(
+            "another snapshot operation is using the destination directory");
+    }
+    throw SnapshotError("cannot lock snapshot destination directory: "
+                        + std::generic_category().message(value));
+}
+
 void writeSnapshotLinux(const std::string& json,
                         const fs::path& target) {
     std::string error;
@@ -284,6 +308,7 @@ void writeSnapshotLinux(const std::string& json,
         throw SnapshotError(error.empty() ? "snapshot destination parent is not a directory"
                                           : error);
     }
+    lockSnapshotDirectory(parent);
     const std::string targetName = target.filename().native();
     const FileState before = checkedRegularStateAt(
         parent.get(), targetName,
@@ -312,10 +337,17 @@ void writeSnapshotLinux(const std::string& json,
         if (!installed.exists) {
             throw SnapshotError("snapshot temporary file disappeared before installation");
         }
-        installTemporaryAt(parent.get(), temporary, targetName, before,
-                           installed, preserveTemporary);
+        if (!detail::directoryPathMatches(target.parent_path(), parent, error)) {
+            throw SnapshotError("snapshot destination directory changed during atomic write");
+        }
+        installTemporaryAt(parent.get(), parent, target.parent_path(), temporary,
+                           targetName, before, installed, preserveTemporary);
         temporaryExists = false;
-        if (::fsync(parent.get()) != 0) {
+        if (::fsync(parent.get()) != 0
+            || !detail::directoryPathMatches(target.parent_path(), parent, error)) {
+            if (!error.empty()) {
+                throw SnapshotError(error);
+            }
             throw SnapshotError("cannot sync snapshot directory");
         }
     } catch (...) {

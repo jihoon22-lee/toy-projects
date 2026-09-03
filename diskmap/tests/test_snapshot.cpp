@@ -15,6 +15,8 @@
 #include <vector>
 
 #if defined(__linux__)
+#include <fcntl.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
@@ -243,6 +245,20 @@ void testSnapshotFileIo() {
         CHECK(throwsSnapshotError([&] {
             diskmap::readSnapshotFile(linkedParent / "direct.json");
         }));
+    }
+
+    const int lockedParent = ::open(temporary.path().c_str(), O_RDONLY | O_DIRECTORY);
+    CHECK(lockedParent >= 0);
+    if (lockedParent >= 0) {
+        CHECK(::flock(lockedParent, LOCK_EX | LOCK_NB) == 0);
+        CHECK(throwsSnapshotError([&] {
+            diskmap::writeSnapshotAtomically(first,
+                                              temporary.path() / "locked.json");
+        }));
+        CHECK(!std::filesystem::exists(temporary.path() / "locked.json"));
+        CHECK(!hasSnapshotTemporary(temporary.path()));
+        CHECK(::flock(lockedParent, LOCK_UN) == 0);
+        CHECK(::close(lockedParent) == 0);
     }
 
     const std::filesystem::path unwritable = temporary.path() / "unwritable";

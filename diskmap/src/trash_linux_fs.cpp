@@ -9,6 +9,7 @@
 #include <utility>
 
 #include <fcntl.h>
+#include <sys/file.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -412,6 +413,10 @@ bool openTrashDirectories(const TrashOptions& options,
         directories.root, create, error);
     if (!directories.root_directory
         || !secureOwnedDirectory(directories.root_directory, error)) {
+        return false;
+    }
+    if (::flock(directories.root_directory.get(), LOCK_EX | LOCK_NB) != 0) {
+        error = errnoMessage("another Trash operation is already active");
         return false;
     }
     directories.files = openConfiguredTrashDirectory(

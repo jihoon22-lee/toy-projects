@@ -18,7 +18,10 @@
 #include <vector>
 
 #if defined(__linux__)
+#include <fcntl.h>
+#include <sys/file.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 namespace fs = std::filesystem;
@@ -1035,6 +1038,55 @@ void testCrashRecoveryMetadata(const fs::path& root) {
     }
 }
 
+void testConcurrentMutationLock(const fs::path& root) {
+    const diskmap::TrashOptions options = optionsFor(root);
+    CHECK(ensurePrivateTrash(options));
+    const fs::path source = root / "concurrent-lock.txt";
+    CHECK(writeFile(source, "serialized mutation"));
+    const diskmap::CleanupTarget target = targetFor(source);
+
+    const fs::path trashRoot = options.data_home / "Trash";
+    const int lockedRoot = ::open(trashRoot.c_str(), O_RDONLY | O_DIRECTORY);
+    CHECK(lockedRoot >= 0);
+    if (lockedRoot < 0) {
+        return;
+    }
+    CHECK(::flock(lockedRoot, LOCK_EX | LOCK_NB) == 0);
+    const auto blocked = diskmap::movePlanToTrash(planFor({target}), options);
+    CHECK_EQ(blocked.size(), static_cast<std::size_t>(1));
+    if (!blocked.empty()) {
+        CHECK(blocked[0].status == diskmap::TrashStatus::IoError);
+    }
+    CHECK(fs::is_regular_file(source));
+    CHECK(::flock(lockedRoot, LOCK_UN) == 0);
+    CHECK(::close(lockedRoot) == 0);
+
+    const auto moved = diskmap::movePlanToTrash(planFor({target}), options);
+    CHECK_EQ(moved.size(), static_cast<std::size_t>(1));
+    if (moved.empty() || moved[0].status != diskmap::TrashStatus::Moved) {
+        return;
+    }
+
+    const int restoreLock = ::open(trashRoot.c_str(), O_RDONLY | O_DIRECTORY);
+    CHECK(restoreLock >= 0);
+    if (restoreLock < 0) {
+        return;
+    }
+    CHECK(::flock(restoreLock, LOCK_EX | LOCK_NB) == 0);
+    const auto blockedRestore =
+        diskmap::restoreFromTrash(moved[0].restore_token, options);
+    CHECK(blockedRestore.status == diskmap::TrashStatus::IoError);
+    CHECK(!fs::exists(source));
+    CHECK(fs::is_regular_file(moved[0].trashed_path));
+    CHECK(::flock(restoreLock, LOCK_UN) == 0);
+    CHECK(::close(restoreLock) == 0);
+
+    const auto restored =
+        diskmap::restoreFromTrash(moved[0].restore_token, options);
+    CHECK(restored.status == diskmap::TrashStatus::Restored);
+    CHECK_EQ(readFile(source), "serialized mutation");
+}
+
 } // namespace
 
 int main() {
@@ -1052,6 +1104,7 @@ int main() {
     testFilesystemRefusalsAndLimits(temp.path());
     testMetadataAndRestoreFailures(temp.path());
     testCrashRecoveryMetadata(temp.path());
+    testConcurrentMutationLock(temp.path());
     testCapabilityAndInvalidRestore(temp.path());
     testMoveInfoEncodingAndTokenRestore(temp.path());
     testRestoreNeverOverwrites(temp.path());
