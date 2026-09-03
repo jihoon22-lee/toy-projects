@@ -3,6 +3,7 @@
   "scenario_id": "python.dead-private-function",
   "expectations": {
     "8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4": "expectations/released-v0.10.2.json",
-    "53fc75f0a073a74689babfe9ef8a4b2378995002d7d563bdc52da548fdbb9ee8": "expectations/candidate-7872a7b.json"
+    "53fc75f0a073a74689babfe9ef8a4b2378995002d7d563bdc52da548fdbb9ee8": "expectations/candidate-7872a7b.json",
+    "e7f1a2ce7147057538873a802715c7bf2b12e530a85070af862e02e378caceb8": "expectations/candidate-9d470ed.json"
   }
 }
