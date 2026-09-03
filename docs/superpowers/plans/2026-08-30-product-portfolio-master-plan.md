@@ -1296,7 +1296,7 @@ quality contract를 기록한다. Repository path-aware manifest와 Python 3.10/
 job, main publisher와 `Merge Gate`가 성공했다. PR-only publisher는 push에서 expected skip이다.
 Exact-main artifact는 EnvLens ici `9872574260`, Python 3.10 `9872561889`, latest Python
 `9872564898`, Quality Zoo `9872561713`이며, 네 project Page는 artifact와 byte-identical이고
-exact title/Zero-CDN 검사를 통과했다. 상세 size/hash는 [EnvLens workthrough](../../workthrough/2026-09-03-envlens-snapshot.md)에
+exact title/Zero-CDN 검사를 통과했다. 상세 size/hash는 [EnvLens workthrough](../../../workthrough/2026-09-03-envlens-snapshot.md)에
 중앙화한다. 제품 identity는 `0.1.0`/`Unreleased`로 유지하며 stable release는 아직 pending이다.
 E2 snapshot diff/compatibility, E3 project/runtime smoke와 E4 release 조건은 이 E1 완료에 포함되지
 않는다.
