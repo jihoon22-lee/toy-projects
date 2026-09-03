@@ -403,8 +403,9 @@ def _dist_import_names(distribution: Mapping[str, Any]) -> tuple[list[str], bool
 def _dist_wheel_tags(distribution: Mapping[str, Any]) -> tuple[list[str], bool]:
     metadata = distribution.get("metadata")
     if not isinstance(metadata, dict):
-        return [], False
-    value = metadata.get("wheel_tags")
+        value = distribution.get("wheel_tags")
+    else:
+        value = metadata.get("wheel_tags", distribution.get("wheel_tags"))
     if not isinstance(value, list):
         return [], False
     tags = sorted({str(item) for item in value if isinstance(item, str) and item})

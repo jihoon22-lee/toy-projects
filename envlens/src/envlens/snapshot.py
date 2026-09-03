@@ -203,7 +203,10 @@ def _normalize_distribution(value: Any, homes: tuple[str, ...], *, redact: bool)
             }
         )
         normalized["import_names"] = import_names
-    if "wheel_tags" in metadata:
+    wheel_tag_value = (
+        metadata.get("wheel_tags") if "wheel_tags" in metadata else raw.get("wheel_tags")
+    )
+    if "wheel_tags" in metadata or "wheel_tags" in raw:
         wheel_tags = sorted(
             {
                 _redact_if_enabled(
@@ -212,7 +215,7 @@ def _normalize_distribution(value: Any, homes: tuple[str, ...], *, redact: bool)
                     redact,
                 )
                 for item in _array(
-                    metadata.get("wheel_tags"),
+                    wheel_tag_value,
                     "distribution.metadata.wheel_tags",
                     maximum=MAX_COLLECTION_ITEMS,
                 )
