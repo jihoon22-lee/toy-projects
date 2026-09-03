@@ -154,8 +154,18 @@
                 "type": "array",
                 "maxItems": 100000,
                 "items": {"type": "string", "minLength": 1, "maxLength": 65536}
+              },
+              "wheel_tags": {
+                "type": "array",
+                "maxItems": 100000,
+                "items": {"type": "string", "minLength": 1, "maxLength": 65536}
               }
             }
+          },
+          "import_names": {
+            "type": "array",
+            "maxItems": 100000,
+            "items": {"type": "string", "minLength": 1, "maxLength": 65536}
           },
           "entry_points": {
             "type": "array",

@@ -82,13 +82,63 @@ def distribution_record(distribution):
         location = ""
         errors.append(error_record("location", error))
 
+    # ``top_level.txt`` is the most reliable offline hint for the import names
+    # exposed by a distribution.  A small files-based fallback also handles
+    # modern metadata that omits the legacy file.  This is deliberately only a
+    # hint: namespace packages and generated importers cannot be inferred from
+    # wheel metadata alone.
+    import_names = set()
+    try:
+        top_level = distribution.read_text("top_level.txt") or ""
+        import_names.update(
+            line.strip()
+            for line in top_level.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        )
+    except Exception:
+        pass
+    if not import_names:
+        try:
+            for file_name in distribution.files or []:
+                parts = str(file_name).replace("\\", "/").split("/")
+                if not parts:
+                    continue
+                first = parts[0]
+                if first.endswith((".dist-info", ".egg-info")) or first == "__pycache__":
+                    continue
+                if first.endswith(".py") and len(parts) == 1:
+                    candidate = first[:-3]
+                    if candidate != "__init__":
+                        import_names.add(candidate)
+                elif len(parts) > 1 and first not in {"", "."}:
+                    import_names.add(first)
+        except Exception:
+            pass
+
+    # A wheel's ``Tag:`` records are local metadata and do not require parsing
+    # or opening the wheel archive.  Source installs simply report an empty
+    # list, which lets the compatibility consumer distinguish unknown from
+    # incompatible.
+    wheel_tags = []
+    try:
+        wheel_text = distribution.read_text("WHEEL") or ""
+        wheel_tags = [
+            line.split(":", 1)[1].strip()
+            for line in wheel_text.splitlines()
+            if line.lower().startswith("tag:") and ":" in line
+        ]
+    except Exception:
+        pass
+
     return {
         "name": metadata_value("Name"),
         "version": metadata_value("Version"),
         "metadata": {
             "requires_python": metadata_value("Requires-Python"),
             "requires_dist": requirements,
+            "wheel_tags": sorted(set(wheel_tags)),
         },
+        "import_names": sorted(import_names),
         "entry_points": entry_points,
         "location": location,
         "errors": errors,
