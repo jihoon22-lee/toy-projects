@@ -10,6 +10,10 @@
       "path": "scenarios/cpp/lsan-memory-leak"
     },
     {
+      "id": "cpp.qt-missing-parent-constructor",
+      "path": "scenarios/cpp/qt-missing-parent-constructor"
+    },
+    {
       "id": "cpp.sanitizer-clean",
       "path": "scenarios/cpp/sanitizer-clean"
     },

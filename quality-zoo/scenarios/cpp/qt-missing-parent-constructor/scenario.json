@@ -1,0 +1,8 @@
+{
+  "schema": 2,
+  "scenario_id": "cpp.qt-missing-parent-constructor",
+  "expectations": {
+    "8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4": "expectations/released-v0.10.2.json",
+    "985c81a63363356619207870cddb0d8cd9854a46925a3e0a745e54bd543d5b51": "expectations/candidate-e7a9f55.json"
+  }
+}

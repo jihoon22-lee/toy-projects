@@ -5,13 +5,17 @@ small scenarios separate from the user-facing toy products and checks that ici
 reports the expected finding at the expected location. A scenario is therefore a
 test asset, not an application to install or a product release.
 
-The current checked-in corpus contains five stable scenarios: the Python
-`python.dead-private-function` case and four C++ sanitizer cases. The Python
-scenario gives the `dead` engine one deliberately unused private function in
+The current checked-in corpus contains six scenario entries: the Python
+`python.dead-private-function` case, four C++ sanitizer cases, and a Qt 6 C++
+clazy lifetime case. The first five scenarios are the existing stable
+known-answer slice. The Python scenario gives the `dead` engine one deliberately
+unused private function in
 `src/bad.py`, while `src/clean.py` provides the nearby positive counterpart that
 must not produce the same finding. The C++ scenarios keep AddressSanitizer,
 LeakSanitizer, and UndefinedBehaviorSanitizer defects, plus a sanitizer-clean
-fixture, isolated from the user-facing products.
+fixture, isolated from the user-facing products. The Qt scenario pairs a
+missing-parent-constructor fixture with a clean `QObject` parent-forwarding
+counterpart.
 
 ## Current status
 
@@ -20,7 +24,9 @@ candidate consumer are complete. The C++ sanitizer subset is locally complete fo
 both the released and candidate ici digests documented below. Released-artifact Q0
 acceptance is complete through the toy repository's remote PR/exact-main path, and
 candidate cross-repository acceptance is now complete through the exact-revision
-dispatch of the ici-hosted workflow recorded below. PR #49 head
+dispatch of the ici-hosted workflow recorded below. The Qt lifetime fixture and
+digest-bound expectations are checked in, but its candidate remote acceptance,
+PR CI, exact-main CI, and Pages evidence remain pending. PR #49 head
 `f6ad1dc4e745d3d1a2703000a00a5d7c4eed61a0` ran as
 [`33693241255`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33693241255):
 22 jobs succeeded and the main publisher was expectedly skipped. Its Quality Zoo
@@ -96,6 +102,41 @@ This is local known-answer evidence for the sanitizer subset. The later remote
 candidate acceptance is recorded separately below; this local run itself did not
 claim PR CI, a merge, or a release, and it does not close the broader C++ or other
 corpus areas.
+
+### Qt lifetime scenario (candidate contract; remote evidence pending)
+
+`cpp.qt-missing-parent-constructor` is a Qt 6 Core CMake fixture with a bad
+`MissingParent` constructor at `src/bad.cpp:3` and a clean `ParentAware`
+parent-forwarding counterpart in `src/clean.cpp`. Its `ici.toml` requires `g++`,
+`cmake`, and `clazy`, and selects the exact `ctor-missing-parent-argument`
+check.
+
+The released ici `v0.10.2` expectation and the new candidate expectation share
+the exact rule, tool rule, `WARN` suite/engine status, `MEASURED` evidence,
+`exact` confidence, and `src/bad.cpp:3` location. They intentionally differ in
+category: the released answer is `maintainability`, while the candidate answer
+uses `cpp_diagnostic_category_policy = tool-rule-v1` and is `resource`. Both
+forbid a lint finding in `src/clean.cpp`.
+
+| Channel | Executable SHA-256 | Expected / observed | Rule / tool rule | Category | Location |
+|---|---|---|---|---|---|
+| released ici `v0.10.2` | `8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4` | `WARN` / `WARN`; `MEASURED`; `exact` | `ici.legacy.lint.target` / `clazy-ctor-missing-parent-argument` | `maintainability` | `src/bad.cpp:3` |
+| candidate target `e7a9f55be8893d91497a6e1d0bff6e2e5f4af5f3` | `985c81a63363356619207870cddb0d8cd9854a46925a3e0a745e54bd543d5b51` | `WARN` / `WARN`; `MEASURED`; `exact` | `ici.legacy.lint.target` / `clazy-ctor-missing-parent-argument` | `resource` (`tool-rule-v1`) | `src/bad.cpp:3` |
+
+The candidate producer [run `33715173073`](https://github.com/jihoon22-lee/ici/actions/runs/33715173073)
+published [artifact `9878317009`](https://github.com/jihoon22-lee/ici/actions/artifacts/9878317009).
+The raw candidate ZIP is `2,288,897` bytes with SHA-256
+`1165312e36344244fe0591e4fbcf869d126a0a7160a21099ee13c34ae8144d5e`; its
+contained `ici.pyz` is `2,287,574` bytes with SHA-256
+`985c81a63363356619207870cddb0d8cd9854a46925a3e0a745e54bd543d5b51`. The
+candidate provenance binds exact ici target `e7a9f55be8893d91497a6e1d0bff6e2e5f4af5f3`
+to successful main `Merge Gate` [run `33714515219`](https://github.com/jihoon22-lee/ici/actions/runs/33714515219).
+
+Local Quality Zoo unit validation is `57/57` passed. Running the new candidate
+with the Qt scenario excluded against the existing five scenarios returned
+contract `5/5 PASS`. This is local candidate evidence only: Qt candidate remote
+acceptance, PR CI, exact-main CI, and Pages remain pending. The candidate is
+non-stable and no version or release changed.
 
 ### Sanitizer-normalization candidate selector (local authenticated evidence)
 
@@ -213,7 +254,7 @@ for a file that only maps an ID to a directory. The scenario's `ici.toml` is
 still present because ici consumes it; the Quality Zoo runner does not parse
 that TOML file.
 
-The manifest currently has schema `1` and five entries:
+The manifest currently has schema `1` and six entries:
 
 ```json
 {
@@ -226,6 +267,10 @@ The manifest currently has schema `1` and five entries:
     {
       "id": "cpp.lsan-memory-leak",
       "path": "scenarios/cpp/lsan-memory-leak"
+    },
+    {
+      "id": "cpp.qt-missing-parent-constructor",
+      "path": "scenarios/cpp/qt-missing-parent-constructor"
     },
     {
       "id": "cpp.sanitizer-clean",
@@ -388,6 +433,8 @@ Quality Zoo is not a user-facing application and has no product release in this
 change. Released-artifact Q0 (the scenario contract, local runner, and toy
 PR/exact-main acceptance) and the exact-revision candidate cross-repository
 acceptance are complete, as is the local candidate intake/selector evidence. The
+Qt 6 lifetime fixture and digest-specific expectations are checked in, but its
+candidate remote acceptance, PR CI, exact-main CI, and Pages remain pending. The
 remote evidence closes only the Q2 runtime ASan/LSan/UBSan-plus-clean sub-scope;
-Qt lifetime, broader Q2, and Q1–Q5 (the Python, C++, Qt, build/binary, and hybrid
-corpus expansions) remain future work.
+broader Q2 and Q1–Q5 (the Python, C++, Qt, build/binary, and hybrid corpus
+expansions) remain future work. No version or release changed.

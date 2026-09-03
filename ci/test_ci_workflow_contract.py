@@ -236,6 +236,19 @@ class WorkflowPublicationContractTests(unittest.TestCase):
 
         self.assertIn('test "$manifest_hash" = "$ICI_SHA256"', block)
         self.assertIn("sha256sum --check ici.pyz.sha256", block)
+        self.assertIn("Install C++ and Qt analysis tools", block)
+        self.assertIn("sudo apt-get update", block)
+        self.assertIn("--no-install-recommends", block)
+        for package in (
+            "clang",
+            "clang-tidy",
+            "clazy",
+            "cmake",
+            "g++",
+            "pkg-config",
+            "qt6-base-dev",
+        ):
+            self.assertRegex(block, rf"(?:^|\s){re.escape(package)}(?:\s|$)")
         self.assertIn("python3 -m unittest discover -s tests -v", block)
         self.assertIn("python3 -m runner.run", block)
         self.assertIn('--ici-bin "$QUALITY_ZOO_ICI"', block)
