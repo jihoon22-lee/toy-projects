@@ -22,6 +22,7 @@ MAX_PATHS = 1_000
 MAX_PATH_LENGTH = 65_536
 MAX_SOURCE_ENTRIES = 100_000
 MAX_OUTPUT_CHARS = 65_536
+MAX_COMPILE_COMMAND_CHARS = 64 * 1024
 MODULE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
 
 IMPORT_SCRIPT = r"""
@@ -44,6 +45,8 @@ import importlib
 import sys
 
 module_name, attribute_name = sys.argv[1].split(":", 1)
+program_name = sys.argv[2] if len(sys.argv) > 2 else module_name
+sys.argv[:] = [program_name]
 try:
     target = importlib.import_module(module_name)
     for component in attribute_name.split("."):
@@ -234,9 +237,6 @@ def _runtime_env(project_root: Path, cache_root: Path | None = None) -> dict[str
     src_root = project_root / "src"
     if src_root.is_dir():
         roots.append(str(src_root))
-    existing = env.get("PYTHONPATH")
-    if existing:
-        roots.append(existing)
     env["PYTHONPATH"] = os.pathsep.join(roots)
     if cache_root is not None:
         env["PYTHONPYCACHEPREFIX"] = str(cache_root)
@@ -323,7 +323,7 @@ def _entry_check(
     return {
         **result,
         **_run_check(
-            [str(resolved), "-c", ENTRY_POINT_SCRIPT, target_text],
+            [str(resolved), "-c", ENTRY_POINT_SCRIPT, target_text, str(entry.get("name", ""))],
             timeout_seconds=timeout_seconds,
             cwd=project_root,
             env=env,
@@ -332,6 +332,20 @@ def _entry_check(
         ),
         "action": "executed",
     }
+
+
+def _compile_command(interpreter: Path, source_files: Sequence[Path]) -> list[str]:
+    command = [str(interpreter), "-m", "compileall", "-q", "-f"]
+    command.extend(str(path) for path in source_files)
+    command_bytes = sum(
+        len(argument.encode("utf-8", errors="surrogatepass")) + 1 for argument in command
+    )
+    if command_bytes > MAX_COMPILE_COMMAND_CHARS:
+        raise RuntimeCheckError(
+            "runtime-input-too-large",
+            "compileall command exceeds 65536 UTF-8 bytes",
+        )
+    return command
 
 
 def _validate_runtime_options(
@@ -486,8 +500,7 @@ def run_runtime_checks(
             cache_root = Path(cache_directory)
             env = _runtime_env(root, cache_root)
             if source_files:
-                command = [str(resolved), "-m", "compileall", "-q", "-f"]
-                command.extend(str(path) for path in source_files)
+                command = _compile_command(resolved, source_files)
                 compile_result = _run_check(
                     command,
                     timeout_seconds=timeout_seconds,

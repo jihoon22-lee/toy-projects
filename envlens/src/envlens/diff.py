@@ -11,162 +11,29 @@ import json
 import os
 import re
 from collections.abc import Mapping
-from pathlib import Path
-from typing import Any, TextIO, cast
+from typing import Any, cast
 
-from envlens.snapshot import MAX_COLLECTION_ITEMS, MAX_DISTRIBUTIONS, MAX_STRING_LENGTH
+from envlens.snapshot_input import (
+    MAX_REQUIREMENTS,
+    DiffError,
+    _object,
+    load_snapshot,
+    validate_snapshot,
+)
 
-MAX_INPUT_BYTES = 16 * 1024 * 1024
-MAX_REQUIREMENTS = 100_000
 MAX_COMPATIBILITY_ITEMS = 100_000
 
-
-class DiffError(ValueError):
-    """A bounded, user-facing snapshot diff failure."""
-
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(f"{code}: {message}")
-        self.code = code
-        self.message = message
-
-
-def _object(value: Any, label: str) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise DiffError("invalid-snapshot", f"{label} must be an object")
-    return value
-
-
-def _string(value: Any, label: str, *, allow_empty: bool = True) -> str:
-    if not isinstance(value, str) or (not allow_empty and not value):
-        raise DiffError("invalid-snapshot", f"{label} must be a string")
-    if len(value) > MAX_STRING_LENGTH:
-        raise DiffError("snapshot-field-too-large", f"{label} exceeds 65536 characters")
-    return value
-
-
-def _array(value: Any, label: str, maximum: int = MAX_COLLECTION_ITEMS) -> list[Any]:
-    if not isinstance(value, list):
-        raise DiffError("invalid-snapshot", f"{label} must be an array")
-    if len(value) > maximum:
-        raise DiffError("snapshot-field-too-large", f"{label} exceeds {maximum} items")
-    return value
-
-
-def _reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            raise DiffError("invalid-snapshot-json", f"duplicate key {key!r}")
-        result[key] = value
-    return result
-
-
-def _reject_constant(value: str) -> None:
-    raise DiffError("invalid-snapshot-json", f"non-finite number {value}")
-
-
-def load_snapshot(source: str | os.PathLike[str] | TextIO) -> dict[str, Any]:
-    """Load one bounded snapshot from a path or text stream.
-
-    A stream is read at most ``MAX_INPUT_BYTES + 1`` bytes.  ``-`` is not
-    treated specially here; the CLI maps it to stdin explicitly so library
-    callers cannot accidentally consume an unrelated process stream.
-    """
-
-    if hasattr(source, "read"):
-        stream = cast(TextIO, source)
-        try:
-            text = stream.read(MAX_INPUT_BYTES + 1)
-        except (OSError, ValueError) as error:
-            raise DiffError("snapshot-read-failed", str(error)) from error
-        if not isinstance(text, str):
-            raise DiffError("snapshot-read-failed", "snapshot stream must return text")
-        if len(text.encode("utf-8", errors="surrogatepass")) > MAX_INPUT_BYTES:
-            raise DiffError("snapshot-too-large", "snapshot exceeds 16 MiB")
-    else:
-        path = Path(source)
-        try:
-            stat = path.stat()
-        except OSError as error:
-            raise DiffError("snapshot-read-failed", str(error)) from error
-        if not path.is_file():
-            raise DiffError("snapshot-read-failed", "snapshot must be a regular file")
-        if stat.st_size > MAX_INPUT_BYTES:
-            raise DiffError("snapshot-too-large", "snapshot exceeds 16 MiB")
-        try:
-            data = path.read_bytes()
-        except OSError as error:
-            raise DiffError("snapshot-read-failed", str(error)) from error
-        if len(data) > MAX_INPUT_BYTES:
-            raise DiffError("snapshot-too-large", "snapshot exceeds 16 MiB")
-        try:
-            text = data.decode("utf-8")
-        except UnicodeError as error:
-            raise DiffError("invalid-snapshot-json", "snapshot is not UTF-8") from error
-    try:
-        value = json.loads(
-            text,
-            object_pairs_hook=_reject_duplicates,
-            parse_constant=_reject_constant,
-        )
-    except DiffError:
-        raise
-    except (json.JSONDecodeError, RecursionError) as error:
-        raise DiffError("invalid-snapshot-json", str(error)) from error
-    return validate_snapshot(value)
-
-
-def validate_snapshot(snapshot: Any) -> dict[str, Any]:
-    """Validate the bounded fields needed by the diff consumer.
-
-    Unknown additive fields are retained.  This lets a newer producer add
-    metadata while keeping the E2 consumer compatible with older v1 files.
-    """
-
-    value = _object(snapshot, "snapshot")
-    if value.get("schema_version") != "envlens.snapshot/v1":
-        raise DiffError("unsupported-snapshot", "expected envlens.snapshot/v1")
-    distributions = _array(value.get("distributions"), "snapshot.distributions", MAX_DISTRIBUTIONS)
-    for index, raw in enumerate(distributions):
-        distribution = _object(raw, f"snapshot.distributions[{index}]")
-        _string(distribution.get("name"), f"distribution[{index}].name")
-        normalized = distribution.get("normalized_name")
-        if normalized is not None:
-            _string(normalized, f"distribution[{index}].normalized_name")
-        _string(distribution.get("version"), f"distribution[{index}].version")
-        metadata = _object(distribution.get("metadata"), f"distribution[{index}].metadata")
-        _string(metadata.get("requires_python"), f"distribution[{index}].requires_python")
-        _array(
-            metadata.get("requires_dist"),
-            f"distribution[{index}].requires_dist",
-            MAX_REQUIREMENTS,
-        )
-        _array(
-            distribution.get("entry_points"),
-            f"distribution[{index}].entry_points",
-            MAX_COLLECTION_ITEMS,
-        )
-        _array(
-            distribution.get("errors"),
-            f"distribution[{index}].errors",
-            MAX_COLLECTION_ITEMS,
-        )
-        if "import_names" in distribution:
-            _array(
-                distribution.get("import_names"),
-                f"distribution[{index}].import_names",
-                MAX_COLLECTION_ITEMS,
-            )
-        if "wheel_tags" in metadata:
-            _array(
-                metadata.get("wheel_tags"),
-                f"distribution[{index}].wheel_tags",
-                MAX_COLLECTION_ITEMS,
-            )
-    source = _object(value.get("source"), "snapshot.source")
-    identity = _object(source.get("identity"), "snapshot.source.identity")
-    _string(identity.get("version"), "snapshot.source.identity.version")
-    return value
+__all__ = [
+    "DiffError",
+    "check_compatibility",
+    "check_snapshot_compatibility",
+    "compare_snapshots",
+    "compare_versions",
+    "diff_snapshots",
+    "load_snapshot",
+    "satisfies_requires_python",
+    "validate_snapshot",
+]
 
 
 _NORMALIZE_NAME_RE = re.compile(r"[-_.]+")
@@ -180,34 +47,24 @@ def _normalized_name(distribution: Mapping[str, Any]) -> str:
     return _NORMALIZE_NAME_RE.sub("-", str(name)).lower()
 
 
-def _version_tokens(value: str) -> tuple[tuple[int, Any], ...] | None:
-    """Return a conservative ordering key for common PEP 440 versions."""
+_NUMERIC_VERSION_RE = re.compile(r"^v?\d+(?:\.\d+)*$")
 
-    text = value.strip().lower()
-    if text.startswith("v"):
-        text = text[1:]
-    if (
-        not text
-        or not text[0].isdigit()
-        or not re.fullmatch(r"[0-9a-zA-Z]+(?:[._+-][0-9a-zA-Z]+)*", text)
-    ):
+
+def _version_tokens(value: str) -> tuple[int, ...] | None:
+    """Return a key only for plain numeric release versions.
+
+    Pre/dev/post releases, epochs, local labels, and alternate separators are
+    deliberately outside this bounded evaluator.  Treating those forms as
+    unknown is safer than claiming an incorrect PEP 440 ordering.
+    """
+
+    text = value.strip()
+    if not _NUMERIC_VERSION_RE.fullmatch(text):
         return None
-    tokens = re.findall(r"[0-9]+|[a-z]+", text)
-    if not tokens:
-        return None
-    result: list[tuple[int, Any]] = []
-    for token in tokens:
-        if token.isdigit():
-            result.append((0, int(token)))
-        else:
-            # PEP 440's pre-release spellings have a stable ordering before a
-            # final release.  Unknown local labels remain comparable but are
-            # reported as inferred by callers.
-            rank = {"dev": -3, "a": -2, "alpha": -2, "b": -1, "beta": -1, "rc": 0}
-            result.append((1, rank.get(token, 2)))
-    while len(result) > 1 and result[-1] == (0, 0):
-        result.pop()
-    return tuple(result)
+    result = tuple(int(part) for part in text.lstrip("v").split("."))
+    while len(result) > 1 and result[-1] == 0:
+        result = result[:-1]
+    return result
 
 
 def compare_versions(left: str, right: str) -> int | None:
@@ -225,7 +82,7 @@ def compare_versions(left: str, right: str) -> int | None:
 
 
 _REQ_NAME_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(.*)$")
-_SPECIFIER_RE = re.compile(r"^(===|==|!=|~=|>=|<=|>|<)\s*([0-9A-Za-z][^,\s]*)\s*$")
+_SPECIFIER_RE = re.compile(r"^(==|!=|~=|>=|<=|>|<)\s*([0-9A-Za-z][^,\s]*)\s*$")
 _MARKER_RE = re.compile(
     r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(==|!=|<=|>=|<|>|in|not\s+in)\s*(['\"])(.*?)\3\s*$"
 )
@@ -275,7 +132,7 @@ def _python_version(identity: Mapping[str, Any]) -> tuple[int, ...] | None:
 
 
 def _version_tuple(value: str) -> tuple[int, ...] | None:
-    match = re.match(r"^\s*v?(\d+(?:\.\d+)*)", value)
+    match = re.fullmatch(r"\s*v?(\d+(?:\.\d+)*)\s*", value)
     if match is None:
         return None
     return tuple(int(part) for part in match.group(1).split("."))
@@ -322,6 +179,20 @@ def _marker_matches(marker: str | None, identity: Mapping[str, Any]) -> bool | N
             result = actual in candidates
             if operator == "not in":
                 result = not result
+        elif key in {"python_version", "python_full_version"}:
+            actual_release = _version_tuple(actual)
+            expected_release = _version_tuple(expected)
+            if actual_release is None or expected_release is None:
+                return None
+            ordering = _compare_release(actual_release, expected_release)
+            result = {
+                "==": ordering == 0,
+                "!=": ordering != 0,
+                "<": ordering < 0,
+                "<=": ordering <= 0,
+                ">": ordering > 0,
+                ">=": ordering >= 0,
+            }[operator]
         else:
             result = {
                 "==": actual == expected,
@@ -447,9 +318,18 @@ def _group_distributions(snapshot: Mapping[str, Any]) -> dict[str, list[Mapping[
 
 def _certainty(snapshot: Mapping[str, Any]) -> str:
     collection = snapshot.get("collection")
-    if isinstance(collection, dict) and collection.get("status") == "complete":
-        return "certain"
-    return "unknown"
+    if not isinstance(collection, dict) or collection.get("status") != "complete":
+        return "unknown"
+    distributions = snapshot.get("distributions")
+    if not isinstance(distributions, list):
+        return "unknown"
+    if any(
+        isinstance(item, dict) and item.get("status") not in {None, "ok"} for item in distributions
+    ):
+        return "unknown"
+    if any(len(items) > 1 for items in _group_distributions(snapshot).values()):
+        return "unknown"
+    return "certain"
 
 
 def _identity(snapshot: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -477,6 +357,17 @@ def _interpreter_summary(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _snapshot_input(value: Mapping[str, Any] | str | os.PathLike[str]) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return validate_snapshot(value)
+    return load_snapshot(value)
+
+
+def _with_certainty(value: dict[str, Any], certainty: str) -> dict[str, Any]:
+    value["certainty"] = certainty
+    return value
+
+
 def _project_values(project: Mapping[str, Any] | None) -> tuple[str, list[str], list[str]]:
     if not project:
         return "", [], []
@@ -497,46 +388,76 @@ def _wheel_tag_match(tag: str, identity: Mapping[str, Any]) -> bool | None:
     if len(parts) != 3 or any(not part for part in parts):
         return None
     python_tag, abi_tag, platform_tag = parts
+    # A dotted field represents a compound tag.  The snapshot stores only the
+    # WHEEL record, not the full packaging tag set, so refusing to choose one
+    # candidate avoids a false certain result.
+    if any("." in part for part in parts):
+        return None
     python_version = _python_version(identity)
     if python_version is None:
         return None
     major, minor = python_version[:2]
-    cache_tag = str(identity.get("cache_tag", ""))
+    implementation = str(identity.get("implementation", "")).lower()
     cp_tag = f"cp{major}{minor}"
-    py_tag = f"py{major}{minor}"
-    py_ok = python_tag in {"py", "py3", f"py{major}"} or python_tag in {
-        py_tag,
-        cp_tag,
-        cache_tag.replace("-", "") if cache_tag else "",
-    }
-    if python_tag.startswith("py3") and python_tag[3:].isdigit():
-        py_ok = py_ok or (int(python_tag[3:]) <= minor and major == 3)
-    if not py_ok:
+    if python_tag == "py3":
+        python_match: bool | None = major == 3
+    elif python_tag == f"py{major}{minor}":
+        python_match = True
+    elif python_tag.startswith("py") and python_tag[2:].isdigit():
+        python_match = False
+    elif python_tag == cp_tag:
+        python_match = implementation == "cpython"
+    elif python_tag.startswith("cp") and python_tag[2:].isdigit():
+        python_match = False if implementation == "cpython" else None
+    else:
+        python_match = None
+    if python_match is False:
+        if python_tag.startswith("cp") and abi_tag == "abi3":
+            return None
         return False
-    if abi_tag not in {"none", "abi3", cp_tag, cache_tag.split("-", 1)[-1] if cache_tag else ""}:
-        if abi_tag.startswith("cp") and abi_tag != cp_tag:
-            return False
+    if python_match is None:
         return None
 
-    platform_name = str(identity.get("platform", ""))
+    if abi_tag == "none":
+        abi_match: bool | None = True
+    elif abi_tag == cp_tag:
+        abi_match = implementation == "cpython"
+    elif abi_tag == "abi3":
+        # ABI3 compatibility depends on the wheel's minimum CPython ABI and
+        # platform support; neither is represented by this snapshot field.
+        return None
+    else:
+        abi_match = None
+    if abi_match is False:
+        return False
+    if abi_match is None:
+        return None
+
+    platform_name = str(identity.get("platform", "")).lower()
     machine = str(identity.get("machine", "")).lower().replace("-", "_")
     if platform_tag == "any":
         return True
-    if platform_name.startswith("linux"):
-        if not (platform_tag.startswith(("manylinux", "musllinux", "linux_"))):
-            return False
-        if platform_tag.endswith((machine, "_any")) or machine in platform_tag:
-            return True
-        return None
     if platform_name.startswith("win"):
-        expected = {"x86_64": "win_amd64", "amd64": "win_amd64", "aarch64": "win_arm64"}.get(
-            machine
-        )
-        return expected == platform_tag if expected else None
+        expected = {
+            "x86_64": "win_amd64",
+            "amd64": "win_amd64",
+            "aarch64": "win_arm64",
+            "arm64": "win_arm64",
+        }.get(machine)
+        if platform_tag.startswith("win_") and expected:
+            return platform_tag == expected
+        return None
+    if platform_name.startswith("linux"):
+        # A plain linux tag can be matched from sys.platform/machine.  The
+        # glibc/musl family and manylinux policy version require dimensions
+        # that the offline identity does not capture.
+        if platform_tag.startswith(("manylinux", "musllinux")):
+            return None
+        if platform_tag.startswith("linux_") and machine:
+            return platform_tag == f"linux_{machine}"
+        return None
     if platform_name == "darwin":
-        if not platform_tag.startswith("macosx_"):
-            return False
-        return machine in platform_tag or platform_tag.endswith("_universal2")
+        return None
     return None
 
 
@@ -678,19 +599,17 @@ def _dependency_issue(
 
 
 def _satisfies_specifier(version: str, specifier: str) -> bool | None:
-    actual = _version_tokens(version)
-    if actual is None:
-        return None
     for part in specifier.split(","):
         match = _SPECIFIER_RE.match(part.strip())
         if match is None:
             return None
         operator, expected_text = match.groups()
         if expected_text.endswith(".*"):
-            expected = _version_tokens(expected_text[:-2])
-            if expected is None:
+            actual_release = _version_tuple(version)
+            expected_release = _version_tuple(expected_text[:-2])
+            if actual_release is None or expected_release is None:
                 return None
-            equal = actual[: len(expected)] == expected
+            equal = actual_release[: len(expected_release)] == expected_release
             if operator == "==" and not equal:
                 return False
             if operator == "!=" and equal:
@@ -698,10 +617,11 @@ def _satisfies_specifier(version: str, specifier: str) -> bool | None:
             if operator not in {"==", "!="}:
                 return None
             continue
-        expected = _version_tokens(expected_text)
-        if expected is None:
+        if _version_tokens(version) is None or _version_tokens(expected_text) is None:
             return None
-        ordering = (actual > expected) - (actual < expected)
+        ordering = compare_versions(version, expected_text)
+        if ordering is None:
+            return None
         if operator == "==" and ordering != 0:
             return False
         if operator == "!=" and ordering == 0:
@@ -719,7 +639,11 @@ def _satisfies_specifier(version: str, specifier: str) -> bool | None:
             if release is None:
                 return None
             upper = _compatible_upper_bound(release)
-            if _compare_release(_version_tuple(version) or (), upper) >= 0:
+            upper_text = ".".join(str(part) for part in upper)
+            upper_ordering = compare_versions(version, upper_text)
+            if upper_ordering is None:
+                return None
+            if upper_ordering >= 0:
                 return False
     return True
 
@@ -802,18 +726,37 @@ def _import_comparison(
     for normalized in sorted(set(before) | set(after)):
         old = before.get(normalized, [])
         new = after.get(normalized, [])
-        old_names, old_available = _dist_import_names(old[0]) if old else ([], False)
-        new_names, new_available = _dist_import_names(new[0]) if new else ([], False)
+        old_evidence = [_dist_import_names(item) for item in old]
+        new_evidence = [_dist_import_names(item) for item in new]
+        old_available = any(available for _names, available in old_evidence)
+        new_available = any(available for _names, available in new_evidence)
+        old_names = sorted({name for names, _available in old_evidence for name in names})
+        new_names = sorted({name for names, _available in new_evidence for name in names})
+        ambiguous = len(old) > 1 or len(new) > 1
         record: dict[str, Any] = {
             "project_name": str((new or old)[0].get("name", normalized)),
             "normalized_project_name": normalized,
             "import_names": new_names,
             "before": old_names,
             "after": new_names,
-            "status": "observed" if new_available or old_available else "unknown",
-            "certainty": "observed" if new_available or old_available else "unknown",
+            "status": (
+                "ambiguous"
+                if ambiguous
+                else "observed"
+                if new_available or old_available
+                else "unknown"
+            ),
+            "certainty": (
+                "unknown"
+                if ambiguous
+                else "observed"
+                if new_available or old_available
+                else "unknown"
+            ),
         }
-        if not new_available and not old_available:
+        if ambiguous:
+            record["reason"] = "multiple distributions share this normalized project name"
+        elif not new_available and not old_available:
             record["reason"] = "snapshot has no import-name evidence"
         evidence.append(record)
         if old_available and new_available and old_names != new_names:
@@ -822,21 +765,24 @@ def _import_comparison(
 
 
 def compare_snapshots(
-    before: Mapping[str, Any],
-    after: Mapping[str, Any],
+    before: Mapping[str, Any] | str | os.PathLike[str],
+    after: Mapping[str, Any] | str | os.PathLike[str],
     *,
     project: Mapping[str, Any] | None = None,
     project_metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compare two snapshots and produce deterministic JSON-compatible evidence."""
 
-    left = validate_snapshot(before)
-    right = validate_snapshot(after)
+    left = _snapshot_input(before)
+    right = _snapshot_input(after)
     if project is not None and project_metadata is not None:
         raise DiffError("invalid-project", "pass only one of project or project_metadata")
     project_input = project if project is not None else project_metadata
     old_grouped = _group_distributions(left)
     new_grouped = _group_distributions(right)
+    left_certainty = _certainty(left)
+    right_certainty = _certainty(right)
+    evidence_certainty = "certain" if left_certainty == right_certainty == "certain" else "unknown"
     added: list[dict[str, Any]] = []
     removed: list[dict[str, Any]] = []
     upgraded: list[dict[str, Any]] = []
@@ -845,11 +791,30 @@ def compare_snapshots(
     for normalized in sorted(set(old_grouped) | set(new_grouped)):
         old_items = old_grouped.get(normalized, [])
         new_items = new_grouped.get(normalized, [])
+        if len(old_items) > 1 or len(new_items) > 1:
+            changed.append(
+                {
+                    "name": str((new_items or old_items)[0].get("name", normalized)),
+                    "normalized_name": normalized,
+                    "before": [_dist_public(item) for item in old_items],
+                    "after": [_dist_public(item) for item in new_items],
+                    "certainty": "unknown",
+                    "reason": (
+                        "multiple distributions share this normalized project name; "
+                        "version transition is ambiguous"
+                    ),
+                }
+            )
+            continue
         if not old_items:
-            added.extend(_dist_public(item) for item in new_items)
+            added.extend(
+                _with_certainty(_dist_public(item), evidence_certainty) for item in new_items
+            )
             continue
         if not new_items:
-            removed.extend(_dist_public(item) for item in old_items)
+            removed.extend(
+                _with_certainty(_dist_public(item), evidence_certainty) for item in old_items
+            )
             continue
         old = old_items[-1]
         new = new_items[-1]
@@ -878,6 +843,7 @@ def compare_snapshots(
                     "to_version": new_version,
                     "before": _dist_public(old),
                     "after": _dist_public(new),
+                    "certainty": evidence_certainty,
                 }
             )
         elif ordering > 0:
@@ -889,6 +855,7 @@ def compare_snapshots(
                     "to_version": new_version,
                     "before": _dist_public(old),
                     "after": _dist_public(new),
+                    "certainty": evidence_certainty,
                 }
             )
 
@@ -960,6 +927,13 @@ def compare_snapshots(
         "after": _interpreter_summary(right),
         "status": status,
         "summary": summary,
+        "changes": {
+            "added": added,
+            "removed": removed,
+            "upgraded": upgraded,
+            "downgraded": downgraded,
+            "changed": changed,
+        },
         "added": added,
         "removed": removed,
         "upgraded": upgraded,
@@ -973,8 +947,8 @@ def compare_snapshots(
 
 
 def diff_snapshots(
-    before: Mapping[str, Any],
-    after: Mapping[str, Any],
+    before: Mapping[str, Any] | str | os.PathLike[str],
+    after: Mapping[str, Any] | str | os.PathLike[str],
     *,
     project: Mapping[str, Any] | None = None,
     project_metadata: Mapping[str, Any] | None = None,
@@ -987,3 +961,34 @@ def diff_snapshots(
         project=project,
         project_metadata=project_metadata,
     )
+
+
+def check_compatibility(
+    snapshot: Mapping[str, Any] | str | os.PathLike[str],
+    *,
+    project: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return offline compatibility/dependency evidence for one snapshot."""
+
+    value = _snapshot_input(snapshot)
+    report = compare_snapshots(value, value, project=project)
+    status = report["status"]
+    if status == "unchanged":
+        status = "compatible"
+    return {
+        "schema_version": "envlens.compatibility/v1",
+        "status": status,
+        "compatibility": report["compatibility"],
+        "dependencies": report["dependencies"],
+        "summary": report["summary"],
+    }
+
+
+def check_snapshot_compatibility(
+    snapshot: Mapping[str, Any] | str | os.PathLike[str],
+    *,
+    project: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Compatibility alias for :func:`check_compatibility`."""
+
+    return check_compatibility(snapshot, project=project)

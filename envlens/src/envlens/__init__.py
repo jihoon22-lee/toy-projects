@@ -1,6 +1,13 @@
 """Offline, deterministic Python environment snapshots and checks."""
 
-from envlens.diff import DiffError, compare_snapshots, diff_snapshots, load_snapshot
+from envlens.diff import (
+    DiffError,
+    check_compatibility,
+    check_snapshot_compatibility,
+    compare_snapshots,
+    diff_snapshots,
+    load_snapshot,
+)
 from envlens.io import write_snapshot
 from envlens.project import (
     ProjectError,
@@ -29,6 +36,8 @@ __all__ = [
     "ReportError",
     "RuntimeCheckError",
     "SnapshotError",
+    "check_compatibility",
+    "check_snapshot_compatibility",
     "collect_snapshot",
     "compare_snapshots",
     "diff_snapshots",

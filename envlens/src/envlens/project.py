@@ -210,7 +210,10 @@ def _parse_value(value: str, *, line: int) -> Any:
         return int(cleaned)
     if re.fullmatch(r"[-+]?(?:\d+\.\d*|\d*\.\d+)", cleaned):
         return float(cleaned)
-    return cleaned
+    raise ProjectError(
+        "unsupported-pyproject",
+        f"unsupported bare TOML value on line {line}",
+    )
 
 
 def _set_nested(
