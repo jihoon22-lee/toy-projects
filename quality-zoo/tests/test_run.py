@@ -304,6 +304,7 @@ class RunContractTests(unittest.TestCase):
             {
                 "cpp.asan-use-after-free",
                 "cpp.lsan-memory-leak",
+                "cpp.qt-missing-parent-constructor",
                 "cpp.sanitizer-clean",
                 "cpp.ubsan-signed-overflow",
                 "python.dead-private-function",
@@ -324,8 +325,13 @@ class RunContractTests(unittest.TestCase):
                     )
                     report_contract._validate_expectation(expectation)
 
-        cpp_ids = {name for name in registry if name.startswith("cpp.")}
-        for scenario_id in cpp_ids:
+        runtime_sanitizer_ids = {
+            "cpp.asan-use-after-free",
+            "cpp.lsan-memory-leak",
+            "cpp.sanitizer-clean",
+            "cpp.ubsan-signed-overflow",
+        }
+        for scenario_id in runtime_sanitizer_ids:
             selector = json.loads(
                 (registry[scenario_id] / "scenario.json").read_text(encoding="utf-8")
             )
@@ -336,6 +342,16 @@ class RunContractTests(unittest.TestCase):
                     "e7f1a2ce7147057538873a802715c7bf2b12e530a85070af862e02e378caceb8",
                 },
             )
+
+        qt_selector = json.loads(
+            (
+                registry["cpp.qt-missing-parent-constructor"] / "scenario.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            set(qt_selector["expectations"]),
+            {"8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4"},
+        )
 
     def test_run_manifest_success_copies_reports_and_records_reproducible_summary(
         self,
