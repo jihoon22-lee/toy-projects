@@ -34,7 +34,7 @@
 | diskmap | C++17, Qt, qmake | D1/D2 complete · D3 explorer workbench merged by PR #46 · exact-main evidence green · `0.1.0`/`Unreleased` | treemap/table, filters, uncertainty, accessible navigation, rescan restoration verified; cleanup UX는 D4~D6에서 확장 |
 | buildscope | Python + C++17/Qt, CMake | B0~B5 implementation, remote acceptance, exact-main CI, trusted main Pages와 `0.5.0` tag/release/public asset audit complete | B3~B5 첫 usable release boundary published and audited |
 | envlens | pure Python 3.10+ package/CLI | deterministic snapshot core · path-aware manifest/CI matrix · PR #50 merged · exact-main green | `0.1.0`/`Unreleased`; E2/E3 and release remain pending |
-| quality-zoo | Python 3.10, stdlib runner | scenario contract/local candidate consumer · PR #49 remote PR CI/sticky/exact-main complete | test asset only; Q1~Q5 corpus pending |
+| quality-zoo | Python 3.10, stdlib runner | scenario contract/local candidate consumer · released-artifact PR #49 remote PR CI/sticky/exact-main complete · candidate cross-repo acceptance pending | test asset only; Q1~Q5 corpus pending |
 | ici/viewer | Qt-free core + Qt6 GUI | 3 tests, TEM 4.94 | core 중심, 셸과 report workflow 부족 |
 
 현재 공백:
@@ -1440,7 +1440,9 @@ expectation 경로를 선언하고, 각 경로가 가리키는 full strict schem
 - 필요한 capability와 skip 조건
 
 **현재 상태 (2026-09-03):** scenario contract, dependency-free runner, candidate archive intake와
-local candidate consumer 구현은 완료됐다. Registry는 Python 3.10 표준 라이브러리만 사용하는
+local candidate consumer 구현은 완료됐다. Released-artifact Q0의 toy PR/exact-main acceptance도
+완료됐지만, ici-hosted candidate consumer의 remote cross-repository acceptance는 ici workflow가
+병합·dispatch될 때까지 pending이다. Registry는 Python 3.10 표준 라이브러리만 사용하는
 `manifest.json`으로 고정했으며, scenario의 `ici.toml`은 ici 입력으로 남기고 runner가 TOML
 parser를 추가하지 않는다. `ICI_BIN`은 명시적인 local executable path이고, ordinary CI는
 released ici `v0.10.2` pin을 유지한다. Candidate ZIP과 optional exact five authenticated
@@ -1478,6 +1480,17 @@ Authenticated API evidence validation은 통과했다. `python.dead-private-func
 suite `WARN`이지만 contract `PASS`였고, expected finding 하나만 match됐으며 clean counterpart
 false positive가 없었다. 이 evidence는 version/release bump를 의미하지 않으며, same package
 version의 released/candidate report를 하나의 expectation으로 취급하지 않는다.
+
+sanitizer-normalization target `9d470edca7ab037a24dcd6594531a822f116548b`의 candidate selector도
+추가했다. Producer run `33706057540`은 success이고 artifact `9875319095`의 raw archive
+SHA-256은 `4aec084b3a30ac01a1df5124fa3b42b7f51d23f66c12b490194a84549be9db27`, executable
+SHA-256은 `e7f1a2ce7147057538873a802715c7bf2b12e530a85070af862e02e378caceb8`다. 이 digest는
+`expectations/candidate-9d470ed.json`을 선택하며 authenticated local intake evidence가
+성공했다. 해당 Q0 runner는 contract `PASS`, observed suite `WARN`, one matched finding,
+zero errors를 기록했다. 이는 기존 Python dead-code known-answer에 대한 local candidate
+evidence이며 sanitizer rule 자체를 검증하거나 remote cross-repository acceptance를 닫는
+증거가 아니다. ici-hosted candidate workflow merge/dispatch와 ASan/UBSan/LSan scenario는
+여전히 pending이다.
 
 Quality Zoo의 다음 exact-main push [run `33698248293`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33698248293)에서도
 artifact `9872561713`의 contract는 `PASS`였고, stable scenario 하나의 observed `WARN`은 예상된
@@ -1601,9 +1614,10 @@ ici와 toy-projects가 함께 바뀌는 기능은 다음 순서를 따른다.
 - [ ] E0~E4: envlens pure-Python environment explorer와 release 완료 (E1 snapshot 구현·PR #50
   merge·exact-main evidence complete; E2~E4 pending)
 - [ ] A0~A4: abilens Makefile/ELF explorer와 release 완료
-- [ ] Q0~Q5: Python/C++/Qt/build/hybrid stable expected-finding corpus 완료 (Q0 implementation/local
-  candidate consumer와 PR #49 remote acceptance, 그리고 EnvLens merge의 exact-main QZ artifact complete;
-  Q1~Q5 pending)
+- [ ] Q0~Q5: Python/C++/Qt/build/hybrid stable expected-finding corpus 완료 (released-artifact Q0
+  implementation과 PR #49 remote acceptance, EnvLens merge의 exact-main QZ artifact, 그리고 새
+  candidate SHA selector/local authenticated evidence는 complete; ici-hosted candidate workflow의
+  remote cross-repository acceptance와 Q1~Q5는 pending)
 - [ ] repository path-aware CI, ici pin/candidate와 artifact 정책 완료
 
 체크포인트는 기능이 시연되는 것만으로 닫지 않는다. 공통 제품 완성 불변식, native tests, ici 실측, 문서와 오류 처리까지 모두 충족해야 한다.
