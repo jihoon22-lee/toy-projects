@@ -21,8 +21,6 @@ from envlens.snapshot_input import (
     validate_snapshot,
 )
 
-MAX_COMPATIBILITY_ITEMS = 100_000
-
 __all__ = [
     "DiffError",
     "check_compatibility",
@@ -927,13 +925,6 @@ def compare_snapshots(
         "after": _interpreter_summary(right),
         "status": status,
         "summary": summary,
-        "changes": {
-            "added": added,
-            "removed": removed,
-            "upgraded": upgraded,
-            "downgraded": downgraded,
-            "changed": changed,
-        },
         "added": added,
         "removed": removed,
         "upgraded": upgraded,
