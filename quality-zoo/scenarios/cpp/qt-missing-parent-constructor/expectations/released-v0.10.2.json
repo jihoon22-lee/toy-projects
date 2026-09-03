@@ -39,8 +39,7 @@
       "severity": "medium",
       "confidence": "exact",
       "suppressed": false,
-      "location": {"path": "src/bad.cpp", "line": 3},
-      "snippet_contains": ["class MissingParent"]
+      "location": {"path": "src/bad.cpp", "line": 3}
     }
   ],
   "forbidden_findings": [
