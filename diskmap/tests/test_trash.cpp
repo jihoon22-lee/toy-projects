@@ -6,6 +6,10 @@
 #include "diskmap/fs_source.hpp"
 #include "diskmap/trash.hpp"
 
+#if defined(__linux__)
+#include "../src/trash_linux_internal.hpp"
+#endif
+
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -90,6 +94,158 @@ bool writeFile(const fs::path& path, const std::string& contents) {
     output.write(contents.data(), static_cast<std::streamsize>(contents.size()));
     return output.good();
 }
+
+#if defined(__linux__)
+enum class MutationScenarioKind {
+    BlockMetadataReserve,
+    BlockPayloadMove,
+    MutateMoved,
+    MutateMovedAndBlockRollback,
+    BlockMetadataFinalize,
+    DeleteMovedAndBlockRollback,
+    MutateMovedAndDetachParent,
+    DetachParentDuringMoveRollback,
+    BlockPayloadRestore,
+    DetachRestoreParent,
+    DetachRestoreParentAndBlockRollback,
+};
+
+struct MutationScenario {
+    MutationScenarioKind kind = MutationScenarioKind::MutateMoved;
+    fs::path auxiliary_path;
+    std::error_code error;
+    bool invoked = false;
+};
+
+thread_local MutationScenario* currentMutationScenario = nullptr;
+
+void mutateTrashOperation(diskmap::detail::TrashMutationTestPoint point,
+                          const fs::path& original,
+                          const fs::path& trashed) noexcept {
+    MutationScenario& scenario = *currentMutationScenario;
+    scenario.invoked = true;
+    if (point == diskmap::detail::TrashMutationTestPoint::BeforeMetadataReserve) {
+        if (scenario.kind == MutationScenarioKind::BlockMetadataReserve) {
+            scenario.auxiliary_path = trashed;
+            if (!writeFile(trashed, "metadata reservation collision")) {
+                scenario.error = std::make_error_code(std::errc::io_error);
+            }
+        }
+        return;
+    }
+    if (point == diskmap::detail::TrashMutationTestPoint::BeforePayloadMove) {
+        if (scenario.kind == MutationScenarioKind::BlockPayloadMove) {
+            scenario.auxiliary_path = trashed;
+            if (!writeFile(trashed, "payload destination collision")) {
+                scenario.error = std::make_error_code(std::errc::io_error);
+            }
+        }
+        return;
+    }
+    if (point == diskmap::detail::TrashMutationTestPoint::BeforeMoveRollback) {
+        if (scenario.kind != MutationScenarioKind::DetachParentDuringMoveRollback) {
+            return;
+        }
+        fs::rename(original.parent_path(), scenario.auxiliary_path, scenario.error);
+        if (!scenario.error) {
+            fs::create_directory(original.parent_path(), scenario.error);
+        }
+        return;
+    }
+    if (point == diskmap::detail::TrashMutationTestPoint::PayloadMoved) {
+        if (scenario.kind == MutationScenarioKind::BlockMetadataFinalize) {
+            scenario.auxiliary_path =
+                trashed.parent_path().parent_path() / "info"
+                / (trashed.filename().string() + ".trashinfo");
+            if (!writeFile(scenario.auxiliary_path, "reserved by a concurrent writer")) {
+                scenario.error = std::make_error_code(std::errc::io_error);
+            }
+            return;
+        }
+        if (scenario.kind == MutationScenarioKind::DeleteMovedAndBlockRollback) {
+            if (!fs::remove(trashed, scenario.error) || scenario.error
+                || !writeFile(original, "replacement after payload removal")) {
+                if (!scenario.error) {
+                    scenario.error = std::make_error_code(std::errc::io_error);
+                }
+            }
+            return;
+        }
+        if (scenario.kind == MutationScenarioKind::MutateMovedAndDetachParent) {
+            if (!writeFile(trashed, "changed before detached-parent rollback")) {
+                scenario.error = std::make_error_code(std::errc::io_error);
+                return;
+            }
+            fs::rename(original.parent_path(), scenario.auxiliary_path,
+                       scenario.error);
+            if (!scenario.error) {
+                fs::create_directory(original.parent_path(), scenario.error);
+            }
+            return;
+        }
+        if (scenario.kind == MutationScenarioKind::DetachParentDuringMoveRollback) {
+            if (!writeFile(trashed, "changed before rollback identity recheck")) {
+                scenario.error = std::make_error_code(std::errc::io_error);
+            }
+            return;
+        }
+        if (scenario.kind != MutationScenarioKind::MutateMoved
+            && scenario.kind != MutationScenarioKind::MutateMovedAndBlockRollback) {
+            return;
+        }
+        if (scenario.kind == MutationScenarioKind::MutateMovedAndBlockRollback
+            && (!fs::remove(trashed, scenario.error) || scenario.error)) {
+            if (!scenario.error) {
+                scenario.error = std::make_error_code(std::errc::io_error);
+            }
+            return;
+        }
+        if (!writeFile(trashed, "changed after the reviewed move")) {
+            scenario.error = std::make_error_code(std::errc::io_error);
+            return;
+        }
+        if (scenario.kind == MutationScenarioKind::MutateMovedAndBlockRollback
+            && !writeFile(original, "replacement at the reviewed name")) {
+            scenario.error = std::make_error_code(std::errc::io_error);
+        }
+        return;
+    }
+    if (point == diskmap::detail::TrashMutationTestPoint::BeforePayloadRestore) {
+        if (scenario.kind == MutationScenarioKind::BlockPayloadRestore
+            && !writeFile(original, "restore destination collision")) {
+            scenario.error = std::make_error_code(std::errc::io_error);
+        }
+        return;
+    }
+    if (scenario.kind != MutationScenarioKind::DetachRestoreParent
+        && scenario.kind != MutationScenarioKind::DetachRestoreParentAndBlockRollback) {
+        return;
+    }
+    fs::rename(original.parent_path(), scenario.auxiliary_path, scenario.error);
+    if (scenario.error) {
+        return;
+    }
+    fs::create_directory(original.parent_path(), scenario.error);
+    if (!scenario.error
+        && scenario.kind == MutationScenarioKind::DetachRestoreParentAndBlockRollback
+        && !writeFile(trashed, "rollback destination blocker")) {
+        scenario.error = std::make_error_code(std::errc::io_error);
+    }
+}
+
+class ScopedTrashMutationHook {
+public:
+    explicit ScopedTrashMutationHook(MutationScenario& scenario) {
+        currentMutationScenario = &scenario;
+        diskmap::detail::setTrashMutationTestHook(&mutateTrashOperation);
+    }
+
+    ~ScopedTrashMutationHook() {
+        diskmap::detail::setTrashMutationTestHook(nullptr);
+        currentMutationScenario = nullptr;
+    }
+};
+#endif
 
 std::string readFile(const fs::path& path) {
     std::ifstream input(path, std::ios::binary);
@@ -948,6 +1104,28 @@ void testMetadataAndRestoreFailures(const fs::path& root) {
               == diskmap::TrashStatus::IoError);
         CHECK(fs::is_regular_file(payload));
     }
+    // A metadata document exactly at the bound is still readable; the
+    // post-boundary EOF probe must not turn it into an overflow failure.
+    {
+        const std::string token = "diskmap-bounded-metadata";
+        const fs::path payload = files / token;
+        const fs::path destination = root / "bounded-metadata-restore.txt";
+        CHECK(writeFile(payload, "bounded metadata payload"));
+        const auto target = targetFor(payload);
+        std::string content = restoreInfo(destination.generic_string(), target);
+        constexpr std::size_t kMetadataBound = 16 * 1024;
+        CHECK(content.size() < kMetadataBound);
+        if (content.size() < kMetadataBound) {
+            content.append(kMetadataBound - content.size(), 'x');
+            CHECK_EQ(content.size(), kMetadataBound);
+            CHECK(writeRestoreInfo(options, token, content));
+            const auto restored = diskmap::restoreFromTrash(token, options);
+            CHECK(restored.status == diskmap::TrashStatus::Restored);
+            CHECK(fs::is_regular_file(destination));
+            CHECK_EQ(readFile(destination), "bounded metadata payload");
+            CHECK(!fs::exists(payload));
+        }
+    }
     {
         const std::string token = "diskmap-directory-metadata";
         const fs::path payload = files / token;
@@ -1038,6 +1216,7 @@ void testCrashRecoveryMetadata(const fs::path& root) {
     }
 }
 
+#if defined(__linux__)
 void testConcurrentMutationLock(const fs::path& root) {
     const diskmap::TrashOptions options = optionsFor(root);
     CHECK(ensurePrivateTrash(options));
@@ -1087,6 +1266,351 @@ void testConcurrentMutationLock(const fs::path& root) {
     CHECK_EQ(readFile(source), "serialized mutation");
 }
 
+void testDeterministicRollbackRecovery(const fs::path& root) {
+    const diskmap::TrashOptions options = optionsFor(root);
+    CHECK(ensurePrivateTrash(options));
+
+    // No-replace creation protects both the reserved metadata name and the
+    // payload token from a concurrent claimant, leaving the source untouched.
+    {
+        const fs::path source = root / "metadata-reservation-collision.txt";
+        CHECK(writeFile(source, "metadata reservation payload"));
+        MutationScenario scenario;
+        scenario.kind = MutationScenarioKind::BlockMetadataReserve;
+        std::vector<diskmap::TrashReceipt> receipts;
+        {
+            ScopedTrashMutationHook hook(scenario);
+            receipts = diskmap::movePlanToTrash(
+                planFor({targetFor(source)}), options);
+        }
+        CHECK(scenario.invoked);
+        CHECK(!scenario.error);
+        CHECK_EQ(receipts.size(), static_cast<std::size_t>(1));
+        if (!receipts.empty()) {
+            CHECK(receipts[0].status == diskmap::TrashStatus::IoError);
+        }
+        CHECK_EQ(readFile(source), "metadata reservation payload");
+        CHECK_EQ(readFile(scenario.auxiliary_path),
+                 "metadata reservation collision");
+    }
+    {
+        const fs::path source = root / "payload-token-collision.txt";
+        CHECK(writeFile(source, "payload token collision source"));
+        MutationScenario scenario;
+        scenario.kind = MutationScenarioKind::BlockPayloadMove;
+        std::vector<diskmap::TrashReceipt> receipts;
+        {
+            ScopedTrashMutationHook hook(scenario);
+            receipts = diskmap::movePlanToTrash(
+                planFor({targetFor(source)}), options);
+        }
+        CHECK(scenario.invoked);
+        CHECK(!scenario.error);
+        CHECK_EQ(receipts.size(), static_cast<std::size_t>(1));
+        if (!receipts.empty()) {
+            CHECK(receipts[0].status == diskmap::TrashStatus::DestinationExists);
+        }
+        CHECK_EQ(readFile(source), "payload token collision source");
+        CHECK_EQ(readFile(scenario.auxiliary_path), "payload destination collision");
+    }
+
+    // A moved payload that changes before final validation is returned to the
+    // reviewed name when that name remains free.
+    {
+        const fs::path source = root / "rollback-after-move.txt";
+        CHECK(writeFile(source, "reviewed"));
+        const diskmap::CleanupTarget target = targetFor(source);
+        MutationScenario scenario;
+        scenario.kind = MutationScenarioKind::MutateMoved;
+        std::vector<diskmap::TrashReceipt> receipts;
+        {
+            ScopedTrashMutationHook hook(scenario);
+            receipts = diskmap::movePlanToTrash(planFor({target}), options);
+        }
+        CHECK(scenario.invoked);
+        CHECK(!scenario.error);
+        CHECK_EQ(receipts.size(), static_cast<std::size_t>(1));
+        if (!receipts.empty()) {
+            CHECK(receipts[0].status == diskmap::TrashStatus::RevalidationFailed);
+            CHECK(receipts[0].restore_token.empty());
+        }
+        CHECK_EQ(readFile(source), "changed after the reviewed move");
+    }
+
+    // If another entry claims the reviewed name, no-replace rollback must not
+    // overwrite it. The changed payload stays recoverable under metadata that
+    // is rewritten from its actual post-race identity.
+    {
+        const fs::path source = root / "blocked-rollback-after-move.txt";
+        CHECK(writeFile(source, "reviewed"));
+        const diskmap::CleanupTarget target = targetFor(source);
+        MutationScenario scenario;
+        scenario.kind = MutationScenarioKind::MutateMovedAndBlockRollback;
+        std::vector<diskmap::TrashReceipt> receipts;
+        {
+            ScopedTrashMutationHook hook(scenario);
+            receipts = diskmap::movePlanToTrash(planFor({target}), options);
+        }
+        CHECK(scenario.invoked);
+        CHECK(!scenario.error);
+        CHECK_EQ(receipts.size(), static_cast<std::size_t>(1));
+        if (receipts.empty()) {
+            return;
+        }
+        const diskmap::TrashReceipt& failed = receipts[0];
+        CHECK(failed.status == diskmap::TrashStatus::RevalidationFailed);
+        CHECK(!failed.restore_token.empty());
+        CHECK(failed.message.find("rollback was blocked") != std::string::npos);
+        CHECK_EQ(readFile(source), "replacement at the reviewed name");
+        CHECK_EQ(readFile(failed.trashed_path), "changed after the reviewed move");
+
+        std::error_code error;
+        CHECK(fs::remove(source, error));
+        CHECK(!error);
+        const auto restored =
+            diskmap::restoreFromTrash(failed.restore_token, options);
+        CHECK(restored.status == diskmap::TrashStatus::Restored);
+        CHECK_EQ(readFile(source), "changed after the reviewed move");
+    }
+
+    // A source parent renamed after the move must never receive a rollback via
+    // its now-detached descriptor. Keep the payload and rewritten metadata in
+    // Trash so the lexical destination can be retried safely.
+    {
+        const fs::path parent = root / "move-parent-race";
+        const fs::path detached = root / "move-parent-race-detached";
+        CHECK(fs::create_directory(parent));
+        const fs::path source = parent / "payload.txt";
+        CHECK(writeFile(source, "move parent race payload"));
+        const diskmap::CleanupTarget target = targetFor(source);
+        MutationScenario scenario;
+        scenario.kind = MutationScenarioKind::MutateMovedAndDetachParent;
+        scenario.auxiliary_path = detached;
+        std::vector<diskmap::TrashReceipt> receipts;
+        {
+            ScopedTrashMutationHook hook(scenario);
+            receipts = diskmap::movePlanToTrash(planFor({target}), options);
+        }
+        CHECK(scenario.invoked);
+        CHECK(!scenario.error);
+        CHECK_EQ(receipts.size(), static_cast<std::size_t>(1));
+        if (receipts.empty()) {
+            return;
+        }
+        CHECK(receipts[0].status == diskmap::TrashStatus::RevalidationFailed);
+        CHECK(!receipts[0].restore_token.empty());
+        CHECK(receipts[0].message.find("source directory changed")
+              != std::string::npos);
+        CHECK(!fs::exists(detached / "payload.txt"));
+        CHECK(!fs::exists(source));
+        CHECK_EQ(readFile(receipts[0].trashed_path),
+                 "changed before detached-parent rollback");
+        std::error_code error;
+        CHECK(fs::remove(detached, error));
+        CHECK(!error);
+        const auto restored =
+            diskmap::restoreFromTrash(receipts[0].restore_token, options);
+        CHECK(restored.status == diskmap::TrashStatus::Restored);
+        CHECK_EQ(readFile(source), "changed before detached-parent rollback");
+    }
+
+    // If the parent changes after the initial rollback anchor check, the
+    // post-rename identity check moves the payload back out of the detached
+    // directory and keeps it recoverable under the returned token.
+    {
+        const fs::path parent = root / "move-rollback-window";
+        const fs::path detached = root / "move-rollback-window-detached";
+        CHECK(fs::create_directory(parent));
+        const fs::path source = parent / "payload.txt";
+        CHECK(writeFile(source, "rollback window payload"));
+        const diskmap::CleanupTarget target = targetFor(source);
+        MutationScenario scenario;
+        scenario.kind = MutationScenarioKind::DetachParentDuringMoveRollback;
+        scenario.auxiliary_path = detached;
+        std::vector<diskmap::TrashReceipt> receipts;
+        {
+            ScopedTrashMutationHook hook(scenario);
+            receipts = diskmap::movePlanToTrash(planFor({target}), options);
+        }
+        CHECK(scenario.invoked);
+        CHECK(!scenario.error);
+        CHECK_EQ(receipts.size(), static_cast<std::size_t>(1));
+        if (receipts.empty()) {
+            return;
+        }
+        CHECK(receipts[0].status == diskmap::TrashStatus::RevalidationFailed);
+        CHECK(!receipts[0].restore_token.empty());
+        CHECK(receipts[0].message.find("returned to Trash") != std::string::npos);
+        CHECK(!fs::exists(detached / "payload.txt"));
+        CHECK(!fs::exists(source));
+        CHECK_EQ(readFile(receipts[0].trashed_path),
+                 "changed before rollback identity recheck");
+        std::error_code error;
+        CHECK(fs::remove(detached, error));
+        CHECK(!error);
+        const auto restored =
+            diskmap::restoreFromTrash(receipts[0].restore_token, options);
+        CHECK(restored.status == diskmap::TrashStatus::Restored);
+        CHECK_EQ(readFile(source), "changed before rollback identity recheck");
+    }
+
+    // A concurrent final metadata name must not overwrite that entry. The
+    // payload is rolled back and the collision remains available for review.
+    {
+        const fs::path source = root / "metadata-finalize-collision.txt";
+        CHECK(writeFile(source, "metadata collision payload"));
+        const diskmap::CleanupTarget target = targetFor(source);
+        MutationScenario scenario;
+        scenario.kind = MutationScenarioKind::BlockMetadataFinalize;
+        std::vector<diskmap::TrashReceipt> receipts;
+        {
+            ScopedTrashMutationHook hook(scenario);
+            receipts = diskmap::movePlanToTrash(planFor({target}), options);
+        }
+        CHECK(scenario.invoked);
+        CHECK(!scenario.error);
+        CHECK_EQ(receipts.size(), static_cast<std::size_t>(1));
+        if (!receipts.empty()) {
+            CHECK(receipts[0].status == diskmap::TrashStatus::IoError);
+            CHECK(receipts[0].restore_token.empty());
+        }
+        CHECK_EQ(readFile(source), "metadata collision payload");
+        CHECK_EQ(readFile(scenario.auxiliary_path),
+                 "reserved by a concurrent writer");
+    }
+
+    // If an external actor removes the moved payload and also claims the old
+    // name, rollback and recovery-metadata reconstruction both fail closed.
+    // The replacement is preserved and no unusable restore token is promised.
+    {
+        const fs::path source = root / "removed-payload-rollback.txt";
+        CHECK(writeFile(source, "payload removed during validation"));
+        const diskmap::CleanupTarget target = targetFor(source);
+        MutationScenario scenario;
+        scenario.kind = MutationScenarioKind::DeleteMovedAndBlockRollback;
+        std::vector<diskmap::TrashReceipt> receipts;
+        {
+            ScopedTrashMutationHook hook(scenario);
+            receipts = diskmap::movePlanToTrash(planFor({target}), options);
+        }
+        CHECK(scenario.invoked);
+        CHECK(!scenario.error);
+        CHECK_EQ(receipts.size(), static_cast<std::size_t>(1));
+        if (!receipts.empty()) {
+            CHECK(receipts[0].status == diskmap::TrashStatus::RevalidationFailed);
+            CHECK(receipts[0].restore_token.empty());
+            CHECK(receipts[0].message.find("recovery metadata failed")
+                  != std::string::npos);
+            CHECK(!fs::exists(receipts[0].trashed_path));
+        }
+        CHECK_EQ(readFile(source), "replacement after payload removal");
+    }
+
+    // Replacing the lexical destination directory after restore is detected.
+    // The pinned original parent allows the payload to return to Trash, after
+    // which an ordinary retry can restore it into the new directory.
+    {
+        const fs::path parent = root / "restore-parent-race";
+        const fs::path detached = root / "restore-parent-race-detached";
+        CHECK(fs::create_directory(parent));
+        const fs::path source = parent / "payload.txt";
+        CHECK(writeFile(source, "restore race payload"));
+        const auto moved =
+            diskmap::movePlanToTrash(planFor({targetFor(source)}), options);
+        CHECK_EQ(moved.size(), static_cast<std::size_t>(1));
+        if (moved.empty() || moved[0].status != diskmap::TrashStatus::Moved) {
+            return;
+        }
+        MutationScenario scenario;
+        scenario.kind = MutationScenarioKind::DetachRestoreParent;
+        scenario.auxiliary_path = detached;
+        diskmap::TrashReceipt failed;
+        {
+            ScopedTrashMutationHook hook(scenario);
+            failed = diskmap::restoreFromTrash(moved[0].restore_token, options);
+        }
+        CHECK(scenario.invoked);
+        CHECK(!scenario.error);
+        CHECK(failed.status == diskmap::TrashStatus::RevalidationFailed);
+        CHECK(!fs::exists(source));
+        CHECK(fs::is_regular_file(moved[0].trashed_path));
+        std::error_code error;
+        CHECK(fs::remove(detached, error));
+        CHECK(!error);
+        const auto restored =
+            diskmap::restoreFromTrash(moved[0].restore_token, options);
+        CHECK(restored.status == diskmap::TrashStatus::Restored);
+        CHECK_EQ(readFile(source), "restore race payload");
+    }
+
+    // A destination appearing after the absence check still wins: restore's
+    // no-replace rename refuses it and leaves the Trash payload retryable.
+    {
+        const fs::path source = root / "restore-no-replace.txt";
+        CHECK(writeFile(source, "restore no-replace payload"));
+        const auto moved =
+            diskmap::movePlanToTrash(planFor({targetFor(source)}), options);
+        CHECK_EQ(moved.size(), static_cast<std::size_t>(1));
+        if (moved.empty() || moved[0].status != diskmap::TrashStatus::Moved) {
+            return;
+        }
+        MutationScenario scenario;
+        scenario.kind = MutationScenarioKind::BlockPayloadRestore;
+        diskmap::TrashReceipt failed;
+        {
+            ScopedTrashMutationHook hook(scenario);
+            failed = diskmap::restoreFromTrash(moved[0].restore_token, options);
+        }
+        CHECK(scenario.invoked);
+        CHECK(!scenario.error);
+        CHECK(failed.status == diskmap::TrashStatus::DestinationExists);
+        CHECK_EQ(readFile(source), "restore destination collision");
+        CHECK(fs::is_regular_file(moved[0].trashed_path));
+        std::error_code error;
+        CHECK(fs::remove(source, error));
+        CHECK(!error);
+        const auto restored =
+            diskmap::restoreFromTrash(moved[0].restore_token, options);
+        CHECK(restored.status == diskmap::TrashStatus::Restored);
+        CHECK_EQ(readFile(source), "restore no-replace payload");
+    }
+
+    // The same race with a claimed Trash token exercises the recovery outcome:
+    // neither the restored payload nor its metadata is deleted when rollback
+    // cannot use its no-replace destination.
+    {
+        const fs::path parent = root / "restore-rollback-blocked";
+        const fs::path detached = root / "restore-rollback-blocked-detached";
+        CHECK(fs::create_directory(parent));
+        const fs::path source = parent / "payload.txt";
+        CHECK(writeFile(source, "preserved restored payload"));
+        const auto moved =
+            diskmap::movePlanToTrash(planFor({targetFor(source)}), options);
+        CHECK_EQ(moved.size(), static_cast<std::size_t>(1));
+        if (moved.empty() || moved[0].status != diskmap::TrashStatus::Moved) {
+            return;
+        }
+        MutationScenario scenario;
+        scenario.kind = MutationScenarioKind::DetachRestoreParentAndBlockRollback;
+        scenario.auxiliary_path = detached;
+        diskmap::TrashReceipt failed;
+        {
+            ScopedTrashMutationHook hook(scenario);
+            failed = diskmap::restoreFromTrash(moved[0].restore_token, options);
+        }
+        CHECK(scenario.invoked);
+        CHECK(!scenario.error);
+        CHECK(failed.status == diskmap::TrashStatus::IoError);
+        CHECK(failed.restore_token.empty());
+        CHECK(failed.message.find("rollback failed") != std::string::npos);
+        CHECK_EQ(readFile(detached / "payload.txt"), "preserved restored payload");
+        CHECK_EQ(readFile(moved[0].trashed_path), "rollback destination blocker");
+        CHECK(fs::exists(options.data_home / "Trash" / "info"
+                         / (moved[0].restore_token + ".trashinfo")));
+    }
+}
+#endif
+
 } // namespace
 
 int main() {
@@ -1105,6 +1629,7 @@ int main() {
     testMetadataAndRestoreFailures(temp.path());
     testCrashRecoveryMetadata(temp.path());
     testConcurrentMutationLock(temp.path());
+    testDeterministicRollbackRecovery(temp.path());
     testCapabilityAndInvalidRestore(temp.path());
     testMoveInfoEncodingAndTokenRestore(temp.path());
     testRestoreNeverOverwrites(temp.path());

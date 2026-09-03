@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -164,6 +165,53 @@ void testSnapshotFileIo() {
     CHECK(!hasSnapshotTemporary(temporary.path()));
     CHECK_EQ(diskmap::serializeSnapshot(diskmap::readSnapshotFile(path)),
              diskmap::serializeSnapshot(second));
+
+#if defined(__linux__)
+    // Snapshot timestamp conversion clamps seconds outside the nanosecond
+    // representation range instead of overflowing during destination checks.
+    {
+        constexpr std::int64_t kTimestampOverflowSeconds = 10'000'000'000LL;
+        using SnapshotSeconds = decltype(std::declval<struct timespec>().tv_sec);
+        const bool wideEnough =
+            std::numeric_limits<SnapshotSeconds>::max() >= kTimestampOverflowSeconds
+            && std::numeric_limits<SnapshotSeconds>::lowest()
+                   <= -kTimestampOverflowSeconds;
+        if (!wideEnough) {
+            std::printf("SKIP snapshot timestamp overflow test: narrow time_t\n");
+        } else {
+            const auto setMtime = [&](std::int64_t seconds) {
+                struct timespec times[2]{};
+                times[0].tv_nsec = UTIME_OMIT;
+                times[1].tv_sec = static_cast<SnapshotSeconds>(seconds);
+                if (::utimensat(AT_FDCWD, path.c_str(), times, 0) != 0) {
+                    return false;
+                }
+                struct stat observed{};
+                return ::stat(path.c_str(), &observed) == 0
+                       && observed.st_mtim.tv_sec
+                              == static_cast<SnapshotSeconds>(seconds);
+            };
+
+            const bool futureSet = setMtime(kTimestampOverflowSeconds);
+            if (!futureSet) {
+                std::printf("SKIP future snapshot timestamp clamp: filesystem range\n");
+            } else {
+                diskmap::writeSnapshotAtomically(first, path);
+                CHECK(!hasSnapshotTemporary(temporary.path()));
+
+                const bool pastSet = setMtime(-kTimestampOverflowSeconds);
+                if (!pastSet) {
+                    std::printf("SKIP past snapshot timestamp clamp: filesystem range\n");
+                } else {
+                    diskmap::writeSnapshotAtomically(second, path);
+                    CHECK(!hasSnapshotTemporary(temporary.path()));
+                    CHECK_EQ(diskmap::serializeSnapshot(diskmap::readSnapshotFile(path)),
+                             diskmap::serializeSnapshot(second));
+                }
+            }
+        }
+    }
+#endif
 
     const std::string firstJson = diskmap::serializeSnapshot(first);
     SnapshotLimits tooSmall;

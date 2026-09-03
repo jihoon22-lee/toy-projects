@@ -1092,8 +1092,22 @@ class TempDirectory {
 public:
     TempDirectory() {
         const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        path_ = fs::temp_directory_path() / ("diskmap-duplicates-" + std::to_string(stamp));
-        fs::create_directories(path_);
+        const fs::path parent = fs::temp_directory_path();
+        std::error_code error;
+        for (unsigned attempt = 0; attempt != 100; ++attempt) {
+            const fs::path candidate =
+                parent / ("diskmap-duplicates-" + std::to_string(stamp) + "-"
+                          + std::to_string(attempt));
+            error.clear();
+            if (fs::create_directory(candidate, error)) {
+                path_ = candidate;
+                return;
+            }
+            if (error && error != std::make_error_code(std::errc::file_exists)) {
+                break;
+            }
+        }
+        throw std::runtime_error("cannot create duplicate-analysis test directory");
     }
     ~TempDirectory() { std::error_code ignored; fs::remove_all(path_, ignored); }
     const fs::path& path() const { return path_; }
@@ -1135,6 +1149,88 @@ void testRealFiles() {
                       }));
 }
 
+void testSystemReadRaceRefusals() {
+#if defined(__linux__)
+    const auto run = [](bool replaceWithSymlink) {
+        TempDirectory temporary;
+        const fs::path root = temporary.path() / "root";
+        const fs::path raced = root / "a-raced.bin";
+        const fs::path stable = root / "b-stable.bin";
+        const fs::path replacement = temporary.path() / "replacement.bin";
+        const std::string bytes = "0123456789abcdef";
+        fs::create_directories(root);
+        writeFile(raced, bytes);
+        writeFile(stable, bytes);
+        writeFile(replacement, "replacement payload");
+
+        diskmap::RealFsSource source;
+        diskmap::ScanOptions scanOptions;
+        scanOptions.generation = 100;
+        const ScanResult scan = diskmap::scan(source, root, scanOptions);
+
+        if (replaceWithSymlink) {
+            // Symlink support is a filesystem policy rather than a duplicate
+            // analyzer invariant.  Skip only this variant when the fixture
+            // filesystem disallows creating symlinks.
+            const fs::path probe = temporary.path() / "symlink-probe";
+            std::error_code probeError;
+            fs::create_symlink(replacement, probe, probeError);
+            if (probeError) {
+                std::printf("SKIP system duplicate symlink race: %s\n",
+                            probeError.message().c_str());
+                return;
+            }
+            probeError.clear();
+            fs::remove(probe, probeError);
+            CHECK(!probeError);
+        }
+
+        diskmap::DuplicateAnalysisOptions options;
+        options.partial_bytes = 4;
+        options.read_buffer_bytes = 4;
+        bool mutated = false;
+        std::error_code mutationError;
+        const DuplicateAnalysis analysis = diskmap::analyzeDuplicates(
+            scan, options, nullptr,
+            [&](std::size_t, std::uint64_t bytesRead) {
+                if (mutated || bytesRead < options.partial_bytes) {
+                    return;
+                }
+                mutationError.clear();
+                fs::remove(raced, mutationError);
+                if (!mutationError) {
+                    if (replaceWithSymlink) {
+                        fs::create_symlink(replacement, raced, mutationError);
+                    } else {
+                        fs::rename(replacement, raced, mutationError);
+                    }
+                }
+                mutated = true;
+            });
+
+        CHECK(mutated);
+        CHECK(!mutationError);
+        CHECK(analysis.groups.empty());
+        CHECK(!analysis.complete);
+        CHECK(hasIssue(analysis, DuplicateIssueKind::ReadError));
+        CHECK(std::any_of(analysis.issues.begin(), analysis.issues.end(),
+                          [&](const diskmap::DuplicateIssue& issue) {
+                              return issue.path == raced
+                                     && issue.kind == DuplicateIssueKind::ReadError;
+                          }));
+    };
+
+    // The first range is read successfully, then the reviewed path becomes a
+    // symlink before the second range. O_NOFOLLOW must fail at open().
+    run(true);
+
+    // The first range is read successfully, then the reviewed path becomes a
+    // different regular inode. The opened descriptor must be rejected against
+    // the retained identity before any replacement bytes are accepted.
+    run(false);
+#endif
+}
+
 } // namespace
 
 int main() {
@@ -1153,5 +1249,6 @@ int main() {
     testComparisonOutcomesAndGroupLimit();
     testBoundsAndSymlinks();
     testRealFiles();
+    testSystemReadRaceRefusals();
     return testSummary();
 }

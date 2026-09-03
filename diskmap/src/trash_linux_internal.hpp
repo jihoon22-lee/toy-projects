@@ -32,6 +32,22 @@ struct TrashDirectories {
     FileDescriptor info;
 };
 
+// Internal deterministic race seam used by the real-filesystem regression
+// tests. Production callers never install a hook; thread-local storage keeps
+// one test's mutation from affecting another worker.
+enum class TrashMutationTestPoint {
+    BeforeMetadataReserve,
+    BeforePayloadMove,
+    PayloadMoved,
+    BeforeMoveRollback,
+    BeforePayloadRestore,
+    PayloadRestored,
+};
+using TrashMutationTestHook = void (*)(TrashMutationTestPoint,
+                                       const fs::path& original,
+                                       const fs::path& trashed) noexcept;
+void setTrashMutationTestHook(TrashMutationTestHook hook) noexcept;
+
 FileDescriptor openAbsoluteDirectory(const fs::path& input, std::string& error);
 FileDescriptor openOrCreateAbsoluteDirectory(const fs::path& input,
                                              std::string& error);
