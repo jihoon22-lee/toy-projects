@@ -153,3 +153,27 @@ def test_runtime_maps_timeout_probe_error(tmp_path: Path) -> None:
             timeout_seconds=1,
         )
     assert result["interpreters"][0]["checks"][1]["status"] == "timeout"
+
+
+def test_runtime_rejects_oversized_path_configuration(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    with pytest.raises(runtime.RuntimeCheckError, match="compile_paths exceeds"):
+        runtime.run_runtime_checks(
+            tmp_path,
+            interpreters=[sys.executable],
+            imports=[],
+            compile_paths=[tmp_path] * (runtime.MAX_PATHS + 1),
+        )
+
+
+def test_runtime_stops_recursive_source_enumeration_at_bound(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    with (
+        patch.object(runtime, "MAX_SOURCE_ENTRIES", 1),
+        pytest.raises(runtime.RuntimeCheckError, match="source tree exceeds"),
+    ):
+        runtime.run_runtime_checks(
+            tmp_path,
+            interpreters=[sys.executable],
+            imports=[],
+        )

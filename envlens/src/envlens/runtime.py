@@ -18,6 +18,9 @@ MAX_SOURCE_FILES = 10_000
 MAX_SOURCE_BYTES = 64 * 1024 * 1024
 MAX_IMPORTS = 1_000
 MAX_ENTRY_POINTS = 1_000
+MAX_PATHS = 1_000
+MAX_PATH_LENGTH = 65_536
+MAX_SOURCE_ENTRIES = 100_000
 MAX_OUTPUT_CHARS = 65_536
 MODULE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
 
@@ -173,6 +176,7 @@ def _python_files(paths: Sequence[Path]) -> list[Path]:
     total_bytes = 0
     seen: set[tuple[int, int]] = set()
     skip_directories = {".git", ".hg", ".svn", ".tox", ".venv", "venv", "__pycache__"}
+    entries_seen = 0
     for path in paths:
         if path.is_symlink():
             continue
@@ -180,12 +184,26 @@ def _python_files(paths: Sequence[Path]) -> list[Path]:
             candidates = [path] if path.suffix == ".py" else []
         elif path.is_dir():
             candidates = []
-            for candidate in path.rglob("*.py"):
-                if any(part in skip_directories for part in candidate.parts):
-                    continue
-                if candidate.is_symlink() or not candidate.is_file():
-                    continue
-                candidates.append(candidate)
+            pending = [path]
+            while pending:
+                directory = pending.pop()
+                try:
+                    directory_entries = sorted(os.scandir(directory), key=lambda item: item.name)
+                except OSError as error:
+                    raise RuntimeCheckError("source-read-failed", str(error)) from error
+                for entry in directory_entries:
+                    entries_seen += 1
+                    if entries_seen > MAX_SOURCE_ENTRIES:
+                        raise RuntimeCheckError(
+                            "source-too-large", "source tree exceeds 100000 directory entries"
+                        )
+                    if entry.is_symlink():
+                        continue
+                    if entry.is_dir(follow_symlinks=False):
+                        if entry.name not in skip_directories:
+                            pending.append(Path(entry.path))
+                    elif entry.is_file(follow_symlinks=False) and entry.name.endswith(".py"):
+                        candidates.append(Path(entry.path))
         else:
             continue
         for candidate in candidates:
@@ -326,6 +344,18 @@ def _validate_runtime_options(
         raise RuntimeCheckError("runtime-input-too-large", f"{label} exceeds {MAX_IMPORTS} items")
 
 
+def _validate_paths(values: Sequence[str | Path] | None, label: str) -> None:
+    if values is None:
+        return
+    if len(values) > MAX_PATHS:
+        raise RuntimeCheckError("runtime-input-too-large", f"{label} exceeds {MAX_PATHS} items")
+    for value in values:
+        if len(str(value)) > MAX_PATH_LENGTH:
+            raise RuntimeCheckError(
+                "runtime-input-too-large", f"{label} contains an oversized path"
+            )
+
+
 def run_runtime_checks(
     project_root: str | Path = ".",
     *,
@@ -347,6 +377,8 @@ def run_runtime_checks(
     _validate_runtime_options(timeout_seconds, entry_points, "entry_points")
     if not isinstance(execute_entry_points, bool):
         raise RuntimeCheckError("invalid-execute-policy", "execute_entry_points must be boolean")
+    _validate_paths(compile_paths, "compile_paths")
+    _validate_paths(interpreters, "interpreters")
     root = Path(project_root)
     if not root.is_dir():
         raise RuntimeCheckError("project-root-failed", "project root must be a directory")
