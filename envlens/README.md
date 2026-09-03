@@ -113,7 +113,7 @@ directly symlinked output directory, and replacing the selected interpreter
 (including an existing hardlink alias) are rejected. `--output -` writes the
 canonical JSON to stdout.
 
-## Local validation and CI intent
+## Validation and CI
 
 The current local E1 core slice is covered on Python 3.10 by 50/50 tests:
 
@@ -129,16 +129,21 @@ WARN/FAIL/ERROR; TEM is 5.00, line/function/branch coverage is
 93.0%/100.0%/84.6%, and complexity max is 13 (cycle and sanitize also PASS).
 `envlens/ici.toml` records the intended
 Python quality gate (test pass/fail with coverage, TEM at least 4.0, branch
-coverage at least 80%, and function coverage at least 90%). The branch adds
-envlens to the path-aware CI manifest and runs a dedicated Python 3.10/3.14
-matrix for tests, schema validation, strict typing, reproducible wheel/sdist
-builds, pure `py3-none-any` metadata, and clean-wheel smoke. Remote PR, sticky
-report, and exact-main evidence remain pending until that branch is accepted.
+coverage at least 80%, and function coverage at least 90%). The path-aware CI
+manifest runs a dedicated Python 3.10/latest matrix for tests, schema
+validation, strict typing, reproducible wheel/sdist builds, pure
+`py3-none-any` metadata, and clean-wheel smoke. [PR #50](https://github.com/jihoon22-lee/toy-projects/pull/50)
+merged as `c307ac1ab01e12e4ac81a34623eb669da0e43641`, and exact-main run
+[`33698248293`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33698248293)
+passed. The exact artifact IDs, four main Pages, and byte-level evidence are
+centralized in the [EnvLens workthrough](../workthrough/2026-09-03-envlens-snapshot.md).
+Stable release remains pending.
 
 ## Deliberate current boundary
 
 This release-free snapshot slice inventories one interpreter; it does not yet
 compare two snapshots, resolve dependencies, decide compatibility, parse wheel
 tags, import project modules, run entry points, or perform runtime smoke tests.
-Those are separate E2 (diff/compatibility) and E3 (project/runtime check)
-policies. A snapshot is evidence for those later operations, not their result.
+Those are separate E2 (diff/compatibility), E3 (project/runtime check), and E4
+(release) policies, which remain pending. A snapshot is evidence for those
+later operations, not their result.

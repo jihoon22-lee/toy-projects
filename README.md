@@ -33,10 +33,10 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 | [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D1/D2 complete · D3 explorer workbench merged (PR #46; exact-main green) · `0.1.0`/`Unreleased` |
 | [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · L2 1 GiB benchmark merged in PR #26 · default capacity 8192 |
 | [buildscope](buildscope/) | compile DB explorer | 0.5.0 stable · published 2026-09-02 · immutable GitHub Release |
-| [envlens](envlens/) | Python 환경 snapshot CLI/library | pure Python 3.10+ · deterministic snapshot core complete · path-aware manifest/CI matrix integrated locally · PR/exact-main/release pending · `0.1.0`/`Unreleased` |
+| [envlens](envlens/) | Python 환경 snapshot CLI/library | pure Python 3.10+ · deterministic snapshot core · PR #50 merged · exact-main green · release pending · `0.1.0`/`Unreleased` |
 | [quality-zoo](quality-zoo/) | ici known-answer expected-finding corpus | Q0 contract/candidate intake/PR/exact-main complete · Q1~Q5 pending · no product release |
 
-### envlens deterministic snapshot — local core slice
+### envlens deterministic snapshot — merged evidence
 
 [envlens 문서](envlens/README.md)의 현재 slice는 하나의 명시적으로 선택한 Python interpreter를
 네트워크 없이 조사해 `envlens.snapshot/v1` JSON으로 남기는 pure-Python CLI/library다. 고정된
@@ -69,10 +69,12 @@ interpreter(기존 hardlink alias 포함) 덮어쓰기를 거부한다. 이는 s
 1 compile_db SKIP`로 PASS했으며, TEM `5.00`, line/function/branch
 `93.0% / 100.0% / 84.6%`, complexity max `13`, cycle/sanitize `PASS`였다. `envlens/ici.toml`은
 test/coverage, TEM `≥ 4.0`, branch `≥ 80%`, function `≥ 90%`의 intended quality contract를
-기록한다. Path-aware manifest와 Python 3.10/3.14 quality matrix도 이 브랜치에 연결했지만 이
-slice의 remote PR CI, sticky report, exact-main verification과 stable release는 아직 pending이다.
-제품 버전은 `0.1.0`/`Unreleased`로 유지한다. 두 snapshot diff,
-dependency/wheel compatibility, project import와 runtime smoke는 후속 범위다.
+기록한다. Path-aware manifest와 Python 3.10/latest quality matrix가 연결됐고, [PR #50](https://github.com/jihoon22-lee/toy-projects/pull/50)은
+`c307ac1ab01e12e4ac81a34623eb669da0e43641`로 병합됐다. Exact-main
+[run `33698248293`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33698248293)도 성공했으며,
+EnvLens report와 package/Page byte evidence는 [EnvLens workthrough](workthrough/2026-09-03-envlens-snapshot.md)에
+중앙화했다. 제품 버전은 `0.1.0`/`Unreleased`로 유지한다. 두 snapshot diff,
+dependency/wheel compatibility, project import와 runtime smoke 및 release boundary는 E2~E4 후속 범위다.
 
 ### Quality Zoo known-answer corpus and candidate consumer
 
@@ -103,7 +105,9 @@ passed, exactly one sticky comment contained exactly one marker and three produc
 HTML links at that time, the PR merged as
 `ed5fea2e881da77ac95482cf665e4e40bfe172f1`, and [exact-main run
 `33694452357`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33694452357)
-passed. Package version alone is not an expectation selector: released ici `v0.10.2` digest
+passed. The later EnvLens merge exact-main [run `33698248293`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33698248293)
+also passed all jobs, the main publisher, and `Merge Gate`; the PR-only publisher was
+skipped as expected, and the Quality Zoo artifact was `9872561713`. Package version alone is not an expectation selector: released ici `v0.10.2` digest
 `8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4` reports legacy `MEASURED`/`high`,
 while candidate digest `53fc75f0a073a74689babfe9ef8a4b2378995002d7d563bdc52da548fdbb9ee8` reports
 provenance-aware `ESTIMATED`/`medium`, despite the same package version. Schema-2 `scenario.json`
@@ -111,7 +115,8 @@ therefore selects a full strict schema-1 expectation by exact executable SHA-256
 fail closed. Ordinary CI uses the released expectation, and candidate validation uses the candidate
 expectation. This candidate validation does not bump a toy version or create a release. Q0 remote
 acceptance is complete; Q1~Q5 corpus work remains pending. The exact local evidence and Q0 remote
-closeout are captured in the [Quality Zoo workthrough](docs/workthroughs/2026-09-03-quality-zoo-contract.md).
+closeout are captured in the [Quality Zoo workthrough](docs/workthroughs/2026-09-03-quality-zoo-contract.md);
+the post-merge four-project evidence is in the [EnvLens workthrough](workthrough/2026-09-03-envlens-snapshot.md).
 
 ### buildscope B0 hybrid skeleton — release-backed evidence
 
