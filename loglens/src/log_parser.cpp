@@ -1,10 +1,12 @@
 #include "loglens/log_parser.hpp"
 
+#include "json_line_parser.hpp"
+
 #include <algorithm>
+#include <cstdint>
 #include <cctype>
-#include <cstdlib>
-#include <ctime>
 #include <limits>
+#include <string_view>
 #include <stdexcept>
 #include <utility>
 
@@ -17,19 +19,6 @@ bool isDigit(char c) { return c >= '0' && c <= '9'; }
 std::size_t saturatingAdd(std::size_t left, std::size_t right) {
     const std::size_t maximum = std::numeric_limits<std::size_t>::max();
     return right > maximum - left ? maximum : left + right;
-}
-
-// Maps a backslash escape to its character. A lookup keeps each mapping on one
-// line rather than repeating a case/append/break block per escape.
-char unescapeJson(char c) {
-    switch (c) {
-        case 'n': return '\n';
-        case 't': return '\t';
-        case 'r': return '\r';
-        case 'b': return '\b';
-        case 'f': return '\f';
-        default: return c;
-    }
 }
 
 bool startsWithDigits(const std::string& text, std::size_t count) {
@@ -59,70 +48,66 @@ std::string trim(const std::string& text) {
 // Splits on the first run of whitespace. Returns false when there is no
 // remainder, which keeps the callers' loops flat.
 bool splitToken(const std::string& text, std::string& token, std::string& rest) {
-    const std::size_t space = text.find(' ');
-    if (space == std::string::npos) {
-        token = text;
+    std::size_t begin = 0;
+    while (begin < text.size()
+           && std::isspace(static_cast<unsigned char>(text[begin]))) {
+        ++begin;
+    }
+    if (begin == text.size()) {
+        token.clear();
         rest.clear();
         return false;
     }
-    token = text.substr(0, space);
-    std::size_t next = space;
-    while (next < text.size() && text[next] == ' ') {
-        ++next;
+    std::size_t end = begin;
+    while (end < text.size()
+           && !std::isspace(static_cast<unsigned char>(text[end]))) {
+        ++end;
     }
-    rest = text.substr(next);
-    return true;
-}
-
-// Reads a JSON string literal starting at the opening quote, honouring simple
-// escapes. \uXXXX is left as-is: log messages rarely use it and decoding here
-// would duplicate a real parser for no benefit.
-std::string readJsonString(const std::string& line, std::size_t quote) {
-    std::string value;
-    std::size_t i = quote + 1;
-    while (i < line.size() && line[i] != '"') {
-        if (line[i] != '\\' || i + 1 >= line.size()) {
-            value += line[i];
-            ++i;
-            continue;
-        }
-        value += unescapeJson(line[i + 1]);
-        i += 2;
+    token = text.substr(begin, end - begin);
+    while (end < text.size()
+           && std::isspace(static_cast<unsigned char>(text[end]))) {
+        ++end;
     }
-    return value;
-}
-
-// Extracts a "key":"value" or "key":value pair from a JSON line without a full
-// parser. Good enough for flat log records and keeps the module dependency-free.
-std::string jsonField(const std::string& line, const std::string& key) {
-    const std::string needle = "\"" + key + "\"";
-    const std::size_t at = line.find(needle);
-    if (at == std::string::npos) {
-        return std::string();
-    }
-    std::size_t colon = line.find(':', at + needle.size());
-    if (colon == std::string::npos) {
-        return std::string();
-    }
-    ++colon;
-    while (colon < line.size() && std::isspace(static_cast<unsigned char>(line[colon]))) {
-        ++colon;
-    }
-    if (colon >= line.size()) {
-        return std::string();
-    }
-    if (line[colon] != '"') {
-        const std::size_t end = line.find_first_of(",}", colon);
-        return trim(line.substr(colon, end == std::string::npos ? std::string::npos
-                                                                : end - colon));
-    }
-    return readJsonString(line, colon);
+    rest = text.substr(end);
+    return end < text.size();
 }
 
 const char* const kMonths[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
                                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
 
-bool isMonthName(const std::string& token) {
+constexpr std::size_t kMaxSyslogHostBytes = 255;
+constexpr std::size_t kMaxSyslogComponentBytes = 32;
+
+struct SyslogToken {
+    std::string_view value;
+    std::size_t offset = 0;
+};
+
+std::size_t skipWhitespace(std::string_view text, std::size_t cursor) {
+    while (cursor < text.size()
+           && std::isspace(static_cast<unsigned char>(text[cursor]))) {
+        ++cursor;
+    }
+    return cursor;
+}
+
+bool takeSyslogToken(std::string_view text, std::size_t& cursor,
+                     SyslogToken& token) {
+    cursor = skipWhitespace(text, cursor);
+    if (cursor == text.size()) {
+        token = SyslogToken{};
+        return false;
+    }
+    const std::size_t begin = cursor;
+    while (cursor < text.size()
+           && !std::isspace(static_cast<unsigned char>(text[cursor]))) {
+        ++cursor;
+    }
+    token = SyslogToken{text.substr(begin, cursor - begin), begin};
+    return true;
+}
+
+bool isMonthName(std::string_view token) {
     for (const char* month : kMonths) {
         if (token == month) {
             return true;
@@ -131,28 +116,75 @@ bool isMonthName(const std::string& token) {
     return false;
 }
 
-// "2026-08-26T04:15:22.123Z" -> epoch millis. Returns 0 when unparseable;
-// callers treat 0 as "no timestamp" rather than as the epoch.
-std::uint64_t parseIsoTimestamp(const std::string& text) {
-    if (text.size() < 19 || text[4] != '-' || text[7] != '-') {
-        return 0;
+bool isSyslogToken(std::string_view token, std::size_t maximum) {
+    if (token.empty() || token.size() > maximum) {
+        return false;
     }
-    std::tm parts{};
-    parts.tm_year = std::atoi(text.substr(0, 4).c_str()) - 1900;
-    parts.tm_mon = std::atoi(text.substr(5, 2).c_str()) - 1;
-    parts.tm_mday = std::atoi(text.substr(8, 2).c_str());
-    parts.tm_hour = std::atoi(text.substr(11, 2).c_str());
-    parts.tm_min = std::atoi(text.substr(14, 2).c_str());
-    parts.tm_sec = std::atoi(text.substr(17, 2).c_str());
-    const std::time_t seconds = timegm(&parts);
-    if (seconds < 0) {
-        return 0;
+    for (const char character : token) {
+        const unsigned char byte = static_cast<unsigned char>(character);
+        if (byte <= 0x20U || byte == 0x7fU) {
+            return false;
+        }
     }
-    std::uint64_t millis = static_cast<std::uint64_t>(seconds) * 1000;
-    if (text.size() > 20 && text[19] == '.') {
-        millis += static_cast<std::uint64_t>(std::atoi(text.substr(20, 3).c_str()));
+    return true;
+}
+
+bool isSyslogDay(std::string_view token) {
+    if (token.empty() || token.size() > 2U) {
+        return false;
     }
-    return millis;
+    unsigned value = 0;
+    for (const char character : token) {
+        if (!isDigit(character)) {
+            return false;
+        }
+        value = value * 10U + static_cast<unsigned>(character - '0');
+    }
+    return value >= 1U && value <= 31U;
+}
+
+bool isSyslogTime(std::string_view token) {
+    if (token.size() != 8U || token[2] != ':' || token[5] != ':') {
+        return false;
+    }
+    for (std::size_t index = 0; index < token.size(); ++index) {
+        if (index != 2U && index != 5U && !isDigit(token[index])) {
+            return false;
+        }
+    }
+    const unsigned hour = static_cast<unsigned>(token[0] - '0') * 10U
+                          + static_cast<unsigned>(token[1] - '0');
+    const unsigned minute = static_cast<unsigned>(token[3] - '0') * 10U
+                            + static_cast<unsigned>(token[4] - '0');
+    const unsigned second = static_cast<unsigned>(token[6] - '0') * 10U
+                            + static_cast<unsigned>(token[7] - '0');
+    return hour <= 23U && minute <= 59U && second <= 59U;
+}
+
+bool isSyslogComponent(std::string_view token) {
+    if (token.size() < 2U || token.back() != ':') {
+        return false;
+    }
+    const std::string_view name = token.substr(0, token.size() - 1U);
+    return name.find(':') == std::string_view::npos
+           && isSyslogToken(name, kMaxSyslogComponentBytes);
+}
+
+void addDiagnostic(LogRecord& record, ParseDiagnosticCode code,
+                   const std::string& field, std::size_t offset,
+                   const std::string& message) {
+    constexpr const char* kLimitMessage =
+        "parse diagnostic limit exceeded; additional diagnostics were dropped";
+    if (record.diagnostics.size() < kMaxParseDiagnostics) {
+        record.diagnostics.push_back(ParseDiagnostic{code, field, offset, message});
+    } else if (record.diagnostics.empty()
+               || record.diagnostics.back().message != kLimitMessage) {
+        record.diagnostics.back() =
+            ParseDiagnostic{ParseDiagnosticCode::LimitExceeded, {}, offset, kLimitMessage};
+    }
+    if (record.parse_status == ParseStatus::Parsed) {
+        record.parse_status = ParseStatus::Partial;
+    }
 }
 
 // "[component]" -> "component"; returns false when the token is not bracketed.
@@ -166,15 +198,33 @@ bool takeBracketed(const std::string& token, std::string& out) {
 
 LogRecord parsePlainIso(const std::string& line) {
     LogRecord record;
+    record.parse_status = ParseStatus::Parsed;
     std::string timestamp;
     std::string rest;
     splitToken(line, timestamp, rest);
-    record.timestamp_ms = parseIsoTimestamp(timestamp);
+    if (timestamp.empty()) {
+        addDiagnostic(record, ParseDiagnosticCode::MissingField, "timestamp", 0,
+                      "plain ISO record has no timestamp token");
+    } else {
+        const detail::TimestampResult parsed = detail::parseIsoTimestamp(timestamp);
+        if (parsed.valid) {
+            record.timestamp_ms = parsed.value;
+        } else {
+            addDiagnostic(record, parsed.code, "timestamp", 0, parsed.message);
+        }
+    }
 
     std::string levelToken;
     std::string tail;
     splitToken(rest, levelToken, tail);
     record.level = parseLevel(levelToken);
+    if (levelToken.empty()) {
+        addDiagnostic(record, ParseDiagnosticCode::MissingField, "level", timestamp.size(),
+                      "plain ISO record has no level token");
+    } else if (record.level == Level::Unknown) {
+        addDiagnostic(record, ParseDiagnosticCode::InvalidField, "level", timestamp.size(),
+                      "plain ISO record has an unknown level token");
+    }
 
     std::string maybeSource;
     std::string body;
@@ -188,34 +238,62 @@ LogRecord parsePlainIso(const std::string& line) {
 
 LogRecord parseSyslog(const std::string& line) {
     LogRecord record;
-    std::string rest = line;
-    // Month, day, time, host are positional; drop them one token at a time.
-    for (int i = 0; i < 4; ++i) {
-        std::string token;
-        std::string tail;
-        splitToken(rest, token, tail);
-        rest = tail;
+    record.parse_status = ParseStatus::Parsed;
+    std::size_t cursor = 0;
+    SyslogToken month;
+    SyslogToken day;
+    SyslogToken time;
+    SyslogToken host;
+    const bool hasMonth = takeSyslogToken(line, cursor, month);
+    const bool hasDay = takeSyslogToken(line, cursor, day);
+    const bool hasTime = takeSyslogToken(line, cursor, time);
+    const bool hasHost = takeSyslogToken(line, cursor, host);
+
+    if (!hasMonth) {
+        addDiagnostic(record, ParseDiagnosticCode::MissingField, "month", cursor,
+                      "syslog record has no month token");
+    } else if (!isMonthName(month.value)) {
+        addDiagnostic(record, ParseDiagnosticCode::InvalidField, "month", month.offset,
+                      "syslog month is not a valid abbreviated month");
     }
-    std::string component;
-    std::string body;
-    splitToken(rest, component, body);
-    if (!component.empty() && component.back() == ':') {
-        record.source = component.substr(0, component.size() - 1);
-        record.message = body;
+    if (!hasDay) {
+        addDiagnostic(record, ParseDiagnosticCode::MissingField, "day", cursor,
+                      "syslog record has no day token");
+    } else if (!isSyslogDay(day.value)) {
+        addDiagnostic(record, ParseDiagnosticCode::InvalidField, "day", day.offset,
+                      "syslog day must be one or two digits in the range 1..31");
+    }
+    if (!hasTime) {
+        addDiagnostic(record, ParseDiagnosticCode::MissingField, "time", cursor,
+                      "syslog record has no time token");
+    } else if (!isSyslogTime(time.value)) {
+        addDiagnostic(record, ParseDiagnosticCode::InvalidTimestamp, "time", time.offset,
+                      "syslog time must be HH:MM:SS in the range 00:00:00..23:59:59");
+    }
+    if (!hasHost) {
+        addDiagnostic(record, ParseDiagnosticCode::MissingField, "host", cursor,
+                      "syslog record has no host token");
+    } else if (!isSyslogToken(host.value, kMaxSyslogHostBytes)) {
+        addDiagnostic(record, ParseDiagnosticCode::InvalidField, "host", host.offset,
+                      "syslog host must be a bounded non-whitespace token");
+    }
+
+    const std::size_t componentOffset = skipWhitespace(line, cursor);
+    SyslogToken component;
+    const bool hasComponent = takeSyslogToken(line, cursor, component);
+    if (!hasComponent) {
+        addDiagnostic(record, ParseDiagnosticCode::MissingField, "component", componentOffset,
+                      "syslog record has no component token");
+        record.message = line.substr(componentOffset);
         return record;
     }
-    record.message = rest;
-    return record;
-}
-
-LogRecord parseJsonLine(const std::string& line) {
-    LogRecord record;
-    record.timestamp_ms = parseIsoTimestamp(jsonField(line, "ts"));
-    record.level = parseLevel(jsonField(line, "level"));
-    record.source = jsonField(line, "logger");
-    record.message = jsonField(line, "msg");
-    if (record.message.empty()) {
-        record.message = jsonField(line, "message");
+    if (isSyslogComponent(component.value)) {
+        record.source.assign(component.value.data(), component.value.size() - 1U);
+        record.message = line.substr(skipWhitespace(line, cursor));
+    } else {
+        addDiagnostic(record, ParseDiagnosticCode::InvalidField, "component", component.offset,
+                      "syslog component must be a bounded name followed by one colon");
+        record.message = line.substr(component.offset);
     }
     return record;
 }
@@ -249,6 +327,54 @@ Format detectFormat(const std::string& line) {
     return Format::Auto;
 }
 
+const char* formatName(Format format) {
+    switch (format) {
+        case Format::Auto: return "auto";
+        case Format::PlainIso: return "iso";
+        case Format::Syslog: return "syslog";
+        case Format::JsonLine: return "jsonl";
+        case Format::Raw: return "raw";
+    }
+    return "auto";
+}
+
+std::optional<Format> parseFormatName(const std::string& name) {
+    if (name == "auto") {
+        return Format::Auto;
+    }
+    if (name == "iso" || name == "plain") {
+        return Format::PlainIso;
+    }
+    if (name == "syslog") {
+        return Format::Syslog;
+    }
+    if (name == "jsonl" || name == "json") {
+        return Format::JsonLine;
+    }
+    if (name == "raw") {
+        return Format::Raw;
+    }
+    return std::nullopt;
+}
+
+const char* multilinePolicyName(MultilinePolicy policy) {
+    switch (policy) {
+        case MultilinePolicy::FoldContinuations: return "fold-continuations";
+        case MultilinePolicy::SeparateLines: return "separate-lines";
+    }
+    return "unknown";
+}
+
+std::optional<MultilinePolicy> parseMultilinePolicyName(const std::string& name) {
+    if (name == "fold-continuations") {
+        return MultilinePolicy::FoldContinuations;
+    }
+    if (name == "separate-lines") {
+        return MultilinePolicy::SeparateLines;
+    }
+    return std::nullopt;
+}
+
 LogRecord parseLine(const std::string& line, Format format, std::size_t lineNumber) {
     const Format resolved = format == Format::Auto ? detectFormat(line) : format;
     LogRecord record;
@@ -257,7 +383,7 @@ LogRecord parseLine(const std::string& line, Format format, std::size_t lineNumb
     } else if (resolved == Format::Syslog) {
         record = parseSyslog(line);
     } else if (resolved == Format::JsonLine) {
-        record = parseJsonLine(line);
+        record = detail::parseJsonLine(line);
     } else {
         record.message = line;
     }
@@ -271,9 +397,9 @@ LogRecord parseLine(const std::string& line, Format format, std::size_t lineNumb
 }
 
 RecordAssembler::RecordAssembler(Format format, EncodingErrorPolicy encodingPolicy,
-                                 std::size_t maxRecordBytes)
+                                 std::size_t maxRecordBytes, MultilinePolicy multilinePolicy)
     : format_(format), encoding_error_policy_(encodingPolicy),
-      max_record_bytes_(maxRecordBytes) {
+      max_record_bytes_(maxRecordBytes), multiline_policy_(multilinePolicy) {
     if (maxRecordBytes == 0 || maxRecordBytes > kMaxRecordBytes) {
         throw std::invalid_argument("record byte limit is outside the supported range");
     }
@@ -291,7 +417,8 @@ std::vector<RecordDelta> RecordAssembler::consumeCompleteLine(const std::string&
 
     const std::size_t physicalLine = next_line_number_++;
     std::vector<RecordDelta> deltas;
-    if (isContinuation(line) && has_pending_) {
+    if (multiline_policy_ == MultilinePolicy::FoldContinuations && isContinuation(line)
+        && has_pending_) {
         const std::size_t incomingBytes = saturatingAdd(1, saturatingAdd(line.size(), omittedBytes));
         pending_record_.input_bytes =
             saturatingAdd(pending_record_.input_bytes, incomingBytes);
@@ -406,6 +533,8 @@ std::size_t RecordAssembler::nextLineNumber() const { return next_line_number_; 
 std::size_t RecordAssembler::recordCount() const { return record_count_; }
 
 std::size_t RecordAssembler::maxRecordBytes() const { return max_record_bytes_; }
+
+MultilinePolicy RecordAssembler::multilinePolicy() const { return multiline_policy_; }
 
 std::size_t RecordAssembler::partialBytes() const { return partial_.size(); }
 

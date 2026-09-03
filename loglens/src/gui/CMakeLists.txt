@@ -10,6 +10,7 @@ add_library(loglens_gui STATIC
     log_load_worker.cpp
     log_model.cpp
     main_window.cpp
+    main_window_persistence.cpp
     timeline_widget.cpp
     ${CMAKE_SOURCE_DIR}/include/loglens/gui/log_load_worker.hpp
     ${CMAKE_SOURCE_DIR}/include/loglens/gui/log_model.hpp

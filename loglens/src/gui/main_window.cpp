@@ -2,12 +2,14 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDir>
 #include <QFileDialog>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QStandardPaths>
 #include <QScrollBar>
 #include <QSpinBox>
 #include <QStatusBar>
@@ -16,7 +18,7 @@
 #include <QThread>
 #include <QVBoxLayout>
 
-#include <string>
+#include <algorithm>
 #include <vector>
 
 #include "loglens/gui/log_model.hpp"
@@ -38,7 +40,8 @@ QString filterErrorRange(const loglens::ParseError& error) {
 
 MainWindow::MainWindow(QWidget* parent, MainWindowOptions options)
     : QMainWindow(parent), source_chunk_bytes_(options.sourceChunkBytes),
-      record_capacity_(options.recordCapacity) {
+      record_capacity_(std::min(loglens::kMaxRecordCapacity,
+                                std::max<std::size_t>(1, options.recordCapacity))) {
     auto* central = new QWidget(this);
     auto* layout = new QVBoxLayout(central);
 
@@ -49,6 +52,7 @@ MainWindow::MainWindow(QWidget* parent, MainWindowOptions options)
     filterEdit_ = new QLineEdit(central);
     filterEdit_->setObjectName(QStringLiteral("filterEdit"));
     filterEdit_->setAccessibleName(tr("Log filter"));
+    filterEdit_->setMaxLength(static_cast<int>(loglens::kMaxFilterQueryBytes));
     filterEdit_->setPlaceholderText(tr("level>=WARN AND message~timeout"));
     auto* applyButton = new QPushButton(tr("Apply"), central);
     applyButton->setObjectName(QStringLiteral("applyFilterButton"));
@@ -80,6 +84,90 @@ MainWindow::MainWindow(QWidget* parent, MainWindowOptions options)
     bar->addWidget(followBox_);
     layout->addLayout(bar);
 
+    auto* profileBar = new QHBoxLayout();
+    auto* profileLabel = new QLabel(tr("Source profile"), central);
+    sourceProfile_ = new QComboBox(central);
+    sourceProfile_->setObjectName(QStringLiteral("sourceProfileComboBox"));
+    sourceProfile_->setAccessibleName(tr("Source profile"));
+    sourceProfile_->setEditable(true);
+    sourceProfile_->setInsertPolicy(QComboBox::NoInsert);
+    sourceProfile_->setMaxCount(static_cast<int>(loglens::kMaxPersistedItems));
+    sourceProfile_->lineEdit()->setMaxLength(
+        static_cast<int>(loglens::kMaxPersistedNameBytes));
+    sourceProfile_->lineEdit()->setPlaceholderText(tr("New profile name"));
+    profileLabel->setBuddy(sourceProfile_);
+    profileBar->addWidget(profileLabel);
+    profileBar->addWidget(sourceProfile_);
+
+    sourceFormat_ = new QComboBox(central);
+    sourceFormat_->setObjectName(QStringLiteral("sourceFormatComboBox"));
+    sourceFormat_->setAccessibleName(tr("Source format"));
+    sourceFormat_->addItem(tr("Auto-detect"), QStringLiteral("auto"));
+    sourceFormat_->addItem(tr("ISO timestamp"), QStringLiteral("iso"));
+    sourceFormat_->addItem(tr("Syslog"), QStringLiteral("syslog"));
+    sourceFormat_->addItem(tr("JSON Lines"), QStringLiteral("jsonl"));
+    sourceFormat_->addItem(tr("Raw lines"), QStringLiteral("raw"));
+    auto* formatLabel = new QLabel(tr("Format"), central);
+    formatLabel->setBuddy(sourceFormat_);
+    profileBar->addWidget(formatLabel);
+    profileBar->addWidget(sourceFormat_);
+
+    multilinePolicy_ = new QComboBox(central);
+    multilinePolicy_->setObjectName(QStringLiteral("multilinePolicyComboBox"));
+    multilinePolicy_->setAccessibleName(tr("Multiline policy"));
+    multilinePolicy_->addItem(tr("Fold continuations"),
+                              QStringLiteral("fold-continuations"));
+    multilinePolicy_->addItem(tr("Keep separate lines"), QStringLiteral("separate-lines"));
+    auto* multilineLabel = new QLabel(tr("Multiline"), central);
+    multilineLabel->setBuddy(multilinePolicy_);
+    profileBar->addWidget(multilineLabel);
+    profileBar->addWidget(multilinePolicy_);
+
+    maxRecordBytes_ = new QSpinBox(central);
+    maxRecordBytes_->setObjectName(QStringLiteral("maxRecordBytesSpinBox"));
+    maxRecordBytes_->setAccessibleName(tr("Maximum record bytes"));
+    maxRecordBytes_->setRange(1, static_cast<int>(loglens::kMaxRecordBytes));
+    maxRecordBytes_->setSingleStep(1024);
+    maxRecordBytes_->setValue(static_cast<int>(loglens::kDefaultMaxRecordBytes));
+    maxRecordBytes_->setSuffix(tr(" bytes"));
+    auto* maxRecordLabel = new QLabel(tr("Max record"), central);
+    maxRecordLabel->setBuddy(maxRecordBytes_);
+    profileBar->addWidget(maxRecordLabel);
+    profileBar->addWidget(maxRecordBytes_);
+
+    auto* applyProfileButton = new QPushButton(tr("Apply profile"), central);
+    applyProfileButton->setObjectName(QStringLiteral("applySourceProfileButton"));
+    applyProfileButton->setAccessibleName(tr("Apply source profile"));
+    profileBar->addWidget(applyProfileButton);
+    auto* saveProfileButton = new QPushButton(tr("Save profile"), central);
+    saveProfileButton->setObjectName(QStringLiteral("saveSourceProfileButton"));
+    saveProfileButton->setAccessibleName(tr("Save source profile"));
+    profileBar->addWidget(saveProfileButton);
+    layout->addLayout(profileBar);
+
+    auto* queryBar = new QHBoxLayout();
+    auto* queryLabel = new QLabel(tr("Saved query"), central);
+    savedQuery_ = new QComboBox(central);
+    savedQuery_->setObjectName(QStringLiteral("savedQueryComboBox"));
+    savedQuery_->setAccessibleName(tr("Saved query"));
+    savedQuery_->setEditable(true);
+    savedQuery_->setInsertPolicy(QComboBox::NoInsert);
+    savedQuery_->setMaxCount(static_cast<int>(loglens::kMaxPersistedItems));
+    savedQuery_->lineEdit()->setMaxLength(static_cast<int>(loglens::kMaxPersistedNameBytes));
+    savedQuery_->lineEdit()->setPlaceholderText(tr("Saved query name"));
+    queryLabel->setBuddy(savedQuery_);
+    queryBar->addWidget(queryLabel);
+    queryBar->addWidget(savedQuery_, 1);
+    auto* applyQueryButton = new QPushButton(tr("Apply query"), central);
+    applyQueryButton->setObjectName(QStringLiteral("applySavedQueryButton"));
+    applyQueryButton->setAccessibleName(tr("Apply saved query"));
+    queryBar->addWidget(applyQueryButton);
+    auto* saveQueryButton = new QPushButton(tr("Save query"), central);
+    saveQueryButton->setObjectName(QStringLiteral("saveSavedQueryButton"));
+    saveQueryButton->setAccessibleName(tr("Save saved query"));
+    queryBar->addWidget(saveQueryButton);
+    layout->addLayout(queryBar);
+
     timeline_ = new TimelineWidget(central);
     timeline_->setObjectName(QStringLiteral("timelineWidget"));
     timeline_->setAccessibleName(tr("Log timeline"));
@@ -109,6 +197,8 @@ MainWindow::MainWindow(QWidget* parent, MainWindowOptions options)
     pollTimer_->setInterval(500);
     connect(pollTimer_, &QTimer::timeout, this, &MainWindow::pollSource);
     connect(followBox_, &QCheckBox::toggled, this, &MainWindow::setFollowing);
+    connect(sourceProfile_, qOverload<int>(&QComboBox::currentIndexChanged), this,
+            &MainWindow::selectSourceProfile);
     connect(loadMode_, qOverload<int>(&QComboBox::currentIndexChanged), this,
             [this](int index) { tailRecords_->setEnabled(index == 0); });
     timelineTimer_ = new QTimer(this);
@@ -149,9 +239,32 @@ MainWindow::MainWindow(QWidget* parent, MainWindowOptions options)
     connect(openButton, &QPushButton::clicked, this, &MainWindow::chooseFile);
     connect(applyButton, &QPushButton::clicked, this, &MainWindow::applyFilter);
     connect(filterEdit_, &QLineEdit::returnPressed, this, &MainWindow::applyFilter);
+    connect(applyProfileButton, &QPushButton::clicked, this, &MainWindow::applySourceProfile);
+    connect(saveProfileButton, &QPushButton::clicked, this, &MainWindow::saveSourceProfile);
+    connect(applyQueryButton, &QPushButton::clicked, this, &MainWindow::applySavedQuery);
+    connect(saveQueryButton, &QPushButton::clicked, this, &MainWindow::saveSavedQuery);
 
     resize(1100, 700);
     setWindowTitle(tr("loglens"));
+
+    sourceProfilesPath_ = options.sourceProfilesPath;
+    savedQueriesPath_ = options.savedQueriesPath;
+    if (sourceProfilesPath_.isEmpty()) {
+        const QString configDirectory = QStandardPaths::writableLocation(
+            QStandardPaths::AppConfigLocation);
+        sourceProfilesPath_ = (configDirectory.isEmpty() ? QDir::currentPath() : configDirectory)
+                              + QStringLiteral("/source-profiles.json");
+        sourceProfilesPathIsDefault_ = true;
+    }
+    if (savedQueriesPath_.isEmpty()) {
+        const QString configDirectory = QStandardPaths::writableLocation(
+            QStandardPaths::AppConfigLocation);
+        savedQueriesPath_ = (configDirectory.isEmpty() ? QDir::currentPath() : configDirectory)
+                            + QStringLiteral("/saved-queries.json");
+        savedQueriesPathIsDefault_ = true;
+    }
+    sourceProfile_->setEditText(QStringLiteral("Default"));
+    loadPersistenceState();
 }
 
 MainWindow::~MainWindow() {
@@ -207,6 +320,7 @@ void MainWindow::openPath(const QString& path) {
 
 void MainWindow::openPath(const QString& path, loglens::InitialLoadMode mode,
                           std::size_t tailRecords) {
+    currentPath_ = path;
     ++active_job_;
     loader_->selectJob(active_job_);
     expected_sequence_ = 0;
@@ -226,6 +340,10 @@ void MainWindow::openPath(const QString& path, loglens::InitialLoadMode mode,
     request.mode = mode;
     request.tail_records = std::max<std::size_t>(1, std::min(tailRecords, record_capacity_));
     request.source_chunk_bytes = source_chunk_bytes_;
+    const loglens::SourceProfile profile = profileFromControls();
+    request.format = profile.format;
+    request.multiline = profile.multiline;
+    request.max_record_bytes = profile.max_record_bytes;
     emit startLoadRequested(std::move(request));
 }
 
@@ -318,13 +436,16 @@ loglens::InitialLoadMode MainWindow::selectedLoadMode() const {
 }
 
 void MainWindow::applyFilter() {
-    const QString text = filterEdit_->text();
+    applyFilterText(filterEdit_->text());
+}
+
+bool MainWindow::applyFilterText(const QString& text, const QString& successMessage) {
     if (text.trimmed().isEmpty()) {
         filter_.reset();
         model_->setFilter(nullptr);
         refreshTimeline();
-        updateStatus(QString());
-        return;
+        updateStatus(successMessage);
+        return true;
     }
     loglens::ParseError error;
     const std::optional<loglens::Filter> candidate =
@@ -334,12 +455,13 @@ void MainWindow::applyFilter() {
         updateStatus(tr("bad filter at bytes %1: %2")
                          .arg(filterErrorRange(error))
                          .arg(QString::fromStdString(error.message)));
-        return;
+        return false;
     }
     filter_ = candidate;
     model_->setFilter(&filter_.value());
     refreshTimeline();
-    updateStatus(QString());
+    updateStatus(successMessage);
+    return true;
 }
 
 void MainWindow::refreshTimeline() {

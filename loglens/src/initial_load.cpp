@@ -30,8 +30,10 @@ bool cancellationRequested(const std::function<bool()>& cancelled) {
 
 class TailWindowScanner {
 public:
-    TailWindowScanner(std::size_t recordCount, const std::function<bool()>& cancelled)
-        : record_count_(recordCount), cancelled_(cancelled) {
+    TailWindowScanner(std::size_t recordCount, const std::function<bool()>& cancelled,
+                      MultilinePolicy multilinePolicy)
+        : record_count_(recordCount), cancelled_(cancelled),
+          multiline_policy_(multilinePolicy) {
         prefix_.reserve(3);
     }
 
@@ -96,7 +98,8 @@ private:
     }
 
     void completeLine(std::uint64_t nextLineOffset) {
-        if (!has_record_ || !isContinuation(prefix_)) {
+        if (!has_record_ || multiline_policy_ == MultilinePolicy::SeparateLines
+            || !isContinuation(prefix_)) {
             starts_.push_back(RecordStart{line_start_offset_, physical_line_});
             if (starts_.size() > record_count_) {
                 starts_.pop_front();
@@ -111,6 +114,7 @@ private:
 
     std::size_t record_count_;
     const std::function<bool()>& cancelled_;
+    MultilinePolicy multiline_policy_ = MultilinePolicy::FoldContinuations;
     InitialLoadWindow result_;
     std::deque<RecordStart> starts_;
     std::uint64_t line_start_offset_ = 0;
@@ -127,13 +131,14 @@ bool InitialLoadWindow::ok() const {
 
 InitialLoadWindow locateTailWindow(const std::string& path, std::size_t recordCount,
                                    std::size_t sourceChunkBytes,
-                                   const std::function<bool()>& cancelled) {
+                                   const std::function<bool()>& cancelled,
+                                   MultilinePolicy multilinePolicy) {
     if (recordCount == 0) {
         throw std::invalid_argument("tail record count must be positive");
     }
 
     FileTailer source(path, sourceChunkBytes);
-    TailWindowScanner scanner(recordCount, cancelled);
+    TailWindowScanner scanner(recordCount, cancelled, multilinePolicy);
     bool firstChunk = true;
 
     while (true) {

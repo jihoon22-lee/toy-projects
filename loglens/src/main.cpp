@@ -49,7 +49,7 @@ void printUsage(std::ostream& out) {
     out << "Usage: loglens <file> [options]\n"
         << "  --filter EXPR   e.g. \"level>=WARN AND message~timeout\"\n"
         << "  --level LEVEL   shorthand for level>=LEVEL\n"
-        << "  --format F      auto|plain|syslog|json (default auto)\n"
+        << "  --format F      auto|plain|syslog|json|raw (default auto)\n"
         << "  --stats         print level histogram and top patterns\n"
         << "  --bucket MS     histogram bucket size (default 60000)\n"
         << "  --top N         number of patterns to show (default 10)\n"
@@ -165,6 +165,9 @@ loglens::Format resolveFormat(const std::string& name) {
     }
     if (name == "json") {
         return loglens::Format::JsonLine;
+    }
+    if (name == "raw") {
+        return loglens::Format::Raw;
     }
     return loglens::Format::Auto;
 }
