@@ -397,16 +397,15 @@ def run_runtime_checks(
                         "reason": "configured interpreter is unavailable",
                     }
                 )
-            if source_files:
-                record["checks"].append(
-                    {
-                        "kind": "compileall",
-                        "name": str(root),
-                        "status": interpreter_status,
-                        "files": len(source_files),
-                        "reason": "configured interpreter is unavailable",
-                    }
-                )
+            record["checks"].append(
+                {
+                    "kind": "compileall",
+                    "name": str(root),
+                    "status": interpreter_status,
+                    "files": len(source_files),
+                    "reason": "configured interpreter is unavailable",
+                }
+            )
             for entry in entries:
                 record["checks"].append(
                     {

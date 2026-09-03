@@ -271,7 +271,7 @@ def _parse_toml(text: str) -> tuple[dict[str, Any], dict[tuple[str, ...], int]]:
         if "=" not in line:
             raise ProjectError("invalid-pyproject", f"expected key/value on line {line_number}")
         key_text, raw_value = line.split("=", 1)
-        key = _decode_key(key_text.strip())
+        key_parts = _split_dotted(key_text.strip())
         value_text = raw_value.strip()
         balance = _bracket_balance(value_text)
         while balance > 0 and index < len(lines):
@@ -285,7 +285,7 @@ def _parse_toml(text: str) -> tuple[dict[str, Any], dict[tuple[str, ...], int]]:
             )
         _set_nested(
             root,
-            [*current, key],
+            [*current, *key_parts],
             _parse_value(value_text, line=line_number),
             line=line_number,
             locations=locations,

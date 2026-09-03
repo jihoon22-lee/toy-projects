@@ -130,19 +130,23 @@ def distribution_record(distribution):
     except Exception:
         pass
 
-    return {
+    metadata_record = {
+        "requires_python": metadata_value("Requires-Python"),
+        "requires_dist": requirements,
+    }
+    if wheel_tags:
+        metadata_record["wheel_tags"] = sorted(set(wheel_tags))
+    result = {
         "name": metadata_value("Name"),
         "version": metadata_value("Version"),
-        "metadata": {
-            "requires_python": metadata_value("Requires-Python"),
-            "requires_dist": requirements,
-            "wheel_tags": sorted(set(wheel_tags)),
-        },
-        "import_names": sorted(import_names),
+        "metadata": metadata_record,
         "entry_points": entry_points,
         "location": location,
         "errors": errors,
     }
+    if import_names:
+        result["import_names"] = sorted(import_names)
+    return result
 
 payload = {
     "schema_version": "envlens.probe/v1",

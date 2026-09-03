@@ -251,6 +251,8 @@ def _parse_requirement(requirement: str) -> tuple[str, str, str | None] | None:
         if end < 0:
             return None
         rest = rest[end + 1 :].strip()
+    if rest.startswith("(") and rest.endswith(")"):
+        rest = rest[1:-1].strip()
     if rest.startswith("@"):
         return name, "", marker
     return name, rest, marker
@@ -382,8 +384,7 @@ def satisfies_requires_python(expression: str, identity: Mapping[str, Any]) -> b
         if operator == "~=" and ordering < 0:
             return False
         if operator == "~=":
-            parts = len(required)
-            upper = (*required[:-1], required[-1] + 1) if parts > 1 else (required[0] + 1,)
+            upper = _compatible_upper_bound(required)
             if _compare_release(current, upper) >= 0:
                 return False
     return True
@@ -716,10 +717,18 @@ def _satisfies_specifier(version: str, specifier: str) -> bool | None:
             release = _version_tuple(expected_text)
             if release is None:
                 return None
-            upper = (*release[:-1], release[-1] + 1) if len(release) > 1 else (release[0] + 1,)
+            upper = _compatible_upper_bound(release)
             if _compare_release(_version_tuple(version) or (), upper) >= 0:
                 return False
     return True
+
+
+def _compatible_upper_bound(release: tuple[int, ...]) -> tuple[int, ...]:
+    if len(release) <= 1:
+        return (release[0] + 1,)
+    if len(release) == 2:
+        return (release[0] + 1, 0)
+    return (*release[:-2], release[-2] + 1, 0)
 
 
 def _dependency_issues(
