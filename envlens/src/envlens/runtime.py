@@ -188,22 +188,25 @@ def _python_files(paths: Sequence[Path]) -> list[Path]:
             while pending:
                 directory = pending.pop()
                 try:
-                    directory_entries = sorted(os.scandir(directory), key=lambda item: item.name)
+                    with os.scandir(directory) as directory_entries:
+                        for entry in directory_entries:
+                            entries_seen += 1
+                            if entries_seen > MAX_SOURCE_ENTRIES:
+                                raise RuntimeCheckError(
+                                    "source-too-large",
+                                    "source tree exceeds 100000 directory entries",
+                                )
+                            if entry.is_symlink():
+                                continue
+                            if entry.is_dir(follow_symlinks=False):
+                                if entry.name not in skip_directories:
+                                    pending.append(Path(entry.path))
+                            elif entry.is_file(follow_symlinks=False) and entry.name.endswith(
+                                ".py"
+                            ):
+                                candidates.append(Path(entry.path))
                 except OSError as error:
                     raise RuntimeCheckError("source-read-failed", str(error)) from error
-                for entry in directory_entries:
-                    entries_seen += 1
-                    if entries_seen > MAX_SOURCE_ENTRIES:
-                        raise RuntimeCheckError(
-                            "source-too-large", "source tree exceeds 100000 directory entries"
-                        )
-                    if entry.is_symlink():
-                        continue
-                    if entry.is_dir(follow_symlinks=False):
-                        if entry.name not in skip_directories:
-                            pending.append(Path(entry.path))
-                    elif entry.is_file(follow_symlinks=False) and entry.name.endswith(".py"):
-                        candidates.append(Path(entry.path))
         else:
             continue
         for candidate in candidates:
