@@ -375,7 +375,7 @@ def _entry_points(
                     "invalid-project-metadata",
                     "entry-point names and values must be strings",
                 )
-            location_key = ("project", "entry-points", group, name)
+            custom_location_key = ("project", "entry-points", group, name)
             target = _entry_point_target(value)
             records.append(
                 {
@@ -384,7 +384,10 @@ def _entry_points(
                     "value": value,
                     "target": {"module": target[0], "attribute": target[1]} if target else None,
                     "status": "inspectable" if target else "unsupported",
-                    "location": {"path": str(path), "line": locations.get(location_key, 0)},
+                    "location": {
+                        "path": str(path),
+                        "line": locations.get(custom_location_key, 0),
+                    },
                 }
             )
     if len(records) > MAX_ENTRY_POINTS:

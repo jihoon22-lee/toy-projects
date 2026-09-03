@@ -23,8 +23,12 @@ def _value(item: Mapping[str, Any], key: str, default: str = "") -> str:
     return str(value) if value is not None else default
 
 
+def _mapping(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
 def _diff_text(report: Mapping[str, Any]) -> str:
-    summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
+    summary = _mapping(report.get("summary"))
     lines = [f"envlens diff: {_value(report, 'status', 'unknown').upper()}", ""]
     lines.append(
         "Summary: "
@@ -100,7 +104,7 @@ def _diff_text(report: Mapping[str, Any]) -> str:
 
 
 def _runtime_text(report: Mapping[str, Any]) -> str:
-    summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
+    summary = _mapping(report.get("summary"))
     lines = [f"envlens runtime: {_value(summary, 'status', 'unknown').upper()}", ""]
     lines.append(
         f"Summary: interpreters={summary.get('interpreter_count', 0)}, "
