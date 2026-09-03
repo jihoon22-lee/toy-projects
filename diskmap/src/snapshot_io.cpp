@@ -84,7 +84,9 @@ bool stableInputDescriptor(int descriptor, const struct stat& initial) {
            && finalState.st_ino == initial.st_ino
            && finalState.st_size == initial.st_size
            && finalState.st_mtim.tv_sec == initial.st_mtim.tv_sec
-           && finalState.st_mtim.tv_nsec == initial.st_mtim.tv_nsec;
+           && finalState.st_mtim.tv_nsec == initial.st_mtim.tv_nsec
+           && finalState.st_ctim.tv_sec == initial.st_ctim.tv_sec
+           && finalState.st_ctim.tv_nsec == initial.st_ctim.tv_nsec;
 }
 
 std::string readRegularFile(const fs::path& path,

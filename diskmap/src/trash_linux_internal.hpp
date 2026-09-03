@@ -27,6 +27,7 @@ private:
 
 struct TrashDirectories {
     fs::path root;
+    FileDescriptor root_directory;
     FileDescriptor files;
     FileDescriptor info;
 };
@@ -39,6 +40,13 @@ bool inspectAbsoluteDirectoryPath(const fs::path& input,
                                   bool& complete,
                                   std::string& error);
 bool directoryWritable(const FileDescriptor& directory, std::string& error);
+bool directoryOwnedByEffectiveUser(const FileDescriptor& directory,
+                                   std::string& error);
+bool directoryPathMatches(const fs::path& path,
+                          const FileDescriptor& directory,
+                          std::string& error);
+bool trashDirectoriesAnchored(const TrashDirectories& directories,
+                              std::string& error);
 FsKind kindFromMode(mode_t mode);
 std::uint64_t allocatedBytes(const struct stat& status);
 TrashStatus validateStat(const CleanupTarget& target,

@@ -35,12 +35,12 @@ struct FileState {
     std::uint64_t size = 0;
     std::int64_t modified_ns = 0;
     bool modified_known = false;
+    std::int64_t changed_ns = 0;
+    bool changed_known = false;
 };
 
 #if defined(__linux__)
-std::int64_t modifiedNanoseconds(const struct stat& status) {
-    const std::int64_t seconds = static_cast<std::int64_t>(status.st_mtim.tv_sec);
-    const std::int64_t nanos = static_cast<std::int64_t>(status.st_mtim.tv_nsec);
+std::int64_t timestampNanoseconds(std::int64_t seconds, std::int64_t nanos) {
     constexpr std::int64_t kNanosPerSecond = 1'000'000'000;
     if (seconds > std::numeric_limits<std::int64_t>::max() / kNanosPerSecond
         || seconds < std::numeric_limits<std::int64_t>::min() / kNanosPerSecond) {
@@ -52,6 +52,11 @@ std::int64_t modifiedNanoseconds(const struct stat& status) {
         return std::numeric_limits<std::int64_t>::max();
     }
     return base + nanos;
+}
+
+std::int64_t modifiedNanoseconds(const struct stat& status) {
+    return timestampNanoseconds(static_cast<std::int64_t>(status.st_mtim.tv_sec),
+                                static_cast<std::int64_t>(status.st_mtim.tv_nsec));
 }
 
 bool inspectFileAt(int parent,
@@ -75,6 +80,10 @@ bool inspectFileAt(int parent,
     state.size = status.st_size < 0 ? 0 : static_cast<std::uint64_t>(status.st_size);
     state.modified_ns = modifiedNanoseconds(status);
     state.modified_known = true;
+    state.changed_ns = timestampNanoseconds(
+        static_cast<std::int64_t>(status.st_ctim.tv_sec),
+        static_cast<std::int64_t>(status.st_ctim.tv_nsec));
+    state.changed_known = true;
     return true;
 }
 #else
@@ -129,7 +138,23 @@ bool sameState(const FileState& before, const FileState& after) {
         return false;
     }
     return !before.modified_known || !after.modified_known
-           || before.modified_ns == after.modified_ns;
+           || (before.modified_ns == after.modified_ns
+               && (!before.changed_known || !after.changed_known
+                   || before.changed_ns == after.changed_ns));
+}
+
+bool sameRenamedState(const FileState& before, const FileState& after) {
+    if (before.exists != after.exists) {
+        return false;
+    }
+    if (!before.exists) {
+        return true;
+    }
+    return before.kind == after.kind && before.size == after.size
+           && (!before.identity.valid || !after.identity.valid
+               || before.identity == after.identity)
+           && (!before.modified_known || !after.modified_known
+               || before.modified_ns == after.modified_ns);
 }
 
 std::string temporaryName() {
@@ -183,15 +208,40 @@ void closeDescriptor(int descriptor) {
     }
 }
 
+FileState checkedRegularStateAt(int parent,
+                                const std::string& name,
+                                const char* changedMessage) {
+    FileState state;
+    std::string error;
+    if (!inspectFileAt(parent, name, state, error)) {
+        throw SnapshotError(error);
+    }
+    if (state.exists && state.kind != FsKind::RegularFile) {
+        throw SnapshotError(changedMessage);
+    }
+    return state;
+}
+
 void installTemporaryAt(int parent,
                         const std::string& temporary,
                         const std::string& target,
                         const FileState& expected,
+                        const FileState& installed,
                         bool& preserveTemporary) {
     if (!expected.exists) {
         if (::linkat(parent, temporary.c_str(), parent, target.c_str(), 0) != 0) {
             throw SnapshotError("cannot atomically install snapshot: "
                                 + std::generic_category().message(errno));
+        }
+        FileState targetState;
+        std::string error;
+        if (!inspectFileAt(parent, target, targetState, error)
+            || !sameRenamedState(installed, targetState)) {
+            preserveTemporary = true;
+            throw SnapshotError(
+                "snapshot destination changed during atomic installation; "
+                "the temporary snapshot was preserved as "
+                + temporary);
         }
         if (::unlinkat(parent, temporary.c_str(), 0) != 0) {
             preserveTemporary = true;
@@ -206,17 +256,17 @@ void installTemporaryAt(int parent,
     }
 
     FileState displaced;
+    FileState targetState;
     std::string error;
     if (!inspectFileAt(parent, temporary, displaced, error)
-        || !sameState(expected, displaced)) {
-        if (::syscall(SYS_renameat2, parent, temporary.c_str(), parent,
-                      target.c_str(), RENAME_EXCHANGE) != 0) {
-            preserveTemporary = true;
-            throw SnapshotError(
-                "snapshot destination raced; displaced entry was preserved as "
-                + temporary);
-        }
-        throw SnapshotError("snapshot destination changed during atomic installation");
+        || !sameRenamedState(expected, displaced)
+        || !inspectFileAt(parent, target, targetState, error)
+        || !sameRenamedState(installed, targetState)) {
+        preserveTemporary = true;
+        throw SnapshotError(
+            "snapshot destination raced during atomic exchange; displaced "
+            "entries were preserved for recovery as "
+            + temporary);
     }
     if (::unlinkat(parent, temporary.c_str(), 0) != 0) {
         preserveTemporary = true;
@@ -235,14 +285,9 @@ void writeSnapshotLinux(const std::string& json,
                                           : error);
     }
     const std::string targetName = target.filename().native();
-    FileState before;
-    if (!inspectFileAt(parent.get(), targetName, before, error)) {
-        throw SnapshotError(error);
-    }
-    if (before.exists && before.kind != FsKind::RegularFile) {
-        throw SnapshotError(
-            "snapshot destination must be a regular file, not a symlink or special file");
-    }
+    const FileState before = checkedRegularStateAt(
+        parent.get(), targetName,
+        "snapshot destination must be a regular file, not a symlink or special file");
 
     const std::string temporary = temporaryName();
     bool temporaryExists = false;
@@ -261,8 +306,14 @@ void writeSnapshotLinux(const std::string& json,
             || !sameState(before, after)) {
             throw SnapshotError("snapshot destination changed during atomic write");
         }
+        const FileState installed = checkedRegularStateAt(
+            parent.get(), temporary,
+            "snapshot temporary file changed before installation");
+        if (!installed.exists) {
+            throw SnapshotError("snapshot temporary file disappeared before installation");
+        }
         installTemporaryAt(parent.get(), temporary, targetName, before,
-                           preserveTemporary);
+                           installed, preserveTemporary);
         temporaryExists = false;
         if (::fsync(parent.get()) != 0) {
             throw SnapshotError("cannot sync snapshot directory");

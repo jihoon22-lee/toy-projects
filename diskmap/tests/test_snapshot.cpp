@@ -1,6 +1,7 @@
 // Tests for the bounded diskmap.snapshot/v1 contract and its diff projection.
 
 #include "assert.hpp"
+#include "diskmap/cleanup.hpp"
 #include "diskmap/snapshot.hpp"
 
 #include <chrono>
@@ -474,22 +475,50 @@ int main() {
         CHECK(containsChange(diff, SnapshotChangeKind::Removed, "/uncertain/missing", false));
     }
 
-    // Snapshot-wide incompleteness must survive conversion to the shared scan
-    // shape even when the root node itself looks structurally complete.
+    // Loaded snapshot-wide incompleteness must reach every retained node, so a
+    // complete-looking child cannot bypass cleanup's fail-closed guard.
     {
-        Snapshot incomplete = snapshot(directory(
-            "root", "/offline", {file("a", "/offline/a", 1)},
-            FileIdentity{2, 120, true}));
-        incomplete.complete = false;
-        const diskmap::ScanResult evidence =
-            diskmap::scanEvidenceFromSnapshot(std::move(incomplete), 77);
-        CHECK_EQ(evidence.generation, std::uint64_t(77));
-        CHECK(!evidence.root.complete);
-        CHECK(evidence.root.error.find("snapshot inventory is incomplete")
-              != std::string::npos);
-        CHECK_EQ(evidence.root.scan_generation, std::uint64_t(77));
-        CHECK_EQ(evidence.root.children.front().scan_generation,
-                 std::uint64_t(77));
+        const auto verifyLoadedIncomplete = [](bool truncated) {
+            Snapshot persisted = snapshot(directory(
+                "root", "/offline", {file("a", "/offline/a", 1,
+                                             FileIdentity{2, 121, true})},
+                FileIdentity{2, 120, true}));
+            persisted.complete = false;
+            persisted.truncated = truncated;
+
+            const Snapshot loaded = diskmap::parseSnapshot(
+                diskmap::serializeSnapshot(persisted));
+            CHECK(!loaded.complete);
+            CHECK_EQ(loaded.truncated, truncated);
+            CHECK(loaded.root.complete);
+            CHECK(loaded.root.children.front().complete);
+
+            const diskmap::ScanResult evidence =
+                diskmap::scanEvidenceFromSnapshot(loaded, 77);
+            CHECK_EQ(evidence.generation, std::uint64_t(77));
+            CHECK(!evidence.root.complete);
+            CHECK(evidence.root.error.find("snapshot inventory is incomplete")
+                  != std::string::npos);
+            CHECK(!evidence.root.children.front().complete);
+            CHECK_EQ(evidence.root.scan_generation, std::uint64_t(77));
+            CHECK_EQ(evidence.root.children.front().scan_generation,
+                     std::uint64_t(77));
+
+            const diskmap::NodeKey childKey =
+                diskmap::nodeKey(evidence.root.children.front());
+            const diskmap::CleanupPlan plan =
+                diskmap::planCleanup(evidence, {childKey});
+            CHECK(plan.targets.empty());
+            CHECK_EQ(plan.rejected.size(), static_cast<std::size_t>(1));
+            if (!plan.rejected.empty()) {
+                CHECK_EQ(plan.rejected.front().key, childKey);
+                CHECK_EQ(plan.rejected.front().reason,
+                         diskmap::CleanupSkipReason::IncompleteScan);
+            }
+        };
+
+        verifyLoadedIncomplete(false);
+        verifyLoadedIncomplete(true);
     }
 
     // --- absence evidence requires the opposite snapshot to be complete ---

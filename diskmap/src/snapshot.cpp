@@ -247,6 +247,12 @@ ScanResult scanEvidenceFromSnapshot(Snapshot snapshot, std::uint64_t generation)
         FsNode* node = stack.back();
         stack.pop_back();
         node->scan_generation = generation;
+        // Inventory-wide incompleteness is inherited by every retained node.
+        // Otherwise a caller selecting a complete-looking child could bypass
+        // the root marker and authorize cleanup from partial historical data.
+        if (!inventoryComplete) {
+            node->complete = false;
+        }
         if (node->is_dir) {
             ++result.dirs_scanned;
         } else if (nodeKind(*node) == FsKind::RegularFile) {

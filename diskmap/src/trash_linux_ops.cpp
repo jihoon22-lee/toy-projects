@@ -32,7 +32,8 @@ bool probeTrashDirectory(const fs::path& path,
     bool complete = false;
     if (!inspectAbsoluteDirectoryPath(path, closest, complete, error)
         || !directoryWritable(closest, error)
-        || !sameDevice(closest, sourceDevice, error)) {
+        || !sameDevice(closest, sourceDevice, error)
+        || (complete && !directoryOwnedByEffectiveUser(closest, error))) {
         return false;
     }
     return true;
@@ -98,6 +99,42 @@ bool reserveMetadata(const TrashDirectories& directories,
     return false;
 }
 
+bool finalizeRecoveryMetadata(const TrashDirectories& directories,
+                              const ValidatedSource& source,
+                              const std::string& token,
+                              const std::string& tempName,
+                              FileDescriptor& metadata,
+                              std::string& recoveryError) {
+    struct stat movedStatus{};
+    if (::fstatat(directories.files.get(), token.c_str(), &movedStatus,
+                  AT_SYMLINK_NOFOLLOW) != 0) {
+        recoveryError = errnoMessage("cannot inspect payload after rollback failure");
+        return false;
+    }
+    CleanupTarget actual;
+    actual.identity = FileIdentity{static_cast<std::uint64_t>(movedStatus.st_dev),
+                                   static_cast<std::uint64_t>(movedStatus.st_ino), true};
+    actual.kind = kindFromMode(movedStatus.st_mode);
+    if (::ftruncate(metadata.get(), 0) != 0 || ::lseek(metadata.get(), 0, SEEK_SET) < 0
+        || !writeAll(metadata.get(), infoContent(actual, source.original), recoveryError)) {
+        if (recoveryError.empty()) {
+            recoveryError = errnoMessage("cannot rewrite recovery metadata");
+        }
+        return false;
+    }
+    const std::string infoName = token + ".trashinfo";
+    if (renameNoReplace(directories.info.get(), tempName.c_str(),
+                        directories.info.get(), infoName.c_str()) != 0) {
+        recoveryError = errnoMessage("cannot finalize recovery metadata");
+        return false;
+    }
+    if (::fsync(directories.info.get()) != 0) {
+        recoveryError = errnoMessage("cannot sync recovery metadata directory");
+        return false;
+    }
+    return true;
+}
+
 TrashReceipt rollbackMoved(const TrashDirectories& directories,
                            const ValidatedSource& source,
                            const std::string& token,
@@ -116,29 +153,9 @@ TrashReceipt rollbackMoved(const TrashDirectories& directories,
     // rollback can legitimately be blocked. Keep the moved payload
     // recoverable with metadata matching its actual identity instead of
     // deleting the only restore record.
-    struct stat movedStatus{};
     std::string recoveryError;
-    if (::fstatat(directories.files.get(), token.c_str(), &movedStatus,
-                  AT_SYMLINK_NOFOLLOW) != 0) {
-        recoveryError = errnoMessage("cannot inspect payload after rollback failure");
-    } else {
-        CleanupTarget actual;
-        actual.identity = FileIdentity{static_cast<std::uint64_t>(movedStatus.st_dev),
-                                       static_cast<std::uint64_t>(movedStatus.st_ino), true};
-        actual.kind = kindFromMode(movedStatus.st_mode);
-        if (::ftruncate(metadata.get(), 0) != 0 || ::lseek(metadata.get(), 0, SEEK_SET) < 0
-            || !writeAll(metadata.get(), infoContent(actual, source.original), recoveryError)) {
-            if (recoveryError.empty()) {
-                recoveryError = errnoMessage("cannot rewrite recovery metadata");
-            }
-        } else {
-            const std::string infoName = token + ".trashinfo";
-            if (renameNoReplace(directories.info.get(), tempName.c_str(),
-                                directories.info.get(), infoName.c_str()) != 0) {
-                recoveryError = errnoMessage("cannot finalize recovery metadata");
-            }
-        }
-    }
+    finalizeRecoveryMetadata(directories, source, token, tempName, metadata,
+                             recoveryError);
     TrashReceipt receipt = trashFailure(
         status, source.original,
         recoveryError.empty()
@@ -170,6 +187,10 @@ TrashReceipt finalizeTrashMove(const TrashDirectories& directories,
         return rollbackMoved(directories, source, token, tempName, metadata,
                              TrashStatus::RevalidationFailed, error);
     }
+    if (!trashDirectoriesAnchored(directories, error)) {
+        return rollbackMoved(directories, source, token, tempName, metadata,
+                             TrashStatus::RevalidationFailed, error);
+    }
     const std::string infoName = token + ".trashinfo";
     if (renameNoReplace(directories.info.get(), tempName.c_str(),
                         directories.info.get(), infoName.c_str()) != 0) {
@@ -178,8 +199,23 @@ TrashReceipt finalizeTrashMove(const TrashDirectories& directories,
             directories, source, token, tempName, metadata, TrashStatus::IoError,
             errnoMessage("cannot finalize trash metadata", value));
     }
-    ::fsync(directories.files.get());
-    ::fsync(directories.info.get());
+    if (::fsync(directories.info.get()) != 0
+        || !trashDirectoriesAnchored(directories, error)) {
+        const std::string failure = error.empty()
+                                        ? errnoMessage("cannot sync trash metadata directory")
+                                        : error;
+        if (renameNoReplace(directories.info.get(), infoName.c_str(),
+                            directories.info.get(), tempName.c_str()) == 0) {
+            return rollbackMoved(directories, source, token, tempName, metadata,
+                                 TrashStatus::IoError, failure);
+        }
+        TrashReceipt receipt = trashFailure(
+            TrashStatus::IoError, source.original,
+            failure + "; payload and metadata remain recoverable in Trash");
+        receipt.trashed_path = directories.root / "files" / token;
+        receipt.restore_token = token;
+        return receipt;
+    }
     TrashReceipt receipt;
     receipt.status = TrashStatus::Moved;
     receipt.original_path = source.original;
@@ -203,10 +239,21 @@ TrashReceipt moveOneToTrash(const CleanupTarget& target,
         || !sameDevice(directories.info, target.identity.device, error)) {
         return trashFailure(TrashStatus::DifferentFilesystem, source.original, error);
     }
+    if (!trashDirectoriesAnchored(directories, error)
+        || !directoryPathMatches(source.original.parent_path(), source.parent,
+                                 error)) {
+        return trashFailure(TrashStatus::RevalidationFailed, source.original, error);
+    }
     const std::string tempName = token + ".tmp";
     FileDescriptor metadata;
     if (!reserveMetadata(directories, target, source, tempName, metadata, receipt)) {
         return receipt;
+    }
+    if (::fsync(directories.info.get()) != 0) {
+        const int value = errno;
+        ::unlinkat(directories.info.get(), tempName.c_str(), 0);
+        return trashFailure(TrashStatus::IoError, source.original,
+                            errnoMessage("cannot sync reserved trash metadata", value));
     }
     if (renameNoReplace(source.parent.get(), source.name.c_str(),
                         directories.files.get(), token.c_str()) != 0) {
@@ -217,14 +264,20 @@ TrashReceipt moveOneToTrash(const CleanupTarget& target,
                             source.original,
                             errnoMessage("cannot move target to Trash", value));
     }
+    if (::fsync(directories.files.get()) != 0) {
+        return rollbackMoved(
+            directories, source, token, tempName, metadata, TrashStatus::IoError,
+            errnoMessage("cannot sync moved Trash payload"));
+    }
     return finalizeTrashMove(directories, target, source, token, tempName, metadata);
 }
 
 bool loadRestoreMetadata(const TrashDirectories& directories,
                          const std::string& token,
                          RestoreMetadata& restore,
+                         std::string& metadataName,
                          TrashReceipt& receipt) {
-    const std::string infoName = token + ".trashinfo";
+    metadataName = token + ".trashinfo";
     int flags = O_RDONLY;
 #ifdef O_NONBLOCK
     // A token is untrusted input and the metadata pathname can be replaced
@@ -238,7 +291,13 @@ bool loadRestoreMetadata(const TrashDirectories& directories,
 #ifdef O_NOFOLLOW
     flags |= O_NOFOLLOW;
 #endif
-    FileDescriptor metadata(::openat(directories.info.get(), infoName.c_str(), flags));
+    FileDescriptor metadata(
+        ::openat(directories.info.get(), metadataName.c_str(), flags));
+    if (!metadata && errno == ENOENT) {
+        metadataName = token + ".tmp";
+        metadata = FileDescriptor(
+            ::openat(directories.info.get(), metadataName.c_str(), flags));
+    }
     if (!metadata) {
         const int value = errno;
         receipt = trashFailure(value == ENOENT ? TrashStatus::MissingToken
@@ -256,9 +315,75 @@ bool loadRestoreMetadata(const TrashDirectories& directories,
     return true;
 }
 
+bool restorePayloadMatches(const RestoreMetadata& restore,
+                           const struct stat& status) {
+    const FileIdentity identity{static_cast<std::uint64_t>(status.st_dev),
+                                static_cast<std::uint64_t>(status.st_ino), true};
+    return identity == restore.identity && kindFromMode(status.st_mode) == restore.kind;
+}
+
+TrashReceipt rollbackRestore(const TrashDirectories& directories,
+                             const std::string& token,
+                             const RestoreMetadata& restore,
+                             const FileDescriptor& parent,
+                             const std::string& name,
+                             TrashStatus status,
+                             const std::string& message) {
+    if (renameNoReplace(parent.get(), name.c_str(), directories.files.get(),
+                        token.c_str()) == 0) {
+        ::fsync(parent.get());
+        ::fsync(directories.files.get());
+        return trashFailure(status, restore.original, message);
+    }
+    TrashReceipt receipt = trashFailure(
+        TrashStatus::IoError, restore.original,
+        message + "; rollback failed, restored entry and metadata were preserved");
+    receipt.restore_token = token;
+    return receipt;
+}
+
+bool restoreDestinationAbsent(const FileDescriptor& parent,
+                              const std::string& name) {
+    struct stat ignored{};
+    return ::fstatat(parent.get(), name.c_str(), &ignored,
+                     AT_SYMLINK_NOFOLLOW) != 0
+           && errno == ENOENT;
+}
+
+bool restoredPayloadStable(const TrashDirectories& directories,
+                           const RestoreMetadata& restore,
+                           const FileDescriptor& parent,
+                           const std::string& name,
+                           std::string& error) {
+    struct stat restoredStatus{};
+    return ::fstatat(parent.get(), name.c_str(), &restoredStatus,
+                     AT_SYMLINK_NOFOLLOW) == 0
+           && restorePayloadMatches(restore, restoredStatus)
+           && directoryPathMatches(restore.original.parent_path(), parent, error)
+           && trashDirectoriesAnchored(directories, error);
+}
+
+TrashReceipt completedRestore(const TrashDirectories& directories,
+                              const std::string& token,
+                              const RestoreMetadata& restore,
+                              const std::string& metadataName) {
+    const bool metadataRemoved =
+        ::unlinkat(directories.info.get(), metadataName.c_str(), 0) == 0;
+    const bool metadataSynced = ::fsync(directories.info.get()) == 0;
+    TrashReceipt receipt;
+    receipt.status = TrashStatus::Restored;
+    receipt.original_path = restore.original;
+    receipt.restore_token = token;
+    receipt.message = metadataRemoved && metadataSynced
+                          ? "restored from recoverable Trash"
+                          : "restored, but stale Trash metadata may remain";
+    return receipt;
+}
+
 TrashReceipt restoreOne(const TrashDirectories& directories,
                         const std::string& token,
-                        const RestoreMetadata& restore) {
+                        const RestoreMetadata& restore,
+                        const std::string& metadataName) {
     struct stat trashedStatus{};
     if (::fstatat(directories.files.get(), token.c_str(), &trashedStatus,
                   AT_SYMLINK_NOFOLLOW) != 0) {
@@ -268,11 +393,7 @@ TrashReceipt restoreOne(const TrashDirectories& directories,
                             restore.original,
                             errnoMessage("cannot inspect trashed target", value));
     }
-    const FileIdentity trashedIdentity{
-        static_cast<std::uint64_t>(trashedStatus.st_dev),
-        static_cast<std::uint64_t>(trashedStatus.st_ino), true};
-    if (trashedIdentity != restore.identity
-        || kindFromMode(trashedStatus.st_mode) != restore.kind) {
+    if (!restorePayloadMatches(restore, trashedStatus)) {
         return trashFailure(TrashStatus::RevalidationFailed, restore.original,
                             "trashed target no longer matches its identity metadata");
     }
@@ -281,10 +402,12 @@ TrashReceipt restoreOne(const TrashDirectories& directories,
     if (!parent) {
         return trashFailure(TrashStatus::IoError, restore.original, error);
     }
+    if (!trashDirectoriesAnchored(directories, error)
+        || !directoryPathMatches(restore.original.parent_path(), parent, error)) {
+        return trashFailure(TrashStatus::RevalidationFailed, restore.original, error);
+    }
     const std::string name = restore.original.filename().native();
-    struct stat ignored{};
-    if (::fstatat(parent.get(), name.c_str(), &ignored, AT_SYMLINK_NOFOLLOW) == 0
-        || errno != ENOENT) {
+    if (!restoreDestinationAbsent(parent, name)) {
         return trashFailure(TrashStatus::DestinationExists, restore.original,
                             "restore destination already exists or cannot be inspected safely");
     }
@@ -296,20 +419,19 @@ TrashReceipt restoreOne(const TrashDirectories& directories,
                             restore.original,
                             errnoMessage("cannot restore trashed target", value));
     }
-    const std::string infoName = token + ".trashinfo";
-    const bool metadataRemoved =
-        ::unlinkat(directories.info.get(), infoName.c_str(), 0) == 0;
-    ::fsync(parent.get());
-    ::fsync(directories.files.get());
-    ::fsync(directories.info.get());
-    TrashReceipt receipt;
-    receipt.status = TrashStatus::Restored;
-    receipt.original_path = restore.original;
-    receipt.restore_token = token;
-    receipt.message = metadataRemoved
-                          ? "restored from recoverable Trash"
-                          : "restored, but stale Trash metadata could not be removed";
-    return receipt;
+    if (!restoredPayloadStable(directories, restore, parent, name, error)) {
+        const std::string failure = error.empty()
+                                        ? "restored payload changed during final validation"
+                                        : error;
+        return rollbackRestore(directories, token, restore, parent, name,
+                               TrashStatus::RevalidationFailed, failure);
+    }
+    if (::fsync(parent.get()) != 0 || ::fsync(directories.files.get()) != 0) {
+        return rollbackRestore(
+            directories, token, restore, parent, name, TrashStatus::IoError,
+            errnoMessage("cannot sync restored payload"));
+    }
+    return completedRestore(directories, token, restore, metadataName);
 }
 
 } // namespace
@@ -380,11 +502,12 @@ TrashReceipt restoreFromTrashLinux(const std::string& token,
         return trashFailure(TrashStatus::IoError, {}, error);
     }
     RestoreMetadata restore;
+    std::string metadataName;
     TrashReceipt receipt;
-    if (!loadRestoreMetadata(directories, token, restore, receipt)) {
+    if (!loadRestoreMetadata(directories, token, restore, metadataName, receipt)) {
         return receipt;
     }
-    return restoreOne(directories, token, restore);
+    return restoreOne(directories, token, restore, metadataName);
 }
 
 } // namespace detail

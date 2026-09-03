@@ -179,6 +179,51 @@ bool directoryWritable(const FileDescriptor& directory, std::string& error) {
     return true;
 }
 
+bool directoryOwnedByEffectiveUser(const FileDescriptor& directory,
+                                   std::string& error) {
+    struct stat status{};
+    if (::fstat(directory.get(), &status) != 0) {
+        error = errnoMessage("cannot inspect Trash directory ownership");
+        return false;
+    }
+    if (!S_ISDIR(status.st_mode) || status.st_uid != ::geteuid()) {
+        error = "Trash directory is not owned by the current user";
+        return false;
+    }
+    return true;
+}
+
+bool directoryPathMatches(const fs::path& path,
+                          const FileDescriptor& directory,
+                          std::string& error) {
+    FileDescriptor current = openAbsoluteDirectory(path, error);
+    if (!current) {
+        return false;
+    }
+    struct stat expected{};
+    struct stat actual{};
+    if (::fstat(directory.get(), &expected) != 0
+        || ::fstat(current.get(), &actual) != 0) {
+        error = errnoMessage("cannot revalidate directory identity");
+        return false;
+    }
+    if (expected.st_dev != actual.st_dev || expected.st_ino != actual.st_ino) {
+        error = "directory path changed during operation";
+        return false;
+    }
+    return true;
+}
+
+bool trashDirectoriesAnchored(const TrashDirectories& directories,
+                              std::string& error) {
+    return directoryPathMatches(directories.root, directories.root_directory,
+                                error)
+           && directoryPathMatches(directories.root / "files",
+                                   directories.files, error)
+           && directoryPathMatches(directories.root / "info",
+                                   directories.info, error);
+}
+
 FsKind kindFromMode(mode_t mode) {
     if (S_ISREG(mode)) {
         return FsKind::RegularFile;
@@ -331,6 +376,24 @@ bool readBounded(int descriptor, std::string& content, std::string& error) {
     return false;
 }
 
+namespace {
+
+bool preflightTrashPath(const fs::path& path, std::string& error) {
+    FileDescriptor closest;
+    bool complete = false;
+    return inspectAbsoluteDirectoryPath(path, closest, complete, error)
+           && directoryWritable(closest, error);
+}
+
+FileDescriptor openConfiguredTrashDirectory(const fs::path& path,
+                                             bool create,
+                                             std::string& error) {
+    return create ? openOrCreateAbsoluteDirectory(path, error)
+                  : openAbsoluteDirectory(path, error);
+}
+
+} // namespace
+
 bool openTrashDirectories(const TrashOptions& options,
                           bool create,
                           TrashDirectories& directories,
@@ -340,30 +403,28 @@ bool openTrashDirectories(const TrashOptions& options,
         return false;
     }
     directories.root = dataHome / "Trash";
-    if (create) {
-        const auto preflight = [&error](const fs::path& path) {
-            FileDescriptor closest;
-            bool complete = false;
-            return inspectAbsoluteDirectoryPath(path, closest, complete, error)
-                   && directoryWritable(closest, error);
-        };
-        if (!preflight(directories.root / "files")
-            || !preflight(directories.root / "info")) {
-            return false;
-        }
+    if (create
+        && (!preflightTrashPath(directories.root / "files", error)
+            || !preflightTrashPath(directories.root / "info", error))) {
+        return false;
     }
-    directories.files = create
-                            ? openOrCreateAbsoluteDirectory(directories.root / "files", error)
-                            : openAbsoluteDirectory(directories.root / "files", error);
+    directories.root_directory = openConfiguredTrashDirectory(
+        directories.root, create, error);
+    if (!directories.root_directory
+        || !secureOwnedDirectory(directories.root_directory, error)) {
+        return false;
+    }
+    directories.files = openConfiguredTrashDirectory(
+        directories.root / "files", create, error);
     if (!directories.files) {
         return false;
     }
-    directories.info = create
-                           ? openOrCreateAbsoluteDirectory(directories.root / "info", error)
-                           : openAbsoluteDirectory(directories.root / "info", error);
+    directories.info = openConfiguredTrashDirectory(
+        directories.root / "info", create, error);
     return directories.files && directories.info
            && secureOwnedDirectory(directories.files, error)
-           && secureOwnedDirectory(directories.info, error);
+           && secureOwnedDirectory(directories.info, error)
+           && trashDirectoriesAnchored(directories, error);
 }
 
 } // namespace detail

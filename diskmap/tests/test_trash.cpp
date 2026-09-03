@@ -979,6 +979,62 @@ void testMetadataAndRestoreFailures(const fs::path& root) {
     }
 }
 
+void testCrashRecoveryMetadata(const fs::path& root) {
+    const diskmap::TrashOptions options = optionsFor(root);
+    CHECK(ensurePrivateTrash(options));
+    const fs::path files = options.data_home / "Trash" / "files";
+    const fs::path info = options.data_home / "Trash" / "info";
+
+    // A crash after moving the payload and before finalizing the metadata
+    // leaves only <token>.tmp.  That entry is still recoverable, and a
+    // successful restore consumes the temporary metadata as well.
+    {
+        const std::string token = "diskmap-crash-recovery";
+        const std::string contents = "crash recovery payload";
+        const fs::path payload = files / token;
+        const fs::path destination = root / "crash-recovered.txt";
+        const fs::path temporaryInfo = info / (token + ".tmp");
+        const fs::path finalInfo = info / (token + ".trashinfo");
+        CHECK(writeFile(payload, contents));
+        const auto target = targetFor(payload);
+        CHECK(writeFile(temporaryInfo,
+                        restoreInfo(destination.generic_string(), target)));
+        CHECK(!fs::exists(finalInfo));
+
+        const auto restored = diskmap::restoreFromTrash(token, options);
+        CHECK(restored.status == diskmap::TrashStatus::Restored);
+        CHECK(fs::is_regular_file(destination));
+        CHECK_EQ(readFile(destination), contents);
+        CHECK(!fs::exists(payload));
+        CHECK(!fs::exists(temporaryInfo));
+        CHECK(!fs::exists(finalInfo));
+    }
+
+    // A malformed crash marker must fail closed and leave both recovery
+    // artifacts available for diagnosis or a later repair.
+    {
+        const std::string token = "diskmap-crash-malformed";
+        const fs::path payload = files / token;
+        const fs::path temporaryInfo = info / (token + ".tmp");
+        CHECK(writeFile(payload, "malformed crash payload"));
+        CHECK(writeFile(temporaryInfo, "not a trash info file\n"));
+        const auto receipt = diskmap::restoreFromTrash(token, options);
+        CHECK(receipt.status == diskmap::TrashStatus::IoError);
+        CHECK(fs::is_regular_file(payload));
+        CHECK(fs::is_regular_file(temporaryInfo));
+    }
+
+    // A payload without either metadata name is not restored or consumed.
+    {
+        const std::string token = "diskmap-crash-missing";
+        const fs::path payload = files / token;
+        CHECK(writeFile(payload, "missing crash metadata payload"));
+        const auto receipt = diskmap::restoreFromTrash(token, options);
+        CHECK(receipt.status == diskmap::TrashStatus::MissingToken);
+        CHECK(fs::is_regular_file(payload));
+    }
+}
+
 } // namespace
 
 int main() {
@@ -995,6 +1051,7 @@ int main() {
     testStatusTokensAndEnvironment(temp.path());
     testFilesystemRefusalsAndLimits(temp.path());
     testMetadataAndRestoreFailures(temp.path());
+    testCrashRecoveryMetadata(temp.path());
     testCapabilityAndInvalidRestore(temp.path());
     testMoveInfoEncodingAndTokenRestore(temp.path());
     testRestoreNeverOverwrites(temp.path());
