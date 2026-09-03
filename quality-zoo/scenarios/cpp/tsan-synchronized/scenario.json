@@ -2,6 +2,6 @@
   "schema": 2,
   "scenario_id": "cpp.tsan-synchronized",
   "expectations": {
-    "0000000000000000000000000000000000000000000000000000000000000000": "expectations/candidate-thread-sanitize.json"
+    "424108397858470b1209bc2749b580a858fb06c8b09aaa2e4772c94e43690bb5": "expectations/candidate-thread-sanitize.json"
   }
 }
