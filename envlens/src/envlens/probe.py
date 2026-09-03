@@ -278,7 +278,13 @@ def _finish_readers(
             thread.join(0.25)
 
 
-def _run_bounded(command: list[str], timeout_seconds: int) -> tuple[bytes, bytes, int]:
+def _run_bounded(
+    command: list[str],
+    timeout_seconds: int,
+    *,
+    cwd: str | Path | None = None,
+    env: dict[str, str] | None = None,
+) -> tuple[bytes, bytes, int]:
     try:
         process = subprocess.Popen(
             command,
@@ -286,6 +292,8 @@ def _run_bounded(command: list[str], timeout_seconds: int) -> tuple[bytes, bytes
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             shell=False,
+            cwd=None if cwd is None else str(cwd),
+            env=env,
             start_new_session=os.name == "posix",
             creationflags=(
                 getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
