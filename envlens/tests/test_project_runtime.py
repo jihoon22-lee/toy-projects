@@ -72,6 +72,30 @@ def test_runtime_compile_import_and_dry_entrypoint_e2e(tmp_path: Path) -> None:
     assert checks[-1]["action"] == "dry-inspection"
 
 
+def test_runtime_uses_optional_tool_configuration_when_options_are_omitted(
+    tmp_path: Path,
+) -> None:
+    _write_project(tmp_path)
+    with (tmp_path / "pyproject.toml").open("a", encoding="utf-8") as stream:
+        stream.write(
+            "\n[tool.envlens]\n"
+            f"interpreters = [{sys.executable!r}]\n"
+            'imports = ["samplemod"]\n'
+            'compile_paths = ["src"]\n'
+            'entry_points = ["hello"]\n'
+        )
+
+    result = runtime.run_runtime_checks(tmp_path)
+
+    assert result["project"]["configuration"]["compile_paths"] == ["src"]
+    assert result["interpreters"][0]["requested_executable"] == sys.executable
+    assert [item["status"] for item in result["interpreters"][0]["checks"]] == [
+        "passed",
+        "passed",
+        "inspected",
+    ]
+
+
 def test_runtime_entrypoint_execution_requires_explicit_opt_in(tmp_path: Path) -> None:
     source = _write_project(tmp_path)
     with patch.object(runtime, "_run_bounded", wraps=runtime._run_bounded) as run:

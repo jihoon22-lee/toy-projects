@@ -395,6 +395,31 @@ def _entry_points(
     return records
 
 
+def _tool_configuration(root: Mapping[str, Any]) -> dict[str, list[str]]:
+    tool = _get_mapping(root, "tool")
+    envlens = _get_mapping(tool, "envlens")
+    runtime = _get_mapping(envlens, "runtime")
+    configuration: dict[str, list[str]] = {}
+    for output_key, keys in (
+        ("interpreters", ("interpreters",)),
+        ("imports", ("imports", "modules")),
+        ("compile_paths", ("compile_paths", "compile")),
+        ("entry_points", ("entry_points",)),
+    ):
+        value: Any = None
+        for key in keys:
+            if key in runtime:
+                value = runtime[key]
+                break
+            if key in envlens:
+                value = envlens[key]
+                break
+        values = _string_list(value, f"tool.envlens.{output_key}")
+        if values:
+            configuration[output_key] = values
+    return configuration
+
+
 def inspect_pyproject(path: str | Path = "pyproject.toml") -> dict[str, Any]:
     """Read project metadata and entry points without importing or executing code."""
 
@@ -421,7 +446,8 @@ def inspect_pyproject(path: str | Path = "pyproject.toml") -> dict[str, Any]:
     requires_python = _string_field(project.get("requires-python"), "requires-python")
     dependencies = _string_list(project.get("dependencies"), "project.dependencies")
     entries = _entry_points(project, locations, project_path)
-    return {
+    configuration = _tool_configuration(root)
+    result: dict[str, Any] = {
         "schema_version": "envlens.project/v1",
         "path": str(project_path),
         "project": {
@@ -436,6 +462,9 @@ def inspect_pyproject(path: str | Path = "pyproject.toml") -> dict[str, Any]:
             "entry-point inspection is dry; code is not imported or executed",
         ],
     }
+    if configuration:
+        result["configuration"] = configuration
+    return result
 
 
 def inspect_project(path: str | Path = "pyproject.toml") -> dict[str, Any]:

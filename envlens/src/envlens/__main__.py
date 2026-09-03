@@ -84,7 +84,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--import-module",
         dest="imports",
         action="append",
-        default=[],
         help="module to import explicitly (repeat for multiple modules)",
     )
     runtime.add_argument(
@@ -100,7 +99,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--run-entry-point",
         dest="entry_points",
         action="append",
-        default=[],
         help="entry-point name or group/name to inspect or execute",
     )
     runtime.add_argument(

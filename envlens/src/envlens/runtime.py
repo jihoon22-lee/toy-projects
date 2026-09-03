@@ -405,16 +405,42 @@ def run_runtime_checks(
             "warnings": [f"entry-point inspection unavailable: {error}"],
             "inspection_error": {"code": error.code, "message": error.message},
         }
+    configuration = project_info.get("configuration", {})
+    configured_values = configuration if isinstance(configuration, dict) else {}
+    selected_entries = entry_points
+    if selected_entries is None:
+        selected_entries = configured_values.get("entry_points")
     entries = _select_entry_points(
-        [dict(item) for item in project_info.get("entry_points", [])], entry_points
+        [dict(item) for item in project_info.get("entry_points", [])], selected_entries
     )
-    modules = list(imports or [])
+    modules = list(imports if imports is not None else configured_values.get("imports", []))
     for module in modules:
         if not isinstance(module, str) or not MODULE_RE.fullmatch(module):
             raise RuntimeCheckError("invalid-import", f"invalid import module {module!r}")
-    paths = [Path(item) for item in compile_paths] if compile_paths is not None else [root]
+    configured_paths = compile_paths
+    if configured_paths is None:
+        configured_paths = configured_values.get("compile_paths")
+    if configured_paths is None:
+        paths = [root]
+    else:
+        _validate_paths(configured_paths, "compile_paths")
+        paths = [
+            Path(item) if Path(item).is_absolute() else root / Path(item)
+            for item in configured_paths
+        ]
     source_files = _python_files(paths)
-    configured = list(interpreters or [sys.executable])
+    configured_interpreters = interpreters
+    if configured_interpreters is None:
+        configured_interpreters = configured_values.get("interpreters")
+    if configured_interpreters is not None:
+        _validate_paths(configured_interpreters, "interpreters")
+    configured = list(configured_interpreters or [sys.executable])
+    if interpreters is None and configured_values.get("interpreters"):
+        configured = [
+            root / Path(item) if not Path(item).is_absolute() else Path(item) for item in configured
+        ]
+    _validate_runtime_options(timeout_seconds, modules, "imports")
+    _validate_runtime_options(timeout_seconds, selected_entries, "entry_points")
     if len(configured) > MAX_ENTRY_POINTS:
         raise RuntimeCheckError("runtime-input-too-large", "interpreters exceeds 1000 items")
     interpreter_results: list[dict[str, Any]] = []
