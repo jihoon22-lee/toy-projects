@@ -13,7 +13,9 @@
 
 #include "diskmap/gui/node_key_metatype.hpp"
 #include "diskmap/gui/node_table_model.hpp"
+#include "diskmap/cleanup.hpp"
 #include "diskmap/scanner.hpp"
+#include "diskmap/trash.hpp"
 
 class QComboBox;
 class QHBoxLayout;
@@ -21,7 +23,9 @@ class QLabel;
 class QLineEdit;
 class QPushButton;
 class QTableView;
+class QTableWidget;
 class QTimer;
+class QUndoStack;
 class QVBoxLayout;
 class QWidget;
 class TreemapWidget;
@@ -41,8 +45,22 @@ public:
         const diskmap::ScanOptions&,
         const std::shared_ptr<diskmap::ScanCancellationToken>&,
         const diskmap::ProgressFn&)>;
+    using TrashMover =
+        std::function<std::vector<diskmap::TrashReceipt>(const diskmap::CleanupPlan&)>;
+    using TrashRestorer =
+        std::function<diskmap::TrashReceipt(const std::string&)>;
+    using CleanupConfirmer =
+        std::function<bool(const diskmap::CleanupPlan&)>;
 
-    explicit MainWindow(QWidget* parent = nullptr, ScanRunner scanRunner = {});
+    struct CleanupServices {
+        TrashMover move;
+        TrashRestorer restore;
+        CleanupConfirmer confirm;
+    };
+
+    explicit MainWindow(QWidget* parent = nullptr,
+                        ScanRunner scanRunner = {},
+                        CleanupServices cleanupServices = {});
     ~MainWindow() override;
 
     // Starts a scan without going through the folder dialog, so
@@ -63,6 +81,10 @@ private slots:
     void onNodeActivated(diskmap::NodeKey key);
     void onNodeHovered(diskmap::NodeKey key);
     void clearHover();
+    void stageSelectedRows();
+    void clearCleanupStaging();
+    void executeCleanup();
+    void restoreSelectedTrashItem();
 
 private:
     struct ScanProgressState {
@@ -94,9 +116,21 @@ private:
     QTimer* progressTimer_ = nullptr;
     QPushButton* upButton_ = nullptr;
     QPushButton* cancelButton_ = nullptr;
+    QPushButton* stageCleanupButton_ = nullptr;
+    QPushButton* clearCleanupButton_ = nullptr;
+    QPushButton* undoCleanupButton_ = nullptr;
+    QPushButton* redoCleanupButton_ = nullptr;
+    QPushButton* executeCleanupButton_ = nullptr;
+    QPushButton* restoreTrashButton_ = nullptr;
+    QTableWidget* cleanupReviewTable_ = nullptr;
+    QTableWidget* cleanupAuditTable_ = nullptr;
+    QLabel* cleanupSummary_ = nullptr;
+    QComboBox* restoreTokenCombo_ = nullptr;
+    QUndoStack* cleanupUndo_ = nullptr;
     std::shared_ptr<diskmap::ScanCancellationToken> activeCancellation_;
     std::shared_ptr<ScanProgressState> activeProgress_;
     ScanRunner scanRunner_;
+    CleanupServices cleanupServices_;
     diskmap::ScanOptions scanOptions_;
     std::uint64_t activeGeneration_ = 0;
 
@@ -112,10 +146,13 @@ private:
     bool pendingRestore_ = false;
     bool refreshingProjection_ = false;
     bool modelResetInProgress_ = false;
+    std::vector<diskmap::NodeKey> stagedCleanupKeys_;
+    diskmap::CleanupPlan cleanupPlan_;
 
     void buildNavigationBar(QWidget* central, QVBoxLayout* layout);
     void buildFilterPanel(QWidget* central, QVBoxLayout* layout);
     void buildExplorer(QWidget* central, QVBoxLayout* layout);
+    void buildCleanupPanel(QWidget* central, QVBoxLayout* layout);
     void connectUi();
     void startScan(const QString& path, bool restoreNavigation = false);
     void onScanProgress(std::uint64_t generation,
@@ -138,4 +175,7 @@ private:
     void updatePartialBanner();
     void updateControlState();
     void restoreSelection();
+    void setStagedCleanupKeys(std::vector<diskmap::NodeKey> keys);
+    void refreshCleanupReview();
+    void appendCleanupAudit(const diskmap::TrashReceipt& receipt);
 };

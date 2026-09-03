@@ -12,6 +12,7 @@
 #include <QPushButton>
 #include <QStringList>
 #include <QTableView>
+#include <QTableWidget>
 #include <QTemporaryDir>
 #include <QToolButton>
 #include <QWaitCondition>
@@ -64,6 +65,8 @@ private slots:
     void activatingADirectoryDescendsAndUpdatesBreadcrumb();
     void goingUpReturnsToTheRootAndStopsThere();
     void activatingALeafDoesNothing();
+    void cleanupStagingIsReviewableAndUndoable();
+    void cleanupAuditKeepsOnlyRealRestoreTokens();
 };
 
 namespace {
@@ -138,6 +141,26 @@ QTableView* nodeTable(MainWindow& window) {
     return window.findChild<QTableView*>(QStringLiteral("nodeTable"));
 }
 
+QPushButton* cleanupButton(MainWindow& window, const char* name) {
+    return window.findChild<QPushButton*>(QString::fromLatin1(name));
+}
+
+QTableWidget* cleanupReview(MainWindow& window) {
+    return window.findChild<QTableWidget*>(QStringLiteral("cleanupReviewTable"));
+}
+
+QTableWidget* cleanupAudit(MainWindow& window) {
+    return window.findChild<QTableWidget*>(QStringLiteral("cleanupAuditTable"));
+}
+
+QComboBox* restoreTokens(MainWindow& window) {
+    return window.findChild<QComboBox*>(QStringLiteral("restoreTokenCombo"));
+}
+
+QLabel* cleanupSummary(MainWindow& window) {
+    return window.findChild<QLabel*>(QStringLiteral("cleanupSummary"));
+}
+
 NodeTableModel* tableModel(MainWindow& window) {
     QTableView* table = nodeTable(window);
     return table == nullptr ? nullptr : qobject_cast<NodeTableModel*>(table->model());
@@ -195,6 +218,21 @@ void activateTableRow(MainWindow& window, const QString& name) {
     QVERIFY(index.isValid());
     if (index.isValid()) {
         emit table->activated(index);
+    }
+}
+
+void selectTableRows(MainWindow& window, const QStringList& names) {
+    QTableView* table = nodeTable(window);
+    QVERIFY(table != nullptr);
+    QVERIFY(table->selectionModel() != nullptr);
+    table->selectionModel()->clearSelection();
+    for (const QString& name : names) {
+        const QModelIndex index = tableIndexNamed(window, name);
+        QVERIFY2(index.isValid(), qPrintable(name));
+        if (index.isValid()) {
+            table->selectionModel()->select(
+                index, QItemSelectionModel::Select | QItemSelectionModel::Rows);
+        }
     }
 }
 
@@ -796,6 +834,12 @@ void TestMainWindow::uiControlsHaveStableNamesAndAccessibleLabels() {
         QStringLiteral("partialBanner"),      QStringLiteral("explorerSplitter"),
         QStringLiteral("nodeTable"),           QStringLiteral("treemap"),
         QStringLiteral("treemapLegend"),       QStringLiteral("projectionSummary"),
+        QStringLiteral("cleanupHeading"),      QStringLiteral("stageCleanupButton"),
+        QStringLiteral("clearCleanupButton"),  QStringLiteral("undoCleanupButton"),
+        QStringLiteral("redoCleanupButton"),   QStringLiteral("executeCleanupButton"),
+        QStringLiteral("restoreTokenCombo"),   QStringLiteral("restoreTrashButton"),
+        QStringLiteral("cleanupSummary"),      QStringLiteral("cleanupSplitter"),
+        QStringLiteral("cleanupReviewTable"),  QStringLiteral("cleanupAuditTable"),
         QStringLiteral("status"),
     };
     for (const QString& name : objectNames) {
@@ -813,7 +857,13 @@ void TestMainWindow::uiControlsHaveStableNamesAndAccessibleLabels() {
         QStringLiteral("viewModeCombo"),      QStringLiteral("metricExplanation"),
         QStringLiteral("partialBanner"),      QStringLiteral("nodeTable"),
         QStringLiteral("treemap"),             QStringLiteral("treemapLegend"),
-        QStringLiteral("projectionSummary"),  QStringLiteral("status"),
+        QStringLiteral("projectionSummary"),  QStringLiteral("cleanupHeading"),
+        QStringLiteral("stageCleanupButton"), QStringLiteral("clearCleanupButton"),
+        QStringLiteral("undoCleanupButton"),  QStringLiteral("redoCleanupButton"),
+        QStringLiteral("executeCleanupButton"), QStringLiteral("restoreTokenCombo"),
+        QStringLiteral("restoreTrashButton"), QStringLiteral("cleanupSummary"),
+        QStringLiteral("cleanupReviewTable"), QStringLiteral("cleanupAuditTable"),
+        QStringLiteral("status"),
     };
     for (const QString& name : accessibleNames) {
         QWidget* control = window.findChild<QWidget*>(name);
@@ -1521,6 +1571,107 @@ void TestMainWindow::activatingALeafDoesNothing() {
     QCOMPARE(QString::fromStdString(view->currentNode()->name),
              QString::fromStdString(directoryNode->name));
     QCOMPARE(breadcrumbPath(window), directoryTrail);
+}
+
+void TestMainWindow::cleanupStagingIsReviewableAndUndoable() {
+    MainWindow window(nullptr, explorerRunner(ExplorerResultKind::Complete));
+    window.scanPath(QStringLiteral("cleanup-review"));
+    waitForScan(window);
+
+    selectTableRows(window,
+                    {QStringLiteral("needle.bin"), QStringLiteral("other.bin")});
+    QPushButton* stage = cleanupButton(window, "stageCleanupButton");
+    QPushButton* undo = cleanupButton(window, "undoCleanupButton");
+    QPushButton* redo = cleanupButton(window, "redoCleanupButton");
+    QVERIFY(stage != nullptr);
+    QVERIFY(stage->isEnabled());
+    stage->click();
+
+    QTableWidget* review = cleanupReview(window);
+    QVERIFY(review != nullptr);
+    QCOMPARE(review->rowCount(), 2);
+    QCOMPARE(review->item(0, 0)->text(), QStringLiteral("Ready"));
+    QVERIFY(cleanupSummary(window)->text().contains(QStringLiteral("2 ready")));
+    QVERIFY(cleanupSummary(window)->text().contains(QStringLiteral("96 B")));
+    QVERIFY(cleanupSummary(window)->text().contains(QStringLiteral("nothing has moved")));
+
+    QVERIFY(undo != nullptr);
+    QVERIFY(undo->isEnabled());
+    undo->click();
+    QCOMPARE(review->rowCount(), 0);
+    QCOMPARE(cleanupSummary(window)->text(), QStringLiteral("Dry run: 0 ready, 0 rejected · reclaimable 0 B · nothing has moved"));
+
+    QVERIFY(redo != nullptr);
+    QVERIFY(redo->isEnabled());
+    redo->click();
+    QCOMPARE(review->rowCount(), 2);
+}
+
+void TestMainWindow::cleanupAuditKeepsOnlyRealRestoreTokens() {
+    bool confirmed = false;
+    std::size_t movedTargets = 0;
+    std::string restoredToken;
+    MainWindow::CleanupServices services;
+    services.confirm = [&confirmed](const diskmap::CleanupPlan&) {
+        confirmed = true;
+        return true;
+    };
+    services.move = [&movedTargets](const diskmap::CleanupPlan& plan) {
+        movedTargets = plan.targets.size();
+        std::vector<diskmap::TrashReceipt> receipts;
+        for (std::size_t index = 0; index < plan.targets.size(); ++index) {
+            diskmap::TrashReceipt receipt;
+            receipt.original_path = plan.targets[index].path;
+            if (index == 0) {
+                receipt.status = diskmap::TrashStatus::Moved;
+                receipt.restore_token = "opaque-token";
+                receipt.message = "moved safely";
+            } else {
+                receipt.status = diskmap::TrashStatus::RevalidationFailed;
+                receipt.message = "identity changed";
+            }
+            receipts.push_back(std::move(receipt));
+        }
+        return receipts;
+    };
+    services.restore = [&restoredToken](const std::string& token) {
+        restoredToken = token;
+        diskmap::TrashReceipt receipt;
+        receipt.status = diskmap::TrashStatus::Restored;
+        receipt.original_path = "/virtual/cleanup-audit/needle.bin";
+        receipt.message = "restored safely";
+        return receipt;
+    };
+
+    MainWindow window(nullptr, explorerRunner(ExplorerResultKind::Complete),
+                      std::move(services));
+    window.scanPath(QStringLiteral("cleanup-audit"));
+    waitForScan(window);
+    selectTableRows(window,
+                    {QStringLiteral("needle.bin"), QStringLiteral("other.bin")});
+    cleanupButton(window, "stageCleanupButton")->click();
+    cleanupButton(window, "executeCleanupButton")->click();
+
+    QTRY_VERIFY(rescanButton(window)->isEnabled());
+    QVERIFY(confirmed);
+    QCOMPARE(movedTargets, std::size_t{2});
+    QTableWidget* audit = cleanupAudit(window);
+    QVERIFY(audit != nullptr);
+    QCOMPARE(audit->rowCount(), 2);
+    QCOMPARE(audit->item(0, 0)->text(), QStringLiteral("moved"));
+    QCOMPARE(audit->item(1, 0)->text(), QStringLiteral("revalidation-failed"));
+    QComboBox* tokens = restoreTokens(window);
+    QVERIFY(tokens != nullptr);
+    QCOMPARE(tokens->count(), 1);
+    QCOMPARE(tokens->itemData(0).toString(), QStringLiteral("opaque-token"));
+    QCOMPARE(cleanupReview(window)->rowCount(), 0);
+
+    cleanupButton(window, "restoreTrashButton")->click();
+    QTRY_VERIFY(rescanButton(window)->isEnabled());
+    QCOMPARE(QString::fromStdString(restoredToken), QStringLiteral("opaque-token"));
+    QCOMPARE(audit->rowCount(), 3);
+    QCOMPARE(audit->item(2, 0)->text(), QStringLiteral("restored"));
+    QCOMPARE(tokens->count(), 0);
 }
 
 QTEST_MAIN(TestMainWindow)

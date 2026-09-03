@@ -14,7 +14,9 @@
 #include <QRegularExpressionValidator>
 #include <QSplitter>
 #include <QTableView>
+#include <QTableWidget>
 #include <QTimer>
+#include <QUndoStack>
 #include <QVBoxLayout>
 
 #include <optional>
@@ -177,7 +179,7 @@ void MainWindow::buildExplorer(QWidget* central, QVBoxLayout* layout) {
     table_->setAccessibleName(tr("Projected filesystem entries"));
     table_->setModel(tableModel_);
     table_->setSelectionBehavior(QAbstractItemView::SelectRows);
-    table_->setSelectionMode(QAbstractItemView::SingleSelection);
+    table_->setSelectionMode(QAbstractItemView::ExtendedSelection);
     table_->setAlternatingRowColors(true);
     table_->setWordWrap(false);
     table_->setSortingEnabled(true);
@@ -218,14 +220,112 @@ void MainWindow::buildExplorer(QWidget* central, QVBoxLayout* layout) {
     layout->addLayout(footer);
 }
 
+void MainWindow::buildCleanupPanel(QWidget* central, QVBoxLayout* layout) {
+    auto* heading = new QLabel(tr("Cleanup staging — review only until Move to Trash"),
+                               central);
+    heading->setObjectName(QStringLiteral("cleanupHeading"));
+    heading->setAccessibleName(tr("Cleanup staging"));
+    layout->addWidget(heading);
+
+    auto* actions = new QHBoxLayout();
+    stageCleanupButton_ = new QPushButton(tr("Stage selected"), central);
+    stageCleanupButton_->setObjectName(QStringLiteral("stageCleanupButton"));
+    stageCleanupButton_->setAccessibleName(tr("Stage selected entries for cleanup"));
+    clearCleanupButton_ = new QPushButton(tr("Clear staging"), central);
+    clearCleanupButton_->setObjectName(QStringLiteral("clearCleanupButton"));
+    clearCleanupButton_->setAccessibleName(tr("Clear cleanup staging"));
+    undoCleanupButton_ = new QPushButton(tr("Undo staging"), central);
+    undoCleanupButton_->setObjectName(QStringLiteral("undoCleanupButton"));
+    undoCleanupButton_->setAccessibleName(tr("Undo cleanup staging change"));
+    redoCleanupButton_ = new QPushButton(tr("Redo staging"), central);
+    redoCleanupButton_->setObjectName(QStringLiteral("redoCleanupButton"));
+    redoCleanupButton_->setAccessibleName(tr("Redo cleanup staging change"));
+    executeCleanupButton_ = new QPushButton(tr("Move to Trash…"), central);
+    executeCleanupButton_->setObjectName(QStringLiteral("executeCleanupButton"));
+    executeCleanupButton_->setAccessibleName(tr("Move reviewed entries to Trash"));
+    for (QPushButton* button : {stageCleanupButton_, clearCleanupButton_,
+                                undoCleanupButton_, redoCleanupButton_,
+                                executeCleanupButton_}) {
+        actions->addWidget(button);
+    }
+    actions->addStretch(1);
+    restoreTokenCombo_ = new QComboBox(central);
+    restoreTokenCombo_->setObjectName(QStringLiteral("restoreTokenCombo"));
+    restoreTokenCombo_->setAccessibleName(tr("Recoverable Trash item"));
+    restoreTrashButton_ = new QPushButton(tr("Restore"), central);
+    restoreTrashButton_->setObjectName(QStringLiteral("restoreTrashButton"));
+    restoreTrashButton_->setAccessibleName(tr("Restore selected Trash item"));
+    actions->addWidget(restoreTokenCombo_);
+    actions->addWidget(restoreTrashButton_);
+    layout->addLayout(actions);
+
+    cleanupSummary_ = new QLabel(tr("No items staged"), central);
+    cleanupSummary_->setObjectName(QStringLiteral("cleanupSummary"));
+    cleanupSummary_->setAccessibleName(tr("Cleanup dry-run summary"));
+    cleanupSummary_->setTextFormat(Qt::PlainText);
+    cleanupSummary_->setWordWrap(true);
+    layout->addWidget(cleanupSummary_);
+
+    auto* cleanupSplitter = new QSplitter(Qt::Horizontal, central);
+    cleanupSplitter->setObjectName(QStringLiteral("cleanupSplitter"));
+    cleanupReviewTable_ = new QTableWidget(cleanupSplitter);
+    cleanupReviewTable_->setObjectName(QStringLiteral("cleanupReviewTable"));
+    cleanupReviewTable_->setAccessibleName(tr("Cleanup dry-run review"));
+    cleanupReviewTable_->setColumnCount(3);
+    cleanupReviewTable_->setHorizontalHeaderLabels(
+        {tr("Decision"), tr("Path"), tr("Evidence")});
+    cleanupReviewTable_->horizontalHeader()->setSectionResizeMode(
+        1, QHeaderView::Stretch);
+    cleanupReviewTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    cleanupReviewTable_->setSelectionMode(QAbstractItemView::NoSelection);
+
+    cleanupAuditTable_ = new QTableWidget(cleanupSplitter);
+    cleanupAuditTable_->setObjectName(QStringLiteral("cleanupAuditTable"));
+    cleanupAuditTable_->setAccessibleName(tr("Trash operation audit"));
+    cleanupAuditTable_->setColumnCount(3);
+    cleanupAuditTable_->setHorizontalHeaderLabels(
+        {tr("Result"), tr("Original path"), tr("Detail")});
+    cleanupAuditTable_->horizontalHeader()->setSectionResizeMode(
+        1, QHeaderView::Stretch);
+    cleanupAuditTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    cleanupAuditTable_->setSelectionMode(QAbstractItemView::NoSelection);
+    cleanupSplitter->addWidget(cleanupReviewTable_);
+    cleanupSplitter->addWidget(cleanupAuditTable_);
+    cleanupSplitter->setStretchFactor(0, 1);
+    cleanupSplitter->setStretchFactor(1, 1);
+    layout->addWidget(cleanupSplitter);
+
+    cleanupUndo_ = new QUndoStack(this);
+}
+
 void MainWindow::connectUi() {
     connect(chooseButton_, &QPushButton::clicked, this, &MainWindow::chooseFolder);
     connect(rescanButton_, &QPushButton::clicked, this, &MainWindow::rescan);
     connect(upButton_, &QPushButton::clicked, this, &MainWindow::goUp);
     connect(cancelButton_, &QPushButton::clicked, this, &MainWindow::cancelScan);
+    connect(stageCleanupButton_, &QPushButton::clicked, this,
+            &MainWindow::stageSelectedRows);
+    connect(clearCleanupButton_, &QPushButton::clicked, this,
+            &MainWindow::clearCleanupStaging);
+    connect(undoCleanupButton_, &QPushButton::clicked, cleanupUndo_,
+            &QUndoStack::undo);
+    connect(redoCleanupButton_, &QPushButton::clicked, cleanupUndo_,
+            &QUndoStack::redo);
+    connect(executeCleanupButton_, &QPushButton::clicked, this,
+            &MainWindow::executeCleanup);
+    connect(restoreTrashButton_, &QPushButton::clicked, this,
+            &MainWindow::restoreSelectedTrashItem);
+    connect(cleanupUndo_, &QUndoStack::canUndoChanged, undoCleanupButton_,
+            &QPushButton::setEnabled);
+    connect(cleanupUndo_, &QUndoStack::canRedoChanged, redoCleanupButton_,
+            &QPushButton::setEnabled);
+    connect(restoreTokenCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int) { updateControlState(); });
     connect(table_, &QTableView::activated, this, &MainWindow::onTableActivated);
     connect(table_->selectionModel(), &QItemSelectionModel::currentChanged, this,
             &MainWindow::onTableCurrentChanged);
+    connect(table_->selectionModel(), &QItemSelectionModel::selectionChanged, this,
+            [this]() { updateControlState(); });
     connect(table_->horizontalHeader(), &QHeaderView::sortIndicatorChanged, this,
             &MainWindow::onTableSortChanged);
     connect(tableModel_, &QAbstractItemModel::modelAboutToBeReset, this, [this]() {
@@ -303,4 +403,16 @@ void MainWindow::updateControlState() {
     ageCombo_->setEnabled(explorerEnabled);
     issueCombo_->setEnabled(explorerEnabled);
     modeCombo_->setEnabled(explorerEnabled);
+    stageCleanupButton_->setEnabled(explorerEnabled
+                                    && table_->selectionModel() != nullptr
+                                    && table_->selectionModel()->hasSelection());
+    clearCleanupButton_->setEnabled(explorerEnabled
+                                    && !stagedCleanupKeys_.empty());
+    undoCleanupButton_->setEnabled(explorerEnabled && cleanupUndo_->canUndo());
+    redoCleanupButton_->setEnabled(explorerEnabled && cleanupUndo_->canRedo());
+    executeCleanupButton_->setEnabled(explorerEnabled
+                                      && !cleanupPlan_.targets.empty());
+    restoreTokenCombo_->setEnabled(!scanning && restoreTokenCombo_->count() > 0);
+    restoreTrashButton_->setEnabled(!scanning
+                                    && restoreTokenCombo_->currentIndex() >= 0);
 }

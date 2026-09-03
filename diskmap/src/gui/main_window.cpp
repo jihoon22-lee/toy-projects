@@ -3,8 +3,10 @@
 #include <QComboBox>
 #include <QFileDialog>
 #include <QLabel>
+#include <QMessageBox>
 #include <QStatusBar>
 #include <QTimer>
+#include <QUndoStack>
 #include <QVBoxLayout>
 #include <QWidget>
 #include <QtConcurrent>
@@ -18,6 +20,7 @@
 #include <vector>
 
 #include "explorer_text.hpp"
+#include "diskmap/format.hpp"
 
 namespace {
 
@@ -57,8 +60,11 @@ diskmap::ScanResult failedScanResult(const QString& path,
 
 } // namespace
 
-MainWindow::MainWindow(QWidget* parent, ScanRunner scanRunner)
-    : QMainWindow(parent), scanRunner_(std::move(scanRunner)) {
+MainWindow::MainWindow(QWidget* parent,
+                       ScanRunner scanRunner,
+                       CleanupServices cleanupServices)
+    : QMainWindow(parent), scanRunner_(std::move(scanRunner)),
+      cleanupServices_(std::move(cleanupServices)) {
     if (!scanRunner_) {
         scanRunner_ = runScan;
     }
@@ -67,7 +73,40 @@ MainWindow::MainWindow(QWidget* parent, ScanRunner scanRunner)
     buildNavigationBar(central, layout);
     buildFilterPanel(central, layout);
     buildExplorer(central, layout);
+    buildCleanupPanel(central, layout);
     setCentralWidget(central);
+
+    if (!cleanupServices_.move) {
+        cleanupServices_.move = [](const diskmap::CleanupPlan& plan) {
+            return diskmap::movePlanToTrash(plan);
+        };
+    }
+    if (!cleanupServices_.restore) {
+        cleanupServices_.restore = [](const std::string& token) {
+            return diskmap::restoreFromTrash(token);
+        };
+    }
+    if (!cleanupServices_.confirm) {
+        cleanupServices_.confirm = [this](const diskmap::CleanupPlan& plan) {
+            const QString known = plan.reclaimable_bytes_known
+                                      ? QString::fromStdString(
+                                            diskmap::humanBytes(plan.reclaimable_bytes))
+                                      : tr("at least %1")
+                                            .arg(QString::fromStdString(
+                                                diskmap::humanBytes(
+                                                    plan.reclaimable_bytes)));
+            return QMessageBox::question(
+                       this, tr("Move reviewed items to Trash?"),
+                       tr("Move %1 reviewed item(s) to recoverable Trash?\n\n"
+                          "Estimated reclaimable storage: %2\n"
+                          "Rejected items will not be touched.")
+                           .arg(plan.targets.size())
+                           .arg(known),
+                       QMessageBox::Yes | QMessageBox::Cancel,
+                       QMessageBox::Cancel)
+                   == QMessageBox::Yes;
+        };
+    }
 
     status_ = new QLabel(tr("Ready"), this);
     status_->setObjectName(QStringLiteral("status"));
@@ -100,7 +139,7 @@ MainWindow::~MainWindow() {
         activeCancellation_->cancel();
     }
     filterTimer_->stop();
-    filterTimer_->stop();
+    progressTimer_->stop();
 }
 
 void MainWindow::chooseFolder() {
@@ -238,6 +277,9 @@ void MainWindow::onScanFinished(QFutureWatcher<diskmap::ScanResult>* watcher,
     const std::vector<diskmap::NodeKey> previousTrail = pendingTrail_;
     const std::optional<diskmap::NodeKey> previousSelection = pendingSelectedKey_;
     document_ = std::make_shared<diskmap::ScanResult>(std::move(completed));
+    cleanupUndo_->clear();
+    stagedCleanupKeys_.clear();
+    refreshCleanupReview();
     currentScanPath_ = requestedScanPath_;
     if (pendingRestore_) {
         restoreNavigation(previousTrail);
