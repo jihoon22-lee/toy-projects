@@ -4,15 +4,36 @@ from __future__ import annotations
 
 import os
 import re
-import signal
 import sys
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from envlens.probe import ProbeError, _run_bounded, resolve_interpreter
+from envlens.probe import ProbeError, _run_bounded
 from envlens.project import ProjectError, inspect_pyproject
+from envlens.runtime_execution import (
+    PreparedRuntime as _PreparedRuntime,
+)
+from envlens.runtime_execution import (
+    interpreter_record as _interpreter_record,
+)
+from envlens.runtime_execution import (
+    resolve_for_runtime as _resolve_for_runtime,
+)
+from envlens.runtime_execution import (
+    select_entry_points as _select_entry_points,
+)
+from envlens.runtime_execution import (
+    unavailable_record as _unavailable_record,
+)
+from envlens.runtime_files import collect_python_files
+from envlens.runtime_process import (
+    bounded_text,
+    classify_process,
+    failed_process_status,
+)
+from envlens.runtime_types import RuntimeCheckError as RuntimeCheckError
 
 MAX_SOURCE_FILES = 10_000
 MAX_SOURCE_BYTES = 64 * 1024 * 1024
@@ -72,20 +93,12 @@ raise SystemExit(0)
 """
 
 
-class RuntimeCheckError(ValueError):
-    """A stable, user-facing runtime-check configuration failure."""
-
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(f"{code}: {message}")
-        self.code = code
-        self.message = message
-
-
 def _bounded_text(data: bytes) -> str:
-    text = data.decode("utf-8", errors="replace")
-    if len(text) > MAX_OUTPUT_CHARS:
-        return text[:MAX_OUTPUT_CHARS] + "…"
-    return text
+    return bounded_text(data, MAX_OUTPUT_CHARS)
+
+
+def _failed_process_status(return_code: int, stderr: str, name: str) -> dict[str, Any]:
+    return failed_process_status(return_code, stderr, name)
 
 
 def _classify_process(
@@ -97,39 +110,17 @@ def _classify_process(
     kind: str,
     name: str,
 ) -> dict[str, Any]:
-    stderr_text = _bounded_text(stderr).strip()
-    result: dict[str, Any] = {
-        "kind": kind,
-        "name": name,
-        "status": "passed" if return_code == 0 else "failed",
-        "return_code": return_code,
-    }
-    if stdout:
-        result["stdout"] = _bounded_text(stdout)
-    if stderr_text:
-        result["stderr"] = stderr_text
-    if return_code < 0:
-        number = -return_code
-        result["status"] = "signal"
-        result["signal"] = number
-        try:
-            result["signal_name"] = signal.Signals(number).name
-        except ValueError:
-            result["signal_name"] = f"SIG{number}"
-    elif return_code != 0 and "ENVLENS_MISSING_IMPORT=" in stderr_text:
-        result["status"] = "missing-import"
-        marker = stderr_text.split("ENVLENS_MISSING_IMPORT=", 1)[1].splitlines()[0]
-        result["missing_import"] = marker.strip() or name
-    elif return_code != 0 and "ENVLENS_IMPORT_ERROR=" in stderr_text:
-        result["status"] = "import-error"
-    elif return_code != 0 and "ENVLENS_ENTRY_POINT_ERROR=" in stderr_text:
-        result["status"] = "entry-point-error"
-    if result["status"] == "failed":
-        result["reason"] = f"{kind} process exited {return_code}"
-    elif result["status"] == "passed":
-        result["reason"] = f"{kind} completed successfully"
-    result["timeout_seconds"] = timeout_seconds
-    return result
+    return classify_process(
+        stdout=stdout,
+        stderr=stderr,
+        return_code=return_code,
+        timeout_seconds=timeout_seconds,
+        kind=kind,
+        name=name,
+        max_output_chars=MAX_OUTPUT_CHARS,
+        text_renderer=_bounded_text,
+        status_renderer=_failed_process_status,
+    )
 
 
 def _run_check(
@@ -175,60 +166,12 @@ def _run_check(
 
 
 def _python_files(paths: Sequence[Path]) -> list[Path]:
-    files: list[Path] = []
-    total_bytes = 0
-    seen: set[tuple[int, int]] = set()
-    skip_directories = {".git", ".hg", ".svn", ".tox", ".venv", "venv", "__pycache__"}
-    entries_seen = 0
-    for path in paths:
-        if path.is_symlink():
-            continue
-        if path.is_file():
-            candidates = [path] if path.suffix == ".py" else []
-        elif path.is_dir():
-            candidates = []
-            pending = [path]
-            while pending:
-                directory = pending.pop()
-                try:
-                    with os.scandir(directory) as directory_entries:
-                        for entry in directory_entries:
-                            entries_seen += 1
-                            if entries_seen > MAX_SOURCE_ENTRIES:
-                                raise RuntimeCheckError(
-                                    "source-too-large",
-                                    "source tree exceeds 100000 directory entries",
-                                )
-                            if entry.is_symlink():
-                                continue
-                            if entry.is_dir(follow_symlinks=False):
-                                if entry.name not in skip_directories:
-                                    pending.append(Path(entry.path))
-                            elif entry.is_file(follow_symlinks=False) and entry.name.endswith(
-                                ".py"
-                            ):
-                                candidates.append(Path(entry.path))
-                except OSError as error:
-                    raise RuntimeCheckError("source-read-failed", str(error)) from error
-        else:
-            continue
-        for candidate in candidates:
-            try:
-                stat = candidate.stat()
-            except OSError as error:
-                raise RuntimeCheckError("source-read-failed", str(error)) from error
-            identity = (stat.st_dev, stat.st_ino)
-            if identity in seen:
-                continue
-            seen.add(identity)
-            total_bytes += stat.st_size
-            if total_bytes > MAX_SOURCE_BYTES:
-                raise RuntimeCheckError("source-too-large", "Python source exceeds 64 MiB")
-            files.append(candidate)
-            if len(files) > MAX_SOURCE_FILES:
-                raise RuntimeCheckError("source-too-large", "Python source exceeds 10000 files")
-    files.sort(key=lambda item: str(item))
-    return files
+    return collect_python_files(
+        paths,
+        max_files=MAX_SOURCE_FILES,
+        max_bytes=MAX_SOURCE_BYTES,
+        max_entries=MAX_SOURCE_ENTRIES,
+    )
 
 
 def _runtime_env(project_root: Path, cache_root: Path | None = None) -> dict[str, str]:
@@ -243,52 +186,12 @@ def _runtime_env(project_root: Path, cache_root: Path | None = None) -> dict[str
     return env
 
 
-def _interpreter_record(
-    requested: str, *, status: str, resolved: Path | None = None
-) -> dict[str, Any]:
-    result: dict[str, Any] = {
-        "requested_executable": requested,
-        "status": status,
-        "checks": [],
-    }
-    if resolved is not None:
-        result["resolved_executable"] = str(resolved)
-    return result
-
-
-def _resolve_for_runtime(value: str | Path) -> tuple[str, Path | None]:
-    requested = str(value)
-    path = Path(requested)
-    if not path.exists():
-        return "missing-interpreter", None
-    if not path.is_file() or not os.access(path, os.X_OK):
-        return "invalid-interpreter", None
-    try:
-        resolved, _requested = resolve_interpreter(path)
-    except ProbeError:
-        return "invalid-interpreter", None
-    return "ready", resolved
-
-
-def _select_entry_points(
-    entries: list[dict[str, Any]], requested: Sequence[str] | None
-) -> list[dict[str, Any]]:
-    if not requested:
-        return entries
-    selected: list[dict[str, Any]] = []
-    wanted = set(requested)
-    for entry in entries:
-        qualified = f"{entry.get('group', '')}/{entry.get('name', '')}"
-        if str(entry.get("name", "")) in wanted or qualified in wanted:
-            selected.append(entry)
-    return selected
-
-
 def _entry_check(
     entry: dict[str, Any],
     *,
     resolved: Path,
     project_root: Path,
+    env: dict[str, str],
     timeout_seconds: int,
     execute: bool,
 ) -> dict[str, Any]:
@@ -319,7 +222,6 @@ def _entry_check(
         )
         return result
     target_text = f"{target['module']}:{target['attribute']}"
-    env = _runtime_env(project_root)
     return {
         **result,
         **_run_check(
@@ -373,6 +275,202 @@ def _validate_paths(values: Sequence[str | Path] | None, label: str) -> None:
             )
 
 
+def _project_info(root: Path, pyproject: str | Path | None) -> dict[str, Any]:
+    path = Path(pyproject) if pyproject is not None else root / "pyproject.toml"
+    try:
+        return inspect_pyproject(path)
+    except ProjectError as error:
+        return {
+            "schema_version": "envlens.project/v1",
+            "path": str(path),
+            "project": {
+                "name": "",
+                "normalized_name": "",
+                "version": "",
+                "requires_python": "",
+                "dependencies": [],
+            },
+            "entry_points": [],
+            "warnings": [f"entry-point inspection unavailable: {error}"],
+            "inspection_error": {"code": error.code, "message": error.message},
+        }
+
+
+def _configured_list(
+    explicit: Sequence[Any] | None,
+    configuration: dict[str, Any],
+    key: str,
+) -> tuple[list[Any] | None, bool]:
+    if explicit is not None:
+        return list(explicit), False
+    configured = configuration.get(key)
+    if configured is None:
+        return None, False
+    if not isinstance(configured, list):
+        raise RuntimeCheckError("invalid-runtime-config", f"{key} must be a list")
+    return list(configured), True
+
+
+def _prepare_runtime(
+    project_root: str | Path,
+    *,
+    interpreters: Sequence[str | Path] | None,
+    imports: Sequence[str] | None,
+    compile_paths: Sequence[str | Path] | None,
+    entry_points: Sequence[str] | None,
+    pyproject: str | Path | None,
+    timeout_seconds: int,
+) -> _PreparedRuntime:
+    root = Path(project_root)
+    if not root.is_dir():
+        raise RuntimeCheckError("project-root-failed", "project root must be a directory")
+    project_info = _project_info(root, pyproject)
+    raw_configuration = project_info.get("configuration", {})
+    configuration = raw_configuration if isinstance(raw_configuration, dict) else {}
+
+    selected_entries, _configured_entries = _configured_list(
+        entry_points, configuration, "entry_points"
+    )
+    project_entries = project_info.get("entry_points", [])
+    if not isinstance(project_entries, list):
+        raise RuntimeCheckError("invalid-runtime-config", "project entry_points must be a list")
+    entries = _select_entry_points(
+        [dict(item) for item in project_entries if isinstance(item, dict)],
+        selected_entries,
+    )
+
+    raw_modules, _configured_modules = _configured_list(imports, configuration, "imports")
+    modules = [] if raw_modules is None else raw_modules
+    if any(not isinstance(module, str) or not MODULE_RE.fullmatch(module) for module in modules):
+        raise RuntimeCheckError("invalid-import", "imports contain an invalid module name")
+
+    raw_paths, _configured_paths_used = _configured_list(
+        compile_paths, configuration, "compile_paths"
+    )
+    paths = [root]
+    if raw_paths is not None:
+        _validate_paths(raw_paths, "compile_paths")
+        paths = [
+            Path(item) if Path(item).is_absolute() else root / Path(item) for item in raw_paths
+        ]
+
+    raw_interpreters, from_configuration = _configured_list(
+        interpreters, configuration, "interpreters"
+    )
+    configured: list[str | Path] = raw_interpreters or [sys.executable]
+    _validate_paths(configured, "interpreters")
+    if from_configuration:
+        configured = [
+            root / Path(item) if not Path(item).is_absolute() else Path(item) for item in configured
+        ]
+    _validate_runtime_options(timeout_seconds, modules, "imports")
+    _validate_runtime_options(timeout_seconds, selected_entries, "entry_points")
+    if len(configured) > MAX_ENTRY_POINTS:
+        raise RuntimeCheckError("runtime-input-too-large", "interpreters exceeds 1000 items")
+    return _PreparedRuntime(
+        root=root,
+        project_info=project_info,
+        entries=entries,
+        modules=modules,
+        source_files=_python_files(paths),
+        interpreters=configured,
+    )
+
+
+def _compile_check(
+    resolved: Path,
+    prepared: _PreparedRuntime,
+    env: dict[str, str],
+    timeout_seconds: int,
+) -> dict[str, Any]:
+    if not prepared.source_files:
+        return {
+            "kind": "compileall",
+            "name": str(prepared.root),
+            "status": "passed",
+            "files": 0,
+            "reason": "no Python source files were found",
+        }
+    result = _run_check(
+        _compile_command(resolved, prepared.source_files),
+        timeout_seconds=timeout_seconds,
+        cwd=prepared.root,
+        env=env,
+        kind="compileall",
+        name=str(prepared.root),
+    )
+    result["files"] = len(prepared.source_files)
+    return result
+
+
+def _ready_record(
+    requested: str,
+    resolved: Path,
+    prepared: _PreparedRuntime,
+    timeout_seconds: int,
+    execute_entry_points: bool,
+) -> dict[str, Any]:
+    record = _interpreter_record(requested, status="ready", resolved=resolved)
+    with tempfile.TemporaryDirectory(prefix="envlens-runtime-") as cache_directory:
+        env = _runtime_env(prepared.root, Path(cache_directory))
+        record["checks"].append(_compile_check(resolved, prepared, env, timeout_seconds))
+        record["checks"].extend(
+            _run_check(
+                [str(resolved), "-c", IMPORT_SCRIPT, module],
+                timeout_seconds=timeout_seconds,
+                cwd=prepared.root,
+                env=env,
+                kind="import",
+                name=module,
+            )
+            for module in prepared.modules
+        )
+        record["checks"].extend(
+            _entry_check(
+                entry,
+                resolved=resolved,
+                project_root=prepared.root,
+                env=env,
+                timeout_seconds=timeout_seconds,
+                execute=execute_entry_points,
+            )
+            for entry in prepared.entries
+        )
+    return record
+
+
+_FAILURE_STATUSES = {
+    "failed",
+    "signal",
+    "timeout",
+    "missing-import",
+    "import-error",
+    "entry-point-error",
+    "start-error",
+    "missing-interpreter",
+    "invalid-interpreter",
+}
+
+
+def _runtime_summary(interpreters: list[dict[str, Any]]) -> dict[str, Any]:
+    checks = [check for record in interpreters for check in record["checks"]]
+    failures = [item for item in checks if item.get("status") in _FAILURE_STATUSES]
+    unknown = [item for item in checks if item.get("status") == "unsupported"]
+    if failures:
+        status = "failed"
+    elif unknown or any(record["status"] != "ready" for record in interpreters):
+        status = "unknown"
+    else:
+        status = "passed"
+    return {
+        "status": status,
+        "interpreter_count": len(interpreters),
+        "check_count": len(checks),
+        "failure_count": len(failures),
+        "unknown_count": len(unknown),
+    }
+
+
 def run_runtime_checks(
     project_root: str | Path = ".",
     *,
@@ -390,198 +488,43 @@ def run_runtime_checks(
     when ``execute_entry_points`` is explicitly true.
     """
 
-    _validate_runtime_options(timeout_seconds, imports, "imports")
-    _validate_runtime_options(timeout_seconds, entry_points, "entry_points")
     if not isinstance(execute_entry_points, bool):
         raise RuntimeCheckError("invalid-execute-policy", "execute_entry_points must be boolean")
+    _validate_runtime_options(timeout_seconds, imports, "imports")
+    _validate_runtime_options(timeout_seconds, entry_points, "entry_points")
     _validate_paths(compile_paths, "compile_paths")
     _validate_paths(interpreters, "interpreters")
-    root = Path(project_root)
-    if not root.is_dir():
-        raise RuntimeCheckError("project-root-failed", "project root must be a directory")
-    pyproject_path = Path(pyproject) if pyproject is not None else root / "pyproject.toml"
-    try:
-        project_info = inspect_pyproject(pyproject_path)
-    except ProjectError as error:
-        # Runtime smoke can still be useful without a project file.  Preserve a
-        # user-visible inspection result and continue with explicit imports.
-        project_info = {
-            "schema_version": "envlens.project/v1",
-            "path": str(pyproject_path),
-            "project": {
-                "name": "",
-                "normalized_name": "",
-                "version": "",
-                "requires_python": "",
-                "dependencies": [],
-            },
-            "entry_points": [],
-            "warnings": [f"entry-point inspection unavailable: {error}"],
-            "inspection_error": {"code": error.code, "message": error.message},
-        }
-    configuration = project_info.get("configuration", {})
-    configured_values = configuration if isinstance(configuration, dict) else {}
-    selected_entries = entry_points
-    if selected_entries is None:
-        selected_entries = configured_values.get("entry_points")
-    entries = _select_entry_points(
-        [dict(item) for item in project_info.get("entry_points", [])], selected_entries
+    prepared = _prepare_runtime(
+        project_root,
+        interpreters=interpreters,
+        imports=imports,
+        compile_paths=compile_paths,
+        entry_points=entry_points,
+        pyproject=pyproject,
+        timeout_seconds=timeout_seconds,
     )
-    modules = list(imports if imports is not None else configured_values.get("imports", []))
-    for module in modules:
-        if not isinstance(module, str) or not MODULE_RE.fullmatch(module):
-            raise RuntimeCheckError("invalid-import", f"invalid import module {module!r}")
-    configured_paths = compile_paths
-    if configured_paths is None:
-        configured_paths = configured_values.get("compile_paths")
-    if configured_paths is None:
-        paths = [root]
-    else:
-        _validate_paths(configured_paths, "compile_paths")
-        paths = [
-            Path(item) if Path(item).is_absolute() else root / Path(item)
-            for item in configured_paths
-        ]
-    source_files = _python_files(paths)
-    configured_interpreters = interpreters
-    if configured_interpreters is None:
-        configured_interpreters = configured_values.get("interpreters")
-    if configured_interpreters is not None:
-        _validate_paths(configured_interpreters, "interpreters")
-    configured = list(configured_interpreters or [sys.executable])
-    if interpreters is None and configured_values.get("interpreters"):
-        configured = [
-            root / Path(item) if not Path(item).is_absolute() else Path(item) for item in configured
-        ]
-    _validate_runtime_options(timeout_seconds, modules, "imports")
-    _validate_runtime_options(timeout_seconds, selected_entries, "entry_points")
-    if len(configured) > MAX_ENTRY_POINTS:
-        raise RuntimeCheckError("runtime-input-too-large", "interpreters exceeds 1000 items")
     interpreter_results: list[dict[str, Any]] = []
-    for configured_value in configured:
+    for configured_value in prepared.interpreters:
         requested = str(configured_value)
         interpreter_status, resolved = _resolve_for_runtime(configured_value)
         if resolved is None:
-            record = _interpreter_record(requested, status=interpreter_status)
-            for module in modules:
-                record["checks"].append(
-                    {
-                        "kind": "import",
-                        "name": module,
-                        "status": interpreter_status,
-                        "reason": "configured interpreter is unavailable",
-                    }
-                )
-            record["checks"].append(
-                {
-                    "kind": "compileall",
-                    "name": str(root),
-                    "status": interpreter_status,
-                    "files": len(source_files),
-                    "reason": "configured interpreter is unavailable",
-                }
-            )
-            for entry in entries:
-                record["checks"].append(
-                    {
-                        "kind": "entry-point",
-                        "group": entry.get("group", ""),
-                        "name": entry.get("name", ""),
-                        "value": entry.get("value", ""),
-                        "location": entry.get("location", {}),
-                        "status": interpreter_status,
-                        "reason": "configured interpreter is unavailable",
-                    }
-                )
-            interpreter_results.append(record)
+            interpreter_results.append(_unavailable_record(requested, interpreter_status, prepared))
             continue
-        record = _interpreter_record(requested, status="ready", resolved=resolved)
-        with tempfile.TemporaryDirectory(prefix="envlens-runtime-") as cache_directory:
-            cache_root = Path(cache_directory)
-            env = _runtime_env(root, cache_root)
-            if source_files:
-                command = _compile_command(resolved, source_files)
-                compile_result = _run_check(
-                    command,
-                    timeout_seconds=timeout_seconds,
-                    cwd=root,
-                    env=env,
-                    kind="compileall",
-                    name=str(root),
-                )
-                compile_result["files"] = len(source_files)
-                record["checks"].append(compile_result)
-            else:
-                record["checks"].append(
-                    {
-                        "kind": "compileall",
-                        "name": str(root),
-                        "status": "passed",
-                        "files": 0,
-                        "reason": "no Python source files were found",
-                    }
-                )
-            for module in modules:
-                record["checks"].append(
-                    _run_check(
-                        [str(resolved), "-c", IMPORT_SCRIPT, module],
-                        timeout_seconds=timeout_seconds,
-                        cwd=root,
-                        env=env,
-                        kind="import",
-                        name=module,
-                    )
-                )
-            for entry in entries:
-                record["checks"].append(
-                    _entry_check(
-                        entry,
-                        resolved=resolved,
-                        project_root=root,
-                        timeout_seconds=timeout_seconds,
-                        execute=execute_entry_points,
-                    )
-                )
-        interpreter_results.append(record)
-    checks = [check for record in interpreter_results for check in record["checks"]]
-    failures = [
-        item
-        for item in checks
-        if item.get("status")
-        in {
-            "failed",
-            "signal",
-            "timeout",
-            "missing-import",
-            "import-error",
-            "entry-point-error",
-            "start-error",
-            "missing-interpreter",
-            "invalid-interpreter",
-        }
-    ]
-    # Dry inspection is a successful, intentionally non-executing action.  It
-    # should not turn an otherwise green runtime matrix into an ``unknown``
-    # result; unsupported entry-point syntax remains unknown.
-    unknown = [item for item in checks if item.get("status") == "unsupported"]
-    if failures:
-        status = "failed"
-    elif unknown or any(record["status"] != "ready" for record in interpreter_results):
-        status = "unknown"
-    else:
-        status = "passed"
+        interpreter_results.append(
+            _ready_record(
+                requested,
+                resolved,
+                prepared,
+                timeout_seconds,
+                execute_entry_points,
+            )
+        )
     return {
         "schema_version": "envlens.runtime/v1",
-        "project": project_info,
+        "project": prepared.project_info,
         "interpreters": interpreter_results,
         "results": interpreter_results,
-        "summary": {
-            "status": status,
-            "interpreter_count": len(interpreter_results),
-            "check_count": len(checks),
-            "failure_count": len(failures),
-            "unknown_count": len(unknown),
-        },
+        "summary": _runtime_summary(interpreter_results),
         "policy": {
             "timeout_seconds": timeout_seconds,
             "entry_points_executed": execute_entry_points,

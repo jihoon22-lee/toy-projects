@@ -25,54 +25,57 @@ class ProjectError(ValueError):
         self.message = message
 
 
+def _advance_quote(quote: str, escaped: bool, char: str) -> tuple[str, bool]:
+    if quote == '"' and escaped:
+        return quote, False
+    if quote == '"' and char == "\\":
+        return quote, True
+    if char == quote:
+        return "", False
+    return quote, escaped
+
+
 def _strip_comment(value: str) -> str:
     quote = ""
     escaped = False
     for index, char in enumerate(value):
         if quote:
-            if quote == '"' and escaped:
-                escaped = False
-            elif quote == '"' and char == "\\":
-                escaped = True
-            elif char == quote:
-                quote = ""
-        elif char in {'"', "'"}:
+            quote, escaped = _advance_quote(quote, escaped, char)
+            continue
+        if char in {'"', "'"}:
             quote = char
         elif char == "#":
             return value[:index].rstrip()
     return value.rstrip()
 
 
-def _split_dotted(value: str) -> list[str]:
+def _split_quoted(value: str, delimiter: str) -> list[str]:
     parts: list[str] = []
     current: list[str] = []
     quote = ""
     escaped = False
-    for char in value.strip():
+    for char in value:
         if quote:
             current.append(char)
-            if quote == '"' and escaped:
-                escaped = False
-            elif quote == '"' and char == "\\":
-                escaped = True
-            elif char == quote:
-                quote = ""
-        elif char in {'"', "'"}:
+            quote, escaped = _advance_quote(quote, escaped, char)
+            continue
+        if char in {'"', "'"}:
             quote = char
             current.append(char)
-        elif char == ".":
-            part = "".join(current).strip()
-            if not part:
-                raise ProjectError("invalid-pyproject", "empty dotted TOML key")
-            parts.append(_decode_key(part))
+        elif char == delimiter:
+            parts.append("".join(current).strip())
             current = []
         else:
             current.append(char)
-    part = "".join(current).strip()
-    if not part:
-        raise ProjectError("invalid-pyproject", "empty dotted TOML key")
-    parts.append(_decode_key(part))
+    parts.append("".join(current).strip())
     return parts
+
+
+def _split_dotted(value: str) -> list[str]:
+    parts = _split_quoted(value.strip(), ".")
+    if any(not part for part in parts):
+        raise ProjectError("invalid-pyproject", "empty dotted TOML key")
+    return [_decode_key(part) for part in parts]
 
 
 def _decode_key(value: str) -> str:
@@ -95,20 +98,32 @@ def _bracket_balance(value: str) -> int:
     escaped = False
     balance = 0
     for char in value:
-        if quote:
-            if quote == '"' and escaped:
-                escaped = False
-            elif quote == '"' and char == "\\":
-                escaped = True
-            elif char == quote:
-                quote = ""
-        elif char in {'"', "'"}:
-            quote = char
-        elif char == "[":
-            balance += 1
-        elif char == "]":
-            balance -= 1
+        quote, escaped, balance = _bracket_step(char, quote, escaped, balance)
     return balance
+
+
+def _bracket_step(char: str, quote: str, escaped: bool, balance: int) -> tuple[str, bool, int]:
+    if quote:
+        return (*_advance_quote(quote, escaped, char), balance)
+    if char in {'"', "'"}:
+        return char, False, balance
+    if char == "[":
+        return quote, escaped, balance + 1
+    if char == "]":
+        return quote, escaped, balance - 1
+    return quote, escaped, balance
+
+
+def _structure_transition(char: str, braces: int, brackets: int) -> tuple[int, int, bool]:
+    if char == "{":
+        return braces + 1, brackets, False
+    if char == "}":
+        return braces - 1, brackets, False
+    if char == "[":
+        return braces, brackets + 1, False
+    if char == "]":
+        return braces, brackets - 1, False
+    return braces, brackets, char == "," and braces == 0 and brackets == 0
 
 
 def _split_top_level(value: str) -> list[str]:
@@ -119,23 +134,13 @@ def _split_top_level(value: str) -> list[str]:
     braces = brackets = 0
     for index, char in enumerate(value):
         if quote:
-            if quote == '"' and escaped:
-                escaped = False
-            elif quote == '"' and char == "\\":
-                escaped = True
-            elif char == quote:
-                quote = ""
-        elif char in {'"', "'"}:
+            quote, escaped = _advance_quote(quote, escaped, char)
+            continue
+        if char in {'"', "'"}:
             quote = char
-        elif char == "{":
-            braces += 1
-        elif char == "}":
-            braces -= 1
-        elif char == "[":
-            brackets += 1
-        elif char == "]":
-            brackets -= 1
-        elif char == "," and braces == 0 and brackets == 0:
+            continue
+        braces, brackets, split = _structure_transition(char, braces, brackets)
+        if split:
             parts.append(value[start:index].strip())
             start = index + 1
     tail = value[start:].strip()
@@ -159,6 +164,54 @@ def _parse_inline_table(value: str, *, line: int) -> dict[str, Any]:
     return result
 
 
+def _parse_array_parts(cleaned: str, *, line: int) -> list[Any]:
+    try:
+        return [
+            _parse_inline_table(item, line=line)
+            if item.startswith("{")
+            else _parse_value(item, line=line)
+            for item in _split_top_level(cleaned[1:-1])
+        ]
+    except ProjectError:
+        raise
+    except (SyntaxError, ValueError) as error:
+        raise ProjectError("invalid-pyproject", f"invalid TOML array on line {line}") from error
+
+
+def _parse_array(cleaned: str, *, line: int) -> list[Any]:
+    try:
+        parsed = ast.literal_eval(cleaned)
+    except (SyntaxError, ValueError):
+        parsed = _parse_array_parts(cleaned, line=line)
+    if not isinstance(parsed, list):
+        raise ProjectError("invalid-pyproject", f"TOML array expected on line {line}")
+    if len(parsed) > MAX_PROJECT_ITEMS:
+        raise ProjectError("project-field-too-large", "project array exceeds 100000 items")
+    return parsed
+
+
+def _parse_string(cleaned: str, *, line: int) -> str:
+    try:
+        parsed = ast.literal_eval(cleaned)
+    except (SyntaxError, ValueError) as error:
+        raise ProjectError("invalid-pyproject", f"invalid TOML string on line {line}") from error
+    if not isinstance(parsed, str):
+        raise ProjectError("invalid-pyproject", f"TOML string expected on line {line}")
+    if len(parsed) > MAX_STRING_LENGTH:
+        raise ProjectError("project-field-too-large", "project string exceeds 65536 characters")
+    return parsed
+
+
+def _parse_bare(cleaned: str, *, line: int) -> Any:
+    # Keep simple numeric values for harmless unrelated TOML fields while
+    # rejecting unsupported bare syntax instead of treating it as a string.
+    if re.fullmatch(r"[-+]?\d+", cleaned):
+        return int(cleaned)
+    if re.fullmatch(r"[-+]?(?:\d+\.\d*|\d*\.\d+)", cleaned):
+        return float(cleaned)
+    raise ProjectError("unsupported-pyproject", f"unsupported bare TOML value on line {line}")
+
+
 def _parse_value(value: str, *, line: int) -> Any:
     cleaned = _strip_comment(value).strip()
     if len(cleaned) > MAX_STRING_LENGTH:
@@ -168,52 +221,12 @@ def _parse_value(value: str, *, line: int) -> Any:
     if cleaned in {"true", "false"}:
         return cleaned == "true"
     if cleaned.startswith("["):
-        try:
-            parsed = ast.literal_eval(cleaned)
-        except (SyntaxError, ValueError):
-            try:
-                parsed = [
-                    _parse_inline_table(item, line=line)
-                    if item.startswith("{")
-                    else _parse_value(item, line=line)
-                    for item in _split_top_level(cleaned[1:-1])
-                ]
-            except ProjectError:
-                raise
-            except (SyntaxError, ValueError) as error:
-                raise ProjectError(
-                    "invalid-pyproject", f"invalid TOML array on line {line}"
-                ) from error
-        if not isinstance(parsed, list):
-            raise ProjectError("invalid-pyproject", f"TOML array expected on line {line}")
-        if len(parsed) > MAX_PROJECT_ITEMS:
-            raise ProjectError("project-field-too-large", "project array exceeds 100000 items")
-        return parsed
+        return _parse_array(cleaned, line=line)
     if cleaned.startswith("{"):
         return _parse_inline_table(cleaned, line=line)
     if cleaned[:1] in {'"', "'"}:
-        try:
-            parsed = ast.literal_eval(cleaned)
-        except (SyntaxError, ValueError) as error:
-            raise ProjectError(
-                "invalid-pyproject", f"invalid TOML string on line {line}"
-            ) from error
-        if not isinstance(parsed, str):
-            raise ProjectError("invalid-pyproject", f"TOML string expected on line {line}")
-        if len(parsed) > MAX_STRING_LENGTH:
-            raise ProjectError("project-field-too-large", "project string exceeds 65536 characters")
-        return parsed
-    # The fields consumed by envlens are string/list values.  Retaining simple
-    # numeric values makes the parser useful for harmless unrelated TOML while
-    # avoiding an unsafe/easily ambiguous evaluator.
-    if re.fullmatch(r"[-+]?\d+", cleaned):
-        return int(cleaned)
-    if re.fullmatch(r"[-+]?(?:\d+\.\d*|\d*\.\d+)", cleaned):
-        return float(cleaned)
-    raise ProjectError(
-        "unsupported-pyproject",
-        f"unsupported bare TOML value on line {line}",
-    )
+        return _parse_string(cleaned, line=line)
+    return _parse_bare(cleaned, line=line)
 
 
 def _set_nested(
@@ -240,6 +253,50 @@ def _set_nested(
     locations[tuple(path)] = line
 
 
+def _table_header(line: str, line_number: int) -> list[str] | None:
+    if line.startswith("[[") and line.endswith("]]"):
+        raise ProjectError(
+            "unsupported-pyproject",
+            f"array tables are unsupported on line {line_number}",
+        )
+    if not line.startswith("[") or not line.endswith("]"):
+        return None
+    if line.count("[") != 1 or line.count("]") != 1:
+        raise ProjectError("invalid-pyproject", f"invalid TOML table on line {line_number}")
+    return _split_dotted(line[1:-1])
+
+
+def _ensure_table(root: dict[str, Any], path: list[str], line: int) -> None:
+    existing: Any = root
+    for part in path:
+        if not isinstance(existing, dict):
+            raise ProjectError("invalid-pyproject", f"line {line} redefines a TOML table")
+        if part not in existing:
+            existing[part] = {}
+        existing = existing[part]
+    if not isinstance(existing, dict):
+        raise ProjectError("invalid-pyproject", f"line {line} redefines a TOML table")
+
+
+def _assignment(
+    lines: list[str], index: int, line_number: int, line: str
+) -> tuple[list[str], str, int]:
+    if "=" not in line:
+        raise ProjectError("invalid-pyproject", f"expected key/value on line {line_number}")
+    key_text, raw_value = line.split("=", 1)
+    key_parts = _split_dotted(key_text.strip())
+    value_text = raw_value.strip()
+    balance = _bracket_balance(value_text)
+    while balance > 0 and index < len(lines):
+        continuation = _strip_comment(lines[index]).strip()
+        index += 1
+        value_text += " " + continuation
+        balance += _bracket_balance(continuation)
+    if balance != 0:
+        raise ProjectError("invalid-pyproject", f"unterminated TOML array on line {line_number}")
+    return key_parts, value_text, index
+
+
 def _parse_toml(text: str) -> tuple[dict[str, Any], dict[tuple[str, ...], int]]:
     root: dict[str, Any] = {}
     locations: dict[tuple[str, ...], int] = {}
@@ -252,40 +309,12 @@ def _parse_toml(text: str) -> tuple[dict[str, Any], dict[tuple[str, ...], int]]:
         index += 1
         if not line:
             continue
-        if line.startswith("[[") and line.endswith("]]"):
-            raise ProjectError(
-                "unsupported-pyproject",
-                f"array tables are unsupported on line {line_number}",
-            )
-        if line.startswith("[") and line.endswith("]"):
-            if line.count("[") != 1 or line.count("]") != 1:
-                raise ProjectError("invalid-pyproject", f"invalid TOML table on line {line_number}")
-            current = _split_dotted(line[1:-1])
-            existing: Any = root
-            for part in current:
-                if part not in existing:
-                    existing[part] = {}
-                existing = existing[part]
-                if not isinstance(existing, dict):
-                    raise ProjectError(
-                        "invalid-pyproject", f"line {line_number} redefines a TOML table"
-                    )
+        table = _table_header(line, line_number)
+        if table is not None:
+            current = table
+            _ensure_table(root, current, line_number)
             continue
-        if "=" not in line:
-            raise ProjectError("invalid-pyproject", f"expected key/value on line {line_number}")
-        key_text, raw_value = line.split("=", 1)
-        key_parts = _split_dotted(key_text.strip())
-        value_text = raw_value.strip()
-        balance = _bracket_balance(value_text)
-        while balance > 0 and index < len(lines):
-            continuation = _strip_comment(lines[index]).strip()
-            index += 1
-            value_text += " " + continuation
-            balance += _bracket_balance(continuation)
-        if balance != 0:
-            raise ProjectError(
-                "invalid-pyproject", f"unterminated TOML array on line {line_number}"
-            )
+        key_parts, value_text, index = _assignment(lines, index, line_number, line)
         _set_nested(
             root,
             [*current, *key_parts],
@@ -340,32 +369,61 @@ def _entry_point_target(value: str) -> tuple[str, str] | None:
     return module, attribute
 
 
-def _entry_points(
-    project: Mapping[str, Any], locations: Mapping[tuple[str, ...], int], path: Path
+def _entry_point_record(
+    *,
+    group: str,
+    name: str,
+    value: str,
+    location: Mapping[tuple[str, ...], int],
+    location_key: tuple[str, ...],
+    path: Path,
+) -> dict[str, Any]:
+    target = _entry_point_target(value)
+    return {
+        "group": group,
+        "name": name,
+        "value": value,
+        "target": {"module": target[0], "attribute": target[1]} if target else None,
+        "status": "inspectable" if target else "unsupported",
+        "location": {"path": str(path), "line": location.get(location_key, 0)},
+    }
+
+
+def _script_entry_points(
+    project: Mapping[str, Any],
+    locations: Mapping[tuple[str, ...], int],
+    path: Path,
+    key: str,
+    group: str,
 ) -> list[dict[str, Any]]:
+    table = _get_mapping(project, key)
     records: list[dict[str, Any]] = []
-    sections = (("scripts", "console_scripts"), ("gui-scripts", "gui_scripts"))
-    for key, group in sections:
-        table = _get_mapping(project, key)
-        for name, value in sorted(table.items()):
-            if not isinstance(name, str) or not isinstance(value, str):
-                raise ProjectError(
-                    "invalid-project-metadata",
-                    f"project.{key} entry points must be strings",
-                )
-            location_key = ("project", key, name)
-            target = _entry_point_target(value)
-            records.append(
-                {
-                    "group": group,
-                    "name": name,
-                    "value": value,
-                    "target": {"module": target[0], "attribute": target[1]} if target else None,
-                    "status": "inspectable" if target else "unsupported",
-                    "location": {"path": str(path), "line": locations.get(location_key, 0)},
-                }
+    for name, value in sorted(table.items()):
+        if not isinstance(name, str) or not isinstance(value, str):
+            raise ProjectError(
+                "invalid-project-metadata",
+                f"project.{key} entry points must be strings",
             )
+        records.append(
+            _entry_point_record(
+                group=group,
+                name=name,
+                value=value,
+                location=locations,
+                location_key=("project", key, name),
+                path=path,
+            )
+        )
+    return records
+
+
+def _custom_entry_points(
+    project: Mapping[str, Any],
+    locations: Mapping[tuple[str, ...], int],
+    path: Path,
+) -> list[dict[str, Any]]:
     custom = _get_mapping(project, "entry-points")
+    records: list[dict[str, Any]] = []
     for group, table_value in sorted(custom.items()):
         if not isinstance(table_value, dict):
             raise ProjectError(
@@ -378,21 +436,26 @@ def _entry_points(
                     "invalid-project-metadata",
                     "entry-point names and values must be strings",
                 )
-            custom_location_key = ("project", "entry-points", group, name)
-            target = _entry_point_target(value)
             records.append(
-                {
-                    "group": group,
-                    "name": name,
-                    "value": value,
-                    "target": {"module": target[0], "attribute": target[1]} if target else None,
-                    "status": "inspectable" if target else "unsupported",
-                    "location": {
-                        "path": str(path),
-                        "line": locations.get(custom_location_key, 0),
-                    },
-                }
+                _entry_point_record(
+                    group=group,
+                    name=name,
+                    value=value,
+                    location=locations,
+                    location_key=("project", "entry-points", group, name),
+                    path=path,
+                )
             )
+    return records
+
+
+def _entry_points(
+    project: Mapping[str, Any], locations: Mapping[tuple[str, ...], int], path: Path
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    records.extend(_script_entry_points(project, locations, path, "scripts", "console_scripts"))
+    records.extend(_script_entry_points(project, locations, path, "gui-scripts", "gui_scripts"))
+    records.extend(_custom_entry_points(project, locations, path))
     if len(records) > MAX_ENTRY_POINTS:
         raise ProjectError("project-field-too-large", "project entry points exceed 10000 items")
     return records
