@@ -66,7 +66,7 @@ private slots:
     void goingUpReturnsToTheRootAndStopsThere();
     void activatingALeafDoesNothing();
     void cleanupStagingIsReviewableAndUndoable();
-    void cleanupAuditKeepsOnlyRealRestoreTokens();
+    void cleanupAuditKeepsAllRealRestoreTokens();
 };
 
 namespace {
@@ -1607,7 +1607,7 @@ void TestMainWindow::cleanupStagingIsReviewableAndUndoable() {
     QCOMPARE(review->rowCount(), 2);
 }
 
-void TestMainWindow::cleanupAuditKeepsOnlyRealRestoreTokens() {
+void TestMainWindow::cleanupAuditKeepsAllRealRestoreTokens() {
     bool confirmed = false;
     std::size_t movedTargets = 0;
     std::string restoredToken;
@@ -1628,7 +1628,8 @@ void TestMainWindow::cleanupAuditKeepsOnlyRealRestoreTokens() {
                 receipt.message = "moved safely";
             } else {
                 receipt.status = diskmap::TrashStatus::RevalidationFailed;
-                receipt.message = "identity changed";
+                receipt.restore_token = "recovery-token";
+                receipt.message = "identity changed; payload preserved in Trash";
             }
             receipts.push_back(std::move(receipt));
         }
@@ -1662,8 +1663,9 @@ void TestMainWindow::cleanupAuditKeepsOnlyRealRestoreTokens() {
     QCOMPARE(audit->item(1, 0)->text(), QStringLiteral("revalidation-failed"));
     QComboBox* tokens = restoreTokens(window);
     QVERIFY(tokens != nullptr);
-    QCOMPARE(tokens->count(), 1);
+    QCOMPARE(tokens->count(), 2);
     QCOMPARE(tokens->itemData(0).toString(), QStringLiteral("opaque-token"));
+    QCOMPARE(tokens->itemData(1).toString(), QStringLiteral("recovery-token"));
     QCOMPARE(cleanupReview(window)->rowCount(), 0);
 
     cleanupButton(window, "restoreTrashButton")->click();
@@ -1671,7 +1673,8 @@ void TestMainWindow::cleanupAuditKeepsOnlyRealRestoreTokens() {
     QCOMPARE(QString::fromStdString(restoredToken), QStringLiteral("opaque-token"));
     QCOMPARE(audit->rowCount(), 3);
     QCOMPARE(audit->item(2, 0)->text(), QStringLiteral("restored"));
-    QCOMPARE(tokens->count(), 0);
+    QCOMPARE(tokens->count(), 1);
+    QCOMPARE(tokens->itemData(0).toString(), QStringLiteral("recovery-token"));
 }
 
 QTEST_MAIN(TestMainWindow)

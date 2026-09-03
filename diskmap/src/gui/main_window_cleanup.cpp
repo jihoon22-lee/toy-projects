@@ -213,11 +213,11 @@ void MainWindow::executeCleanup() {
         appendCleanupAudit(receipt);
         if (receipt.status == diskmap::TrashStatus::Moved) {
             ++moved;
-            if (!receipt.restore_token.empty()) {
-                restoreTokenCombo_->addItem(pathText(receipt.original_path),
-                                            QString::fromStdString(
-                                                receipt.restore_token));
-            }
+        }
+        if (!receipt.restore_token.empty()) {
+            restoreTokenCombo_->addItem(pathText(receipt.original_path),
+                                        QString::fromStdString(
+                                            receipt.restore_token));
         }
     }
     cleanupUndo_->clear();

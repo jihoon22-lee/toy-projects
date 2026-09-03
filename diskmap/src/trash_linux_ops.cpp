@@ -418,9 +418,17 @@ TrashReceipt rollbackRestore(const TrashDirectories& directories,
                              const std::string& message) {
     if (renameNoReplace(parent.get(), name.c_str(), directories.files.get(),
                         token.c_str()) == 0) {
-        ::fsync(parent.get());
-        ::fsync(directories.files.get());
-        return trashFailure(status, restore.original, message);
+        const bool parentSynced = ::fsync(parent.get()) == 0;
+        const bool trashSynced = ::fsync(directories.files.get()) == 0;
+        TrashReceipt receipt = trashFailure(
+            parentSynced && trashSynced ? status : TrashStatus::IoError,
+            restore.original,
+            parentSynced && trashSynced
+                ? message
+                : message + "; rollback completed, but its directories could not be synced");
+        receipt.trashed_path = directories.root / "files" / token;
+        receipt.restore_token = token;
+        return receipt;
     }
     TrashReceipt receipt = trashFailure(
         TrashStatus::IoError, restore.original,

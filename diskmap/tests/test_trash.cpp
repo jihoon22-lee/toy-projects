@@ -1532,6 +1532,8 @@ void testDeterministicRollbackRecovery(const fs::path& root) {
         CHECK(scenario.invoked);
         CHECK(!scenario.error);
         CHECK(failed.status == diskmap::TrashStatus::RevalidationFailed);
+        CHECK_EQ(failed.restore_token, moved[0].restore_token);
+        CHECK_EQ(failed.trashed_path, moved[0].trashed_path);
         CHECK(!fs::exists(source));
         CHECK(fs::is_regular_file(moved[0].trashed_path));
         std::error_code error;
