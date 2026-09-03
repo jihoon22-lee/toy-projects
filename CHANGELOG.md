@@ -93,10 +93,8 @@
   SHA-256 is `e7f1a2ce7147057538873a802715c7bf2b12e530a85070af862e02e378caceb8`. Authenticated
   local intake evidence succeeded, and the Q0 runner returned contract `PASS`, observed suite
   `WARN`, one matched finding, and no errors. This is local candidate evidence for the Python
-  dead-code known-answer scenario, not sanitizer rule coverage or remote cross-repository
-  acceptance. The ici-hosted candidate workflow is merged, but an exact-revision dispatch must
-  succeed before remote acceptance can be claimed; ordinary toy CI remains pinned to released
-  ici `v0.10.2`.
+  dead-code known-answer scenario; that local run did not itself claim sanitizer coverage or remote
+  acceptance, and the separately audited exact-revision workflow below records the later acceptance.
 - Remote Q0 acceptance is complete. [PR #49](https://github.com/jihoon22-lee/toy-projects/pull/49)
   passed run [`33693241255`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33693241255),
   published exactly one sticky comment containing exactly one marker and three product HTML links
@@ -121,8 +119,35 @@
   digests (`5/5` scenarios, zero errors); the three defect scenarios intentionally observed
   `FAIL`, the clean scenario observed `PASS`, and the existing Python scenario observed its
   expected `WARN`. This closes only the C++ sanitizer ASan/UBSan/LSan-plus-clean subitem; the
-  broader corpus remains open, and no sanitizer-scenario candidate remote acceptance, PR CI,
-  merge, or release is claimed. There is no version change.
+  broader corpus remains open. That local run did not itself claim candidate remote acceptance, PR
+  CI, merge, or release; the separate remote evidence is recorded below. There is no version change.
+- Completed the ici-hosted exact-revision candidate-to-Quality-Zoo acceptance for candidate target
+  `9d470edca7ab037a24dcd6594531a822f116548b` at exact ici workflow head
+  `6df011f98be1a19092b112cb56c596dc35bcae4d`: [workflow run `33710695336`](https://github.com/jihoon22-lee/ici/actions/runs/33710695336)
+  and job [`100509326331`](https://github.com/jihoon22-lee/ici/actions/runs/33710695336/job/100509326331)
+  succeeded against toy main `2d0d7c0b2dcc137a782d6042438fc287bffdf570`. The workflow reverified
+  authenticated provenance/API evidence for producer run `33706057540` and artifact `9875319095`
+  (raw candidate ZIP `2,285,368` bytes,
+  SHA-256 `4aec084b3a30ac01a1df5124fa3b42b7f51d23f66c12b490194a84549be9db27`; contained
+  `ici.pyz` `2,284,045` bytes,
+  SHA-256 `e7f1a2ce7147057538873a802715c7bf2b12e530a85070af862e02e378caceb8`) and uploaded the
+  separate acceptance artifact [`9876797536`](https://github.com/jihoon22-lee/ici/actions/artifacts/9876797536)
+  (`1,104,307` bytes, SHA-256
+  `e66ae2b65988abe10fc5ddb92a5c3bb6fc238ec2f77b7fd27ccfe75c24194a5f`).
+- The accepted suite was contract `PASS` for all five scenarios with zero errors. Observed status /
+  rule / category / location matched exactly: `cpp.asan-use-after-free` = `FAIL` /
+  `ici.legacy.sanitize.target` + `asan.heap-use-after-free` / correctness / `src/fault.cpp:5`;
+  `cpp.lsan-memory-leak` = `FAIL` / `ici.legacy.sanitize.target` + `lsan.memory-leak` /
+  resource / `src/fault.cpp:3`; `cpp.sanitizer-clean` = `PASS` /
+  `ici.legacy.sanitize.target` + no tool rule / correctness / `tests/test_clean.cpp:1`;
+  `cpp.ubsan-signed-overflow` = `FAIL` / `ici.legacy.sanitize.target` +
+  `ubsan.signed-integer-overflow` / correctness / `src/fault.cpp:3:18`; and
+  `python.dead-private-function` = `WARN` / `ici.legacy.dead.target` + no tool rule /
+  maintainability / `src/bad.py:1` (with `src/clean.py` remaining forbidden). This closes only
+  candidate remote acceptance and the Q2 runtime ASan/LSan/UBSan-plus-clean sub-scope. The
+  workflow used read-only evidence and a separate artifact and caused no Pages, PR comment,
+  release, tag, or branch mutation; broader Q2, Qt lifetime, Q1/Q3~Q5, I4, and product release
+  remain open, and the stable toy pin/version remains ici `v0.10.2` with no version change.
 
 ### Sticky PR report comment cardinality
 

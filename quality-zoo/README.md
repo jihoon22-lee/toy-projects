@@ -18,9 +18,9 @@ fixture, isolated from the user-facing products.
 The scenario contract, dependency-free runner, candidate archive intake, and local
 candidate consumer are complete. The C++ sanitizer subset is locally complete for
 both the released and candidate ici digests documented below. Released-artifact Q0
-acceptance is complete through the toy repository's remote PR/exact-main path;
-candidate cross-repository acceptance through the now-merged ici-hosted workflow
-is still pending until an exact-revision dispatch succeeds. PR #49 head
+acceptance is complete through the toy repository's remote PR/exact-main path, and
+candidate cross-repository acceptance is now complete through the exact-revision
+dispatch of the ici-hosted workflow recorded below. PR #49 head
 `f6ad1dc4e745d3d1a2703000a00a5d7c4eed61a0` ran as
 [`33693241255`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33693241255):
 22 jobs succeeded and the main publisher was expectedly skipped. Its Quality Zoo
@@ -92,9 +92,10 @@ observed `PASS`, and `python.dead-private-function` observed its expected `WARN`
 | released ici | `0.10.2` | `8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4` | `5/5 PASS`, 0 errors |
 | ici candidate | `0.10.2` | `e7f1a2ce7147057538873a802715c7bf2b12e530a85070af862e02e378caceb8` | `5/5 PASS`, 0 errors |
 
-This is local known-answer evidence for the sanitizer subset. It does not claim
-candidate cross-repository acceptance, PR CI, a merge, or a release, and it does
-not close the broader C++ or other corpus areas.
+This is local known-answer evidence for the sanitizer subset. The later remote
+candidate acceptance is recorded separately below; this local run itself did not
+claim PR CI, a merge, or a release, and it does not close the broader C++ or other
+corpus areas.
 
 ### Sanitizer-normalization candidate selector (local authenticated evidence)
 
@@ -112,8 +113,45 @@ Authenticated local intake evidence succeeded for this archive. Running the Q0 s
 selected candidate expectation returned contract `PASS`, observed suite `WARN`, one matched finding,
 and no runner errors. This particular evidence is still for the Python dead-code known-answer case;
 the separate C++ sanitizer all-scenario evidence above uses the same candidate executable digest and
-its sanitizer-specific expectations. Neither local result claims remote acceptance
-through the merged candidate-to-Quality-Zoo workflow.
+its sanitizer-specific expectations. The exact-revision remote acceptance of that candidate is
+recorded in the next section.
+
+### Remote candidate acceptance (exact-revision dispatch)
+
+The ici-hosted candidate-to-Quality-Zoo workflow completed an independently audited, read-only
+acceptance run against exact revisions. The workflow checks out toy main at
+`2d0d7c0b2dcc137a782d6042438fc287bffdf570`, consumes the candidate for ici target
+`9d470edca7ab037a24dcd6594531a822f116548b`, and runs the complete five-scenario manifest without
+passing credentials to Quality Zoo. The workflow head is ici main
+`6df011f98be1a19092b112cb56c596dc35bcae4d`.
+
+| Evidence | Exact value |
+|---|---|
+| Acceptance workflow / job | [`33710695336`](https://github.com/jihoon22-lee/ici/actions/runs/33710695336) / [`100509326331`](https://github.com/jihoon22-lee/ici/actions/runs/33710695336/job/100509326331) |
+| Candidate producer run / artifact | [`33706057540`](https://github.com/jihoon22-lee/ici/actions/runs/33706057540) / [`9875319095`](https://github.com/jihoon22-lee/ici/actions/artifacts/9875319095) |
+| Candidate ZIP | `2,285,368` bytes; SHA-256 `4aec084b3a30ac01a1df5124fa3b42b7f51d23f66c12b490194a84549be9db27` |
+| Candidate `ici.pyz` | `2,284,045` bytes; SHA-256 `e7f1a2ce7147057538873a802715c7bf2b12e530a85070af862e02e378caceb8` |
+| Acceptance evidence artifact | [`9876797536`](https://github.com/jihoon22-lee/ici/actions/artifacts/9876797536); `1,104,307` bytes; SHA-256 `e66ae2b65988abe10fc5ddb92a5c3bb6fc238ec2f77b7fd27ccfe75c24194a5f` |
+| Provenance/API evidence | Exact five authenticated snapshots reverified; candidate target, producer run, artifact identity, archive digest, executable digest, and merge-gate evidence matched |
+
+The acceptance artifact records suite contract `PASS` for all five scenarios, zero runner errors,
+and the following exact expected/observed statuses and finding predicates:
+
+| Scenario | Expected / observed status | Rule / tool rule | Category | Location |
+|---|---|---|---|---|
+| `cpp.asan-use-after-free` | `FAIL` / `FAIL` | `ici.legacy.sanitize.target` / `asan.heap-use-after-free` | correctness | `src/fault.cpp:5` |
+| `cpp.lsan-memory-leak` | `FAIL` / `FAIL` | `ici.legacy.sanitize.target` / `lsan.memory-leak` | resource | `src/fault.cpp:3` |
+| `cpp.sanitizer-clean` | `PASS` / `PASS` | `ici.legacy.sanitize.target` / no tool rule | correctness | `tests/test_clean.cpp:1` |
+| `cpp.ubsan-signed-overflow` | `FAIL` / `FAIL` | `ici.legacy.sanitize.target` / `ubsan.signed-integer-overflow` | correctness | `src/fault.cpp:3:18` |
+| `python.dead-private-function` | `WARN` / `WARN` | `ici.legacy.dead.target` / no tool rule | maintainability | `src/bad.py:1` |
+
+The Python scenario still forbids a finding in `src/clean.py`; all five scenario contract results
+have `errors: []`. The remote run closes only candidate cross-repository acceptance and the Q2
+runtime ASan/LSan/UBSan-plus-clean sub-scope. It does not close Qt lifetime, broader Q2, Q1/Q3~Q5,
+or I4. The workflow uses read-only API evidence, stages a separate acceptance artifact, and does
+not publish Pages, a PR comment, a release, a tag, or a branch mutation. Ordinary toy CI remains
+pinned to released ici `v0.10.2`; the candidate is still non-stable and no version or product
+release changed.
 
 ## Exact executable expectations
 
@@ -348,7 +386,8 @@ expectations interchangeable.
 
 Quality Zoo is not a user-facing application and has no product release in this
 change. Released-artifact Q0 (the scenario contract, local runner, and toy
-PR/exact-main acceptance) is complete, as is the local candidate intake/selector
-evidence. Candidate cross-repository acceptance through the merged ici-hosted
-workflow is still pending until an exact-revision dispatch succeeds. Q1–Q5 (the
-Python, C++, Qt, build/binary, and hybrid corpus expansions) remain future work.
+PR/exact-main acceptance) and the exact-revision candidate cross-repository
+acceptance are complete, as is the local candidate intake/selector evidence. The
+remote evidence closes only the Q2 runtime ASan/LSan/UBSan-plus-clean sub-scope;
+Qt lifetime, broader Q2, and Q1–Q5 (the Python, C++, Qt, build/binary, and hybrid
+corpus expansions) remain future work.
