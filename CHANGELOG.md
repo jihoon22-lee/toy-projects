@@ -2,6 +2,48 @@
 
 ## Unreleased
 
+### DiskMap storage evidence workbench
+
+- Connected the bounded snapshot/duplicate evidence cores to DiskMap's Qt GUI,
+  CLI, and aggregate qmake workflow. The Qt 5/Qt 6 aggregate covers 17
+  `test_*.pro` leaves, including cleanup/Trash and `test_storage_cli`, with
+  each leaf linking the actual `diskmap_core` library. The detailed
+  implementation and metric provenance live in the [canonical storage
+  workthrough](workthrough/2026-09-03-diskmap-storage-workbench.md).
+- Loaded snapshots remain read-only, and only certain reclaimable duplicate
+  copies can enter the existing cleanup review; confirmation, identity
+  revalidation, recoverable Trash, audit receipts, and real restore tokens
+  remain the mutation/recovery boundary. Versioned snapshot and duplicate
+  report schemas preserve valid UTF-8 and escape malformed filesystem bytes.
+- Relative or unsupported cleanup targets are rejected before mutation. Deletion
+  and unsupported-kind paths fail closed without publishing a false
+  `trashed_path` or `restore_token`; move/restore source splitting restores the
+  per-file line gate. Anchored no-follow/nonblocking I/O, descriptor
+  revalidation, durable recovery, and cooperative nonblocking `flock` remain
+  defense-in-depth, not protection from non-cooperating same-UID processes.
+- This remains local-only evidence under DiskMap `0.1.0`/`Unreleased`; no
+  product version bump or release is implied. The integrated deep no-cache
+  result remains `WARN` (`10 PASS / 2 WARN / 0 FAIL / 0 ERROR / 2 SKIP`), with
+  `test` `17/17`, compile DB `37/37` across `58` configurations,
+  line/function/branch `94.4% / 99.2% / 81.0%`, TEM `4.96`, and sanitizer
+  `PASS`. Line is `13,041` total / `11,500` code lines across `60` files;
+  complexity is max `15` across `594` functions (`0 issues`), and lint and
+  duplication are the only WARN sources.
+
+### LogLens source profiles and saved queries
+
+- Connected the Qt GUI to the bounded, versioned source-profile and saved-query stores. The window
+  loads both stores at startup, exposes editable format/multiline/record-size profile controls,
+  and lets users save or apply profiles without leaving the current source. Saved queries can be
+  saved from the filter editor and applied back into it, sharing the core filter parser with CLI
+  and background loading.
+- Added explicit status-line diagnostics for malformed/unsupported stores and failed saves or
+  applies. Previous valid filters and persisted collections remain intact after an error. The GUI
+  enforces the 128-item and 1 MiB/4,096-byte bounds before state growth, while injected store paths
+  make the workflow deterministic in tests.
+- Added `test_gui_persistence` for Qt5/Qt6 load/save/apply behavior, parser-setting propagation,
+  malformed-store errors, and bounded collection handling. No product version or release changed.
+
 ### EnvLens deterministic environment snapshot core
 
 - Added the pure-Python `envlens` CLI/library on the Python 3.10 floor. The current package and
@@ -217,6 +259,10 @@
   the exact `<!-- ici-report -->` marker occurs once in exactly one comment. Duplicate comments or
   repeated markers are reported as a contract failure and are never deleted automatically. The
   ordinary CI gate remains pinned to released ici `v0.10.2` with its existing SHA-256.
+- The write-capable `report-pr` job now sparse-checks out only
+  `ci/check_published_html.py` from the pull request's base SHA with
+  `persist-credentials: false`, so published HTML validation does not execute
+  PR-controlled validator code.
 
 ### LogLens filter diagnostics and bounds
 
@@ -234,8 +280,8 @@
   argument instead of a synthesized conjunction. The GUI parses the untrimmed UTF-8 input, preserves
   the previously applied filter after a failed apply, points depth failures at the extra nesting token,
   and spans an unsupported UTF-8 escape through its complete scalar. Structured parser token metadata
-  also removes the new clang-tidy swapped-parameter warnings. Final local validation used the public
-  ici `v0.10.2` `ici.pyz`, SHA-256
+  also removes the new clang-tidy swapped-parameter warnings. Final local validation used a versioned
+  `ici v0.10.2` local candidate `ici.pyz` (not the public release asset), SHA-256
   `2af5198d1348a64c39f4f37d12657aa9a2c4bf3ddf034a9099909c41e86e30e7`. Its uncached deep suite is
   `WARN` only because clazy is unavailable and pre-existing lint findings remain. The changed
   `filter_expr.cpp`, `main.cpp`, and `main_window.cpp` have zero actionable lint targets; the overall

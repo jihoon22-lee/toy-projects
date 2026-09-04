@@ -21,16 +21,20 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
   [불변 GitHub Release](https://github.com/jihoon22-lee/toy-projects/releases/tag/buildscope-v0.5.0)로
   공개됐다. 최종 publication evidence는 아래 절과 [BuildScope 문서](buildscope/README.md)에
   기록하며, 그 이후의 작업은 같은 수준의 checkpoint가 마련될 때까지 `Unreleased`에 쌓는다.
-- `diskmap`은 `0.1.0`/`Unreleased`를 유지하는 explorer workbench다. D1 identity-safe scan,
-  D2 cancellation/rescan, D3 explorer UX의 구현과 PR/exact-main evidence는 완료됐고, D4~D7
-  cleanup/trash/snapshot/release 범위는 아직 pending이다. D3의 exact PR/main artifact·Pages
-  표는 [workthrough](workthrough/2026-09-02-diskmap-explorer-workbench.md)에 모아 둔다.
+- `diskmap`은 `0.1.0`/`Unreleased`를 유지하는 explorer/storage workbench다. D1 identity-safe
+  scan, D2 cancellation/rescan, D3 explorer UX의 구현과 PR/exact-main evidence는 완료됐고,
+  D4~D6 cleanup/trash/snapshot/duplicate의 local implementation과 aggregate evidence도
+  기록됐다. Released ici v0.10.2의 local deep 검증은 WARN 경계까지 기록됐지만, D7 release
+  조건과 cross-project acceptance는 아직 pending이다. D3의 exact
+  PR/main artifact·Pages 표는 [workthrough](workthrough/2026-09-02-diskmap-explorer-workbench.md)에,
+  storage integration evidence는 [별도 workthrough](workthrough/2026-09-03-diskmap-storage-workbench.md)에
+  모아 둔다.
 
 ## 프로젝트
 
 | 이름 | 설명 | 상태 |
 |---|---|---|
-| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D1/D2 complete · D3 explorer workbench merged (PR #46; exact-main green) · `0.1.0`/`Unreleased` |
+| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D1~D6 local implementation/evidence · D3 explorer workbench merged (PR #46; exact-main green) · `0.1.0`/`Unreleased` |
 | [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · L2 1 GiB benchmark merged in PR #26 · default capacity 8192 |
 | [buildscope](buildscope/) | compile DB explorer | 0.5.0 stable · published 2026-09-02 · immutable GitHub Release |
 | [envlens](envlens/) | Python 환경 snapshot CLI/library | pure Python 3.10+ · deterministic snapshot core · PR #50 merged · exact-main green · release pending · `0.1.0`/`Unreleased` |
@@ -611,8 +615,39 @@ Qt 5.15.18/6.10.2 clean qmake(`-Werror`)와 native target `11/11`이 통과했�
 `v0.10.2` deep no-cache 결과는 `10 PASS / 2 WARN / 0 FAIL / 0 ERROR / 2 SKIP`, TEM `4.95`,
 coverage `96.1% / 99.1% / 83.4%`다. 알려진 WARN과 정확한 asset/HTML provenance는
 [workthrough 기록](workthrough/2026-09-02-diskmap-explorer-workbench.md)에 보존한다.
-DiskMap은 계속 `0.1.0`/`Unreleased`이며 D1~D3 구현·PR/exact-main evidence는 완료됐다.
-D4~D7 cleanup/trash/snapshot/release는 pending 범위다.
+이 문단의 D3 historical snapshot에서 DiskMap은 `0.1.0`/`Unreleased`였고 D1~D3
+구현·PR/exact-main evidence만 완료된 상태였다. 당시 D4~D7 cleanup/trash/snapshot/release는
+pending 범위였으며, 이후 local storage integration은 다음 절에 별도로 기록한다.
+
+### diskmap storage evidence workbench — local integration (2026-09-03)
+
+Storage workbench의 local integration은 기존 cleanup/Trash safety path 위에 bounded snapshot과
+duplicate evidence를 연결했다. GUI의 snapshot save/load/compare와 duplicate progress/cancel,
+CLI의 `diskmap.snapshot/v1`·snapshot-diff·duplicate versioned schema는 상세 workthrough에
+정리돼 있다. Loaded snapshot은 read-only이며 certain reclaimable copy만 cleanup dry run에
+staging되고, 실제 변경은 confirmation·identity revalidation·recoverable Trash를 거친다.
+
+Qt5/Qt6 clean qmake aggregate는 `test_storage_cli`와 cleanup/Trash를 포함한 17개 leaf를
+각각 `17/17 PASS`로 실행하고 실제 `diskmap_core` static library를 링크한다. 현재 DiskMap
+focused test slot은 `MainWindow=29`, `StorageWorkbench=3`이며, QTest 출력은 lifecycle
+hook을 포함해 각각 `31 PASS`와 `5 PASS`로 보인다. 자세한 구현·검증·metric provenance는
+[canonical storage workthrough](workthrough/2026-09-03-diskmap-storage-workbench.md)에 둔다.
+
+Safety boundary는 유지된다. Relative `CleanupTarget.path`와 unsupported kind은 mutation 전에
+`InvalidRequest`로 거부되고 false `trashed_path`/`restore_token`을 발행하지 않는다. Linux의
+no-follow/nonblocking regular-file I/O와 identity revalidation은 race를 incomplete/uncertain으로
+전파하며, advisory `flock`은 같은 경로를 쓰는 협력적 mutation만 직렬화한다. 비협조적 동일 UID
+프로세스는 보장 범위 밖이다. Move/restore source split은 각 translation unit의 line gate를
+회복했다.
+
+이 통합 트리에 released ici `v0.10.2`를 사용한 deep no-cache 결과는 `WARN`
+(`10 PASS / 2 WARN / 0 FAIL / 0 ERROR / 2 SKIP`)이다. `test`는 `17/17`, compile DB는
+`37/37`(58 configurations), line/function/branch는 `94.4% / 99.2% / 81.0%`, TEM은 `4.96`,
+sanitizer는 `PASS`였다. Line은 `13,041` total / `11,500` code lines across `60` files,
+complexity는 max `15` across `594` functions(`0 issues`)이며 WARN은 lint와 duplication뿐이다.
+이는 WARN/skip 경계를 포함한 local deep evidence이며 release 완료를 의미하지
+않는다. DiskMap 버전은 계속 `0.1.0`/`Unreleased`다. 자세한 변경·검증 범위는 [storage workbench
+workthrough](workthrough/2026-09-03-diskmap-storage-workbench.md)에 보존한다.
 
 ### GUI 는 빌드되고 테스트된다
 
@@ -779,8 +814,8 @@ scalar를 시작하면 backslash부터 scalar 전체를 range에 포함한다. �
 정상 filter를 계속 유지한다. parser의 TokenRange/PredicateTokens 구조화로 새 clang-tidy
 swapped-parameter 경고도 제거했다.
 
-이 slice의 Qt5/Qt6 native suite는 각각 12/12 pass이고, public ici `v0.10.2` `ici.pyz`로 수행한
-uncached deep 검증의 artifact SHA-256은
+이 slice의 Qt5/Qt6 native suite는 각각 12/12 pass이고, versioned `ici v0.10.2` local candidate
+`ici.pyz`(공개 release asset 아님)로 수행한 uncached deep 검증의 artifact SHA-256은
 `2af5198d1348a64c39f4f37d12657aa9a2c4bf3ddf034a9099909c41e86e30e7`이다. 전체 suite는 clazy가
 사용 불가하고 기존 lint finding이 남아 `WARN`이지만 다른 실패는 없다. 변경된
 `filter_expr.cpp`, `main.cpp`, `main_window.cpp`는 actionable lint target 0건이다. 전체 lint는
@@ -879,9 +914,13 @@ background/Tail N 변경에 대한 것이며, 1 GiB benchmark는 PR26 병합과 
 ### Qt 셸 테스트 현황
 
 GUI는 헤드리스 QtTest와 실제 fixture 파일을 사용해 상태 전이를 검증한다. `loglens`는
-Qt5/Qt6 CMake/CTest에서 같은 12개 CTest target을 실행했고, `diskmap`의 explorer workbench는
-현재 native qmake target `11/11`을 통과했다. MainWindow는 29개, TreemapWidget은 12개,
-NodeTableModel은 11개의 focused QtTest case를 가진다. `buildscope` B2는 Qt5/Qt6 CMake/CTest에서
+Qt5/Qt6 CMake/CTest에서 같은 14개 CTest target을 실행했고, `diskmap`의 explorer workbench는
+현재 native qmake aggregate check target `17/17`을 Qt5와 Qt6에서 통과했다.
+새 `test_storage_cli`와 기존 `test_cleanup`·`test_trash`도 aggregate manifest에 포함되며,
+각 focused 실행도 유지한다. 각 qmake test leaf는 core 소스를 다시 컴파일하지 않고 실제
+`diskmap_core` static library를 `LIBS`/`PRE_TARGETDEPS`로 링크해 duplicate coverage object를
+만들지 않는다. MainWindow는 29개 test slot(QTest 출력 31 PASS), TreemapWidget은 12개,
+NodeTableModel은 11개, StorageWorkbench는 3개 test slot(QTest 출력 5 PASS)을 가진다. `buildscope` B2는 Qt5/Qt6 CMake/CTest에서
 각각 6/6을 통과했다. T0-5의
 CI matrix는 GUI 프로젝트를 Qt5와 Qt6로 각각 빌드·native test·실제 headless smoke까지
 실행한다.
@@ -893,8 +932,10 @@ CI matrix는 GUI 프로젝트를 Qt5와 Qt6로 각각 빌드·native test·실�
 | `diskmap/src/gui/treemap_widget.cpp` | `QSignalSpy` 로 검증 — treemap activation/hover/uncertainty (12 tests) |
 | `loglens/src/gui/main_window.cpp` | `test_main_window` — Tail N/From start, open/growth/truncation, retryable missing/reappear, follow stop/resume, search/filter during load, stale sequence와 status |
 | `loglens/src/gui/timeline_widget.cpp` | `test_main_window` — empty/populated paint branch |
-| `diskmap/src/gui/main_window.cpp` | `test_main_window` — scan, filters, metric/largest-files, navigation, rescan/selection/generation/freeze (29 tests) |
+| `diskmap/src/gui/main_window.cpp` | `test_main_window` — scan, filters, metric/largest-files, navigation, rescan/selection/generation/freeze (29 test slots; QTest 31 PASS) |
 | `diskmap/src/gui/node_table_model.cpp` | `test_node_table_model` — shared document, keyed rows, sorting, filters, knownness and largest-files (11 tests) |
+| `diskmap/src/gui/main_window_storage.cpp` | `test_storage_workbench` — snapshot round-trip/read-only state, conservative compare, duplicate evidence staging (3 test slots; QTest 5 PASS) |
+| `diskmap/src/storage_cli.cpp` | `test_storage_cli` — text and versioned JSON snapshot-diff/duplicate report rendering |
 | `buildscope/src/core/compilation_model.cpp` | `test_compilation_model` — normalized grouping, roles, v1 projection, status aggregation, entry view, JSON argv rendering |
 | `buildscope/src/gui/main_window.cpp` | `test_main_window` — v2 tree/detail population, raw-vs-JSON command view, status/source/define filters, malformed-input location |
 
@@ -939,11 +980,17 @@ discovery 단계에서 자동으로 Qt5·Qt6 두 major로 확장된다. 따라�
 한쪽 matrix만 수정하는 실수를 허용하지 않는다. GUI가 없는 순수 CLI 프로젝트는
 `gui.enabled = false`를 명시해야 하며, 그 경우에도 ici verify에는 포함된다.
 
+DiskMap qmake test discovery에도 같은 누락 방지 계약을 적용한다. `ci/test_check_manifest.py`는
+`diskmap/tests/`에서 찾은 모든 `test_*.pro`와 `diskmap/tests/tests.pro`의 등록 집합을 비교한다.
+따라서 새 Qt test leaf를 추가하면 aggregate manifest에도 반드시 등록해야 하며, cleanup/Trash와
+`test_storage_cli`처럼 GUI가 아닌 focused test도 Qt5/Qt6 aggregate에서 빠지지 않는다.
+
 discovery contract 자체는 의존성 없는 Python unit suite로 manifest expansion, 공개 HTML의
 exact-title/Zero-CDN 규칙, PR/main publisher event split과 exact-SHA/digest/path/byte 검증 불변식을
 검사한다. `gui-build`를 비롯해 PR 소스를 체크아웃하는 품질 job은 repository-level
-`contents: read`만 상속한다. write 권한이 필요한 `report-pr`는 소스를 체크아웃하지 않고
-체크섬을 검증한 ici release asset과 verify artifact만 처리한다. 별도 `publish-main`은 모든
+`contents: read`만 상속한다. write 권한이 필요한 `report-pr`는 PR 소스를 실행 validator로
+사용하지 않고, PR base SHA에서 `ci/check_published_html.py`만 `persist-credentials: false`로
+sparse-checkout한 뒤 체크섬을 검증한 ici release asset과 verify artifact를 처리한다. 별도 `publish-main`은 모든
 품질 job이 성공한 push에서만 exact `main` 소스를 체크아웃한다.
 
 PR의 `report-pr`는 verify·GUI matrix가 성공 또는 실패로 끝난 뒤 항상 평가된다. 성공한
@@ -1051,6 +1098,45 @@ cd diskmap
 
 파일 크기는 source에 따라 달라지므로 예시 출력의 `size` 숫자를 고정된 fixture로 취급하지
 않는다. 깨진 root symlink는 JSON 출력과 함께 stderr 및 `ScanResult.errors`에 오류를 남긴다.
+
+### DiskMap snapshots and duplicate evidence
+
+DiskMap can persist a bounded `diskmap.snapshot/v1` inventory and compare it with a later live
+scan. Snapshot writes use a same-directory temporary file and atomic installation; loading a
+snapshot is explicitly read-only. The GUI exposes Save/Load/Compare snapshot buttons and a
+conservative change table. It also exposes duplicate evidence (partial/full hashes, identity and
+hard-link facts, and candidate confidence). A certain reclaimable copy can be staged into the
+existing cleanup dry run, but nothing is moved until the normal confirmation, revalidation, and
+recoverable Trash workflow completes.
+
+```bash
+cd diskmap
+./build/gui/src/diskmap path/to/tree --save-snapshot before.json
+./build/gui/src/diskmap path/to/tree --compare-snapshot before.json --json
+./build/gui/src/diskmap path/to/tree --duplicates --json
+./build/gui/src/diskmap --load-snapshot before.json --json
+./build/gui/src/diskmap --load-snapshot before.json --duplicates
+```
+
+`--load-snapshot` does not require a scan path. Its JSON output is the versioned snapshot document;
+`--compare-snapshot` and `--duplicates` emit separate versioned report schemas. Incomplete scans,
+stale identities, changing files, symlink targets, and hard-link aliases remain visible as
+uncertain or non-reclaimable evidence rather than becoming deletion instructions.
+Added/Removed certainty additionally requires complete structural evidence and a known size metric on
+the source entry plus complete structural evidence on the opposite snapshot.
+Cleanup and Trash paths also reject relative `CleanupTarget.path` values before opening a parent
+directory or mutating an entry; a value such as `relative-source` returns `InvalidRequest` instead of
+being accepted as an authorized mutation target. Final execution revalidates identity, type,
+size/allocation, and known hard-link evidence from the reviewed scan.
+
+On Linux, snapshot installation takes a nonblocking advisory `flock` on the anchored destination
+parent directory, and Trash move/restore takes one on the anchored Trash root. This serializes only
+cooperating DiskMap mutating operations for the same destination or Trash root; a contending
+operation fails promptly instead of waiting or interleaving. Snapshot reads, analysis, and
+capability probes are not described as globally locked. Advisory locking does not control a
+same-UID non-cooperating or malicious process that ignores the lock and directly changes
+user-owned paths. No-follow descriptors, identity revalidation, and rollback reduce ordinary path
+races and fail closed, but do not claim to provide that stronger isolation boundary.
 
 ### DiskMap generated-source benchmark (opt-in/nightly)
 

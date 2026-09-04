@@ -72,14 +72,15 @@ contract.
 
 ### ici verification
 
-The final no-cache public ici v0.10.2 verification exited 0 with `WARN` only
-because local `clang-tidy` and `clazy` are unavailable: 11 pass, 1 warn, and 2
+The final no-cache verification with the versioned ici v0.10.2 local candidate
+exited 0 with `WARN` only because local `clang-tidy` and `clazy` are unavailable: 11 pass, 1 warn, and 2
 skip; test coverage is 10/10, TEM is 4.95, and line/function/branch coverage is
 95.3%/99.0%/81.3%. The compile database check is 11/11 across 23
 configurations; maximum complexity is 14 across 176 functions with no issues,
 and duplication is 3.24%.
 
-The public ici artifact is v0.10.2 with SHA-256
+This historical local verification used a versioned ici v0.10.2 local candidate
+(not the public release asset) with SHA-256
 `2af5198d1348a64c39f4f37d12657aa9a2c4bf3ddf034a9099909c41e86e30e7`.
 The generated HTML report is 356,798 bytes with SHA-256
 `6c5c2346ac1b309c7fb827608b05c1cac7ffb8d83666c92843a8bbd9b59450a1`; its

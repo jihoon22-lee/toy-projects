@@ -30,10 +30,10 @@
 
 | 프로젝트 | 현재 형태 | 실측 | 제품 상태 |
 |---|---|---|---|
-| loglens | C++17, Qt, CMake | L2 bounded/background slice · PR #25 CI green · local Qt5/Qt6 12 CTest targets · 1 GiB benchmark PR #26 merged · main Qt5/Qt6 sweep green | Tail N/From start와 worker UX, benchmark/default 8192 완료 |
-| diskmap | C++17, Qt, qmake | D1/D2 complete · D3 explorer workbench merged by PR #46 · exact-main evidence green · `0.1.0`/`Unreleased` | treemap/table, filters, uncertainty, accessible navigation, rescan restoration verified; cleanup UX는 D4~D6에서 확장 |
+| loglens | C++17, Qt, CMake | L2 bounded/background slice · PR #25 CI green · local Qt5/Qt6 14 CTest targets · 1 GiB benchmark PR #26 merged · main Qt5/Qt6 sweep green | Tail N/From start와 worker UX, benchmark/default 8192 완료 |
+| diskmap | C++17, Qt, qmake | D1/D2 complete · D3 explorer workbench merged by PR #46 and exact-main green · D4~D6 local storage implementation/aggregate/deep evidence · `0.1.0`/`Unreleased` | treemap/table, filters, uncertainty, accessible navigation, rescan restoration과 storage evidence workbench verified; D4~D6 remote evidence와 D7 release 조건은 pending |
 | buildscope | Python + C++17/Qt, CMake | B0~B5 implementation, remote acceptance, exact-main CI, trusted main Pages와 `0.5.0` tag/release/public asset audit complete | B3~B5 첫 usable release boundary published and audited |
-| envlens | pure Python 3.10+ package/CLI | deterministic snapshot core · path-aware manifest/CI matrix · PR #50 merged · exact-main green | `0.1.0`/`Unreleased`; E2/E3 and release remain pending |
+| envlens | pure Python 3.10+ package/CLI | deterministic snapshot core · path-aware manifest/CI matrix · PR #50 merged · exact-main green | `0.1.0`/`Unreleased`; E2/E3 local implementation은 완료됐고 ici 교차검증과 release는 pending |
 | quality-zoo | Python 3.10, stdlib runner | scenario contract/local candidate consumer · four C++ sanitizer scenarios locally verified for released/candidate digests · released-artifact PR #49 remote PR CI/sticky/exact-main complete · exact-revision candidate cross-repo acceptance complete (run `33710695336`) · Q2 runtime ASan/LSan/UBSan-plus-clean sub-scope complete | test asset only; broader Q2 and Q1~Q5 corpus pending |
 | ici/viewer | Qt-free core + Qt6 GUI | 3 tests, TEM 4.94 | core 중심, 셸과 report workflow 부족 |
 
@@ -97,9 +97,12 @@
 
 ### 4.1 PR 운영
 
-- 한 PR은 한 제품의 하나의 사용자 또는 infrastructure milestone만 다룬다.
+- 의미 있는 내부 작업 단위마다 Conventional Commit을 유지한다. 내부 커밋 경계와 PR 경계는
+  일치할 필요가 없다.
+- PR은 관련 제품과 ici 변경을 함께 검증할 수 있는 큰 cross-project milestone으로 묶되,
+  무관한 변경은 섞지 않는다. 하나의 milestone에 필요한 CI와 HTML 검증을 함께 수행해
+  반복 실행과 중복 산출물을 최소화한다.
 - branch는 `feat/<project>-<feature>`, `fix/<project>-<issue>`, `test/<project>-<scope>`, `docs/<scope>` 형식을 사용한다.
-- 의미 있는 단위마다 Conventional Commit을 만든다.
 - PR 제목과 요약은 plan code가 아니라 제품/기술 결과를 설명한다. `T0`, `B1`, `D2` 같은 plan code는
   본문이나 label의 보조 메타데이터로만 쓰며 제목·요약의 유일하거나 주된 식별자로 삼지 않는다.
   이미 남은 historical PR 제목과 문서는 증거이므로 이름을 바꾸지 않는다.
@@ -383,17 +386,18 @@ PR #45로, GUI explorer workbench는 PR #46으로 병합됐고 exact-main verifi
 DiskMap product version은 `0.1.0`/`Unreleased`를 유지한다. exact PR/main artifact·Pages 표는
 [D3 explorer workthrough](../../../workthrough/2026-09-02-diskmap-explorer-workbench.md)에
 중앙화했다.
-L3 parser/filter와 L6 release 완료 조건은 이 결정으로 닫히지 않으며 체크리스트를 유지한다.
+L3 parser/filter 구현과 local evidence는 완료됐고, L4~L6 triage/window analysis와 release 완료
+조건은 체크리스트에 남긴다.
 
 ### L3. parser와 filter 완성도
 
 **브랜치:** `feat/loglens-parser-pipeline`
 
-- [ ] JSON string escape와 Unicode를 손으로 일부 파싱하지 않고 검증된 범위의 parser contract로 처리한다.
-- [ ] ISO, syslog, JSONL, raw와 multiline을 source profile로 저장한다.
-- [ ] malformed line을 유실하지 않고 parse error metadata와 raw를 보존한다.
-- [ ] timestamp timezone/precision과 missing timestamp 정책을 정의한다.
-- [ ] filter AST에 syntax diagnostic range와 saved query를 추가한다.
+- [x] JSON string escape와 Unicode를 손으로 일부 파싱하지 않고 검증된 범위의 parser contract로 처리한다.
+- [x] ISO, syslog, JSONL, raw와 multiline을 source profile로 저장한다.
+- [x] malformed line을 유실하지 않고 parse error metadata와 raw를 보존한다.
+- [x] timestamp timezone/precision과 missing timestamp 정책을 정의한다.
+- [x] filter AST에 syntax diagnostic range와 saved query를 추가한다.
 - [x] regex catastrophic input에 timeout/limit 또는 안전 정책을 둔다.
   - filter 언어는 regex를 실행하지 않고 `~`/`!~`를 bounded literal substring으로 고정한다.
 
@@ -410,7 +414,9 @@ L3 parser/filter와 L6 release 완료 조건은 이 결정으로 닫히지 않�
   유지하며, depth error는 추가 nesting token을, unsupported UTF-8 escape는 전체 scalar를
   가리킨다. `TokenRange`/`PredicateTokens` 구조화로 새 clang-tidy swapped-parameter 경고를
   제거했다.
-- [x] Qt5/Qt6 native suite는 각각 12/12 pass했다. public ici `v0.10.2` `ici.pyz`의 SHA-256은
+- [x] Qt5/Qt6 native suite는 각각 12/12 pass했다. 이 historical slice의 local validation은
+  versioned `ici v0.10.2` local candidate `ici.pyz`를 사용했으며, 이는 공개 release asset이 아니다.
+  해당 candidate의 SHA-256은
   `2af5198d1348a64c39f4f37d12657aa9a2c4bf3ddf034a9099909c41e86e30e7`이며, uncached deep suite는
   clazy unavailable 및 pre-existing lint findings로 인한 `WARN`만 남겼다. 변경된
   `filter_expr.cpp`/`main.cpp`/`main_window.cpp`는 actionable lint target 0건이고, 전체 lint
@@ -418,10 +424,11 @@ L3 parser/filter와 L6 release 완료 조건은 이 결정으로 닫히지 않�
   follow-up이 있다. `compile_db`는 40 configurations의 production unit 14/14 `PASS`, `test`는
   12/12 `PASS`와 line/function/branch `93.3% / 96.7% / 82.4%`, `complexity`는 218개 대상
   max 15 `PASS`, `sanitize`는 `PASS`다. HTML은 484,899 bytes, exact title
-  `ici Verification Report — loglens`, Zero-CDN이다. 이 증거는 version/release를 올리거나
-  broader L3 parser-pipeline contract를 닫지 않는다.
-- [ ] saved query, source-profile parser, malformed log-line metadata와 나머지 L3 contract는
-  후속 slice에서 다룬다.
+  `ici Verification Report — loglens`, Zero-CDN이다. 이 local evidence는 L3 parser/filter slice를
+  완료하지만 version/release를 올리거나 L4~L6 triage/window analysis와 release 조건을 닫지는 않는다.
+- [x] saved query, source-profile parser, malformed log-line metadata를 포함한 L3 parser/filter
+  slice를 완료했다. 이 범위의 구현·local native evidence는 완료됐으며, L4~L6 triage/window
+  analysis와 release는 아직 미완료다.
 
 ### L4. 실제 사용되는 highlight와 triage
 
@@ -698,40 +705,66 @@ Zero-CDN checker가 통과했다.
 duplicate backlog에 연결된다.
 false-positive clone shape를 없애려고 product code를 contort하지 않는다. DiskMap은
 `0.1.0`/`Unreleased`를 유지하며 D1~D3 구현·PR/exact-main evidence는 완료됐다. D4~D7
-cleanup/trash/snapshot/release는 pending 범위다.
+cleanup/trash/snapshot/release는 당시 pending 범위였다. 이후 D4~D6 local storage integration
+evidence는 아래에 별도로 기록하며, D7 release 조건과 전체 deep 검증은 여전히 pending이다.
 
 ### D4. cleanup staging core
 
 **브랜치:** `feat/diskmap-cleanup-staging`
 
-- [ ] multi-select 후보와 예상 reclaimable bytes를 계산한다.
-- [ ] 부모 directory가 선택되면 child 중복 선택을 정규화한다.
-- [ ] `/`, home root, project-configured protected roots와 mount root를 거부한다.
-- [ ] symlink target이 아니라 선택한 link 자체만 대상으로 삼는다.
-- [ ] scan identity, current identity, size/type를 실행 직전 재검증한다.
-- [ ] stale/missing/changed target은 실행 대상에서 제외하고 이유를 보여준다.
-- [ ] QAbstractItemModel + QUndoStack은 staging 편집만 undo하고 실제 삭제를 가짜로 되돌리지 않는다.
+- [x] multi-select 후보와 예상 reclaimable bytes를 계산한다.
+- [x] 부모 directory가 선택되면 child 중복 선택을 정규화한다.
+- [x] `/`, home root, project-configured protected roots와 mount root를 거부한다.
+- [x] symlink target이 아니라 선택한 link 자체만 대상으로 삼는다.
+- [x] scan identity, current identity, size/type를 실행 직전 재검증한다.
+- [x] stale/missing/changed target은 실행 대상에서 제외하고 이유를 보여준다.
+- [x] QAbstractItemModel + QUndoStack은 staging 편집만 undo하고 실제 삭제를 가짜로 되돌리지 않는다.
 
 ### D5. trash backend와 audit
 
 **브랜치:** `feat/diskmap-trash-workflow`
 
-- [ ] Linux desktop trash backend를 adapter로 격리하고 capability를 탐지한다.
-- [ ] command는 shell 없이 argv로 실행한다.
-- [ ] dry-run review 화면에서 path, identity, reclaimable size와 위험 표시를 확인한다.
-- [ ] 성공/실패/부분 성공을 target별 audit record로 남긴다.
-- [ ] backend가 restore token을 제공할 때만 undo/restore를 표시한다.
-- [ ] permanent delete는 초기 release 비목표로 둔다.
+- [x] Linux desktop trash backend를 adapter로 격리하고 capability를 탐지한다.
+- [x] command는 shell 없이 argv로 실행한다.
+- [x] dry-run review 화면에서 path, identity, reclaimable size와 위험 표시를 확인한다.
+- [x] 성공/실패/부분 성공을 target별 audit record로 남긴다.
+- [x] backend가 restore token을 제공할 때만 undo/restore를 표시한다.
+- [x] permanent delete는 초기 release 비목표로 둔다.
 
 ### D6. snapshot, growth와 duplicate candidate
 
 **브랜치:** `feat/diskmap-snapshots`
 
-- [ ] versioned snapshot schema와 atomic write를 제공한다.
-- [ ] 두 snapshot의 new/grown/shrunk/moved candidate를 identity/path로 비교한다.
-- [ ] incomplete scan끼리의 차이를 확정값처럼 표시하지 않는다.
-- [ ] duplicate candidate는 size → partial hash → full hash의 점진 단계로 계산한다.
-- [ ] hash 작업도 진행률, 취소와 stale identity 재검증을 사용한다.
+- [x] versioned snapshot schema와 atomic write를 제공한다.
+- [x] 두 snapshot의 new/grown/shrunk/moved candidate를 identity/path로 비교한다.
+- [x] incomplete scan끼리의 차이를 확정값처럼 표시하지 않는다.
+- [x] duplicate candidate는 size → partial hash → full hash의 점진 단계로 계산한다.
+- [x] hash 작업도 진행률, 취소와 stale identity 재검증을 사용한다.
+
+**D4~D6 local integration evidence (2026-09-03):** cleanup staging, recoverable Trash,
+versioned snapshot I/O/diff, duplicate evidence와 GUI/CLI workbench를 하나의 qmake graph로
+연결했다. Qt5/Qt6 clean aggregate `make check`는 `test_storage_cli`와 cleanup/Trash를 포함한
+17개의 `test_*.pro`를 각각 `17/17 PASS`로 실행하고 실제 `diskmap_core` static library를
+링크한다. `ci/test_check_manifest.py`는 모든 `diskmap/tests/test_*.pro`가 `tests.pro`에
+등록됐는지 비교한다. 상세 구현과 metric provenance는 [canonical storage workthrough](../../../workthrough/2026-09-03-diskmap-storage-workbench.md)에 둔다.
+
+Safety boundary는 loaded snapshot read-only, certain duplicate만 cleanup staging, relative
+`CleanupTarget.path`/unsupported kind의 mutation 전 `InvalidRequest`, 그리고 실행 직전
+identity/type/size/allocation/hard-link 재검증으로 유지된다. Snapshot/duplicate/Trash I/O는
+no-follow·bounded·nonblocking 경계와 revalidation으로 incomplete/uncertain evidence를
+하향 전파한다. Unsupported-kind/deletion rejection은 false `trashed_path`나
+`restore_token`을 발행하지 않으며, move/restore source split은 각 translation unit의 line
+gate를 회복했다.
+
+Linux의 anchored destination/Trash-root `flock(LOCK_EX|LOCK_NB)`는 같은 경로를 쓰는 협력적
+mutation만 직렬화하고, snapshot read·analysis·capability probe는 전역 잠금 대상이 아니다.
+동일 UID의 비협조적·악성 프로세스는 보장 범위 밖이다. 이 통합은 local-only evidence이며
+WARN/SKIP 경계, D4~D6 remote/cross-project acceptance와 D7 release 조건은 별도 판단으로
+남긴다. Released ici `v0.10.2`의 이 통합 트리 deep no-cache 결과는 `WARN`
+(`10 PASS / 2 WARN / 0 FAIL / 0 ERROR / 2 SKIP`)이며, `test` `17/17`, compile DB `37/37`
+(58 configurations), line/function/branch `94.4% / 99.2% / 81.0%`, TEM `4.96`, sanitizer
+`PASS`다. Line은 `13,041` total / `11,500` code lines across `60` files, complexity는 max
+`15` across `594` functions(`0 issues`)이며 WARN은 lint와 duplication뿐이다.
 
 ### D7. diskmap release 완료 조건
 
@@ -1305,20 +1338,20 @@ E2 snapshot diff/compatibility, E3 project/runtime smoke와 E4 release 조건은
 
 **브랜치:** `feat/envlens-diff`
 
-- [ ] added/removed/upgraded/downgraded distribution을 비교한다.
-- [ ] normalized project name과 import name 차이를 구분한다.
-- [ ] requires-python과 wheel tag/platform compatibility를 검사한다.
-- [ ] dependency missing/version conflict를 offline metadata 범위에서 설명한다.
-- [ ] certainty가 없는 resolver 결론은 추정으로 표시한다.
-- [ ] text/JSON/Markdown report를 제공한다.
+- [x] added/removed/upgraded/downgraded distribution을 비교한다.
+- [x] normalized project name과 import name 차이를 구분한다.
+- [x] requires-python과 wheel tag/platform compatibility를 검사한다.
+- [x] dependency missing/version conflict를 offline metadata 범위에서 설명한다.
+- [x] certainty가 없는 resolver 결론은 추정으로 표시한다.
+- [x] text/JSON/Markdown report를 제공한다.
 
 ### E3. project/runtime smoke
 
 **브랜치:** `feat/envlens-runtime-check`
 
-- [ ] configured interpreter마다 compileall과 explicit import case를 실행한다.
-- [ ] timeout, signal, missing interpreter, missing import를 구분한다.
-- [ ] pyproject entry point를 dry inspect하고 opt-in smoke를 실행한다.
+- [x] configured interpreter마다 compileall과 explicit import case를 실행한다.
+- [x] timeout, signal, missing interpreter, missing import를 구분한다.
+- [x] pyproject entry point를 dry inspect하고 opt-in smoke를 실행한다.
 - [ ] ici Python compatibility engine과 같은 fixture를 공유하지 않고 결과를 상호 대조한다.
 
 ### E4. envlens release 완료 조건
@@ -1625,6 +1658,9 @@ acceptance, PR CI, exact-main CI와 Pages 검증이 끝날 때까지 아래 Qt l
 - [ ] Qt5/Qt6, Python version matrix는 관련 프로젝트에만 적용한다.
 - [ ] quality-zoo full suite는 nightly/release와 ici version bump에서 실행하고 PR에는 affected scenario를 우선 실행한다.
 - [ ] job이 실행되지 않은 것을 PASS처럼 표시하지 않고 summary에 scope를 기록한다.
+- [x] write 권한이 필요한 `report-pr`는 PR base SHA에서
+      `ci/check_published_html.py`만 `persist-credentials: false`로 sparse-checkout한 뒤
+      published HTML을 검증해 PR-controlled validator 실행을 차단한다.
 
 ### 13.2 ici pin과 local candidate
 
@@ -1667,15 +1703,19 @@ ici와 toy-projects가 함께 바뀌는 기능은 다음 순서를 따른다.
 
 - [x] T0: loglens/diskmap Qt shell과 Qt5/Qt6 matrix 완료 (T0-1~T0-5 구현, native/ici 실측,
   PR/exact-main matrix와 Merge Gate evidence complete; 상세 기준은 handover의 현재 기준을 따른다)
-- [ ] L1~L3: loglens streaming correctness, bounded storage, parser pipeline 완료 (L1/L2 완료;
-  L3 parser/filter pipeline pending)
+- [ ] L1~L3: loglens streaming correctness, bounded storage, parser pipeline 완료 (L1/L2와 L3
+  parser/filter slice의 구현·local evidence는 완료됐지만, 이 checkpoint의 PR/exact-main/release
+  evidence는 아직 pending; L4~L6 triage/window analysis와 release도 미완료)
 - [ ] L4~L6: loglens triage/window analysis와 release 완료
 - [x] D1~D3: diskmap identity-safe scan, cancellation, explorer UX 구현·PR·exact-main evidence 완료
   (D1/D2는 PR #23/#28, D3 core는 PR #45, D3 GUI는 PR #46 및 exact-main run으로 검증)
-- [ ] D4~D7: cleanup/trash/snapshot과 release 완료 (pending)
+- [ ] D4~D7: cleanup/trash/snapshot과 release 완료 (D4~D6 local implementation/aggregate/deep
+  evidence complete with WARN/SKIP boundary; cross-project/remote acceptance와 D7 release 조건은
+  pending)
 - [x] B0~B5: buildscope hybrid compile explorer와 release 완료 (implementation·remote acceptance·trusted main Pages·`0.5.0` tag/release/public asset audit complete)
 - [ ] E0~E4: envlens pure-Python environment explorer와 release 완료 (E1 snapshot 구현·PR #50
-  merge·exact-main evidence complete; E2~E4 pending)
+  merge·exact-main evidence 및 E2/E3 local implementation complete; ici compatibility cross-check와
+  E4 release evidence는 pending)
 - [ ] A0~A4: abilens Makefile/ELF explorer와 release 완료
 - [ ] Q0~Q5: Python/C++/Qt/build/hybrid stable expected-finding corpus 완료 (released-artifact Q0
   implementation과 PR #49 remote acceptance, EnvLens merge의 exact-main QZ artifact, 새
