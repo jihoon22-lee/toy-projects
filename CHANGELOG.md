@@ -43,6 +43,8 @@
   make the workflow deterministic in tests.
 - Added `test_gui_persistence` for Qt5/Qt6 load/save/apply behavior, parser-setting propagation,
   malformed-store errors, and bounded collection handling. No product version or release changed.
+- Kept the strict GUI benchmark consumer aligned with the complete `MainWindowOptions` contract by
+  explicitly initializing the injected persistence paths.
 
 ### EnvLens deterministic environment snapshot core
 
