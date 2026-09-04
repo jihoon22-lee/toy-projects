@@ -21,6 +21,8 @@
   per-file line gate. Anchored no-follow/nonblocking I/O, descriptor
   revalidation, durable recovery, and cooperative nonblocking `flock` remain
   defense-in-depth, not protection from non-cooperating same-UID processes.
+- Cleanup identity-replacement coverage now retains the reviewed inode while
+  creating its replacement, avoiding filesystem-dependent immediate inode reuse.
 - This remains local-only evidence under DiskMap `0.1.0`/`Unreleased`; no
   product version bump or release is implied. The integrated deep no-cache
   result remains `WARN` (`10 PASS / 2 WARN / 0 FAIL / 0 ERROR / 2 SKIP`), with

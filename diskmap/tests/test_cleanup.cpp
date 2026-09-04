@@ -360,13 +360,17 @@ void testTemporaryFilesystemRevalidation(const std::filesystem::path& root) {
     CHECK(!missing.accepted);
     CHECK(missing.reason == CleanupSkipReason::Missing);
 
-    // Replacing the pathname with a same-size file changes its identity.
+    // Retain the reviewed inode under another name before replacing the
+    // pathname. Immediate unlink/recreate can legally reuse the same inode on
+    // fast filesystems, which would not be an identity change.
     CHECK(writeFile(path, "reviewed content"));
     const CleanupTarget original = targetFor(path);
-    CHECK(std::filesystem::remove(path, error));
+    const std::filesystem::path retained = root / "reviewed-original.txt";
+    std::filesystem::rename(path, retained, error);
     CHECK(!error);
     CHECK(writeFile(path, "reviewed content"));
     const auto replacement = diskmap::revalidateCleanupTarget(original, source);
+    CHECK(!replacement.accepted);
     CHECK(replacement.reason == CleanupSkipReason::IdentityChanged);
 
     // Allocation evidence is independently part of the final check.
