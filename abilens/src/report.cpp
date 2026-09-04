@@ -104,6 +104,47 @@ std::string serialize_report(const ElfReport& report) {
     return output.str();
 }
 
+namespace {
+
+void append_text_values(std::ostringstream& output, const char* label,
+                        const std::vector<std::string>& values) {
+    output << "  " << label << ": " << (values.empty() ? "(none)" : "") << "\n";
+    for (const std::string& value : values) {
+        output << "    - " << value << "\n";
+    }
+}
+
+void append_elf_text(std::ostringstream& output, const ElfReport& report) {
+    output << "  ELF: " << report.header.elf_class << ", " << report.header.endian << ", "
+           << report.header.type << ", " << report.header.machine << "\n"
+           << "  linkage: " << (report.header.has_dynamic ? "dynamic" : "static/non-dynamic")
+           << ", stripped="
+           << (report.stripped_known ? (report.stripped ? "yes" : "no") : "unknown") << "\n";
+    append_text_values(output, "NEEDED", report.needed);
+    append_text_values(output, "RPATH", report.rpath);
+    append_text_values(output, "RUNPATH", report.runpath);
+    output << "  ABI maximums: GLIBC=" << maximum_version(report, "GLIBC")
+           << " GLIBCXX=" << maximum_version(report, "GLIBCXX")
+           << " CXXABI=" << maximum_version(report, "CXXABI") << "\n";
+}
+
+void append_policy_text(std::ostringstream& output, const PolicyEvaluation& policy) {
+    if (!policy.applied) return;
+    output << "  policy: " << (policy.passed ? "PASS" : "FAIL") << "\n";
+    for (const std::string& violation : policy.violations) {
+        output << "    ! " << violation << "\n";
+    }
+}
+
+void append_diagnostic_text(std::ostringstream& output,
+                            const std::vector<std::string>& diagnostics) {
+    for (const std::string& diagnostic : diagnostics) {
+        output << "  note: " << diagnostic << "\n";
+    }
+}
+
+}  // namespace
+
 
 std::string render_report_text(const ElfReport& report) {
     std::ostringstream output;
@@ -116,36 +157,10 @@ std::string render_report_text(const ElfReport& report) {
         output << "  message: " << report.message << "\n";
     }
     if (report.status == InputStatus::Valid) {
-        output << "  ELF: " << report.header.elf_class << ", " << report.header.endian << ", "
-               << report.header.type << ", " << report.header.machine << "\n"
-               << "  linkage: " << (report.header.has_dynamic ? "dynamic" : "static/non-dynamic")
-               << ", stripped="
-               << (report.stripped_known ? (report.stripped ? "yes" : "no") : "unknown") << "\n"
-               << "  NEEDED: " << (report.needed.empty() ? "(none)" : "") << "\n";
-        for (const std::string& value : report.needed) {
-            output << "    - " << value << "\n";
-        }
-        output << "  RPATH: " << (report.rpath.empty() ? "(none)" : "") << "\n";
-        for (const std::string& value : report.rpath) {
-            output << "    - " << value << "\n";
-        }
-        output << "  RUNPATH: " << (report.runpath.empty() ? "(none)" : "") << "\n";
-        for (const std::string& value : report.runpath) {
-            output << "    - " << value << "\n";
-        }
-        output << "  ABI maximums: GLIBC=" << maximum_version(report, "GLIBC")
-               << " GLIBCXX=" << maximum_version(report, "GLIBCXX")
-               << " CXXABI=" << maximum_version(report, "CXXABI") << "\n";
+        append_elf_text(output, report);
     }
-    if (report.policy.applied) {
-        output << "  policy: " << (report.policy.passed ? "PASS" : "FAIL") << "\n";
-        for (const std::string& violation : report.policy.violations) {
-            output << "    ! " << violation << "\n";
-        }
-    }
-    for (const std::string& diagnostic : report.diagnostics) {
-        output << "  note: " << diagnostic << "\n";
-    }
+    append_policy_text(output, report.policy);
+    append_diagnostic_text(output, report.diagnostics);
     return output.str();
 }
 }  // namespace abilens

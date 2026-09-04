@@ -105,6 +105,54 @@ private:
         return value;
     }
 
+    void append_raw_string_character(std::string& result, unsigned char character) {
+        if (character < 0x80U) {
+            result.push_back(static_cast<char>(character));
+            return;
+        }
+        const std::size_t begin = position_ - 1U;
+        const std::size_t length = valid_utf8_sequence_length(input_, begin);
+        if (length == 0U) {
+            throw std::runtime_error("invalid UTF-8 in report JSON string");
+        }
+        result.append(input_, begin, length);
+        position_ = begin + length;
+    }
+
+    unsigned int parse_unicode_codepoint() {
+        unsigned int codepoint = parse_hex_quad();
+        if (codepoint >= 0xdc00U && codepoint <= 0xdfffU) {
+            throw std::runtime_error("unpaired low surrogate in report JSON");
+        }
+        if (codepoint < 0xd800U || codepoint > 0xdbffU) {
+            return codepoint;
+        }
+        if (take() != '\\' || take() != 'u') {
+            throw std::runtime_error("high surrogate has no low surrogate in report JSON");
+        }
+        const unsigned int low = parse_hex_quad();
+        if (low < 0xdc00U || low > 0xdfffU) {
+            throw std::runtime_error("high surrogate has an invalid pair in report JSON");
+        }
+        return 0x10000U + ((codepoint - 0xd800U) << 10U) + (low - 0xdc00U);
+    }
+
+    void append_escape(std::string& result) {
+        const char escaped = take();
+        switch (escaped) {
+            case '"':
+            case '\\':
+            case '/': result.push_back(escaped); return;
+            case 'b': result.push_back('\b'); return;
+            case 'f': result.push_back('\f'); return;
+            case 'n': result.push_back('\n'); return;
+            case 'r': result.push_back('\r'); return;
+            case 't': result.push_back('\t'); return;
+            case 'u': append_codepoint(result, parse_unicode_codepoint()); return;
+            default: throw std::runtime_error("unknown escape in report JSON");
+        }
+    }
+
     std::string parse_string() {
         expect('"');
         std::string result;
@@ -117,67 +165,52 @@ private:
                 throw std::runtime_error("control character in report JSON string");
             }
             if (character != '\\') {
-                if (character >= 0x80U) {
-                    const std::size_t begin = position_ - 1U;
-                    const std::size_t length = valid_utf8_sequence_length(input_, begin);
-                    if (length == 0U) {
-                        throw std::runtime_error("invalid UTF-8 in report JSON string");
-                    }
-                    result.append(input_, begin, length);
-                    position_ = begin + length;
-                    continue;
-                }
-                result.push_back(static_cast<char>(character));
+                append_raw_string_character(result, character);
                 continue;
             }
-            const char escaped = take();
-            switch (escaped) {
-                case '"':
-                case '\\':
-                case '/':
-                    result.push_back(escaped);
-                    break;
-                case 'b':
-                    result.push_back('\b');
-                    break;
-                case 'f':
-                    result.push_back('\f');
-                    break;
-                case 'n':
-                    result.push_back('\n');
-                    break;
-                case 'r':
-                    result.push_back('\r');
-                    break;
-                case 't':
-                    result.push_back('\t');
-                    break;
-                case 'u': {
-                    unsigned int codepoint = parse_hex_quad();
-                    if (codepoint >= 0xd800U && codepoint <= 0xdbffU) {
-                        if (take() != '\\' || take() != 'u') {
-                            throw std::runtime_error(
-                                "high surrogate has no low surrogate in report JSON");
-                        }
-                        const unsigned int low = parse_hex_quad();
-                        if (low < 0xdc00U || low > 0xdfffU) {
-                            throw std::runtime_error(
-                                "high surrogate has an invalid pair in report JSON");
-                        }
-                        codepoint = 0x10000U + ((codepoint - 0xd800U) << 10U)
-                                    + (low - 0xdc00U);
-                    } else if (codepoint >= 0xdc00U && codepoint <= 0xdfffU) {
-                        throw std::runtime_error(
-                            "unpaired low surrogate in report JSON");
-                    }
-                    append_codepoint(result, codepoint);
-                    break;
-                }
-                default:
-                    throw std::runtime_error("unknown escape in report JSON");
-            }
+            append_escape(result);
         }
         throw std::runtime_error("unterminated report JSON string");
+    }
+
+    bool at_digit() const {
+        return position_ < input_.size() &&
+               std::isdigit(static_cast<unsigned char>(input_[position_])) != 0;
+    }
+
+    void consume_digits() {
+        if (!at_digit()) {
+            throw std::runtime_error("malformed report JSON number");
+        }
+        while (at_digit()) ++position_;
+    }
+
+    void consume_integer_part() {
+        if (position_ >= input_.size()) {
+            throw std::runtime_error("malformed report JSON number");
+        }
+        if (input_[position_] == '0') {
+            ++position_;
+            return;
+        }
+        consume_digits();
+    }
+
+    void consume_fraction() {
+        if (position_ >= input_.size() || input_[position_] != '.') return;
+        ++position_;
+        consume_digits();
+    }
+
+    void consume_exponent() {
+        if (position_ >= input_.size() ||
+            (input_[position_] != 'e' && input_[position_] != 'E')) return;
+        ++position_;
+        if (position_ < input_.size() &&
+            (input_[position_] == '+' || input_[position_] == '-')) {
+            ++position_;
+        }
+        consume_digits();
     }
 
     JsonValue parse_number() {
@@ -185,45 +218,9 @@ private:
         if (input_[position_] == '-') {
             ++position_;
         }
-        if (position_ >= input_.size()) {
-            throw std::runtime_error("malformed report JSON number");
-        }
-        if (input_[position_] == '0') {
-            ++position_;
-        } else {
-            if (std::isdigit(static_cast<unsigned char>(input_[position_])) == 0) {
-                throw std::runtime_error("malformed report JSON number");
-            }
-            while (position_ < input_.size() &&
-                   std::isdigit(static_cast<unsigned char>(input_[position_])) != 0) {
-                ++position_;
-            }
-        }
-        if (position_ < input_.size() && input_[position_] == '.') {
-            ++position_;
-            if (position_ >= input_.size() ||
-                std::isdigit(static_cast<unsigned char>(input_[position_])) == 0) {
-                throw std::runtime_error("malformed report JSON number");
-            }
-            while (position_ < input_.size() &&
-                   std::isdigit(static_cast<unsigned char>(input_[position_])) != 0) {
-                ++position_;
-            }
-        }
-        if (position_ < input_.size() && (input_[position_] == 'e' || input_[position_] == 'E')) {
-            ++position_;
-            if (position_ < input_.size() && (input_[position_] == '+' || input_[position_] == '-')) {
-                ++position_;
-            }
-            if (position_ >= input_.size() ||
-                std::isdigit(static_cast<unsigned char>(input_[position_])) == 0) {
-                throw std::runtime_error("malformed report JSON number");
-            }
-            while (position_ < input_.size() &&
-                   std::isdigit(static_cast<unsigned char>(input_[position_])) != 0) {
-                ++position_;
-            }
-        }
+        consume_integer_part();
+        consume_fraction();
+        consume_exponent();
         JsonValue result;
         result.kind = JsonValue::Kind::Number;
         result.scalar = input_.substr(begin, position_ - begin);

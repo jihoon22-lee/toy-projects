@@ -74,44 +74,90 @@ bool is_absolute_path(const std::string& value) {
     return !value.empty() && value.front() == '/';
 }
 
-std::size_t valid_utf8_sequence_length(const std::string& value, std::size_t offset) {
-    if (offset >= value.size()) {
+namespace {
+
+bool continuation_at(const std::string& value, std::size_t offset) {
+    return offset < value.size() &&
+           (static_cast<unsigned char>(value[offset]) & 0xc0U) == 0x80U;
+}
+
+std::size_t three_byte_length(const std::string& value, std::size_t offset,
+                              unsigned char first) {
+    if (!continuation_at(value, offset + 1U) || !continuation_at(value, offset + 2U)) {
         return 0U;
     }
-    const auto byte = [&](std::size_t index) {
-        return static_cast<unsigned char>(value[offset + index]);
-    };
-    const auto continuation = [&](std::size_t index) {
-        return offset + index < value.size() && (byte(index) & 0xc0U) == 0x80U;
-    };
-    const unsigned char first = byte(0U);
-    if (first <= 0x7fU) {
+    const unsigned char second = static_cast<unsigned char>(value[offset + 1U]);
+    if (first == 0xe0U && second < 0xa0U) return 0U;
+    if (first == 0xedU && second > 0x9fU) return 0U;
+    return 3U;
+}
+
+std::size_t four_byte_length(const std::string& value, std::size_t offset,
+                             unsigned char first) {
+    if (!continuation_at(value, offset + 1U) || !continuation_at(value, offset + 2U) ||
+        !continuation_at(value, offset + 3U)) {
+        return 0U;
+    }
+    const unsigned char second = static_cast<unsigned char>(value[offset + 1U]);
+    if (first == 0xf0U && second < 0x90U) return 0U;
+    if (first == 0xf4U && second > 0x8fU) return 0U;
+    return 4U;
+}
+
+void append_hex_byte(std::ostringstream& output, unsigned char character) {
+    output << "\\u00" << std::hex << std::setw(2) << std::setfill('0')
+           << static_cast<unsigned int>(character) << std::dec;
+}
+
+bool append_simple_escape(std::ostringstream& output, unsigned char character) {
+    switch (character) {
+        case '"': output << "\\\""; return true;
+        case '\\': output << "\\\\"; return true;
+        case '\b': output << "\\b"; return true;
+        case '\f': output << "\\f"; return true;
+        case '\n': output << "\\n"; return true;
+        case '\r': output << "\\r"; return true;
+        case '\t': output << "\\t"; return true;
+        default: return false;
+    }
+}
+
+std::size_t append_json_character(std::ostringstream& output,
+                                  const std::string& value,
+                                  std::size_t index) {
+    const unsigned char character = static_cast<unsigned char>(value[index]);
+    if (append_simple_escape(output, character)) return 1U;
+    if (character < 0x20U) {
+        append_hex_byte(output, character);
         return 1U;
     }
+    if (character < 0x80U) {
+        output << static_cast<char>(character);
+        return 1U;
+    }
+    const std::size_t length = valid_utf8_sequence_length(value, index);
+    if (length == 0U) {
+        append_hex_byte(output, character);
+        return 1U;
+    }
+    output.write(value.data() + index, static_cast<std::streamsize>(length));
+    return length;
+}
+
+}  // namespace
+
+std::size_t valid_utf8_sequence_length(const std::string& value, std::size_t offset) {
+    if (offset >= value.size()) return 0U;
+    const unsigned char first = static_cast<unsigned char>(value[offset]);
+    if (first <= 0x7fU) return 1U;
     if (first >= 0xc2U && first <= 0xdfU) {
-        return continuation(1U) ? 2U : 0U;
+        return continuation_at(value, offset + 1U) ? 2U : 0U;
     }
     if (first >= 0xe0U && first <= 0xefU) {
-        if (!continuation(1U) || !continuation(2U)) {
-            return 0U;
-        }
-        const unsigned char second = byte(1U);
-        if ((first == 0xe0U && second < 0xa0U) ||
-            (first == 0xedU && second > 0x9fU)) {
-            return 0U;
-        }
-        return 3U;
+        return three_byte_length(value, offset, first);
     }
     if (first >= 0xf0U && first <= 0xf4U) {
-        if (!continuation(1U) || !continuation(2U) || !continuation(3U)) {
-            return 0U;
-        }
-        const unsigned char second = byte(1U);
-        if ((first == 0xf0U && second < 0x90U) ||
-            (first == 0xf4U && second > 0x8fU)) {
-            return 0U;
-        }
-        return 4U;
+        return four_byte_length(value, offset, first);
     }
     return 0U;
 }
@@ -119,48 +165,8 @@ std::size_t valid_utf8_sequence_length(const std::string& value, std::size_t off
 std::string json_escape(const std::string& value) {
     std::ostringstream output;
     output << '"';
-    for (std::size_t index = 0U; index < value.size(); ++index) {
-        const unsigned char character = static_cast<unsigned char>(value[index]);
-        switch (character) {
-            case '"':
-                output << "\\\"";
-                break;
-            case '\\':
-                output << "\\\\";
-                break;
-            case '\b':
-                output << "\\b";
-                break;
-            case '\f':
-                output << "\\f";
-                break;
-            case '\n':
-                output << "\\n";
-                break;
-            case '\r':
-                output << "\\r";
-                break;
-            case '\t':
-                output << "\\t";
-                break;
-            default:
-                if (character < 0x20U) {
-                    output << "\\u" << std::hex << std::setw(4) << std::setfill('0')
-                           << static_cast<unsigned int>(character) << std::dec;
-                } else if (character >= 0x80U) {
-                    const std::size_t length = valid_utf8_sequence_length(value, index);
-                    if (length == 0U) {
-                        output << "\\u00" << std::hex << std::setw(2) << std::setfill('0')
-                               << static_cast<unsigned int>(character) << std::dec;
-                    } else {
-                        output.write(value.data() + index, static_cast<std::streamsize>(length));
-                        index += length - 1U;
-                    }
-                } else {
-                    output << static_cast<char>(character);
-                }
-                break;
-        }
+    for (std::size_t index = 0U; index < value.size();) {
+        index += append_json_character(output, value, index);
     }
     output << '"';
     return output.str();

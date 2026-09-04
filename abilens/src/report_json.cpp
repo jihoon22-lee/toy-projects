@@ -102,6 +102,126 @@ bool valid_abi_namespace(const std::string& value) {
     return value == "GLIBC" || value == "GLIBCXX" || value == "CXXABI";
 }
 
+void parse_tool(const JsonValue& root, ElfReport& report) {
+    const JsonValue& tool = required_field(root, "tool");
+    require_exact_object(tool, "tool", std::array<const char*, 2U>{"name", "version"});
+    report.tool.name = required_string(tool, "name");
+    report.tool.version = required_string(tool, "version");
+    if (!report.tool.version.empty() && !valid_abi_version(report.tool.version)) {
+        throw std::runtime_error("invalid readelf tool version in report JSON");
+    }
+    if (report.status == InputStatus::Valid && report.tool.name != "GNU readelf") {
+        throw std::runtime_error("valid report does not identify GNU readelf");
+    }
+    if (report.status == InputStatus::Valid && !valid_abi_version(report.tool.version)) {
+        throw std::runtime_error("valid report has no numeric GNU readelf version");
+    }
+}
+
+void parse_stripped(const std::string& stripped, ElfReport& report) {
+    if (stripped == "yes") {
+        report.stripped_known = true;
+        report.stripped = true;
+    } else if (stripped == "no") {
+        report.stripped_known = true;
+    } else if (stripped != "unknown") {
+        throw std::runtime_error("invalid stripped value in report JSON");
+    }
+}
+
+void parse_elf(const JsonValue& root, ElfReport& report) {
+    const JsonValue& elf = required_field(root, "elf");
+    require_exact_object(elf, "elf",
+                         std::array<const char*, 6U>{"class", "endian", "type", "machine",
+                                                      "dynamic", "stripped"});
+    report.header.elf_class = required_string(elf, "class");
+    report.header.endian = required_string(elf, "endian");
+    report.header.type = required_string(elf, "type");
+    report.header.machine = required_string(elf, "machine");
+    report.header.has_dynamic = required_boolean(elf, "dynamic");
+    parse_stripped(required_string(elf, "stripped"), report);
+}
+
+void parse_dependencies(const JsonValue& root, ElfReport& report) {
+    const JsonValue& dependencies = required_field(root, "dependencies");
+    require_exact_object(dependencies, "dependencies",
+                         std::array<const char*, 3U>{"needed", "rpath", "runpath"});
+    report.needed = required_string_array(dependencies, "needed");
+    report.rpath = required_string_array(dependencies, "rpath");
+    report.runpath = required_string_array(dependencies, "runpath");
+}
+
+VersionRequirement parse_version_requirement(const JsonValue& item) {
+    require_exact_object(item, "ABI version",
+                         std::array<const char*, 3U>{"namespace", "version", "library"});
+    VersionRequirement requirement{required_string(item, "namespace"),
+                                   required_string(item, "version"),
+                                   required_string(item, "library")};
+    if (!valid_abi_namespace(requirement.namespace_name)) {
+        throw std::runtime_error("invalid ABI namespace in report JSON");
+    }
+    if (!valid_abi_version(requirement.version)) {
+        throw std::runtime_error("invalid ABI version in report JSON");
+    }
+    return requirement;
+}
+
+bool has_version_requirement(const ElfReport& report,
+                             const VersionRequirement& requirement) {
+    return std::any_of(report.versions.begin(), report.versions.end(),
+                       [&](const VersionRequirement& existing) {
+        return existing.namespace_name == requirement.namespace_name &&
+               existing.version == requirement.version &&
+               existing.library == requirement.library;
+    });
+}
+
+void parse_abi_versions(const JsonValue& abi, ElfReport& report) {
+    const JsonValue& versions = required_field(abi, "versions");
+    if (versions.kind != JsonValue::Kind::Array) {
+        throw std::runtime_error("report ABI versions is not an array");
+    }
+    for (const JsonValue& item : versions.array) {
+        VersionRequirement requirement = parse_version_requirement(item);
+        if (has_version_requirement(report, requirement)) {
+            throw std::runtime_error("duplicate ABI version in report JSON");
+        }
+        report.versions.push_back(std::move(requirement));
+    }
+}
+
+void validate_abi_maximums(const JsonValue& abi, const ElfReport& report) {
+    const JsonValue& maximum = required_field(abi, "maximum");
+    require_exact_object(maximum, "ABI maximum",
+                         std::array<const char*, 3U>{"GLIBC", "GLIBCXX", "CXXABI"});
+    for (const char* namespace_name :
+         std::array<const char*, 3U>{"GLIBC", "GLIBCXX", "CXXABI"}) {
+        const std::string actual = required_string(maximum, namespace_name);
+        if (!actual.empty() && !valid_abi_version(actual)) {
+            throw std::runtime_error("invalid ABI maximum in report JSON");
+        }
+        if (actual != detail::maximum_version(report, namespace_name)) {
+            throw std::runtime_error("ABI maximum does not match version requirements");
+        }
+    }
+}
+
+void parse_abi(const JsonValue& root, ElfReport& report) {
+    const JsonValue& abi = required_field(root, "abi");
+    require_exact_object(abi, "abi", std::array<const char*, 2U>{"versions", "maximum"});
+    parse_abi_versions(abi, report);
+    validate_abi_maximums(abi, report);
+}
+
+void parse_policy(const JsonValue& root, ElfReport& report) {
+    const JsonValue& policy = required_field(root, "policy");
+    require_exact_object(policy, "policy",
+                         std::array<const char*, 3U>{"applied", "passed", "violations"});
+    report.policy.applied = required_boolean(policy, "applied");
+    report.policy.passed = required_boolean(policy, "passed");
+    report.policy.violations = required_string_array(policy, "violations");
+}
+
 
 }  // namespace
 
@@ -118,92 +238,11 @@ ElfReport parse_report_json(const std::string& json) {
     report.input = required_string(root, "input");
     report.status = status_from_name(required_string(root, "status"));
     report.message = required_string(root, "message");
-    const JsonValue& tool = required_field(root, "tool");
-    require_exact_object(tool, "tool", std::array<const char*, 2U>{"name", "version"});
-    report.tool.name = required_string(tool, "name");
-    report.tool.version = required_string(tool, "version");
-    if (!report.tool.version.empty() && !valid_abi_version(report.tool.version)) {
-        throw std::runtime_error("invalid readelf tool version in report JSON");
-    }
-    if (report.status == InputStatus::Valid && report.tool.name != "GNU readelf") {
-        throw std::runtime_error("valid report does not identify GNU readelf");
-    }
-    if (report.status == InputStatus::Valid && !valid_abi_version(report.tool.version)) {
-        throw std::runtime_error("valid report has no numeric GNU readelf version");
-    }
-    const JsonValue& elf = required_field(root, "elf");
-    require_exact_object(elf, "elf",
-                         std::array<const char*, 6U>{"class", "endian", "type", "machine",
-                                                      "dynamic", "stripped"});
-    report.header.elf_class = required_string(elf, "class");
-    report.header.endian = required_string(elf, "endian");
-    report.header.type = required_string(elf, "type");
-    report.header.machine = required_string(elf, "machine");
-    report.header.has_dynamic = required_boolean(elf, "dynamic");
-    const std::string stripped = required_string(elf, "stripped");
-    if (stripped == "yes") {
-        report.stripped_known = true;
-        report.stripped = true;
-    } else if (stripped == "no") {
-        report.stripped_known = true;
-    } else if (stripped != "unknown") {
-        throw std::runtime_error("invalid stripped value in report JSON");
-    }
-    const JsonValue& dependencies = required_field(root, "dependencies");
-    require_exact_object(dependencies, "dependencies",
-                         std::array<const char*, 3U>{"needed", "rpath", "runpath"});
-    report.needed = required_string_array(dependencies, "needed");
-    report.rpath = required_string_array(dependencies, "rpath");
-    report.runpath = required_string_array(dependencies, "runpath");
-    const JsonValue& abi = required_field(root, "abi");
-    require_exact_object(abi, "abi", std::array<const char*, 2U>{"versions", "maximum"});
-    const JsonValue& versions = required_field(abi, "versions");
-    if (versions.kind != JsonValue::Kind::Array) {
-        throw std::runtime_error("report ABI versions is not an array");
-    }
-    for (const JsonValue& item : versions.array) {
-        require_exact_object(item, "ABI version",
-                             std::array<const char*, 3U>{"namespace", "version", "library"});
-        VersionRequirement requirement{required_string(item, "namespace"),
-                                       required_string(item, "version"),
-                                       required_string(item, "library")};
-        if (!valid_abi_namespace(requirement.namespace_name)) {
-            throw std::runtime_error("invalid ABI namespace in report JSON");
-        }
-        if (!valid_abi_version(requirement.version)) {
-            throw std::runtime_error("invalid ABI version in report JSON");
-        }
-        const auto duplicate = std::find_if(
-            report.versions.begin(), report.versions.end(),
-            [&](const VersionRequirement& existing) {
-                return existing.namespace_name == requirement.namespace_name &&
-                       existing.version == requirement.version &&
-                       existing.library == requirement.library;
-            });
-        if (duplicate != report.versions.end()) {
-            throw std::runtime_error("duplicate ABI version in report JSON");
-        }
-        report.versions.push_back(std::move(requirement));
-    }
-    const JsonValue& maximum = required_field(abi, "maximum");
-    require_exact_object(maximum, "ABI maximum",
-                         std::array<const char*, 3U>{"GLIBC", "GLIBCXX", "CXXABI"});
-    for (const char* namespace_name :
-         std::array<const char*, 3U>{"GLIBC", "GLIBCXX", "CXXABI"}) {
-        const std::string actual = required_string(maximum, namespace_name);
-        if (!actual.empty() && !valid_abi_version(actual)) {
-            throw std::runtime_error("invalid ABI maximum in report JSON");
-        }
-        if (actual != detail::maximum_version(report, namespace_name)) {
-            throw std::runtime_error("ABI maximum does not match version requirements");
-        }
-    }
-    const JsonValue& policy = required_field(root, "policy");
-    require_exact_object(policy, "policy",
-                         std::array<const char*, 3U>{"applied", "passed", "violations"});
-    report.policy.applied = required_boolean(policy, "applied");
-    report.policy.passed = required_boolean(policy, "passed");
-    report.policy.violations = required_string_array(policy, "violations");
+    parse_tool(root, report);
+    parse_elf(root, report);
+    parse_dependencies(root, report);
+    parse_abi(root, report);
+    parse_policy(root, report);
     report.diagnostics = required_string_array(root, "diagnostics");
     return report;
 }

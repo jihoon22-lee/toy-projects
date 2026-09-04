@@ -12,7 +12,7 @@ LDLIBS ?=
 
 INCLUDES := -Iinclude
 OUT_GUARD := tools/guard-out.sh
-CORE_SOURCES := src/elf.cpp src/readelf.cpp src/report.cpp src/report_helpers.cpp src/report_json_parser.cpp src/report_json.cpp src/policy.cpp src/diff.cpp
+CORE_SOURCES := src/elf.cpp src/readelf.cpp src/readelf_process.cpp src/report.cpp src/report_helpers.cpp src/report_json_parser.cpp src/report_json.cpp src/policy.cpp src/diff.cpp
 CORE_OBJECTS := $(CORE_SOURCES:src/%.cpp=$(OUT)/obj/%.o)
 TEST_SOURCES := tests/test_parser.cpp tests/test_integration.cpp
 TEST_OBJECTS := $(TEST_SOURCES:tests/%.cpp=$(OUT)/obj/tests/%.o)

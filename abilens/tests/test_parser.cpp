@@ -81,10 +81,8 @@ std::filesystem::path temporary_directory(const std::string& name) {
     return std::filesystem::path(mutable_pattern.data());
 }
 
-}  // namespace
-
-int main() {
-    const std::string transcript = R"(ELF Header:
+std::string synthetic_transcript() {
+    return R"(ELF Header:
   Class:                             ELF64
   Type:                              DYN (Shared object file)
   Machine:                           Advanced Micro Devices X86-64
@@ -104,6 +102,9 @@ Version needs section '.gnu.version_r' contains 2 entries:
   0x0040:   Name: GLIBCXX_3.4.30  Flags: none  Version: 2
   0x0050:   Name: CXXABI_1.3.13  Flags: none  Version: 3
 )";
+}
+
+abilens::ElfReport test_readelf_parser(const std::string& transcript) {
     abilens::ReadelfEvidence synthetic_evidence;
     synthetic_evidence.return_code = 0;
     synthetic_evidence.standard_output = transcript;
@@ -125,7 +126,10 @@ Version needs section '.gnu.version_r' contains 2 entries:
         abilens::parse_readelf_text(transcript, synthetic_header(), unsupported_evidence);
     expect(unsupported.status == abilens::InputStatus::ToolError,
            "non-GNU readelf capability fails closed");
+    return parsed;
+}
 
+std::filesystem::path test_policy(const abilens::ElfReport& parsed) {
     abilens::Policy policy;
     policy.expected_class = "ELF64";
     policy.expected_machine = "Advanced Micro Devices X86-64";
@@ -144,7 +148,10 @@ Version needs section '.gnu.version_r' contains 2 entries:
         invalid_policy_failed = true;
     }
     expect(invalid_policy_failed, "policy files reject invalid UTF-8");
+    return invalid_policy;
+}
 
+void test_json_contract(const abilens::ElfReport& parsed) {
     const std::string json = abilens::serialize_report(parsed);
     const abilens::ElfReport round_trip = abilens::parse_report_json(json);
     expect(abilens::serialize_report(round_trip) == json, "report JSON is stable under round trip");
@@ -210,7 +217,9 @@ Version needs section '.gnu.version_r' contains 2 entries:
     }
     too_many_nodes.push_back(']');
     expect_parse_failure(too_many_nodes, "large shallow JSON is rejected by the node bound");
+}
 
+void test_diff_contract(const abilens::ElfReport& parsed) {
     abilens::ElfReport changed = parsed;
     changed.needed.push_back("libm.so.6");
     changed.versions.push_back({"GLIBC", "2.35", "libc.so.6"});
@@ -224,7 +233,9 @@ Version needs section '.gnu.version_r' contains 2 entries:
     byte_diff.left = std::string("left-") + static_cast<char>(0xfe);
     expect(abilens::serialize_diff(byte_diff).find("left-\\u00fe") != std::string::npos,
            "diff JSON escapes invalid path bytes");
+}
 
+std::vector<std::filesystem::path> test_input_classification() {
     const std::filesystem::path non_elf = temporary_file("non-elf", "not an ELF");
     const abilens::HeaderCheck non_elf_result = abilens::validate_elf_file(non_elf);
     expect(non_elf_result.status == abilens::InputStatus::NonElf, "non-ELF is classified safely");
@@ -235,7 +246,10 @@ Version needs section '.gnu.version_r' contains 2 entries:
     const abilens::HeaderCheck corrupt_result = abilens::validate_elf_file(corrupt);
     expect(corrupt_result.status == abilens::InputStatus::Corrupt,
            "short ELF is classified as corrupt");
+    return {non_elf, corrupt};
+}
 
+std::filesystem::path test_readelf_output_bound(const std::filesystem::path& non_elf) {
     const std::filesystem::path fake_dir = temporary_directory("fake-readelf");
     const std::filesystem::path fake_readelf = fake_dir / "readelf";
     {
@@ -266,13 +280,30 @@ Version needs section '.gnu.version_r' contains 2 entries:
            "readelf output bound terminates the child");
     expect(std::chrono::duration_cast<std::chrono::seconds>(runner_elapsed).count() < 5,
            "readelf output bound does not wait for the timeout");
+    return fake_dir;
+}
 
+void remove_path(const std::filesystem::path& path) {
     std::error_code error;
-    std::filesystem::remove(fake_readelf, error);
-    std::filesystem::remove(fake_dir, error);
-    std::filesystem::remove(non_elf, error);
-    std::filesystem::remove(corrupt, error);
-    std::filesystem::remove(invalid_policy, error);
+    std::filesystem::remove(path, error);
+}
+
+}  // namespace
+
+int main() {
+    const std::string transcript = synthetic_transcript();
+    const abilens::ElfReport parsed = test_readelf_parser(transcript);
+    const std::filesystem::path invalid_policy = test_policy(parsed);
+    test_json_contract(parsed);
+    test_diff_contract(parsed);
+    const std::vector<std::filesystem::path> inputs = test_input_classification();
+    const std::filesystem::path fake_dir = test_readelf_output_bound(inputs[0]);
+
+    remove_path(fake_dir / "readelf");
+    remove_path(fake_dir);
+    remove_path(inputs[0]);
+    remove_path(inputs[1]);
+    remove_path(invalid_policy);
     std::puts("test_parser: PASS");
     return 0;
 }

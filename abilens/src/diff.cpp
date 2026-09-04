@@ -90,6 +90,54 @@ bool set_changed(const SetDiff& diff) {
     return !diff.added.empty() || !diff.removed.empty();
 }
 
+void append_header_change(std::vector<std::string>& changes, const std::string& label,
+                          const std::string& left, const std::string& right) {
+    if (left != right) {
+        changes.push_back(label + ": " + left + " -> " + right);
+    }
+}
+
+void append_elf_header_changes(const ElfReport& left, const ElfReport& right,
+                               std::vector<std::string>& changes) {
+    append_header_change(changes, "ELF class", left.header.elf_class,
+                         right.header.elf_class);
+    append_header_change(changes, "endianness", left.header.endian,
+                         right.header.endian);
+    append_header_change(changes, "machine", left.header.machine,
+                         right.header.machine);
+    append_header_change(changes, "type", left.header.type, right.header.type);
+    if (left.header.has_dynamic != right.header.has_dynamic) {
+        changes.push_back("linkage: dynamic/static changed");
+    }
+}
+
+bool same_elf_header(const ElfReport& left, const ElfReport& right) {
+    return left.header.elf_class == right.header.elf_class &&
+           left.header.endian == right.header.endian &&
+           left.header.machine == right.header.machine &&
+           left.header.type == right.header.type &&
+           left.header.has_dynamic == right.header.has_dynamic;
+}
+
+bool append_abi_changes(const ElfReport& left, const ElfReport& right,
+                        std::vector<std::string>& changes) {
+    bool compatible = true;
+    const std::array<std::string, 3U> namespaces{"GLIBC", "GLIBCXX", "CXXABI"};
+    for (const std::string& namespace_name : namespaces) {
+        const std::string left_max = max_version(left, namespace_name);
+        const std::string right_max = max_version(right, namespace_name);
+        if (left_max == right_max) continue;
+        changes.push_back(namespace_name + " maximum: " +
+                          (left_max.empty() ? "(none)" : left_max) + " -> " +
+                          (right_max.empty() ? "(none)" : right_max));
+        if (left_max.empty() ||
+            (!right_max.empty() && version_less(left_max, right_max))) {
+            compatible = false;
+        }
+    }
+    return compatible;
+}
+
 }  // namespace
 
 DiffReport diff_reports(const ElfReport& left, const ElfReport& right) {
@@ -102,49 +150,15 @@ DiffReport diff_reports(const ElfReport& left, const ElfReport& right) {
     result.rpath = make_set_diff(left.rpath, right.rpath);
     result.runpath = make_set_diff(left.runpath, right.runpath);
     result.abi = make_set_diff(abi_keys(left), abi_keys(right));
-    if (left.status != right.status) {
-        result.header_changes.push_back("input status changed");
-    }
-    if (left.status == InputStatus::Valid && right.status == InputStatus::Valid) {
-        if (left.header.elf_class != right.header.elf_class) {
-            result.header_changes.push_back("ELF class: " + left.header.elf_class + " -> " +
-                                            right.header.elf_class);
-        }
-        if (left.header.endian != right.header.endian) {
-            result.header_changes.push_back("endianness: " + left.header.endian + " -> " +
-                                            right.header.endian);
-        }
-        if (left.header.machine != right.header.machine) {
-            result.header_changes.push_back("machine: " + left.header.machine + " -> " +
-                                            right.header.machine);
-        }
-        if (left.header.type != right.header.type) {
-            result.header_changes.push_back("type: " + left.header.type + " -> " + right.header.type);
-        }
-        if (left.header.has_dynamic != right.header.has_dynamic) {
-            result.header_changes.push_back("linkage: dynamic/static changed");
-        }
-        const std::array<std::string, 3U> namespaces{"GLIBC", "GLIBCXX", "CXXABI"};
-        for (const std::string& namespace_name : namespaces) {
-            const std::string left_max = max_version(left, namespace_name);
-            const std::string right_max = max_version(right, namespace_name);
-            if (left_max != right_max) {
-                result.header_changes.push_back(namespace_name + " maximum: " +
-                                                (left_max.empty() ? "(none)" : left_max) + " -> " +
-                                                (right_max.empty() ? "(none)" : right_max));
-                if (left_max.empty() || (!right_max.empty() && version_less(left_max, right_max))) {
-                    result.compatible = false;
-                }
-            }
-        }
-        if (left.header.elf_class != right.header.elf_class ||
-            left.header.endian != right.header.endian || left.header.machine != right.header.machine ||
-            left.header.type != right.header.type ||
-            left.header.has_dynamic != right.header.has_dynamic) {
-            result.compatible = false;
-        }
-    } else {
+    const bool both_valid = left.status == InputStatus::Valid &&
+                            right.status == InputStatus::Valid;
+    if (left.status != right.status) result.header_changes.push_back("input status changed");
+    if (!both_valid) {
         result.compatible = false;
+    } else {
+        append_elf_header_changes(left, right, result.header_changes);
+        const bool abi_compatible = append_abi_changes(left, right, result.header_changes);
+        result.compatible = same_elf_header(left, right) && abi_compatible;
     }
     result.changed = !result.header_changes.empty() || set_changed(result.needed) ||
                      set_changed(result.rpath) || set_changed(result.runpath) ||

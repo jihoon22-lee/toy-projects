@@ -2,98 +2,13 @@
 
 #include <algorithm>
 #include <array>
-#include <cerrno>
-#include <chrono>
 #include <cctype>
-#include <cstring>
-#include <fcntl.h>
-#include <poll.h>
-#include <signal.h>
-#include <sys/wait.h>
-#include <unistd.h>
 
 #include <sstream>
 #include <vector>
 
 namespace abilens {
 namespace {
-
-using Clock = std::chrono::steady_clock;
-
-void close_fd(int& fd) {
-    if (fd >= 0) {
-        (void)::close(fd);
-        fd = -1;
-    }
-}
-
-bool make_nonblocking(int fd) {
-    const int flags = ::fcntl(fd, F_GETFL, 0);
-    return flags >= 0 && ::fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
-}
-
-void kill_child(pid_t child) {
-    if (child > 0) {
-        (void)::kill(child, SIGKILL);
-    }
-}
-
-bool append_pipe(int fd, std::string& destination, bool& truncated) {
-    std::array<char, 16U * 1024U> buffer{};
-    bool reached_eof = false;
-    for (;;) {
-        const ssize_t count = ::read(fd, buffer.data(), buffer.size());
-        if (count > 0) {
-            const std::size_t bytes = static_cast<std::size_t>(count);
-            const std::size_t remaining = destination.size() < kReadelfOutputLimit
-                                              ? kReadelfOutputLimit - destination.size()
-                                              : 0U;
-            destination.append(buffer.data(), std::min(bytes, remaining));
-            if (bytes > remaining) {
-                truncated = true;
-                // The caller closes this descriptor after observing the bound.
-                // This avoids waiting forever on an untrusted producer.
-                return true;
-            }
-            continue;
-        }
-        if (count == 0) {
-            reached_eof = true;
-            break;
-        }
-        if (errno == EINTR) {
-            continue;
-        }
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            break;
-        }
-        truncated = true;
-        return true;
-    }
-    return reached_eof;
-}
-
-void reap_child(pid_t child, bool& reaped, int& wait_status) {
-    if (reaped) {
-        return;
-    }
-    for (;;) {
-        const pid_t result = ::waitpid(child, &wait_status, WNOHANG);
-        if (result == child) {
-            reaped = true;
-            return;
-        }
-        if (result == 0) {
-            return;
-        }
-        if (result < 0 && errno == EINTR) {
-            continue;
-        }
-        reaped = true;
-        wait_status = -1;
-        return;
-    }
-}
 
 std::string trim(std::string value) {
     auto not_space = [](unsigned char character) { return std::isspace(character) == 0; };
@@ -196,289 +111,123 @@ bool has_symtab_section(const std::string& text) {
     return false;
 }
 
-}  // namespace
-
-namespace {
-
-struct ProcessEvidence {
-    int return_code = -1;
-    bool timed_out = false;
-    bool truncated = false;
-    std::string standard_output;
-    std::string standard_error;
-};
-
-ProcessEvidence run_readelf_process(const std::vector<std::string>& arguments) {
-    ProcessEvidence result;
-    int standard_output[2] = {-1, -1};
-    int standard_error[2] = {-1, -1};
-    if (::pipe(standard_output) != 0 || ::pipe(standard_error) != 0) {
-        close_fd(standard_output[0]);
-        close_fd(standard_output[1]);
-        close_fd(standard_error[0]);
-        close_fd(standard_error[1]);
-        result.standard_error = "could not create readelf pipes";
-        return result;
-    }
-    const pid_t child = ::fork();
-    if (child < 0) {
-        close_fd(standard_output[0]);
-        close_fd(standard_output[1]);
-        close_fd(standard_error[0]);
-        close_fd(standard_error[1]);
-        result.standard_error = "could not fork readelf";
-        return result;
-    }
-    if (child == 0) {
-        (void)::dup2(standard_output[1], STDOUT_FILENO);
-        (void)::dup2(standard_error[1], STDERR_FILENO);
-        close_fd(standard_output[0]);
-        close_fd(standard_output[1]);
-        close_fd(standard_error[0]);
-        close_fd(standard_error[1]);
-        (void)::setenv("LC_ALL", "C", 1);
-        (void)::setenv("LANG", "C", 1);
-        (void)::setenv("LANGUAGE", "C", 1);
-        std::vector<char*> argv;
-        argv.reserve(arguments.size() + 2U);
-        for (const std::string& argument : arguments) {
-            argv.push_back(const_cast<char*>(argument.c_str()));
-        }
-        argv.push_back(nullptr);
-        ::execvp(argv.front(), argv.data());
-        _exit(127);
-    }
-
-    close_fd(standard_output[1]);
-    close_fd(standard_error[1]);
-    if (!make_nonblocking(standard_output[0]) || !make_nonblocking(standard_error[0])) {
-        result.standard_error = "could not bound readelf output pipes";
-        kill_child(child);
-        (void)::waitpid(child, nullptr, 0);
-        close_fd(standard_output[0]);
-        close_fd(standard_error[0]);
-        return result;
-    }
-
-    bool output_eof = false;
-    bool error_eof = false;
-    bool reaped = false;
-    int wait_status = -1;
-    const auto deadline = Clock::now() + std::chrono::milliseconds(
-                                        static_cast<long long>(kReadelfTimeoutSeconds * 1000.0));
-    while ((!output_eof || !error_eof) || !reaped) {
-        struct pollfd descriptors[2]{};
-        nfds_t count = 0;
-        if (standard_output[0] >= 0) {
-            descriptors[count++] = pollfd{standard_output[0], POLLIN | POLLHUP, 0};
-        }
-        if (standard_error[0] >= 0) {
-            descriptors[count++] = pollfd{standard_error[0], POLLIN | POLLHUP, 0};
-        }
-        if (count != 0U) {
-            (void)::poll(descriptors, count, 25);
-        } else {
-            (void)::usleep(25000U);
-        }
-        if (standard_output[0] >= 0) {
-            output_eof = append_pipe(standard_output[0], result.standard_output, result.truncated);
-            if (output_eof) {
-                close_fd(standard_output[0]);
-            }
-        }
-        if (standard_error[0] >= 0) {
-            error_eof = append_pipe(standard_error[0], result.standard_error, result.truncated);
-            if (error_eof) {
-                close_fd(standard_error[0]);
-            }
-        }
-        reap_child(child, reaped, wait_status);
-        if (!reaped && Clock::now() >= deadline) {
-            result.timed_out = true;
-            kill_child(child);
-        }
-        if (result.timed_out || result.truncated) {
-            // No more evidence can be accepted after a timeout or bound
-            // violation. Close both pipes immediately, then reap the child.
-            kill_child(child);
-            close_fd(standard_output[0]);
-            close_fd(standard_error[0]);
-            output_eof = true;
-            error_eof = true;
-        }
-        if ((result.timed_out || result.truncated) && !reaped) {
-            reap_child(child, reaped, wait_status);
-        }
-    }
-    close_fd(standard_output[0]);
-    close_fd(standard_error[0]);
-    if (!reaped) {
-        (void)::waitpid(child, &wait_status, 0);
-    }
-    if (WIFEXITED(wait_status)) {
-        result.return_code = WEXITSTATUS(wait_status);
-    } else if (WIFSIGNALED(wait_status)) {
-        result.return_code = -WTERMSIG(wait_status);
-    }
-    return result;
+void append_colon_separated(const std::string& value,
+                            std::vector<std::string>& destination) {
+    std::istringstream paths(value);
+    std::string item;
+    while (std::getline(paths, item, ':')) append_unique(destination, item);
 }
 
-std::string gnu_readelf_version(const std::string& output) {
-    std::istringstream lines(output);
-    std::string line;
-    while (std::getline(lines, line)) {
-        line = trim(line);
-        if (line.empty()) {
-            continue;
-        }
-        if (!starts_with(line, "GNU readelf")) {
-            return {};
-        }
-        std::istringstream words(line);
-        std::string tool;
-        std::string readelf;
-        words >> tool >> readelf;
-        if (tool != "GNU" || readelf != "readelf") {
-            return {};
-        }
-        std::string token;
-        while (words >> token) {
-            while (!token.empty() && (token.back() == ',' || token.back() == ';')) {
-                token.pop_back();
-            }
-            if (valid_version(token)) {
-                return token;
-            }
-        }
-        return {};
-    }
-    return {};
+void update_current_library(const std::string& line, std::string& current_library) {
+    const std::size_t marker = line.find("File:");
+    if (marker == std::string::npos) return;
+    current_library = trim(line.substr(marker + 5U));
+    const std::size_t whitespace = current_library.find_first_of(" \t");
+    if (whitespace != std::string::npos) current_library.resize(whitespace);
 }
 
-ReadelfCapability query_readelf_capability() {
-    const ProcessEvidence evidence = run_readelf_process({"readelf", "--version"});
-    if (evidence.return_code != 0 || evidence.timed_out || evidence.truncated) {
-        return {};
+void parse_evidence_line(const std::string& line, std::string& current_library,
+                         ElfReport& report) {
+    update_current_library(line, current_library);
+    if (line.find("(NEEDED)") != std::string::npos) {
+        append_unique(report.needed, bracket_value(line));
     }
-    const std::string version = gnu_readelf_version(evidence.standard_output);
-    if (version.empty()) {
-        return {};
+    if (line.find("(RPATH)") != std::string::npos) {
+        append_colon_separated(bracket_value(line), report.rpath);
     }
-    return ReadelfCapability{true, "GNU readelf", version};
+    if (line.find("(RUNPATH)") != std::string::npos) {
+        append_colon_separated(bracket_value(line), report.runpath);
+    }
+    if (line.find("Name:") != std::string::npos) {
+        append_version(report.versions, first_name_token(line), current_library);
+    }
+}
+
+bool version_requirement_less(const VersionRequirement& left,
+                              const VersionRequirement& right) {
+    if (left.namespace_name != right.namespace_name) {
+        return left.namespace_name < right.namespace_name;
+    }
+    if (left.version != right.version) return left.version < right.version;
+    return left.library < right.library;
+}
+
+void sort_evidence(ElfReport& report) {
+    std::sort(report.needed.begin(), report.needed.end());
+    std::sort(report.rpath.begin(), report.rpath.end());
+    std::sort(report.runpath.begin(), report.runpath.end());
+    std::sort(report.versions.begin(), report.versions.end(), version_requirement_less);
+}
+
+void append_stripped_evidence(const std::string& input, ElfReport& report) {
+    report.stripped_known = input.find("Section Headers:") != std::string::npos;
+    report.stripped = report.stripped_known && !has_symtab_section(input);
+    if (!report.stripped_known) {
+        report.diagnostics.push_back("stripped: unknown (section headers were unavailable)");
+    } else if (report.stripped) {
+        report.diagnostics.push_back("stripped: no .symtab section");
+    } else {
+        report.diagnostics.push_back("not-stripped: .symtab section present");
+    }
+}
+
+ElfReport tool_error_report(const ElfHeader& header,
+                            const ReadelfEvidence& evidence) {
+    ElfReport report;
+    report.status = InputStatus::ToolError;
+    report.header = header;
+    report.tool.name = evidence.capability.name;
+    report.tool.version = evidence.capability.version;
+    if (!evidence.capability.supported) {
+        report.message = "system readelf capability is not supported";
+    } else if (evidence.timed_out) {
+        report.message = "readelf timed out";
+    } else if (evidence.truncated) {
+        report.message = "readelf output exceeded the safety bound";
+    } else {
+        report.message = "readelf failed to produce complete evidence";
+    }
+    if (!evidence.standard_error.empty()) {
+        report.diagnostics.push_back(evidence.standard_error.substr(0U, 512U));
+    }
+    return report;
 }
 
 }  // namespace
-
-ReadelfEvidence run_readelf(const std::filesystem::path& path) {
-    ReadelfEvidence result;
-    result.capability = query_readelf_capability();
-    if (!result.capability.supported) {
-        result.standard_error = "system readelf is not a supported GNU readelf";
-        return result;
-    }
-    const ProcessEvidence evidence =
-        run_readelf_process(
-            {"readelf", "-h", "-S", "-d", "-V", "-W", "--", path.generic_string()});
-    result.return_code = evidence.return_code;
-    result.timed_out = evidence.timed_out;
-    result.truncated = evidence.truncated;
-    result.standard_output = evidence.standard_output;
-    result.standard_error = evidence.standard_error;
-    return result;
-}
 
 ElfReport parse_readelf_text(const std::string& input,
                              const ElfHeader& header,
                              const ReadelfEvidence& evidence) {
+    if (!evidence.capability.supported || evidence.return_code != 0 ||
+        evidence.timed_out || evidence.truncated) {
+        return tool_error_report(header, evidence);
+    }
+    if (input.size() > kReadelfOutputLimit || input.find('\0') != std::string::npos) {
+        ElfReport report;
+        report.status = InputStatus::ToolError;
+        report.header = header;
+        report.tool.name = evidence.capability.name;
+        report.tool.version = evidence.capability.version;
+        report.message = "readelf output is outside the bounded text contract";
+        return report;
+    }
+
     ElfReport report;
     report.status = InputStatus::Valid;
     report.header = header;
     report.tool.name = evidence.capability.name;
     report.tool.version = evidence.capability.version;
-    if (!evidence.capability.supported) {
-        report.status = InputStatus::ToolError;
-        report.message = "system readelf capability is not supported";
-        if (!evidence.standard_error.empty()) {
-            report.diagnostics.push_back(evidence.standard_error.substr(0U, 512U));
-        }
-        return report;
-    }
-    if (evidence.return_code != 0 || evidence.timed_out || evidence.truncated) {
-        report.status = InputStatus::ToolError;
-        report.message = evidence.timed_out
-                             ? "readelf timed out"
-                             : evidence.truncated ? "readelf output exceeded the safety bound"
-                                                   : "readelf failed to produce complete evidence";
-        if (!evidence.standard_error.empty()) {
-            report.diagnostics.push_back(evidence.standard_error.substr(0U, 512U));
-        }
-        return report;
-    }
-    if (input.size() > kReadelfOutputLimit || input.find('\0') != std::string::npos) {
-        report.status = InputStatus::ToolError;
-        report.message = "readelf output is outside the bounded text contract";
-        return report;
-    }
-
     std::string current_library;
     std::istringstream lines(input);
     std::string line;
     while (std::getline(lines, line)) {
-        if (line.find("File:") != std::string::npos) {
-            const std::size_t marker = line.find("File:");
-            current_library = trim(line.substr(marker + 5U));
-            const std::size_t whitespace = current_library.find_first_of(" \t");
-            if (whitespace != std::string::npos) {
-                current_library.resize(whitespace);
-            }
-        }
-        if (line.find("(NEEDED)") != std::string::npos) {
-            append_unique(report.needed, bracket_value(line));
-        }
-        if (line.find("(RPATH)") != std::string::npos) {
-            const std::string value = bracket_value(line);
-            std::istringstream paths(value);
-            std::string item;
-            while (std::getline(paths, item, ':')) {
-                append_unique(report.rpath, item);
-            }
-        }
-        if (line.find("(RUNPATH)") != std::string::npos) {
-            const std::string value = bracket_value(line);
-            std::istringstream paths(value);
-            std::string item;
-            while (std::getline(paths, item, ':')) {
-                append_unique(report.runpath, item);
-            }
-        }
-        if (line.find("Name:") != std::string::npos) {
-            append_version(report.versions, first_name_token(line), current_library);
-        }
+        parse_evidence_line(line, current_library, report);
     }
-    std::sort(report.needed.begin(), report.needed.end());
-    std::sort(report.rpath.begin(), report.rpath.end());
-    std::sort(report.runpath.begin(), report.runpath.end());
-    std::sort(report.versions.begin(), report.versions.end(), [](const VersionRequirement& left,
-                                                                  const VersionRequirement& right) {
-        if (left.namespace_name != right.namespace_name) {
-            return left.namespace_name < right.namespace_name;
-        }
-        if (left.version != right.version) {
-            return left.version < right.version;
-        }
-        return left.library < right.library;
-    });
-    report.stripped_known = input.find("Section Headers:") != std::string::npos;
-    report.stripped = report.stripped_known && !has_symtab_section(input);
+    sort_evidence(report);
     if (!header.has_dynamic) {
         report.diagnostics.push_back("static-or-non-dynamic: no PT_DYNAMIC program header");
     }
-    if (report.stripped_known) {
-        report.diagnostics.push_back(report.stripped ? "stripped: no .symtab section" :
-                                                         "not-stripped: .symtab section present");
-    } else {
-        report.diagnostics.push_back("stripped: unknown (section headers were unavailable)");
-    }
+    append_stripped_evidence(input, report);
     report.message = "ELF header and readelf evidence verified";
     return report;
 }

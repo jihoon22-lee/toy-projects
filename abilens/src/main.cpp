@@ -29,6 +29,26 @@ void usage(std::ostream& output) {
            << "  abilens --version\n";
 }
 
+void set_format(Options& options, const std::string& value) {
+    if (value == "json") {
+        options.json = true;
+        return;
+    }
+    if (value == "text") {
+        options.json = false;
+        return;
+    }
+    throw std::runtime_error("--format accepts only text or json");
+}
+
+std::string required_argument(int argc, char** argv, int& index,
+                              const char* option, const char* description) {
+    if (index + 1 >= argc) {
+        throw std::runtime_error(std::string(option) + " requires " + description);
+    }
+    return argv[++index];
+}
+
 Options parse_options(int argc, char** argv, int first) {
     Options options;
     for (int index = first; index < argc; ++index) {
@@ -38,31 +58,11 @@ Options parse_options(int argc, char** argv, int first) {
         } else if (token == "--text") {
             options.json = false;
         } else if (token == "--format") {
-            if (index + 1 >= argc) {
-                throw std::runtime_error("--format requires text or json");
-            }
-            const std::string format(argv[++index]);
-            if (format == "json") {
-                options.json = true;
-            } else if (format == "text") {
-                options.json = false;
-            } else {
-                throw std::runtime_error("--format accepts only text or json");
-            }
+            set_format(options, required_argument(argc, argv, index, "--format", "text or json"));
         } else if (token.rfind("--format=", 0U) == 0U) {
-            const std::string format = token.substr(9U);
-            if (format == "json") {
-                options.json = true;
-            } else if (format == "text") {
-                options.json = false;
-            } else {
-                throw std::runtime_error("--format accepts only text or json");
-            }
+            set_format(options, token.substr(9U));
         } else if (token == "--policy") {
-            if (index + 1 >= argc) {
-                throw std::runtime_error("--policy requires a file");
-            }
-            options.policy_path = argv[++index];
+            options.policy_path = required_argument(argc, argv, index, "--policy", "a file");
         } else if (token == "--help" || token == "-h") {
             usage(std::cout);
             std::exit(0);
