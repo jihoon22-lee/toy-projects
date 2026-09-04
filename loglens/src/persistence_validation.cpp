@@ -12,30 +12,27 @@ namespace loglens::detail {
 
 namespace {
 
-bool utf8Lead(unsigned char lead, std::size_t& width, std::uint32_t& codepoint,
-              std::uint32_t& minimum) {
+struct Utf8Lead {
+    std::size_t width = 0;
+    std::uint32_t codepoint = 0;
+    std::uint32_t minimum = 0;
+};
+
+bool decodeUtf8Lead(unsigned char lead, Utf8Lead& decoded) {
     if (lead < 0x80U) {
-        width = 1;
-        codepoint = lead;
-        minimum = 0;
+        decoded = Utf8Lead{1, lead, 0};
         return true;
     }
     if (lead >= 0xC2U && lead <= 0xDFU) {
-        width = 2;
-        codepoint = lead & 0x1FU;
-        minimum = 0x80U;
+        decoded = Utf8Lead{2, lead & 0x1FU, 0x80U};
         return true;
     }
     if (lead >= 0xE0U && lead <= 0xEFU) {
-        width = 3;
-        codepoint = lead & 0x0FU;
-        minimum = 0x800U;
+        decoded = Utf8Lead{3, lead & 0x0FU, 0x800U};
         return true;
     }
     if (lead >= 0xF0U && lead <= 0xF4U) {
-        width = 4;
-        codepoint = lead & 0x07U;
-        minimum = 0x10000U;
+        decoded = Utf8Lead{4, lead & 0x07U, 0x10000U};
         return true;
     }
     return false;
@@ -44,23 +41,26 @@ bool utf8Lead(unsigned char lead, std::size_t& width, std::uint32_t& codepoint,
 bool validUtf8Sequence(std::string_view text, std::size_t position,
                        std::size_t& width) {
     const unsigned char lead = static_cast<unsigned char>(text[position]);
-    std::uint32_t codepoint = 0;
-    std::uint32_t minimum = 0;
-    if (!utf8Lead(lead, width, codepoint, minimum)
-        || width > text.size() - position) {
+    Utf8Lead decoded;
+    if (!decodeUtf8Lead(lead, decoded)
+        || decoded.width > text.size() - position) {
         return false;
     }
-    for (std::size_t index = 1; index < width; ++index) {
+    for (std::size_t index = 1; index < decoded.width; ++index) {
         const unsigned char continuation =
             static_cast<unsigned char>(text[position + index]);
         if ((continuation & 0xC0U) != 0x80U) {
             return false;
         }
-        codepoint = (codepoint << 6U) | (continuation & 0x3FU);
+        decoded.codepoint =
+            (decoded.codepoint << 6U) | (continuation & 0x3FU);
     }
-    return width == 1
-           || (codepoint >= minimum && codepoint <= 0x10FFFFU
-               && !(codepoint >= 0xD800U && codepoint <= 0xDFFFU));
+    width = decoded.width;
+    return decoded.width == 1
+           || (decoded.codepoint >= decoded.minimum
+               && decoded.codepoint <= 0x10FFFFU
+               && !(decoded.codepoint >= 0xD800U
+                    && decoded.codepoint <= 0xDFFFU));
 }
 
 bool validUtf8(std::string_view text) {

@@ -49,6 +49,8 @@
   malformed-store errors, and bounded collection handling. No product version or release changed.
 - Kept the strict GUI benchmark consumer aligned with the complete `MainWindowOptions` contract by
   explicitly initializing the injected persistence paths.
+- Replaced easily-swapped persistence and timestamp helper parameter groups with typed state,
+  preserving behavior while making clang-tidy evidence deterministic and the call contracts safer.
 
 ### EnvLens deterministic environment snapshot core
 
