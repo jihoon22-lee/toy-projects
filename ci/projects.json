@@ -40,6 +40,19 @@
       "gui": {
         "enabled": false
       }
+    },
+    {
+      "name": "abilens",
+      "verify": true,
+      "gui": {
+        "enabled": false
+      },
+      "native": {
+        "enabled": true,
+        "build_system": "make",
+        "build_target": "all",
+        "test_target": "test"
+      }
     }
   ]
 }
