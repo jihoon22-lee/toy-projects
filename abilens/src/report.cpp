@@ -2,6 +2,7 @@
 
 #include "abilens/elf.hpp"
 #include "abilens/readelf.hpp"
+#include "input_internal.hpp"
 #include "report_internal.hpp"
 
 #include <algorithm>
@@ -20,7 +21,8 @@ using detail::version_less;
 ElfReport inspect_file(const std::filesystem::path& path, const Policy& policy) {
     ElfReport report;
     report.input = path.generic_string();
-    const HeaderCheck check = validate_elf_file(path);
+    const detail::OpenInput input(path);
+    const HeaderCheck check = detail::validate_elf_input(input);
     report.status = check.status;
     report.header = check.header;
     report.message = check.message;
@@ -30,7 +32,7 @@ ElfReport inspect_file(const std::filesystem::path& path, const Policy& policy) 
         }
         return report;
     }
-    const ReadelfEvidence evidence = run_readelf(path);
+    const ReadelfEvidence evidence = detail::run_readelf_input(input);
     report = parse_readelf_text(evidence.standard_output, check.header, evidence);
     report.input = path.generic_string();
     if (report.status == InputStatus::Valid) {

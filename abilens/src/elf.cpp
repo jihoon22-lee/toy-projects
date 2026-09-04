@@ -1,11 +1,10 @@
 #include "abilens/elf.hpp"
 
+#include "input_internal.hpp"
+
 #include <algorithm>
 #include <array>
-#include <fstream>
 #include <limits>
-#include <sstream>
-#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -143,34 +142,16 @@ struct HeaderLayout {
     std::uint16_t shnum = 0U;
 };
 
-HeaderCheck open_and_read_header(const std::filesystem::path& path,
-                                 std::ifstream& stream,
-                                 std::uint64_t& file_size,
-                                 std::vector<unsigned char>& bytes) {
-    std::error_code error;
-    if (!std::filesystem::is_regular_file(path, error) || error) {
-        return failure(InputStatus::Unreadable, "input is not a readable regular file");
-    }
-    const std::uintmax_t raw_size = std::filesystem::file_size(path, error);
-    if (error) {
-        return failure(InputStatus::Unreadable, "could not read input size: " + error.message());
-    }
-    if (raw_size > std::numeric_limits<std::uint64_t>::max()) {
-        return failure(InputStatus::Unsupported,
-                       "input is larger than the supported address range");
-    }
-    file_size = static_cast<std::uint64_t>(raw_size);
+HeaderCheck read_header(const detail::OpenInput& input,
+                        std::vector<unsigned char>& bytes) {
+    const std::uint64_t file_size = input.size();
     if (file_size < 4U) {
         return failure(InputStatus::NonElf, "input is shorter than the ELF magic");
     }
-    stream.open(path, std::ios::binary);
-    if (!stream) return failure(InputStatus::Unreadable, "could not open input");
     const auto header_bytes = static_cast<std::size_t>(
         std::min<std::uint64_t>(file_size, 64U));
     bytes.resize(header_bytes);
-    stream.read(reinterpret_cast<char*>(bytes.data()),
-                static_cast<std::streamsize>(bytes.size()));
-    if (stream.gcount() != static_cast<std::streamsize>(bytes.size())) {
+    if (!input.read_exact(0U, bytes.data(), bytes.size())) {
         return failure(InputStatus::Unreadable, "could not read the ELF header");
     }
     return success();
@@ -258,10 +239,10 @@ HeaderCheck validate_tables(const HeaderLayout& layout, std::uint64_t file_size)
     return success();
 }
 
-HeaderCheck scan_dynamic_segment(std::ifstream& stream, const HeaderLayout& layout,
+HeaderCheck scan_dynamic_segment(const detail::OpenInput& input,
+                                 const HeaderLayout& layout,
                                  std::uint64_t file_size, bool& has_dynamic) {
     has_dynamic = false;
-    stream.clear();
     for (std::uint16_t index = 0; index < layout.phnum; ++index) {
         const std::uint64_t entry = layout.phoff +
                                     static_cast<std::uint64_t>(index) * layout.phentsize;
@@ -269,10 +250,8 @@ HeaderCheck scan_dynamic_segment(std::ifstream& stream, const HeaderLayout& layo
             return failure(InputStatus::Corrupt,
                            "ELF program header entry is truncated");
         }
-        stream.seekg(static_cast<std::streamoff>(entry), std::ios::beg);
         std::array<unsigned char, 4> type_bytes{};
-        stream.read(reinterpret_cast<char*>(type_bytes.data()), 4);
-        if (stream.gcount() != 4) {
+        if (!input.read_exact(entry, type_bytes.data(), type_bytes.size())) {
             return failure(InputStatus::Unreadable,
                            "could not read an ELF program header entry");
         }
@@ -299,11 +278,13 @@ HeaderCheck make_header(const HeaderLayout& layout, bool has_dynamic) {
 
 }  // namespace
 
-HeaderCheck validate_elf_file(const std::filesystem::path& path) {
-    std::ifstream stream;
-    std::uint64_t file_size = 0U;
+HeaderCheck detail::validate_elf_input(const detail::OpenInput& input) {
+    if (!input.opened()) {
+        return failure(input.error_status(), input.error_message());
+    }
+    const std::uint64_t file_size = input.size();
     std::vector<unsigned char> bytes;
-    HeaderCheck step = open_and_read_header(path, stream, file_size, bytes);
+    HeaderCheck step = read_header(input, bytes);
     if (step.status != InputStatus::Valid) return step;
     step = validate_identification(bytes, file_size);
     if (step.status != InputStatus::Valid) return step;
@@ -313,9 +294,18 @@ HeaderCheck validate_elf_file(const std::filesystem::path& path) {
     step = validate_tables(layout, file_size);
     if (step.status != InputStatus::Valid) return step;
     bool has_dynamic = false;
-    step = scan_dynamic_segment(stream, layout, file_size, has_dynamic);
+    step = scan_dynamic_segment(input, layout, file_size, has_dynamic);
     if (step.status != InputStatus::Valid) return step;
+    if (!input.unchanged()) {
+        return failure(InputStatus::Unreadable,
+                       "input changed while reading ELF metadata");
+    }
     return make_header(layout, has_dynamic);
+}
+
+HeaderCheck validate_elf_file(const std::filesystem::path& path) {
+    const detail::OpenInput input(path);
+    return detail::validate_elf_input(input);
 }
 
 const char* input_status_name(InputStatus status) noexcept {

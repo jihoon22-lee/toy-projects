@@ -1,5 +1,6 @@
 #include "abilens/readelf.hpp"
 
+#include "input_internal.hpp"
 #include "report_internal.hpp"
 
 #include <algorithm>
@@ -112,10 +113,17 @@ void reap_child(pid_t child, ProcessState& state) {
 }
 
 [[noreturn]] void exec_child(const std::vector<std::string>& arguments,
-                             ProcessPipes pipes) {
+                             ProcessPipes pipes, int input_descriptor) {
     (void)::dup2(pipes.standard_output[1], STDOUT_FILENO);
     (void)::dup2(pipes.standard_error[1], STDERR_FILENO);
     close_pipes(pipes);
+    if (input_descriptor >= 0) {
+        const int flags = ::fcntl(input_descriptor, F_GETFD, 0);
+        if (flags < 0 ||
+            ::fcntl(input_descriptor, F_SETFD, flags & ~FD_CLOEXEC) != 0) {
+            _exit(126);
+        }
+    }
     (void)::setenv("LC_ALL", "C", 1);
     (void)::setenv("LANG", "C", 1);
     (void)::setenv("LANGUAGE", "C", 1);
@@ -207,7 +215,8 @@ void collect_process(pid_t child, ProcessPipes& pipes, ProcessEvidence& result) 
     set_return_code(result, state.wait_status);
 }
 
-ProcessEvidence run_readelf_process(const std::vector<std::string>& arguments) {
+ProcessEvidence run_readelf_process(const std::vector<std::string>& arguments,
+                                    int input_descriptor = -1) {
     ProcessEvidence result;
     ProcessPipes pipes;
     if (!create_pipes(pipes)) {
@@ -215,7 +224,7 @@ ProcessEvidence run_readelf_process(const std::vector<std::string>& arguments) {
         return result;
     }
     const pid_t child = ::fork();
-    if (child == 0) exec_child(arguments, pipes);
+    if (child == 0) exec_child(arguments, pipes, input_descriptor);
     if (child < 0) {
         close_pipes(pipes);
         result.standard_error = "could not fork readelf";
@@ -261,7 +270,11 @@ std::string gnu_readelf_version(const std::string& output) {
     while (std::getline(lines, line)) {
         line = detail::trim(line);
         if (line.empty()) continue;
-        if (line.rfind("GNU readelf", 0U) != 0U) return {};
+        std::istringstream words(line);
+        std::string vendor;
+        std::string tool;
+        words >> vendor >> tool;
+        if (vendor != "GNU" || tool != "readelf") return {};
         return first_version_token(line);
     }
     return {};
@@ -277,21 +290,37 @@ ReadelfCapability query_readelf_capability() {
 
 }  // namespace
 
-ReadelfEvidence run_readelf(const std::filesystem::path& path) {
+ReadelfEvidence detail::run_readelf_input(const detail::OpenInput& input) {
     ReadelfEvidence result;
+    if (!input.opened()) {
+        result.standard_error = input.error_message();
+        return result;
+    }
     result.capability = query_readelf_capability();
     if (!result.capability.supported) {
         result.standard_error = "system readelf is not a supported GNU readelf";
         return result;
     }
     const ProcessEvidence evidence = run_readelf_process(
-        {"readelf", "-h", "-S", "-d", "-V", "-W", "--", path.generic_string()});
+        {"readelf", "-h", "-S", "-d", "-V", "-W", "--",
+         input.descriptor_path()},
+        input.descriptor());
     result.return_code = evidence.return_code;
     result.timed_out = evidence.timed_out;
     result.truncated = evidence.truncated;
     result.standard_output = evidence.standard_output;
     result.standard_error = evidence.standard_error;
+    if (!input.unchanged()) {
+        result.return_code = -1;
+        result.standard_output.clear();
+        result.standard_error = "input changed while readelf evidence was collected";
+    }
     return result;
+}
+
+ReadelfEvidence run_readelf(const std::filesystem::path& path) {
+    const detail::OpenInput input(path);
+    return detail::run_readelf_input(input);
 }
 
 }  // namespace abilens

@@ -255,11 +255,7 @@ std::filesystem::path test_readelf_output_bound(const std::filesystem::path& non
     {
         std::ofstream script(fake_readelf);
         script << "#!/bin/sh\n"
-                  "if [ \"$1\" = \"--version\" ]; then\n"
-                  "  printf 'GNU readelf (GNU Binutils) 2.40\\n'\n"
-                  "  exit 0\n"
-                  "fi\n"
-                  "while :; do printf '%1048576s' x; done\n";
+                  "printf 'GNU readelfx 2.40\\n'\n";
     }
     expect(::chmod(fake_readelf.c_str(), 0700) == 0, "fake readelf is executable");
     const char* old_path_value = std::getenv("PATH");
@@ -267,6 +263,18 @@ std::filesystem::path test_readelf_output_bound(const std::filesystem::path& non
     const std::string test_path =
         fake_dir.generic_string() + (old_path.empty() ? "" : ":" + old_path);
     expect(::setenv("PATH", test_path.c_str(), 1) == 0, "test PATH is installed");
+    const abilens::ReadelfEvidence near_match = abilens::run_readelf(non_elf);
+    expect(!near_match.capability.supported,
+           "GNU readelf capability requires an exact tool token");
+    {
+        std::ofstream script(fake_readelf);
+        script << "#!/bin/sh\n"
+                  "if [ \"$1\" = \"--version\" ]; then\n"
+                  "  printf 'GNU readelf (GNU Binutils) 2.40\\n'\n"
+                  "  exit 0\n"
+                  "fi\n"
+                  "while :; do printf '%1048576s' x; done\n";
+    }
     const auto runner_start = std::chrono::steady_clock::now();
     const abilens::ReadelfEvidence bounded = abilens::run_readelf(non_elf);
     const auto runner_elapsed = std::chrono::steady_clock::now() - runner_start;
