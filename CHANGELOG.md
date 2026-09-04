@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Refactored DiskMap's UTF-8 lead-byte decoder to return one typed bounds value,
+  removing easily-swapped output parameters and duplicate conditional bodies found by
+  the released ici/LLVM 18 analysis.
+
 ### DiskMap storage evidence workbench
 
 - Connected the bounded snapshot/duplicate evidence cores to DiskMap's Qt GUI,

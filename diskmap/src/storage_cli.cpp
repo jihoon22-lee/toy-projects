@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <ostream>
 #include <string>
 #include <vector>
@@ -44,57 +45,55 @@ bool continuation(unsigned char character) {
     return character >= 0x80U && character <= 0xbfU;
 }
 
-bool utf8LeadBounds(unsigned char first,
-                    std::size_t& width,
-                    unsigned char& secondMinimum,
-                    unsigned char& secondMaximum) {
-    secondMinimum = 0x80U;
-    secondMaximum = 0xbfU;
+struct Utf8LeadBounds {
+    std::size_t width;
+    unsigned char secondMinimum;
+    unsigned char secondMaximum;
+};
+
+std::optional<Utf8LeadBounds> utf8LeadBounds(unsigned char first) {
+    Utf8LeadBounds result{0, 0x80U, 0xbfU};
     if (first >= 0xc2U && first <= 0xdfU) {
-        width = 2;
+        result.width = 2;
     } else if (first == 0xe0U) {
-        width = 3;
-        secondMinimum = 0xa0U;
-    } else if (first >= 0xe1U && first <= 0xecU) {
-        width = 3;
+        result.width = 3;
+        result.secondMinimum = 0xa0U;
     } else if (first == 0xedU) {
-        width = 3;
-        secondMaximum = 0x9fU;
-    } else if (first >= 0xeeU && first <= 0xefU) {
-        width = 3;
+        result.width = 3;
+        result.secondMaximum = 0x9fU;
+    } else if ((first >= 0xe1U && first <= 0xecU)
+               || (first >= 0xeeU && first <= 0xefU)) {
+        result.width = 3;
     } else if (first == 0xf0U) {
-        width = 4;
-        secondMinimum = 0x90U;
+        result.width = 4;
+        result.secondMinimum = 0x90U;
     } else if (first >= 0xf1U && first <= 0xf3U) {
-        width = 4;
+        result.width = 4;
     } else if (first == 0xf4U) {
-        width = 4;
-        secondMaximum = 0x8fU;
+        result.width = 4;
+        result.secondMaximum = 0x8fU;
     } else {
-        return false;
+        return std::nullopt;
     }
-    return true;
+    return result;
 }
 
 std::size_t validUtf8Sequence(const std::string& value, std::size_t index) {
-    std::size_t width = 0;
-    unsigned char secondMinimum = 0;
-    unsigned char secondMaximum = 0;
     const unsigned char first = static_cast<unsigned char>(value[index]);
-    if (!utf8LeadBounds(first, width, secondMinimum, secondMaximum)
-        || width > value.size() - index) {
+    const auto bounds = utf8LeadBounds(first);
+    if (!bounds || bounds->width > value.size() - index) {
         return 0;
     }
     const unsigned char second = static_cast<unsigned char>(value[index + 1]);
-    if (second < secondMinimum || second > secondMaximum) {
+    if (second < bounds->secondMinimum || second > bounds->secondMaximum) {
         return 0;
     }
-    for (std::size_t offset = 2; offset < width; ++offset) {
+    for (std::size_t offset = 2; offset < bounds->width; ++offset) {
         if (!continuation(static_cast<unsigned char>(value[index + offset]))) {
             return 0;
         }
     }
-    return width;
+    return bounds->width;
 }
 
 void appendMalformedByte(std::string& output, unsigned char character) {
