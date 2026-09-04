@@ -48,6 +48,9 @@ using TrashMutationTestHook = void (*)(TrashMutationTestPoint,
                                        const fs::path& original,
                                        const fs::path& trashed) noexcept;
 void setTrashMutationTestHook(TrashMutationTestHook hook) noexcept;
+void notifyTrashMutationTestHook(TrashMutationTestPoint point,
+                                 const fs::path& original,
+                                 const fs::path& trashed) noexcept;
 
 FileDescriptor openAbsoluteDirectory(const fs::path& input, std::string& error);
 FileDescriptor openOrCreateAbsoluteDirectory(const fs::path& input,

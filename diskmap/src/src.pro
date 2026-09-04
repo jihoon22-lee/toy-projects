@@ -47,6 +47,7 @@ SOURCES += \
     trash_metadata.cpp \
     trash_linux_fs.cpp \
     trash_linux_ops.cpp \
+    trash_linux_restore.cpp \
     treemap.cpp \
     view.cpp \
     view_facts.cpp

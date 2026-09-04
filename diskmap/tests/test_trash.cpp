@@ -104,6 +104,7 @@ enum class MutationScenarioKind {
     BlockMetadataFinalize,
     DetachTrashInfoAfterFinalize,
     DeleteMovedAndBlockRollback,
+    ReplaceMovedWithUnsupportedKind,
     MutateMovedAndDetachParent,
     DetachParentDuringMoveRollback,
     BlockPayloadRestore,
@@ -193,6 +194,19 @@ void mutateTrashOperation(diskmap::detail::TrashMutationTestPoint point,
                 if (!scenario.error) {
                     scenario.error = std::make_error_code(std::errc::io_error);
                 }
+            }
+            return;
+        }
+        if (scenario.kind == MutationScenarioKind::ReplaceMovedWithUnsupportedKind) {
+            if (!fs::remove(trashed, scenario.error) || scenario.error) {
+                return;
+            }
+            if (::mkfifo(trashed.c_str(), 0600) != 0) {
+                scenario.error = std::error_code(errno, std::generic_category());
+                return;
+            }
+            if (!writeFile(original, "replacement after unsupported payload")) {
+                scenario.error = std::make_error_code(std::errc::io_error);
             }
             return;
         }
@@ -982,13 +996,22 @@ void testFilesystemRefusalsAndLimits(const fs::path& root) {
         std::printf("SKIP different-filesystem Trash test: no alternate device\n");
     }
 
-    // A FIFO exercises the unsupported stat kind while the reviewed target is
-    // intentionally made inconsistent; it must remain in place.
+    // A FIFO is not a representable recovery kind. A direct target is rejected
+    // up front, while a forged regular-file review fails stat revalidation.
     const fs::path fifoPath = root / "reviewed-fifo";
     if (::mkfifo(fifoPath.c_str(), 0600) != 0) {
         std::printf("SKIP FIFO Trash validation: cannot create FIFO\n");
     } else {
         invalid = targetFor(fifoPath);
+        CHECK(diskmap::inspectTrashCapability(invalid, options).status
+              == diskmap::TrashStatus::InvalidRequest);
+        receipts = diskmap::movePlanToTrash(planFor({invalid}), options);
+        CHECK_EQ(receipts.size(), static_cast<std::size_t>(1));
+        if (!receipts.empty()) {
+            CHECK(receipts[0].status == diskmap::TrashStatus::InvalidRequest);
+        }
+        CHECK(fs::exists(fifoPath));
+
         invalid.kind = diskmap::FsKind::RegularFile;
         receipts = diskmap::movePlanToTrash(planFor({invalid}), options);
         CHECK_EQ(receipts.size(), static_cast<std::size_t>(1));
@@ -1534,9 +1557,35 @@ void testDeterministicRollbackRecovery(const fs::path& root) {
             CHECK(receipts[0].restore_token.empty());
             CHECK(receipts[0].message.find("recovery metadata failed")
                   != std::string::npos);
-            CHECK(!fs::exists(receipts[0].trashed_path));
+            CHECK(receipts[0].trashed_path.empty());
         }
         CHECK_EQ(readFile(source), "replacement after payload removal");
+    }
+
+    // Recovery metadata must never promise a token for a special-file payload
+    // that the metadata parser and restore path cannot represent safely.
+    {
+        const fs::path source = root / "unsupported-recovery-kind.txt";
+        CHECK(writeFile(source, "payload replaced by a fifo"));
+        const diskmap::CleanupTarget target = targetFor(source);
+        MutationScenario scenario;
+        scenario.kind = MutationScenarioKind::ReplaceMovedWithUnsupportedKind;
+        std::vector<diskmap::TrashReceipt> receipts;
+        {
+            ScopedTrashMutationHook hook(scenario);
+            receipts = diskmap::movePlanToTrash(planFor({target}), options);
+        }
+        CHECK(scenario.invoked);
+        CHECK(!scenario.error);
+        CHECK_EQ(receipts.size(), static_cast<std::size_t>(1));
+        if (!receipts.empty()) {
+            CHECK(receipts[0].status == diskmap::TrashStatus::RevalidationFailed);
+            CHECK(receipts[0].restore_token.empty());
+            CHECK(receipts[0].trashed_path.empty());
+            CHECK(receipts[0].message.find("kind cannot be restored safely")
+                  != std::string::npos);
+        }
+        CHECK_EQ(readFile(source), "replacement after unsupported payload");
     }
 
     // Metadata publication cannot produce a public recovery token when the
