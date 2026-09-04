@@ -167,16 +167,28 @@ TrashReceipt movedRecoveryReceipt(const TrashDirectories& directories,
                                   TrashStatus status,
                                   const std::string& message,
                                   const std::string& reason) {
+    std::string anchorError;
+    if (!trashDirectoriesAnchored(directories, anchorError)) {
+        return trashFailure(
+            TrashStatus::IoError, source.original,
+            message + "; payload remains in the originally opened Trash directory, "
+                      "but its public path changed; no recovery token was issued");
+    }
     if (::fsync(directories.files.get()) != 0) {
-        TrashReceipt receipt = trashFailure(
+        return trashFailure(
             TrashStatus::IoError, source.original,
             message + "; payload remains in Trash, but its directory could not be synced");
-        receipt.trashed_path = directories.root / "files" / token;
-        return receipt;
     }
     std::string recoveryError;
     finalizeRecoveryMetadata(directories, source, token, tempName, metadata,
                              recoveryError);
+    anchorError.clear();
+    if (!trashDirectoriesAnchored(directories, anchorError)) {
+        return trashFailure(
+            TrashStatus::IoError, source.original,
+            message + "; Trash location changed while recovery metadata was finalized; "
+                      "no recovery token was issued");
+    }
     TrashReceipt receipt = trashFailure(
         status, source.original,
         recoveryError.empty() ? message + "; " + reason
@@ -420,14 +432,25 @@ TrashReceipt rollbackRestore(const TrashDirectories& directories,
                         token.c_str()) == 0) {
         const bool parentSynced = ::fsync(parent.get()) == 0;
         const bool trashSynced = ::fsync(directories.files.get()) == 0;
+        std::string anchorError;
+        const bool trashAnchored = trashDirectoriesAnchored(directories, anchorError);
+        const bool recoveryPublished = parentSynced && trashSynced && trashAnchored;
         TrashReceipt receipt = trashFailure(
-            parentSynced && trashSynced ? status : TrashStatus::IoError,
+            recoveryPublished ? status : TrashStatus::IoError,
             restore.original,
-            parentSynced && trashSynced
+            recoveryPublished
                 ? message
-                : message + "; rollback completed, but its directories could not be synced");
-        receipt.trashed_path = directories.root / "files" / token;
-        receipt.restore_token = token;
+                : message
+                      + (trashAnchored
+                             ? "; rollback completed, but its directories could not be synced; "
+                               "no recovery token was issued"
+                             : "; rollback completed into the originally opened Trash "
+                               "directory, but its public path changed; no recovery token "
+                               "was issued"));
+        if (recoveryPublished) {
+            receipt.trashed_path = directories.root / "files" / token;
+            receipt.restore_token = token;
+        }
         return receipt;
     }
     TrashReceipt receipt = trashFailure(

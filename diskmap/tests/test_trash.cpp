@@ -108,6 +108,7 @@ enum class MutationScenarioKind {
     BlockPayloadRestore,
     DetachRestoreParent,
     DetachRestoreParentAndBlockRollback,
+    DetachTrashFilesDuringRestore,
 };
 
 struct MutationScenario {
@@ -214,6 +215,14 @@ void mutateTrashOperation(diskmap::detail::TrashMutationTestPoint point,
         if (scenario.kind == MutationScenarioKind::BlockPayloadRestore
             && !writeFile(original, "restore destination collision")) {
             scenario.error = std::make_error_code(std::errc::io_error);
+        }
+        return;
+    }
+    if (scenario.kind == MutationScenarioKind::DetachTrashFilesDuringRestore) {
+        const fs::path files = trashed.parent_path();
+        fs::rename(files, scenario.auxiliary_path, scenario.error);
+        if (!scenario.error) {
+            fs::create_directory(files, scenario.error);
         }
         return;
     }
@@ -1609,6 +1618,48 @@ void testDeterministicRollbackRecovery(const fs::path& root) {
         CHECK_EQ(readFile(moved[0].trashed_path), "rollback destination blocker");
         CHECK(fs::exists(options.data_home / "Trash" / "info"
                          / (moved[0].restore_token + ".trashinfo")));
+    }
+
+    // If the public Trash/files directory is replaced after restore, rollback
+    // can preserve the payload only through its already-open descriptor. The
+    // lexical path and token are withheld until the original directory is put
+    // back, after which the caller's original token is retryable.
+    {
+        const fs::path source = root / "restore-trash-anchor-race.txt";
+        CHECK(writeFile(source, "restore Trash anchor payload"));
+        const auto moved =
+            diskmap::movePlanToTrash(planFor({targetFor(source)}), options);
+        CHECK_EQ(moved.size(), static_cast<std::size_t>(1));
+        if (moved.empty() || moved[0].status != diskmap::TrashStatus::Moved) {
+            return;
+        }
+        const fs::path files = options.data_home / "Trash" / "files";
+        MutationScenario scenario;
+        scenario.kind = MutationScenarioKind::DetachTrashFilesDuringRestore;
+        scenario.auxiliary_path = options.data_home / "Trash" / "files-detached";
+        diskmap::TrashReceipt failed;
+        {
+            ScopedTrashMutationHook hook(scenario);
+            failed = diskmap::restoreFromTrash(moved[0].restore_token, options);
+        }
+        CHECK(scenario.invoked);
+        CHECK(!scenario.error);
+        CHECK(failed.status == diskmap::TrashStatus::IoError);
+        CHECK(failed.restore_token.empty());
+        CHECK(failed.trashed_path.empty());
+        CHECK(!fs::exists(source));
+        CHECK_EQ(readFile(scenario.auxiliary_path / moved[0].restore_token),
+                 "restore Trash anchor payload");
+
+        std::error_code error;
+        CHECK(fs::remove(files, error));
+        CHECK(!error);
+        fs::rename(scenario.auxiliary_path, files, error);
+        CHECK(!error);
+        const auto restored =
+            diskmap::restoreFromTrash(moved[0].restore_token, options);
+        CHECK(restored.status == diskmap::TrashStatus::Restored);
+        CHECK_EQ(readFile(source), "restore Trash anchor payload");
     }
 }
 #endif
