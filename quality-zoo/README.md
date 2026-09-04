@@ -8,11 +8,12 @@ test asset, not an application to install or a product release.
 The released-artifact corpus in `manifest.json` intentionally remains six
 scenario entries: the Python `python.dead-private-function` case, four C++
 sanitizer cases, and a Qt 6 C++ clazy lifetime case. The candidate-only
-`candidate-manifest.json` has ten entries: those six released scenarios plus
-two CMake/CTest ThreadSanitizer cases, a Python security/resource/correctness
-case, and a Make/ELF/integration case. The candidate registry never changes the
-released ici `v0.10.2` validation path. These six released scenarios form the
-stable known-answer slice. The Python scenario gives
+`candidate-manifest.json` has sixteen entries: those six released scenarios
+plus two CMake/CTest ThreadSanitizer cases, three C++ build/quality cases, four
+Python depth cases, a Python security/resource/correctness case, and a
+Make/ELF/integration case. The candidate registry never changes the released
+ici `v0.10.2` validation path. These six released scenarios form the stable
+known-answer slice. The Python scenarios give
 the `dead` engine one deliberately unused private function in
 `src/bad.py`, while `src/clean.py` provides the nearby positive counterpart that
 must not produce the same finding. The C++ scenarios keep AddressSanitizer,
@@ -38,16 +39,21 @@ raw ZIP SHA-256
 `2583e7a69b5a14316968d67c08d1510c13a9e32a9f7810bf0a4800df61004126`, executable
 SHA-256
 `50d41d36775394f66f6620091f42a7a0333ee90758e19449a848d7ee0875a93c`, and exact
-source target `0b7e620bdb80423c3532d3ce3979a8dbdfaf6b11`. All ten candidate
+source target `0b7e620bdb80423c3532d3ce3979a8dbdfaf6b11`. All sixteen candidate
 registry scenarios now have an exact selector for this executable; the released
 six-scenario `manifest.json` remains unchanged.
 
-Using the accepted executable locally, nine of ten candidate contracts pass. The
-only local failure is the Qt scenario because `clazy` is unavailable on this host;
-the other nine scenarios have no runner errors. The two new candidate scenarios
-are `WARN`/`PASS` with four matched findings for
-`python.security-resource-correctness`, and `PASS`/`PASS` with no findings for
-`cpp.make-elf-integration`. No version or release changed.
+Using the accepted executable locally, fifteen of sixteen candidate contracts
+pass. The only local failure is the Qt scenario because `clazy` is unavailable
+on this host; the other fifteen scenarios have no runner errors. The three
+newly integrated C++ scenarios add build-context, malformed compilation
+database, and coverage/quality checks. Their focused runner contract is
+`3/3 PASS`. The three Python depth scenarios add compatibility/package
+metadata, import-cycle and exception, and maintainability-threshold coverage;
+their focused runner contract is also `3/3 PASS`. The existing candidate additions remain
+`python.security-resource-correctness` (`WARN`/`PASS` with four matched
+findings) and `cpp.make-elf-integration` (`PASS`/`PASS` with no findings). No
+version or release changed.
 PR #49 head
 `f6ad1dc4e745d3d1a2703000a00a5d7c4eed61a0` ran as
 [`33693241255`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33693241255):
@@ -63,10 +69,10 @@ product report links. Merge commit
 the exact-main Quality Zoo artifact
 [`9871249913`](https://github.com/jihoon22-lee/toy-projects/actions/artifacts/9871249913)
 recorded stable contract `PASS`, observed suite `WARN`, and no errors, while the
-main product Pages were byte-identical to their artifacts. The broader Python
-and C++ families and hybrid scenarios remain future work; the candidate-only
-local corpus now includes representative security/resource and Make-to-ELF
-process-contract coverage.
+main product Pages were byte-identical to their artifacts. The candidate-only
+local corpus now includes representative compatibility, architecture,
+exception, maintainability, security/resource, and Make-to-ELF process-contract
+coverage; broader variants and cross-tool combinations remain future work.
 
 After EnvLens was merged by [PR #50](https://github.com/jihoon22-lee/toy-projects/pull/50) as
 `c307ac1ab01e12e4ac81a34623eb669da0e43641`, exact-main [run `33698248293`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33698248293)
@@ -161,8 +167,25 @@ suite/engine `FAIL`, one `tsan.data-race` at `src/race.cpp:15`, and ici exit `1`
 `cpp.tsan-synchronized` observed `PASS`, zero TSan issues, and ici exit `0`. A full
 local eight-scenario aggregate had only the Qt contract failure because `clazy` was
 unavailable locally; CI installs `clazy`. This is historical pre-expansion evidence;
-the accepted current candidate's ten-scenario local result is summarized above.
+the accepted current candidate's sixteen-scenario local result is summarized above.
 No PR, merge, Pages, release, or version change is claimed by that earlier run.
+
+### Candidate-only C++ build and quality scenarios
+
+The candidate manifest also covers C++ build metadata and static-quality paths
+that are separate from the sanitizer and Qt fixtures:
+
+| Scenario | Coverage | Expected result |
+|---|---|---|
+| `cpp.static-build-context` | Per-target C++17/C++20 compile options, warning/error locations, unresolved generated headers, and include-cycle context | `FAIL` with measured lint/compile-database findings |
+| `cpp.quality-coverage` | CMake/CTest execution, gcov coverage thresholds, complexity, unused functions, and duplicate blocks | `WARN` with measured/estimated findings |
+| `cpp.malformed-compile-db` | Invalid compilation-database entry handling and fail-closed diagnostics | `FAIL` with one measured compile-database finding |
+
+These fixtures are intentionally candidate-only and are bound to the accepted
+candidate executable digest. Each uses a nearby clean target or a malformed
+input boundary to constrain false positives and parser behavior. The focused
+local run against the accepted executable is `3/3 PASS` at the runner-contract
+level; the expected `FAIL`/`WARN` suite statuses are part of the known answer.
 
 ### Candidate-only Python security/resource/correctness scenario
 
@@ -182,6 +205,25 @@ runtime taint safety or interprocedural ownership. Its strict schema-1 expectati
 is stored under `expectations/candidate-0b7e620.json` and is selected only by the
 accepted candidate executable's exact SHA-256; the scenario remains outside the
 stable released-artifact manifest.
+
+### Candidate-only Python depth scenarios
+
+The candidate manifest also includes three small Python scenarios that exercise
+depth areas not covered by the released dead-code case or the security/resource
+case:
+
+| Scenario | Coverage | Expected result |
+|---|---|---|
+| `python.compatibility-package-metadata` | Python 3.10 standard-library floor, import/distribution metadata, and entry-point resolution | `FAIL` with four measured findings |
+| `python.import-cycle-exception` | Two-module import cycle, silent exception swallowing, and traceback-preserving re-raise | `FAIL` with one cycle warning and two exception findings |
+| `python.maintainability-thresholds` | Cyclomatic/cognitive thresholds and bounded Python AST duplication | `WARN` with four matched findings |
+
+Each scenario has a nearby clean counterpart where the relevant rule could
+overmatch ordinary code. Their schema-2 selectors are bound to the accepted
+candidate executable digest and select strict schema-1 expectations from
+`expectations/candidate-0b7e620.json`. The focused local run against that
+executable is `3/3 PASS` at the runner-contract level; these fixtures remain
+candidate-only until remote toy PR and exact-main acceptance is complete.
 
 ### Candidate-only Make-to-ELF integration scenario
 
@@ -347,13 +389,14 @@ candidate path, SHA-256, and version in `suite.json`, and writes each scenario's
 
 Candidate-only validation opts in explicitly with
 `--manifest candidate-manifest.json`. Digest-bound legacy/TSan entries still
-require their matching candidate executable. All ten candidate entries now select
-expectations by exact SHA-256, including the two new schema-2 selectors whose full
-schema-1 expectations live under `candidate-0b7e620.json`. With the accepted
-`ici 0.10.2` executable, the two new scenarios are locally `2/2 PASS` at the
-runner-contract level (`WARN` is the intentional Python suite status); the full
-ten-scenario local run is `9/10 PASS` because this host lacks required `clazy` for
-the Qt scenario.
+require their matching candidate executable. All sixteen candidate entries now
+select expectations by exact SHA-256, including the three C++ build/quality and
+three Python depth selectors whose full schema-1 expectations live under
+`candidate-0b7e620.json`. With the accepted `ici 0.10.2` executable, each new
+three-scenario family is locally `3/3 PASS` at the runner-contract level (their
+`FAIL`/`WARN` suite statuses are intentional); the full sixteen-scenario local
+run is `15/16 PASS` because this host lacks required `clazy` for the Qt
+scenario.
 
 `ICI_BIN` is deliberately a local path. The Quality Zoo runner does not resolve
 URLs, download an executable, or silently substitute the released tool. This
@@ -364,9 +407,9 @@ CI's released-tool path separate.
 
 `manifest.json` is the released-artifact registry of scenario IDs and paths, while
 `candidate-manifest.json` is an explicit candidate-only registry. The latter
-contains the released six plus the two TSan scenarios, the Python
-security/resource/correctness scenario, and the Make/ELF/integration scenario (ten
-entries total); ordinary CI must continue to select `manifest.json` while it
+contains the released six plus the two TSan scenarios, three C++ build/quality
+cases, four Python depth cases, the Python security/resource/correctness
+scenario, and the Make/ELF/integration scenario (sixteen entries total); ordinary CI must continue to select `manifest.json` while it
 consumes released ici `v0.10.2`; candidate validation alone selects
 `candidate-manifest.json`. The accepted non-stable candidate artifact and its
 exact expectations have passed authenticated intake; the candidate package still
@@ -379,7 +422,7 @@ still present because ici consumes it; the Quality Zoo runner does not parse
 that TOML file.
 
 The released manifest has schema `1` and six entries. The candidate manifest has
-the same schema and ten entries, adding four candidate-only entries:
+the same schema and sixteen entries, adding ten candidate-only entries:
 
 ```json
 {
@@ -394,6 +437,14 @@ the same schema and ten entries, adding four candidate-only entries:
       "path": "scenarios/cpp/lsan-memory-leak"
     },
     {
+      "id": "cpp.malformed-compile-db",
+      "path": "scenarios/cpp/malformed-compile-db"
+    },
+    {
+      "id": "cpp.quality-coverage",
+      "path": "scenarios/cpp/quality-coverage"
+    },
+    {
       "id": "cpp.qt-missing-parent-constructor",
       "path": "scenarios/cpp/qt-missing-parent-constructor"
     },
@@ -402,12 +453,28 @@ the same schema and ten entries, adding four candidate-only entries:
       "path": "scenarios/cpp/sanitizer-clean"
     },
     {
+      "id": "cpp.static-build-context",
+      "path": "scenarios/cpp/static-build-context"
+    },
+    {
       "id": "cpp.ubsan-signed-overflow",
       "path": "scenarios/cpp/ubsan-signed-overflow"
     },
     {
       "id": "python.dead-private-function",
       "path": "scenarios/python/dead-private-function"
+    },
+    {
+      "id": "python.compatibility-package-metadata",
+      "path": "scenarios/python/compatibility-package-metadata"
+    },
+    {
+      "id": "python.import-cycle-exception",
+      "path": "scenarios/python/import-cycle-exception"
+    },
+    {
+      "id": "python.maintainability-thresholds",
+      "path": "scenarios/python/maintainability-thresholds"
     },
     {
       "id": "cpp.tsan-data-race",
@@ -432,8 +499,9 @@ the same schema and ten entries, adding four candidate-only entries:
 Each scenario directory contains `scenario.json`, an ici project directory with
 `ici.toml`, and the source fixture. Existing schema-2 `scenario.json` selectors
 declare the scenario identity and map exact ici executable SHA-256 values to
-contained expectation paths. The two candidate-only additions also use schema-2
-selectors; their strict schema-1 expectations are kept under
+contained expectation paths. The three newly integrated C++ build/quality
+scenarios and the three Python depth scenarios also use schema-2 selectors;
+their strict schema-1 expectations are kept under
 `expectations/candidate-0b7e620.json` and are selected only for the accepted
 candidate digest. Each schema-1 expectation declares the class, project root,
 profile, fixed verify command, expected suite status, expected producer version,
@@ -576,15 +644,11 @@ Quality Zoo is not a user-facing application and has no product release in this
 change. Released-artifact Q0 (the scenario contract, local runner, and toy
 PR/exact-main acceptance) and the earlier exact-revision candidate
 cross-repository acceptance are complete, as is the current candidate's
-authenticated local intake/selector evidence. The Qt 6 lifetime fixture and
-digest-specific expectations are checked in, and its earlier toy PR/exact-main
-and ici candidate acceptance are complete; that six-scenario candidate contract
-is `6/6 PASS` (see the linked evidence above). The current TSan candidate is
-bound to exact ici main `6ee08b14fa598a19074af7afed4368fd79b19b2b`, with local
-seven-scenario contract `7/7 PASS`; its full local eight-scenario aggregate has
-only the Qt contract failure because local `clazy` is unavailable, while CI
-installs `clazy`. The new digest-bound Python and Make/ELF/integration scenarios
-have local contract evidence against the current `ici.pyz`, but their exact toy
-PR/main acceptance and remote candidate workflow remain pending. Broader Q2 and
-Q1–Q5 (the remaining Python, C++, Qt, and hybrid corpus expansions) remain
+authenticated local intake/selector evidence. The current non-stable candidate
+is bound to ici target `0b7e620bdb80423c3532d3ce3979a8dbdfaf6b11`; all sixteen
+candidate entries select its exact executable digest. The six newly added
+candidate scenarios have focused local contract `6/6 PASS`; the full local
+candidate run is `15/16 PASS` because this host has no `clazy` for the Qt
+lifetime fixture. Their exact toy PR/main acceptance and remote candidate
+workflow remain pending. Broader variants and cross-tool combinations remain
 future work. No version or release changed.
