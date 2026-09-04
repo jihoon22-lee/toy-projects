@@ -292,6 +292,8 @@ TrashReceipt finalizeTrashMove(const TrashDirectories& directories,
             directories, source, token, tempName, metadata, TrashStatus::IoError,
             errnoMessage("cannot finalize trash metadata", value));
     }
+    notifyMutationTestHook(TrashMutationTestPoint::MetadataFinalized,
+                           source.original, directories.root / "info" / infoName);
     if (::fsync(directories.info.get()) != 0
         || !trashDirectoriesAnchored(directories, error)) {
         const std::string failure = error.empty()
@@ -302,12 +304,10 @@ TrashReceipt finalizeTrashMove(const TrashDirectories& directories,
             return rollbackMoved(directories, source, token, tempName, metadata,
                                  TrashStatus::IoError, failure);
         }
-        TrashReceipt receipt = trashFailure(
+        return trashFailure(
             TrashStatus::IoError, source.original,
-            failure + "; payload and metadata remain recoverable in Trash");
-        receipt.trashed_path = directories.root / "files" / token;
-        receipt.restore_token = token;
-        return receipt;
+            failure + "; recovery publication could not be confirmed; "
+                      "no recovery token was issued");
     }
     TrashReceipt receipt;
     receipt.status = TrashStatus::Moved;

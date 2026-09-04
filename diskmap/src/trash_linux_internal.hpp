@@ -39,6 +39,7 @@ enum class TrashMutationTestPoint {
     BeforeMetadataReserve,
     BeforePayloadMove,
     PayloadMoved,
+    MetadataFinalized,
     BeforeMoveRollback,
     BeforePayloadRestore,
     PayloadRestored,

@@ -102,6 +102,7 @@ enum class MutationScenarioKind {
     MutateMoved,
     MutateMovedAndBlockRollback,
     BlockMetadataFinalize,
+    DetachTrashInfoAfterFinalize,
     DeleteMovedAndBlockRollback,
     MutateMovedAndDetachParent,
     DetachParentDuringMoveRollback,
@@ -114,6 +115,7 @@ enum class MutationScenarioKind {
 struct MutationScenario {
     MutationScenarioKind kind = MutationScenarioKind::MutateMoved;
     fs::path auxiliary_path;
+    fs::path observed_path;
     std::error_code error;
     bool invoked = false;
 };
@@ -150,6 +152,28 @@ void mutateTrashOperation(diskmap::detail::TrashMutationTestPoint point,
         fs::rename(original.parent_path(), scenario.auxiliary_path, scenario.error);
         if (!scenario.error) {
             fs::create_directory(original.parent_path(), scenario.error);
+        }
+        return;
+    }
+    if (point == diskmap::detail::TrashMutationTestPoint::MetadataFinalized) {
+        if (scenario.kind != MutationScenarioKind::DetachTrashInfoAfterFinalize) {
+            return;
+        }
+        const fs::path info = trashed.parent_path();
+        const std::string infoName = trashed.filename().string();
+        constexpr const char* kInfoSuffix = ".trashinfo";
+        const std::string token =
+            infoName.substr(0, infoName.size() - std::char_traits<char>::length(kInfoSuffix));
+        scenario.observed_path = info.parent_path() / "files" / token;
+        fs::rename(info, scenario.auxiliary_path, scenario.error);
+        if (scenario.error) {
+            return;
+        }
+        fs::create_directory(info, scenario.error);
+        if (!scenario.error
+            && !writeFile(scenario.auxiliary_path / (token + ".tmp"),
+                          "metadata rollback collision")) {
+            scenario.error = std::make_error_code(std::errc::io_error);
         }
         return;
     }
@@ -1513,6 +1537,47 @@ void testDeterministicRollbackRecovery(const fs::path& root) {
             CHECK(!fs::exists(receipts[0].trashed_path));
         }
         CHECK_EQ(readFile(source), "replacement after payload removal");
+    }
+
+    // Metadata publication cannot produce a public recovery token when the
+    // info directory is detached after finalize and rollback of the metadata
+    // name is blocked inside that detached directory.
+    {
+        const fs::path source = root / "detached-info-finalize.txt";
+        CHECK(writeFile(source, "detached info payload"));
+        MutationScenario scenario;
+        scenario.kind = MutationScenarioKind::DetachTrashInfoAfterFinalize;
+        scenario.auxiliary_path = options.data_home / "Trash" / "info-detached";
+        std::vector<diskmap::TrashReceipt> receipts;
+        {
+            ScopedTrashMutationHook hook(scenario);
+            receipts = diskmap::movePlanToTrash(
+                planFor({targetFor(source)}), options);
+        }
+        CHECK(scenario.invoked);
+        CHECK(!scenario.error);
+        CHECK_EQ(receipts.size(), static_cast<std::size_t>(1));
+        if (receipts.empty()) {
+            return;
+        }
+        CHECK(receipts[0].status == diskmap::TrashStatus::IoError);
+        CHECK(receipts[0].restore_token.empty());
+        CHECK(receipts[0].trashed_path.empty());
+        CHECK(!fs::exists(source));
+        CHECK_EQ(readFile(scenario.observed_path), "detached info payload");
+
+        const fs::path info = options.data_home / "Trash" / "info";
+        const std::string token = scenario.observed_path.filename().string();
+        std::error_code error;
+        CHECK(fs::remove(info, error));
+        CHECK(!error);
+        CHECK(fs::remove(scenario.auxiliary_path / (token + ".tmp"), error));
+        CHECK(!error);
+        fs::rename(scenario.auxiliary_path, info, error);
+        CHECK(!error);
+        const auto restored = diskmap::restoreFromTrash(token, options);
+        CHECK(restored.status == diskmap::TrashStatus::Restored);
+        CHECK_EQ(readFile(source), "detached info payload");
     }
 
     // Replacing the lexical destination directory after restore is detected.
