@@ -12,6 +12,7 @@ from pathlib import Path
 
 from runner import candidate_intake
 from runner.candidate_intake import ContractError
+
 from tests.helpers import (
     PACKAGE_VERSION,
     REPOSITORY,

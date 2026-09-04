@@ -10,6 +10,7 @@ from pathlib import Path
 
 from runner import report_contract, run
 from runner.common import ContractError, sha256_file
+
 from tests.helpers import (
     PRODUCER_VERSION,
     engine,
@@ -20,7 +21,9 @@ from tests.helpers import (
 )
 
 CANDIDATE_DIGEST = "23d9922b94b2ba34ab8884cd2d39c8eda358ccb32d0925af5c0a3d52a7ddc893"
-PREVIOUS_CANDIDATE_DIGEST = "50d41d36775394f66f6620091f42a7a0333ee90758e19449a848d7ee0875a93c"
+PREVIOUS_CANDIDATE_DIGEST = (
+    "50d41d36775394f66f6620091f42a7a0333ee90758e19449a848d7ee0875a93c"
+)
 
 
 class RunContractTests(unittest.TestCase):
