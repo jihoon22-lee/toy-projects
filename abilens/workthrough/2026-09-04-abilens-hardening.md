@@ -114,6 +114,13 @@ duplication `3.71%`. The `sanitize`, `thread_sanitize`, `build`,
 `binary_compat`, and `integration` engines all passed. Native tests were `2/2`
 and coverage evidence was `ESTIMATED`.
 
+The exact candidate run uses `ICI_CONFIG=ici-candidate.toml --profile deep`.
+The ordinary `ici.toml` intentionally contains only keys understood by
+the checksummed public `v0.10.2` release used by toy-project CI; native CI
+continues to own the Make test and sanitizer gate there. This keeps candidate
+capability evidence separate from stable consumer evidence instead of silently
+treating an unreleased candidate as the public release.
+
 The ici Make adapter evidence gap noted in the earlier draft was resolved by
 [ici PR #154](https://github.com/jihoon22-lee/ici/pull/154): its recorded
 `make test` process is now recognized by the sanitizer lookup. The current

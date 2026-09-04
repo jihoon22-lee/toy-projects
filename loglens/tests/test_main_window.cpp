@@ -491,7 +491,7 @@ void TestMainWindow::boundedStorageEvictsOldRowsAndReportsWindow() {
                         + line("FATAL", 4));
 
     MainWindow window(
-        nullptr, MainWindowOptions{2, loglens::kDefaultSourceChunkBytes, {}, {}});
+        nullptr, MainWindowOptions{2, loglens::kDefaultSourceChunkBytes, {}, {}, {}});
     window.openPath(path, loglens::InitialLoadMode::FromStart, 2);
 
     QTRY_COMPARE(rowCount(window), 2);
@@ -526,7 +526,7 @@ void TestMainWindow::drainsBacklogWithFollowDisabled() {
     }
     writeFile(path, contents);
 
-    MainWindow window(nullptr, MainWindowOptions{64, 17, {}, {}});
+    MainWindow window(nullptr, MainWindowOptions{64, 17, {}, {}, {}});
     QCheckBox* follow = followBox(window);
     QTimer* timer = pollTimer(window);
     QVERIFY(follow != nullptr);
@@ -559,7 +559,7 @@ void TestMainWindow::searchAndFilterCanChangeDuringBackgroundLoading() {
     contents += lineWithMessage("ERROR", 6, "NEEDLE final");
     writeFile(path, contents);
 
-    MainWindow window(nullptr, MainWindowOptions{64, 5, {}, {}});
+    MainWindow window(nullptr, MainWindowOptions{64, 5, {}, {}, {}});
     auto* model = qobject_cast<LogModel*>(tableModel(window));
     QVERIFY(model != nullptr);
     loglens::ParseError parseError;
@@ -624,7 +624,7 @@ void TestMainWindow::loadProgressReportsFinalFromStartState() {
     const QByteArray contents = line("INFO", 1) + line("WARN", 2) + line("ERROR", 3);
     writeFile(path, contents);
 
-    MainWindow window(nullptr, MainWindowOptions{64, 5, {}, {}});
+    MainWindow window(nullptr, MainWindowOptions{64, 5, {}, {}, {}});
     QSignalSpy progress(&window, &MainWindow::loadProgress);
     window.openPath(path, loglens::InitialLoadMode::FromStart, 64);
 
@@ -657,7 +657,7 @@ void TestMainWindow::loadProgressReportsInitialOpenError() {
     QVERIFY(dir.isValid());
     const QString missing = dir.filePath(QStringLiteral("missing.log"));
 
-    MainWindow window(nullptr, MainWindowOptions{64, 5, {}, {}});
+    MainWindow window(nullptr, MainWindowOptions{64, 5, {}, {}, {}});
     QSignalSpy progress(&window, &MainWindow::loadProgress);
     window.openPath(missing, loglens::InitialLoadMode::FromStart, 64);
 

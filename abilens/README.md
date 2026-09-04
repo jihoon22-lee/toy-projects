@@ -36,6 +36,21 @@ make OUT=build thread-sanitize
 make clean
 ```
 
+Ordinary repository CI runs the checksummed public ici release against
+`ici.toml`. That gate covers the stable release's static source engines, while
+the native CI job owns `make test` and the sanitizer variants. To verify the
+newer Make/ELF/integration engine contract with an exact, separately attested
+candidate artifact, apply the candidate-only overlay explicitly:
+
+```sh
+ICI_CONFIG=ici-candidate.toml /path/to/candidate/ici.pyz verify --profile deep \
+  --report --html verify_report.html
+```
+
+The overlay does not change the repository's stable ici pin and must not be
+used with the public `v0.10.2` artifact, which predates those configuration
+keys.
+
 The policy file is a bounded UTF-8 text file with one `key=value` per line.
 Supported keys are `expected_class`, `expected_machine`, `max_glibc`,
 `max_glibcxx`, `max_cxxabi`, `forbid_absolute_rpath`, and

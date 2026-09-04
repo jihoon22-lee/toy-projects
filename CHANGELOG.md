@@ -4,6 +4,12 @@
 
 ### Consolidated portfolio quality tooling
 
+- Kept AbiLens's ordinary ici configuration compatible with the checksummed
+  public `v0.10.2` consumer gate, and moved its newer Make, ELF compatibility,
+  and executable integration policy into an explicit candidate-only overlay.
+- Completed LogLens option initialization in the benchmark and GUI tests so
+  the warning-as-error benchmark build remains synchronized with persisted
+  triage configuration.
 - Added path-aware project and Quality Zoo selection to the shared CI discovery
   contract. PR changes now run only affected projects/scenarios, common
   contract paths fan out to the complete stable scope, and `main`/manual runs
