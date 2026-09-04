@@ -33,10 +33,10 @@ void testDeterministicWindowSignals() {
         records, {0, 60000}, {60000, 120000});
     CHECK_EQ(analysis.baseline_records, static_cast<std::size_t>(1));
     CHECK_EQ(analysis.comparison_records, static_cast<std::size_t>(3));
-    CHECK(!analysis.signals.empty());
+    CHECK(!analysis.findings.empty());
     bool pattern = false;
     bool level = false;
-    for (const auto& signal : analysis.signals) {
+    for (const auto& signal : analysis.findings) {
         CHECK(!signal.explanation.empty());
         CHECK(signal.score > 0.0);
         CHECK_EQ(signal.first_line, static_cast<std::size_t>(10));
@@ -63,7 +63,7 @@ void testRateSpikeAndInvalidWindows() {
     }
     const auto analysis = loglens::compareWindows(records, {0, 60000}, {60000, 120000});
     bool spike = false;
-    for (const auto& signal : analysis.signals) {
+    for (const auto& signal : analysis.findings) {
         if (signal.dimension == "pattern" && signal.kind == loglens::SignalKind::RateSpike) {
             spike = true;
             CHECK_EQ(signal.baseline_count, static_cast<std::size_t>(1));
@@ -72,7 +72,17 @@ void testRateSpikeAndInvalidWindows() {
         }
     }
     CHECK(spike);
-    CHECK(loglens::compareWindows(records, {10, 10}, {20, 30}).signals.empty());
+    CHECK(loglens::compareWindows(records, {10, 10}, {20, 30}).findings.empty());
+}
+
+void testOverlappingWindowsCountSharedEvidenceInBothSides() {
+    const std::vector<loglens::LogRecord> records{
+        record(50000, loglens::Level::Warn, "api", "shared", "request_id=same", 4),
+    };
+    const auto analysis = loglens::compareWindows(records, {0, 60000}, {30000, 90000});
+    CHECK_EQ(analysis.baseline_records, static_cast<std::size_t>(1));
+    CHECK_EQ(analysis.comparison_records, static_cast<std::size_t>(1));
+    CHECK_EQ(analysis.correlations.size(), static_cast<std::size_t>(1));
 }
 
 } // namespace
@@ -80,5 +90,6 @@ void testRateSpikeAndInvalidWindows() {
 int main() {
     testDeterministicWindowSignals();
     testRateSpikeAndInvalidWindows();
+    testOverlappingWindowsCountSharedEvidenceInBothSides();
     return checkSummary();
 }

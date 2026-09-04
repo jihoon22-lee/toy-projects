@@ -60,6 +60,7 @@ private slots:
     void omittedBytesAreVisibleInMessageAndTooltip();
     void caseInsensitiveRawSearchComposesWithStructuredFilter();
     void searchMembershipSurvivesAppendUpdateAndEviction();
+    void triageAndTimelineShareTheVisibleRecordSet();
 };
 
 // QAbstractItemModelTester asserts the whole QAbstractItemModel contract on
@@ -519,6 +520,34 @@ void TestLogModel::searchMembershipSurvivesAppendUpdateAndEviction() {
     QCOMPARE(model.recordAt(0)->line_number, static_cast<std::size_t>(3));
     QCOMPARE(model.totalSeen(), static_cast<std::size_t>(5));
     QCOMPARE(model.droppedCount(), static_cast<std::size_t>(2));
+}
+
+void TestLogModel::triageAndTimelineShareTheVisibleRecordSet() {
+    LogModel model;
+    loglens::LogRecord first = numberedRecord(Level::Info, 10, "ordinary");
+    first.timestamp_ms = 1000;
+    loglens::LogRecord second = numberedRecord(Level::Error, 20, "needle timeout");
+    second.timestamp_ms = 61000;
+    model.setRecords({first, second});
+
+    loglens::TriageState triage;
+    triage.rules.push_back({"Timeout", {"timeout", false, 10, "#ffaa00"}});
+    triage.entries.push_back({"/tmp/app.log", 20, true, "investigate"});
+    model.setTriageState(triage, QStringLiteral("/tmp/app.log"));
+    QCOMPARE(model.highlightSpansAt(1).size(), static_cast<std::size_t>(1));
+    QVERIFY(model.bookmarkedAt(1));
+    QVERIFY(model.data(model.index(1, LogModel::ColumnLine), Qt::FontRole).isValid());
+
+    model.setTimeWindow(loglens::TimeWindow{60000, 120000});
+    QCOMPARE(model.rowCount(), 1);
+    QCOMPARE(model.recordAt(0)->line_number, static_cast<std::size_t>(20));
+    QCOMPARE(model.rowForLine(20), 0);
+    QCOMPARE(model.rowForLine(10), -1);
+    QCOMPARE(model.visibleRecords(false).size(), static_cast<std::size_t>(2));
+    QCOMPARE(model.visibleRecords(true).size(), static_cast<std::size_t>(1));
+
+    model.setTimeWindow(std::nullopt);
+    QCOMPARE(model.rowCount(), 2);
 }
 
 QTEST_MAIN(TestLogModel)

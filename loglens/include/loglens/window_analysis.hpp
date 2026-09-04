@@ -43,7 +43,9 @@ struct WindowAnalysis {
     TimeWindow comparison;
     std::size_t baseline_records = 0;
     std::size_t comparison_records = 0;
-    std::vector<WindowSignal> signals;
+    // Avoid Qt's legacy `signals` macro so this core header is safe to include
+    // from both Qt and non-Qt translation units.
+    std::vector<WindowSignal> findings;
     std::vector<CorrelationGroup> correlations;
 };
 

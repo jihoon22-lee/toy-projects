@@ -9,8 +9,11 @@
 #include <vector>
 
 #include "loglens/filter_expr.hpp"
+#include "loglens/highlight_rules.hpp"
 #include "loglens/log_record.hpp"
 #include "loglens/ring_buffer.hpp"
+#include "loglens/triage.hpp"
+#include "loglens/window_analysis.hpp"
 
 // Table model over parsed records.
 //
@@ -32,6 +35,10 @@ public:
     void setFilter(const loglens::Filter* filter);
     // Case-insensitive raw-text search composed with the structured filter.
     void setSearch(const QString& search);
+    // A timeline selection further narrows the same record set shown by the
+    // table. nullopt restores the complete filter/search result.
+    void setTimeWindow(std::optional<loglens::TimeWindow> window);
+    void setTriageState(const loglens::TriageState& state, const QString& sourcePath);
 
     // Appends records that arrived after the last poll. Rows that pass the
     // current filter are announced as one contiguous insert at the end, which
@@ -53,6 +60,10 @@ public:
                       std::uint64_t generation);
 
     const loglens::LogRecord* recordAt(int row) const;
+    std::vector<loglens::LogRecord> visibleRecords(bool includeTimeWindow = true) const;
+    std::vector<loglens::Span> highlightSpansAt(int row) const;
+    int rowForLine(std::size_t lineNumber) const;
+    bool bookmarkedAt(int row) const;
     int totalCount() const;
     std::size_t totalSeen() const;
     std::size_t droppedCount() const;
@@ -76,8 +87,13 @@ private:
     // is one shared_ptr, so copying it is cheap.
     std::optional<loglens::Filter> filter_;
     QString search_;
+    std::optional<loglens::TimeWindow> time_window_;
+    loglens::HighlightRules highlight_rules_;
+    std::vector<loglens::TriageEntry> triage_entries_;
+    std::string source_path_;
     std::uint64_t generation_ = 0;
 
     void rebuildVisible();
+    bool matchesBase(const loglens::LogRecord& record) const;
     bool matches(const loglens::LogRecord& record) const;
 };

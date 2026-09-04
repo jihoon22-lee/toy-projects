@@ -209,6 +209,73 @@ bool parseEntry(const detail::StorageJsonNode& node, TriageEntry& value,
     return validateEntry(value, error);
 }
 
+struct TriageDocument {
+    bool legacy = false;
+    const detail::StorageJsonNode* rules = nullptr;
+    const detail::StorageJsonNode* entries = nullptr;
+};
+
+bool parseDocumentShape(const detail::StorageJsonNode& root,
+                        TriageDocument& document,
+                        PersistenceError& error) {
+    std::string schema;
+    if (!getString(root, "schema", schema, error)) return false;
+    document.legacy = schema == kLegacySchema;
+    if (!document.legacy && schema != kSchema) {
+        setError(error, PersistenceErrorCode::UnsupportedVersion,
+                 "unsupported triage schema '" + schema + "'");
+        return false;
+    }
+    const bool known_fields = document.legacy
+        ? onlyFields(root, {"schema", "rules"})
+        : onlyFields(root, {"schema", "rules", "entries"});
+    if (!known_fields) {
+        setError(error, PersistenceErrorCode::Malformed,
+                 "triage document contains unknown or duplicate fields");
+        return false;
+    }
+    document.rules = field(root, "rules");
+    document.entries = document.legacy ? nullptr : field(root, "entries");
+    if (document.rules == nullptr
+        || document.rules->kind != detail::StorageJsonKind::Array
+        || (!document.legacy
+            && (document.entries == nullptr
+                || document.entries->kind != detail::StorageJsonKind::Array))) {
+        setError(error, PersistenceErrorCode::InvalidValue,
+                 "triage rules and entries must be arrays");
+        return false;
+    }
+    if (document.rules->array.size() > kMaxHighlightRules
+        || (document.entries != nullptr
+            && document.entries->array.size() > kMaxTriageEntries)) {
+        setError(error, PersistenceErrorCode::LimitExceeded,
+                 "triage document exceeds item limits");
+        return false;
+    }
+    return true;
+}
+
+bool appendRules(const detail::StorageJsonNode& rules, bool legacy,
+                 TriageState& state, PersistenceError& error) {
+    for (std::size_t index = 0; index < rules.array.size(); ++index) {
+        NamedHighlightRule value;
+        if (!parseRule(rules.array[index], value, error, legacy, index)) return false;
+        state.rules.push_back(std::move(value));
+    }
+    return true;
+}
+
+bool appendEntries(const detail::StorageJsonNode* entries,
+                   TriageState& state, PersistenceError& error) {
+    if (entries == nullptr) return true;
+    for (const auto& node : entries->array) {
+        TriageEntry value;
+        if (!parseEntry(node, value, error)) return false;
+        state.entries.push_back(std::move(value));
+    }
+    return true;
+}
+
 std::string escaped(const std::string& value) {
     std::ostringstream output;
     output << '"';
@@ -314,56 +381,16 @@ TriageLoadResult loadTriageState(const std::string& path) {
                  "malformed triage JSON: " + parse_error.message, parse_error.offset);
         return result;
     }
-    std::string schema;
-    if (!getString(root, "schema", schema, result.error)) {
+    TriageDocument document;
+    TriageState parsed_state;
+    if (!parseDocumentShape(root, document, result.error)
+        || !appendRules(*document.rules, document.legacy, parsed_state, result.error)
+        || !appendEntries(document.entries, parsed_state, result.error)) return result;
+    if (!validateTriageState(parsed_state, result.error)) {
         return result;
     }
-    const bool legacy = schema == kLegacySchema;
-    if (!legacy && schema != kSchema) {
-        setError(result.error, PersistenceErrorCode::UnsupportedVersion,
-                 "unsupported triage schema '" + schema + "'");
-        return result;
-    }
-    if (!onlyFields(root, legacy ? std::initializer_list<std::string_view>{"schema", "rules"}
-                                 : std::initializer_list<std::string_view>{"schema", "rules", "entries"})) {
-        setError(result.error, PersistenceErrorCode::Malformed,
-                 "triage document contains unknown or duplicate fields");
-        return result;
-    }
-    const auto* rules = field(root, "rules");
-    const auto* entries = legacy ? nullptr : field(root, "entries");
-    if (rules == nullptr || rules->kind != detail::StorageJsonKind::Array
-        || (!legacy && (entries == nullptr || entries->kind != detail::StorageJsonKind::Array))) {
-        setError(result.error, PersistenceErrorCode::InvalidValue,
-                 "triage rules and entries must be arrays");
-        return result;
-    }
-    if (rules->array.size() > kMaxHighlightRules
-        || (entries != nullptr && entries->array.size() > kMaxTriageEntries)) {
-        setError(result.error, PersistenceErrorCode::LimitExceeded,
-                 "triage document exceeds item limits");
-        return result;
-    }
-    for (std::size_t index = 0; index < rules->array.size(); ++index) {
-        NamedHighlightRule value;
-        if (!parseRule(rules->array[index], value, result.error, legacy, index)) {
-            return result;
-        }
-        result.state.rules.push_back(std::move(value));
-    }
-    if (entries != nullptr) {
-        for (const auto& node : entries->array) {
-            TriageEntry value;
-            if (!parseEntry(node, value, result.error)) {
-                return result;
-            }
-            result.state.entries.push_back(std::move(value));
-        }
-    }
-    if (!validateTriageState(result.state, result.error)) {
-        return result;
-    }
-    result.migrated = legacy;
+    result.state = std::move(parsed_state);
+    result.migrated = document.legacy;
     return result;
 }
 

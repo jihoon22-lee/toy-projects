@@ -153,3 +153,95 @@ mistake cannot blank a working investigation.
 The focused `test_gui_persistence` QtTest covers load/save/apply, parser
 settings reaching the background worker, malformed-store diagnostics, and
 the item limits on both Qt 5.15 and Qt 6.
+
+## Investigation workbench
+
+The GUI includes a separate **Investigation** dock for preserving evidence and
+turning a suspicious time range into a reproducible comparison.  The dock is
+backed by the same core objects used by the non-GUI tests; it does not parse a
+second, GUI-specific representation of a record.
+
+### Triage state and highlighting
+
+Triage state is stored as the strict, versioned `loglens.triage/v1` document:
+
+```json
+{"schema":"loglens.triage/v1","rules":[
+  {"name":"Timeout","pattern":"timeout","whole_line":false,
+   "priority":40,"style":"#ffcc00"}
+],"entries":[
+  {"source_path":"/var/log/service.log","line_number":42,
+   "bookmarked":true,"annotation":"check upstream retry"}
+]}
+```
+
+The **Highlights** tab supports literal byte-ranged spans or whole-row
+highlighting, priority ordering, safe named/hex colour values, create/update,
+delete, and reorder.  `loglens.triage/v0` rule-only files are accepted as an
+explicit legacy input and are marked as migrated; the next successful save
+writes v1.  Empty or malformed stores never replace the last valid in-memory
+state.
+
+The state is bounded before it is parsed or written: at most 128 rules and
+8,192 source-line entries, 1,024 bytes per pattern, 4,096 bytes per
+annotation, 4,096 bytes per source path, and 64 bytes per style.  Rule names,
+source/line identities, and entry contents are validated strictly, including
+duplicate identities and unbookmarked empty entries.  Saves use the existing
+same-directory atomic persistence backend.
+
+### Record evidence and export
+
+The **Record** tab shows the selected source path and physical line, timestamp,
+level, parser status, input/omitted byte counts, every parse diagnostic, the
+parsed message, and the original `LogRecord::raw` bytes.  A selected row can be
+bookmarked and annotated against its source/line identity.  **Export selected…**
+creates a compact `loglens.selection/v1` JSON document with the source path and
+one object per selected record.  Each object includes parsed fields,
+diagnostics, triage state, byte accounting, and base64 copies of the raw,
+message, and source bytes.  The byte fields keep the original evidence available
+even when malformed UTF-8 cannot be rendered as a normal `QString`.  The display
+strings are UTF-8-normalized conveniences, not the lossless representation.
+Export is sorted by visible row, streams one record at a time, stops at 16 MiB,
+and is committed atomically. It also refuses to replace the currently open
+source log. Empty selections, output-size violations, and failed destinations
+leave the source view unchanged.
+
+### Timeline range comparison
+
+The timeline accepts a left-click/drag selection over timestamp buckets and a
+right-click (or **Clear range**) to remove it.  Ranges are half-open
+`[begin_ms, end_ms)`, so a record exactly at the end boundary belongs only to
+the following range.  The selected range is composed with the current
+structured filter and raw-text search; clearing it restores the same filtered
+view rather than resetting the investigation.
+
+The **Compare** tab stores two selected ranges as baseline and comparison and
+computes deterministic, measured signals over the visible records:
+
+- `new-pattern` for a level, source, or normalized message pattern absent from
+  the baseline;
+- `rate-spike` when an existing key has at least two comparison records and its
+  per-minute rate is at least twice the baseline rate; and
+- raw correlation groups for `correlation_id`, `request_id`, `thread_id`, and
+  `thread` values present in the comparison window.
+
+Every signal and correlation keeps counts, rates where applicable, a stable
+explanation, and its first/last physical source line.  Results are sorted by
+score and then by dimension/key for reproducibility.  Activating a result
+navigates back to the corresponding table row; if that row has been evicted by
+bounded storage or filtered out, the status line explains that the evidence is
+outside the current visible range.  These heuristics describe measured changes
+and intentionally do not claim a diagnosis.
+
+### Verification and current boundary
+
+The Qt5 and Qt6 focused investigation tests cover timeline mouse interaction,
+UTF-8 highlight rendering (including byte-to-UTF-16 offset conversion), triage
+CRUD/migration and persistence, bookmark/annotation display, byte-preserving export,
+diagnostic rendering, comparison navigation, and empty/error paths.  The
+  current local focused CTest result is `18/18` for each Qt major, and the native
+  TSan partition is `41/41 PASS`.  The final exact ici candidate deep local run
+  reports test engine `18/18 PASS`, line/function/branch coverage
+  `90.5% / 96.1% / 78.0%`, and TEM `4.81`.  Remote PR/Pages acceptance is a
+  separate gate; this README does not treat a local candidate or an unreleased
+  toy build as a stable LogLens release.  The product remains `0.1.0`/`Unreleased`.

@@ -4,8 +4,10 @@
 #include <QComboBox>
 #include <QDir>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QItemSelectionModel>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
@@ -22,6 +24,7 @@
 #include <vector>
 
 #include "loglens/gui/log_model.hpp"
+#include "loglens/gui/highlight_delegate.hpp"
 #include "loglens/gui/log_load_worker.hpp"
 #include "loglens/log_stats.hpp"
 #include "loglens/gui/timeline_widget.hpp"
@@ -178,6 +181,8 @@ MainWindow::MainWindow(QWidget* parent, MainWindowOptions options)
     table_->setObjectName(QStringLiteral("logTable"));
     table_->setAccessibleName(tr("Log records"));
     table_->setModel(model_);
+    table_->setItemDelegateForColumn(LogModel::ColumnMessage,
+                                     new HighlightDelegate(table_));
     table_->setSelectionBehavior(QAbstractItemView::SelectRows);
     table_->verticalHeader()->setVisible(false);
     table_->horizontalHeader()->setStretchLastSection(true);
@@ -187,6 +192,7 @@ MainWindow::MainWindow(QWidget* parent, MainWindowOptions options)
     layout->addWidget(table_, 1);
 
     setCentralWidget(central);
+    setupInvestigationDock();
     status_ = new QLabel(tr("Ready"), this);
     status_->setObjectName(QStringLiteral("statusLabel"));
     status_->setAccessibleName(tr("Log status"));
@@ -207,6 +213,7 @@ MainWindow::MainWindow(QWidget* parent, MainWindowOptions options)
     timelineTimer_->setInterval(50);
     connect(timelineTimer_, &QTimer::timeout, this, &MainWindow::refreshTimeline);
     connect(searchEdit_, &QLineEdit::textChanged, this, [this](const QString& text) {
+        timeline_->clearSelection();
         model_->setSearch(text);
         scheduleTimelineRefresh();
         updateStatus(QString());
@@ -243,12 +250,19 @@ MainWindow::MainWindow(QWidget* parent, MainWindowOptions options)
     connect(saveProfileButton, &QPushButton::clicked, this, &MainWindow::saveSourceProfile);
     connect(applyQueryButton, &QPushButton::clicked, this, &MainWindow::applySavedQuery);
     connect(saveQueryButton, &QPushButton::clicked, this, &MainWindow::saveSavedQuery);
+    connect(timeline_, &TimelineWidget::rangeSelected, this,
+            &MainWindow::selectTimelineRange);
+    connect(timeline_, &TimelineWidget::rangeCleared, this,
+            &MainWindow::clearTimelineRange);
+    connect(table_->selectionModel(), &QItemSelectionModel::currentRowChanged, this,
+            [this](const QModelIndex&, const QModelIndex&) { refreshRecordDetail(); });
 
     resize(1100, 700);
     setWindowTitle(tr("loglens"));
 
     sourceProfilesPath_ = options.sourceProfilesPath;
     savedQueriesPath_ = options.savedQueriesPath;
+    triagePath_ = options.triagePath;
     if (sourceProfilesPath_.isEmpty()) {
         const QString configDirectory = QStandardPaths::writableLocation(
             QStandardPaths::AppConfigLocation);
@@ -263,8 +277,16 @@ MainWindow::MainWindow(QWidget* parent, MainWindowOptions options)
                             + QStringLiteral("/saved-queries.json");
         savedQueriesPathIsDefault_ = true;
     }
+    if (triagePath_.isEmpty()) {
+        const QString configDirectory = QStandardPaths::writableLocation(
+            QStandardPaths::AppConfigLocation);
+        triagePath_ = (configDirectory.isEmpty() ? QDir::currentPath() : configDirectory)
+                      + QStringLiteral("/triage.json");
+        triagePathIsDefault_ = true;
+    }
     sourceProfile_->setEditText(QStringLiteral("Default"));
     loadPersistenceState();
+    loadTriageWorkflow();
 }
 
 MainWindow::~MainWindow() {
@@ -320,7 +342,7 @@ void MainWindow::openPath(const QString& path) {
 
 void MainWindow::openPath(const QString& path, loglens::InitialLoadMode mode,
                           std::size_t tailRecords) {
-    currentPath_ = path;
+    currentPath_ = QFileInfo(path).absoluteFilePath();
     ++active_job_;
     loader_->selectJob(active_job_);
     expected_sequence_ = 0;
@@ -329,14 +351,16 @@ void MainWindow::openPath(const QString& path, loglens::InitialLoadMode mode,
     source_active_ = true;
     followBox_->setEnabled(true);
     model_->resetRecords();
+    model_->setTriageState(triageState_, currentPath_);
+    timeline_->clearSelection();
     refreshTimeline();
     updateStatus(tr("loading…"));
-    setWindowTitle(tr("loglens — %1").arg(path));
+    setWindowTitle(tr("loglens — %1").arg(currentPath_));
     setFollowing(followBox_->isChecked());
 
     loglens::LoadRequest request;
     request.job_id = active_job_;
-    request.path = path;
+    request.path = currentPath_;
     request.mode = mode;
     request.tail_records = std::max<std::size_t>(1, std::min(tailRecords, record_capacity_));
     request.source_chunk_bytes = source_chunk_bytes_;
@@ -403,6 +427,7 @@ void MainWindow::handleLoadBatch(const loglens::LoadBatch& batch) {
     }
     retryAttempts_ = 0;
     if (batch.reset_model) {
+        timeline_->clearSelection();
         model_->resetRecords(batch.generation);
     }
     applyDeltas(batch.deltas);
@@ -442,6 +467,7 @@ void MainWindow::applyFilter() {
 bool MainWindow::applyFilterText(const QString& text, const QString& successMessage) {
     if (text.trimmed().isEmpty()) {
         filter_.reset();
+        timeline_->clearSelection();
         model_->setFilter(nullptr);
         refreshTimeline();
         updateStatus(successMessage);
@@ -458,6 +484,7 @@ bool MainWindow::applyFilterText(const QString& text, const QString& successMess
         return false;
     }
     filter_ = candidate;
+    timeline_->clearSelection();
     model_->setFilter(&filter_.value());
     refreshTimeline();
     updateStatus(successMessage);
@@ -466,11 +493,8 @@ bool MainWindow::applyFilterText(const QString& text, const QString& successMess
 
 void MainWindow::refreshTimeline() {
     loglens::Stats stats;
-    for (int row = 0; row < model_->rowCount(); ++row) {
-        const loglens::LogRecord* record = model_->recordAt(row);
-        if (record != nullptr) {
-            stats.add(*record);
-        }
+    for (const loglens::LogRecord& record : model_->visibleRecords(false)) {
+        stats.add(record);
     }
     timeline_->setBuckets(stats.buckets(kBucketMs));
 }

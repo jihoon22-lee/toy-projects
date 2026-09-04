@@ -95,27 +95,35 @@ bool identifierCharacter(char value) {
            || (byte >= '0' && byte <= '9') || value == '-' || value == '_' || value == '.';
 }
 
-std::string extractField(std::string_view text, std::string_view field) {
-    const std::array<char, 2> separators{'=', ':'};
-    for (char separator : separators) {
-        const std::string needle = std::string(field) + separator;
-        std::size_t position = text.find(needle);
-        while (position != std::string_view::npos) {
-            if (position == 0 || !identifierCharacter(text[position - 1])) {
-                std::size_t begin = position + needle.size();
-                while (begin < text.size() && (text[begin] == ' ' || text[begin] == '\"')) {
-                    ++begin;
-                }
-                std::size_t end = begin;
-                while (end < text.size() && identifierCharacter(text[end])) {
-                    ++end;
-                }
-                if (end > begin && end - begin <= 128) {
-                    return std::string(text.substr(begin, end - begin));
-                }
-            }
+std::size_t skipFieldPadding(std::string_view text, std::size_t begin) {
+    while (begin < text.size() && (text[begin] == ' ' || text[begin] == '\"')) ++begin;
+    return begin;
+}
+
+std::string extractFieldWithSeparator(std::string_view text, std::string_view field,
+                                      char separator) {
+    const std::string needle = std::string(field) + separator;
+    std::size_t position = text.find(needle);
+    while (position != std::string_view::npos) {
+        if (position != 0 && identifierCharacter(text[position - 1])) {
             position = text.find(needle, position + needle.size());
+            continue;
         }
+        const std::size_t begin = skipFieldPadding(text, position + needle.size());
+        std::size_t end = begin;
+        while (end < text.size() && identifierCharacter(text[end])) ++end;
+        if (end > begin && end - begin <= 128) {
+            return std::string(text.substr(begin, end - begin));
+        }
+        position = text.find(needle, position + needle.size());
+    }
+    return {};
+}
+
+std::string extractField(std::string_view text, std::string_view field) {
+    for (const char separator : std::array<char, 2>{'=', ':'}) {
+        std::string value = extractFieldWithSeparator(text, field, separator);
+        if (!value.empty()) return value;
     }
     return {};
 }
@@ -160,18 +168,17 @@ WindowAnalysis compareWindows(const std::vector<LogRecord>& records,
         if (!in_baseline && !in_comparison) {
             continue;
         }
-        Counts& levels = in_baseline ? baseline_levels : comparison_levels;
-        Counts& sources = in_baseline ? baseline_sources : comparison_sources;
-        Counts& patterns = in_baseline ? baseline_patterns : comparison_patterns;
         if (in_baseline) {
             ++result.baseline_records;
-        } else {
-            ++result.comparison_records;
+            addCount(baseline_levels, levelName(record.level), record.line_number);
+            addCount(baseline_sources, record.source, record.line_number);
+            addCount(baseline_patterns, normalizeMessage(record.message), record.line_number);
         }
-        addCount(levels, levelName(record.level), record.line_number);
-        addCount(sources, record.source, record.line_number);
-        addCount(patterns, normalizeMessage(record.message), record.line_number);
         if (in_comparison) {
+            ++result.comparison_records;
+            addCount(comparison_levels, levelName(record.level), record.line_number);
+            addCount(comparison_sources, record.source, record.line_number);
+            addCount(comparison_patterns, normalizeMessage(record.message), record.line_number);
             addCorrelation(correlations, "correlation_id", record);
             addCorrelation(correlations, "request_id", record);
             addCorrelation(correlations, "thread_id", record);
@@ -179,13 +186,13 @@ WindowAnalysis compareWindows(const std::vector<LogRecord>& records,
         }
     }
 
-    appendSignals(result.signals, "level", baseline_levels, comparison_levels,
+    appendSignals(result.findings, "level", baseline_levels, comparison_levels,
                   baseline, comparison);
-    appendSignals(result.signals, "source", baseline_sources, comparison_sources,
+    appendSignals(result.findings, "source", baseline_sources, comparison_sources,
                   baseline, comparison);
-    appendSignals(result.signals, "pattern", baseline_patterns, comparison_patterns,
+    appendSignals(result.findings, "pattern", baseline_patterns, comparison_patterns,
                   baseline, comparison);
-    std::sort(result.signals.begin(), result.signals.end(), [](const WindowSignal& left,
+    std::sort(result.findings.begin(), result.findings.end(), [](const WindowSignal& left,
                                                                const WindowSignal& right) {
         if (left.score != right.score) {
             return left.score > right.score;

@@ -1,0 +1,19 @@
+# Qt 6.10's prebuilt, uninstrumented event dispatcher uses GLib eventfd state.
+# TSan cannot observe the synchronization inside either shared library and
+# reports the same descriptor access as a race in every queued Qt test.
+race:libglib-2.0.so
+
+# Qt's queued-argument storage is allocated by the uninstrumented Qt runtime
+# and consumed through the generated FunctorCall trampoline. The project
+# payload is passed by value and owns no shared storage.
+race:QtPrivate::FunctorCall
+
+# QObject disconnects queued signal state while a worker is destroyed through
+# QThread::finished/deleteLater. QThread::wait is the lifecycle barrier, but
+# that synchronization is likewise inside the uninstrumented Qt runtime.
+race:QObject::~QObject
+
+# The worker is destroyed by QThread::finished/deleteLater after QThread::wait.
+# The only concurrent-looking access is its atomic cancellation gate before
+# quit; the happens-before edge is inside Qt's uninstrumented event loop.
+race:loglens::LogLoadWorker::~LogLoadWorker
