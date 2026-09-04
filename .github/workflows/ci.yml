@@ -1456,6 +1456,16 @@ jobs:
       pages: read           # Pages 활성화 여부 조회
 
     steps:
+      # This job has write permissions, so its executable validator must come
+      # from the trusted base revision rather than PR-controlled source.
+      - name: Check out trusted report validator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+          sparse-checkout: ci/check_published_html.py
+          sparse-checkout-cone-mode: false
+
       - name: Set up Python 3.10
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:

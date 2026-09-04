@@ -106,6 +106,15 @@ class WorkflowPublicationContractTests(unittest.TestCase):
     def test_pr_pages_require_the_published_html_contract(self) -> None:
         block = _job_block("report-pr")
 
+        self.assertIn("ref: ${{ github.event.pull_request.base.sha }}", block)
+        self.assertIn("persist-credentials: false", block)
+        self.assertIn("sparse-checkout: ci/check_published_html.py", block)
+        self.assertLess(
+            block.index("ref: ${{ github.event.pull_request.base.sha }}"),
+            block.index(
+                'python3 ci/check_published_html.py "$body_file" --project "$project"'
+            ),
+        )
         self.assertIn(
             'python3 ci/check_published_html.py "$body_file" --project "$project"',
             block,
