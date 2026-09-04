@@ -32,6 +32,14 @@
     {
       "id": "python.dead-private-function",
       "path": "scenarios/python/dead-private-function"
+    },
+    {
+      "id": "python.security-resource-correctness",
+      "path": "scenarios/python/security-resource-correctness"
+    },
+    {
+      "id": "cpp.make-elf-integration",
+      "path": "scenarios/cpp/make-elf-integration"
     }
   ]
 }

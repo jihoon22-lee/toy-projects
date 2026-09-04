@@ -19,6 +19,8 @@ from tests.helpers import (
     write_scenario,
 )
 
+CANDIDATE_DIGEST = "50d41d36775394f66f6620091f42a7a0333ee90758e19449a848d7ee0875a93c"
+
 
 class RunContractTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -340,6 +342,7 @@ class RunContractTests(unittest.TestCase):
                     "e7f1a2ce7147057538873a802715c7bf2b12e530a85070af862e02e378caceb8",
                     "985c81a63363356619207870cddb0d8cd9854a46925a3e0a745e54bd543d5b51",
                     "424108397858470b1209bc2749b580a858fb06c8b09aaa2e4772c94e43690bb5",
+                    CANDIDATE_DIGEST,
                 },
             )
 
@@ -354,10 +357,13 @@ class RunContractTests(unittest.TestCase):
                 "8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4",
                 "985c81a63363356619207870cddb0d8cd9854a46925a3e0a745e54bd543d5b51",
                 "424108397858470b1209bc2749b580a858fb06c8b09aaa2e4772c94e43690bb5",
+                CANDIDATE_DIGEST,
             },
         )
 
-    def test_candidate_registry_keeps_stable_slice_and_adds_tsan_pair(self) -> None:
+    def test_candidate_registry_keeps_stable_slice_and_adds_candidate_corpus(
+        self,
+    ) -> None:
         quality_zoo_root = Path(__file__).resolve().parents[1]
         _, registry = run._load_registry(quality_zoo_root / "candidate-manifest.json")
         self.assertEqual(
@@ -371,11 +377,25 @@ class RunContractTests(unittest.TestCase):
                 "cpp.tsan-synchronized",
                 "cpp.ubsan-signed-overflow",
                 "python.dead-private-function",
+                "python.security-resource-correctness",
+                "cpp.make-elf-integration",
             },
         )
         stable_root = quality_zoo_root / "manifest.json"
         _, stable_registry = run._load_registry(stable_root)
         self.assertTrue(set(stable_registry) < set(registry))
+
+        for scenario_id, scenario_root in registry.items():
+            with self.subTest(scenario_id=scenario_id, digest=CANDIDATE_DIGEST):
+                selector = json.loads(
+                    (scenario_root / "scenario.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(selector["schema"], 2)
+                self.assertIn(CANDIDATE_DIGEST, selector["expectations"])
+                expectation = run._load_scenario(
+                    scenario_id, scenario_root, CANDIDATE_DIGEST
+                )
+                report_contract._validate_expectation(expectation)
 
         for scenario_id in ("cpp.tsan-data-race", "cpp.tsan-synchronized"):
             with self.subTest(scenario_id=scenario_id):
@@ -387,7 +407,8 @@ class RunContractTests(unittest.TestCase):
                 self.assertEqual(
                     set(selector["expectations"]),
                     {
-                        "424108397858470b1209bc2749b580a858fb06c8b09aaa2e4772c94e43690bb5"
+                        "424108397858470b1209bc2749b580a858fb06c8b09aaa2e4772c94e43690bb5",
+                        CANDIDATE_DIGEST,
                     },
                 )
                 expectation = run._load_scenario(
