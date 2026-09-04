@@ -74,7 +74,8 @@ public:
     PaintTimingWindow(std::size_t capacity, const std::chrono::steady_clock::time_point& start,
                       std::optional<double>& firstPaint)
         : MainWindow(nullptr,
-                     MainWindowOptions{capacity, loglens::kDefaultSourceChunkBytes, {}, {}}),
+                     MainWindowOptions{
+                         capacity, loglens::kDefaultSourceChunkBytes, {}, {}, {}}),
           start_(start), first_paint_(firstPaint) {}
 
 protected:

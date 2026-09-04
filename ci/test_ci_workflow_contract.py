@@ -137,6 +137,35 @@ class WorkflowPublicationContractTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_pr_sticky_comment_verifier_accepts_zero_report_links(self) -> None:
+        run_url = "https://github.com/example/toy-projects/actions/runs/99"
+        body = "\n".join(
+            (
+                "<!-- ici-report -->",
+                f"[CI scope]({run_url})",
+                "- selected projects (0): none",
+                "- skipped projects (5): `diskmap`, `loglens`, `buildscope`, `envlens`, `abilens` — not run (not PASS)",
+            )
+        )
+
+        result = _run_sticky_verifier(
+            [[], [{"body": body}]],
+            names="",
+            expected_count=0,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_zero_project_scope_replaces_stale_report_links(self) -> None:
+        block = _job_block("report-pr")
+
+        self.assertIn("if selected:", block)
+        self.assertIn(
+            "# A docs-only PR must not retain links from a previous run", block
+        )
+        self.assertIn('body = marker + "\\n\\n" + scope', block)
+        self.assertIn("if len(marked) > 1:", block)
+
     def test_pr_sticky_comment_verifier_rejects_duplicate_markers(self) -> None:
         run_url = "https://github.com/example/toy-projects/actions/runs/99"
         body = "\n".join(
@@ -199,6 +228,7 @@ class WorkflowPublicationContractTests(unittest.TestCase):
             "discover",
             "verify",
             "gui-build",
+            "native-product",
             "quality-zoo-contract",
             "benchmark-smoke",
             "diskmap-benchmark-smoke",
@@ -312,15 +342,18 @@ class WorkflowPublicationContractTests(unittest.TestCase):
         self.assertIn("exactly one PKG-INFO", block)
         self.assertIn("envlens sdist unexpectedly declares dependencies", block)
 
-    def test_manifest_and_report_contract_are_dynamic_for_four_projects(self) -> None:
+    def test_manifest_and_report_contract_are_dynamic_for_five_projects(self) -> None:
         manifest = json.loads(
             (Path(__file__).resolve().parents[1] / "ci" / "projects.json").read_text(
                 encoding="utf-8"
             )
         )
         names = [entry["name"] for entry in manifest["projects"]]
-        self.assertEqual(names, ["diskmap", "loglens", "buildscope", "envlens"])
-        self.assertEqual(len(names), 4)
+        self.assertEqual(
+            names,
+            ["diskmap", "loglens", "buildscope", "envlens", "abilens"],
+        )
+        self.assertEqual(len(names), 5)
 
         report_block = _job_block("report-pr")
         self.assertIn(
@@ -329,7 +362,112 @@ class WorkflowPublicationContractTests(unittest.TestCase):
         self.assertIn(
             "EXPECTED_REPORTS: ${{ needs.discover.outputs.count }}", report_block
         )
+        self.assertIn(
+            "if: ${{ needs.discover.outputs.count != '0' }}\n        uses: actions/download-artifact@",
+            report_block,
+        )
         self.assertNotIn("exact-three-project", WORKFLOW)
+
+    def test_discovery_is_path_aware_and_records_skipped_scope(self) -> None:
+        block = _job_block("discover")
+
+        self.assertIn("fetch-depth: 0", block)
+        self.assertIn(
+            "GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}", block
+        )
+        self.assertIn(
+            "GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha }}", block
+        )
+        self.assertIn('--base-sha "$GITHUB_BASE_SHA"', block)
+        self.assertIn('--head-sha "$GITHUB_HEAD_SHA"', block)
+        for output in (
+            "all_names",
+            "skipped_names",
+            "skipped_count",
+            "scope_mode",
+            "scope_reason",
+            "quality_zoo_mode",
+            "quality_zoo_scenarios",
+        ):
+            self.assertIn(
+                f"{output}: ${{{{ steps.manifest.outputs.{output} }}}}", block
+            )
+        self.assertIn("GITHUB_STEP_SUMMARY", WORKFLOW)
+        self.assertIn("not run (not PASS)", WORKFLOW)
+
+    def test_native_product_checks_are_separate_from_ici_verify(self) -> None:
+        native = _job_block("native-product")
+        verify = _job_block("verify")
+
+        self.assertIn("Native product checks", native)
+        self.assertIn("native_projects", native)
+        self.assertIn('make -j"$(nproc)"', native)
+        self.assertIn('make "$TEST_TARGET"', native)
+        self.assertNotIn("ici.pyz verify", native)
+        self.assertIn("ici.pyz verify", verify)
+
+    def test_abilens_is_non_gui_but_has_a_native_matrix_entry(self) -> None:
+        manifest = json.loads(
+            (Path(__file__).resolve().parents[1] / "ci" / "projects.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        abilens = next(
+            item for item in manifest["projects"] if item["name"] == "abilens"
+        )
+        self.assertEqual(abilens["gui"], {"enabled": False})
+        self.assertEqual(abilens["native"]["build_system"], "make")
+        self.assertEqual(abilens["native"]["build_target"], "all")
+        self.assertEqual(abilens["native"]["test_target"], "test")
+        discover = _job_block("discover")
+        self.assertIn("native_projects", discover)
+        self.assertIn("native_count", discover)
+        self.assertNotIn(
+            "abilens",
+            "\n".join(
+                line
+                for line in _job_block("gui-build").splitlines()
+                if "matrix" in line
+            ),
+        )
+
+    def test_quality_zoo_can_select_scenarios_and_falls_back_explicitly(self) -> None:
+        block = _job_block("quality-zoo-contract")
+
+        self.assertIn("QUALITY_ZOO_MODE", block)
+        self.assertIn("QUALITY_ZOO_SCENARIOS", block)
+        self.assertIn('scenario_args+=(--scenario "$scenario")', block)
+        self.assertIn(
+            "unknown Quality Zoo path; fail-closed full scenario scope", WORKFLOW
+        )
+        self.assertIn(
+            "if: ${{ needs.discover.outputs.quality_zoo_mode != 'skipped' }}", block
+        )
+
+    def test_path_scoped_jobs_are_skipped_without_being_called_successful(self) -> None:
+        for job, token in (
+            ("verify", "needs.discover.outputs.count != '0'"),
+            ("native-product", "needs.discover.outputs.native_count != '0'"),
+            ("benchmark-smoke", "contains(needs.discover.outputs.names, 'loglens')"),
+            (
+                "diskmap-benchmark-smoke",
+                "contains(needs.discover.outputs.names, 'diskmap')",
+            ),
+            (
+                "buildscope-ici-deep",
+                "contains(needs.discover.outputs.names, 'buildscope')",
+            ),
+            (
+                "envlens-python-quality",
+                "contains(needs.discover.outputs.names, 'envlens')",
+            ),
+        ):
+            with self.subTest(job=job):
+                self.assertIn(token, _job_block(job))
+        gate = _job_block("merge-gate")
+        self.assertIn("require_selected", gate)
+        self.assertIn("was not selected but concluded", gate)
+        self.assertIn('test "$QUALITY_ZOO_RESULT" = skipped', gate)
 
     def test_buildscope_release_pipeline_has_a_fixed_fail_closed_order(self) -> None:
         step_names = (

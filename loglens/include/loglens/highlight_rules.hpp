@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -29,6 +30,8 @@ public:
 
     // Higher priority wins an overlap; ties go to the earlier match.
     std::vector<Span> apply(const std::string& text) const;
+    // Returns the strongest whole-line rule, using insertion order for ties.
+    std::optional<std::string> rowStyle() const;
 
 private:
     std::vector<Rule> rules_;

@@ -7,12 +7,17 @@
 # shares a directory and a basename with a source in the target; anywhere else
 # it has to be named here or moc never runs on it.
 add_library(loglens_gui STATIC
+    highlight_delegate.cpp
     log_load_worker.cpp
     log_model.cpp
+    main_window_analysis.cpp
+    main_window_investigation.cpp
     main_window.cpp
     main_window_persistence.cpp
+    main_window_triage.cpp
     timeline_widget.cpp
     ${CMAKE_SOURCE_DIR}/include/loglens/gui/log_load_worker.hpp
+    ${CMAKE_SOURCE_DIR}/include/loglens/gui/highlight_delegate.hpp
     ${CMAKE_SOURCE_DIR}/include/loglens/gui/log_model.hpp
     ${CMAKE_SOURCE_DIR}/include/loglens/gui/main_window.hpp
     ${CMAKE_SOURCE_DIR}/include/loglens/gui/timeline_widget.hpp

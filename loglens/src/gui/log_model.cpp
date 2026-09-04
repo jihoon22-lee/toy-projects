@@ -6,6 +6,7 @@
 
 #include <QBrush>
 #include <QColor>
+#include <QFont>
 
 namespace {
 
@@ -45,11 +46,13 @@ QString columnText(const loglens::LogRecord& record, int column) {
         return QString::fromLatin1(loglens::levelName(record.level));
     }
     if (column == LogModel::ColumnSource) {
-        return QString::fromStdString(record.source);
+        return QString::fromUtf8(record.source.data(), static_cast<int>(record.source.size()));
     }
     // Multi-line messages (a folded stack trace) would break row height, so the
     // table shows the first line and the tooltip carries the rest.
-    QString message = QString::fromStdString(record.message).section(QLatin1Char('\n'), 0, 0);
+    QString message = QString::fromUtf8(record.message.data(),
+                                        static_cast<int>(record.message.size()))
+                          .section(QLatin1Char('\n'), 0, 0);
     if (record.omitted_bytes > 0) {
         message += QStringLiteral("  [%1 source byte(s) omitted]")
                        .arg(static_cast<qulonglong>(record.omitted_bytes));
@@ -90,6 +93,30 @@ void LogModel::setSearch(const QString& search) {
     search_ = search.trimmed();
     rebuildVisible();
     endResetModel();
+}
+
+void LogModel::setTimeWindow(std::optional<loglens::TimeWindow> window) {
+    beginResetModel();
+    if (window && window->begin_ms >= window->end_ms) {
+        time_window_.reset();
+    } else {
+        time_window_ = window;
+    }
+    rebuildVisible();
+    endResetModel();
+}
+
+void LogModel::setTriageState(const loglens::TriageState& state,
+                              const QString& sourcePath) {
+    highlight_rules_ = loglens::compileHighlightRules(state);
+    triage_entries_ = state.entries;
+    const QByteArray path = sourcePath.toUtf8();
+    source_path_.assign(path.constData(), static_cast<std::size_t>(path.size()));
+    if (rowCount() > 0) {
+        emit dataChanged(index(0, 0), index(rowCount() - 1, ColumnCount - 1),
+                         {Qt::DisplayRole, Qt::BackgroundRole, Qt::FontRole,
+                          Qt::ToolTipRole});
+    }
 }
 
 void LogModel::appendRecords(const std::vector<loglens::LogRecord>& records) {
@@ -208,7 +235,7 @@ void LogModel::rebuildVisible() {
     }
 }
 
-bool LogModel::matches(const loglens::LogRecord& record) const {
+bool LogModel::matchesBase(const loglens::LogRecord& record) const {
     if (filter_ && !filter_->matches(record)) {
         return false;
     }
@@ -219,11 +246,55 @@ bool LogModel::matches(const loglens::LogRecord& record) const {
     return raw.contains(search_, Qt::CaseInsensitive);
 }
 
+bool LogModel::matches(const loglens::LogRecord& record) const {
+    if (!matchesBase(record)) return false;
+    if (!time_window_) return true;
+    return record.timestamp_ms != 0 && record.timestamp_ms >= time_window_->begin_ms
+           && record.timestamp_ms < time_window_->end_ms;
+}
+
 const loglens::LogRecord* LogModel::recordAt(int row) const {
     if (row < 0 || row >= static_cast<int>(visible_.size())) {
         return nullptr;
     }
     return records_.find(visible_[static_cast<std::size_t>(row)]);
+}
+
+std::vector<loglens::LogRecord> LogModel::visibleRecords(bool includeTimeWindow) const {
+    std::vector<loglens::LogRecord> result;
+    result.reserve(records_.size());
+    for (std::size_t index = 0; index < records_.size(); ++index) {
+        const loglens::LogRecord& record = records_.at(index);
+        if (includeTimeWindow ? matches(record) : matchesBase(record)) {
+            result.push_back(record);
+        }
+    }
+    return result;
+}
+
+std::vector<loglens::Span> LogModel::highlightSpansAt(int row) const {
+    const loglens::LogRecord* record = recordAt(row);
+    return record == nullptr ? std::vector<loglens::Span>{}
+                             : highlight_rules_.apply(record->message);
+}
+
+int LogModel::rowForLine(std::size_t lineNumber) const {
+    for (std::size_t row = 0; row < visible_.size(); ++row) {
+        const loglens::LogRecord* record = records_.find(visible_[row]);
+        if (record != nullptr && record->line_number == lineNumber) {
+            return static_cast<int>(row);
+        }
+    }
+    return -1;
+}
+
+bool LogModel::bookmarkedAt(int row) const {
+    const loglens::LogRecord* record = recordAt(row);
+    if (record == nullptr) return false;
+    return std::any_of(triage_entries_.begin(), triage_entries_.end(), [&](const auto& entry) {
+        return entry.source_path == source_path_ && entry.line_number == record->line_number
+               && entry.bookmarked;
+    });
 }
 
 int LogModel::totalCount() const { return static_cast<int>(records_.size()); }
@@ -269,8 +340,33 @@ QVariant LogModel::data(const QModelIndex& index, int role) const {
     if (role == Qt::ForegroundRole) {
         return QBrush(colourFor(record->level));
     }
+    if (role == Qt::BackgroundRole) {
+        const std::optional<std::string> rowStyle = highlight_rules_.rowStyle();
+        if (rowStyle) {
+            QColor color(QString::fromStdString(*rowStyle));
+            color.setAlpha(105);
+            return QBrush(color);
+        }
+        if (bookmarkedAt(index.row())) return QBrush(QColor(48, 72, 96, 150));
+    }
+    if (role == Qt::FontRole && bookmarkedAt(index.row())) {
+        QFont font;
+        font.setBold(true);
+        return font;
+    }
     if (role == Qt::ToolTipRole) {
-        QString tooltip = QString::fromStdString(record->raw);
+        QString tooltip = QString::fromUtf8(record->raw.data(),
+                                            static_cast<int>(record->raw.size()));
+        const auto annotation = std::find_if(
+            triage_entries_.begin(), triage_entries_.end(), [&](const auto& entry) {
+                return entry.source_path == source_path_
+                       && entry.line_number == record->line_number;
+            });
+        if (annotation != triage_entries_.end() && !annotation->annotation.empty()) {
+            tooltip += QStringLiteral("\n\nAnnotation: ")
+                       + QString::fromUtf8(annotation->annotation.data(),
+                                           static_cast<int>(annotation->annotation.size()));
+        }
         if (record->omitted_bytes > 0) {
             tooltip += QStringLiteral("\n[%1 source byte(s) omitted]")
                            .arg(static_cast<qulonglong>(record->omitted_bytes));

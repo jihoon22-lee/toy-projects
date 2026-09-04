@@ -2,6 +2,60 @@
 
 ## Unreleased
 
+### Consolidated portfolio quality tooling
+
+- Kept AbiLens's ordinary ici configuration compatible with the checksummed
+  public `v0.10.2` consumer gate, and moved its newer Make, ELF compatibility,
+  and executable integration policy into an explicit candidate-only overlay.
+- Completed LogLens option initialization in the benchmark and GUI tests so
+  the warning-as-error benchmark build remains synchronized with persisted
+  triage configuration.
+- Added path-aware project and Quality Zoo selection to the shared CI discovery
+  contract. PR changes now run only affected projects/scenarios, common
+  contract paths fan out to the complete stable scope, and `main`/manual runs
+  remain full-scope. Selected and skipped items are recorded separately so a
+  skipped project cannot be mistaken for a passing check; an empty docs-only
+  scope produces one scope-only sticky result without stale report links.
+- Added AbiLens, a dependency-free C++20/Linux ELF artifact inspector. It
+  performs bounded direct ELF checks, a shell-free GNU `readelf` capability
+  probe, deterministic `abilens.report/v1` and `abilens.diff/v1` output,
+  typed GLIBC/GLIBCXX/CXXABI and dynamic-dependency evidence, policy checks,
+  strict report parsing, and ownership-guarded Make output trees. Header and
+  tool evidence share one open descriptor; ordinary path replacement or
+  in-place mutation is rejected before a report can be accepted. Parallel
+  Make targets share one output-ownership prerequisite instead of racing to
+  establish the marker. Its product metadata remains `0.1.0`/`Unreleased`.
+- Extended the candidate-only Quality Zoo registry from ten to sixteen
+  scenarios. The expansion covers C++ static build context, malformed compile
+  databases, coverage/quality thresholds, Python compatibility/package
+  metadata, import cycles and exception handling, and maintainability
+  thresholds. All six newly added scenarios have exact executable-digest
+  selectors and their focused local contract run is `6/6 PASS`; the full
+  accepted-candidate local run is `15/16 PASS` because this host has no
+  `clazy` for the Qt lifetime case. The released six-scenario manifest and
+  stable ici pin are unchanged.
+- Added the LogLens investigation workbench. The Qt GUI now persists bounded
+  highlight rules, bookmarks, and source-line annotations; shows parsed fields,
+  diagnostics, and raw evidence; streams selected rows as bounded
+  `loglens.selection/v1` JSON with byte-preserving raw/message/source fields;
+  and compares half-open timeline windows using
+  deterministic new-pattern, rate-spike, and raw-correlation signals with
+  source-line navigation. Qt5 and Qt6 focused suites each pass `18/18`, and
+  the TSan-partitioned suite passes `41/41`, including three real queued-worker
+  protocol cases. LogLens remains `0.1.0`/`Unreleased`.
+- The exact non-stable ici candidate built from `ccb2067c656492c549dae8f4abc198a69ea013c2`
+  has executable SHA-256 `23d9922b94b2ba34ab8884cd2d39c8eda358ccb32d0925af5c0a3d52a7ddc893`.
+  Its local sixteen-scenario Quality Zoo run is `15/16 PASS`; the sole failure
+  is the Qt lifetime scenario because this host has no `clazy`, while the other
+  fifteen contracts have zero errors. The same candidate's AbiLens deep run
+  exits `0` with `11 PASS / 3 WARN / 0 FAIL / 0 ERROR / 5 SKIP`, TEM `4.75`,
+  complexity maximum `14` across 194 functions, duplication `3.71%`, and
+  measured sanitizer, ThreadSanitizer, build, binary-compatibility, and
+  integration PASS results. The earlier LogLens candidate run remains valid
+  local evidence (`18/18` tests, `90.5% / 96.1% / 78.0%` coverage, TEM `4.81`),
+  and its native TSan partition passes `41/41`. None of these local results is
+  PR, Pages, merge, or stable-release evidence.
+
 - Refactored DiskMap's UTF-8 lead-byte decoder to return one typed bounds value,
   removing easily-swapped output parameters and duplicate conditional bodies found by
   the released ici/LLVM 18 analysis.

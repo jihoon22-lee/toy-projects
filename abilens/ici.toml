@@ -1,0 +1,16 @@
+[project]
+name = "abilens"
+type = "cpp"
+version = "0.1.0"
+source_dirs = ["include", "src", "tests"]
+
+# The public ici release used by ordinary toy-project CI predates the Make,
+# binary-compatibility, and integration engines. It still performs the stable
+# static source analysis. Native tests and sanitizer variants are owned by the
+# separate native CI job because that release cannot drive this handwritten
+# C++20 Makefile without trying to reconstruct the program as C++17.
+[engines.test]
+enabled = false
+
+[engines.sanitize]
+enabled = false

@@ -3,16 +3,26 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 CI_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(CI_DIR))
 
-from check_manifest import SUPPORTED_QT_MAJORS, discover
+from check_manifest import (
+    SUPPORTED_QT_MAJORS,
+    ScopeSelection,
+    discover,
+    discover_native,
+    discover_with_scope,
+    select_scope,
+    write_github_outputs,
+)
 
 
 class ManifestDiscoveryTests(unittest.TestCase):
@@ -75,7 +85,10 @@ class ManifestDiscoveryTests(unittest.TestCase):
     def test_current_projects_expand_gui_projects_to_both_qt_majors(self) -> None:
         verify_projects, gui_projects, names = discover(CI_DIR.parent)
 
-        self.assertEqual(names, ["diskmap", "loglens", "buildscope", "envlens"])
+        self.assertEqual(
+            names,
+            ["diskmap", "loglens", "buildscope", "envlens", "abilens"],
+        )
         self.assertEqual([item["name"] for item in verify_projects], names)
         self.assertNotIn("envlens", [item["name"] for item in gui_projects])
         self.assertEqual(
@@ -202,6 +215,217 @@ class ManifestDiscoveryTests(unittest.TestCase):
         self.assertEqual(names, ["sample"])
         self.assertEqual(verify_projects, [{"name": "sample"}])
         self.assertEqual(gui_projects, [])
+
+    def test_native_make_metadata_is_a_separate_non_gui_matrix(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self._manifest_for("sample")
+            manifest["projects"][0]["gui"]["enabled"] = False
+            manifest["projects"][0]["native"] = {
+                "enabled": True,
+                "build_system": "make",
+                "build_target": "all",
+                "test_target": "test",
+            }
+            self._write_repository(
+                root,
+                manifest,
+                descriptors=(),
+                smoke_files=(),
+            )
+
+            verify_projects, gui_projects, names = discover(root)
+            native_projects = discover_native(root)
+
+        self.assertEqual(verify_projects, [{"name": "sample"}])
+        self.assertEqual(gui_projects, [])
+        self.assertEqual(names, ["sample"])
+        self.assertEqual(
+            native_projects,
+            [
+                {
+                    "name": "sample",
+                    "build_system": "make",
+                    "build_target": "all",
+                    "test_target": "test",
+                }
+            ],
+        )
+
+    def test_native_metadata_rejects_shell_like_make_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self._manifest_for("sample")
+            manifest["projects"][0]["gui"]["enabled"] = False
+            manifest["projects"][0]["native"] = {
+                "enabled": True,
+                "build_system": "make",
+                "build_target": "all; touch /tmp/pwned",
+                "test_target": "test",
+            }
+            self._write_repository(root, manifest, descriptors=(), smoke_files=())
+
+            with self.assertRaisesRegex(ValueError, "invalid .*native.build_target"):
+                discover(root)
+
+    def test_pull_request_selects_only_abilens_and_marks_other_projects_skipped(
+        self,
+    ) -> None:
+        names = ("diskmap", "loglens", "buildscope", "envlens", "abilens")
+        selection = select_scope(
+            names,
+            ["abilens/src/main.cpp"],
+            event_name="pull_request",
+        )
+
+        self.assertIsInstance(selection, ScopeSelection)
+        self.assertEqual(selection.mode, "affected")
+        self.assertEqual(selection.selected_names, ("abilens",))
+        self.assertEqual(
+            selection.skipped_names,
+            ("diskmap", "loglens", "buildscope", "envlens"),
+        )
+        self.assertNotIn("PASS", selection.reason)
+
+    def test_shared_docs_ci_manifest_and_workflow_changes_fan_out_every_project(
+        self,
+    ) -> None:
+        names = ("diskmap", "loglens", "buildscope", "envlens", "abilens")
+        for path in (
+            "ci/README.md",
+            "ci/projects.json",
+            ".github/workflows/ci.yml",
+            "quality-zoo/runner/common.py",
+            "quality-zoo/manifest.json",
+        ):
+            with self.subTest(path=path):
+                selection = select_scope(names, [path], event_name="pull_request")
+                self.assertEqual(selection.mode, "full")
+                self.assertEqual(selection.selected_names, names)
+                self.assertEqual(selection.skipped_names, ())
+
+    def test_quality_zoo_scenario_change_selects_only_that_known_answer(self) -> None:
+        mapping = {
+            "python.dead-private-function": "scenarios/python/dead-private-function",
+            "cpp.sanitizer-clean": "scenarios/cpp/sanitizer-clean",
+        }
+        selection = select_scope(
+            ("diskmap", "abilens"),
+            ["quality-zoo/scenarios/python/dead-private-function/src/bad.py"],
+            event_name="pull_request",
+            quality_zoo_scenarios=mapping,
+        )
+
+        self.assertEqual(selection.mode, "affected")
+        self.assertEqual(selection.selected_names, ())
+        self.assertEqual(selection.skipped_names, ("diskmap", "abilens"))
+        self.assertEqual(selection.quality_zoo_mode, "selected")
+        self.assertEqual(
+            selection.quality_zoo_scenarios,
+            ("python.dead-private-function",),
+        )
+
+    def test_quality_zoo_unknown_path_falls_back_to_all_and_docs_can_skip(self) -> None:
+        mapping = {
+            "python.dead-private-function": "scenarios/python/dead-private-function",
+        }
+        unknown = select_scope(
+            ("abilens",),
+            ["quality-zoo/scripts/new_runner.py"],
+            event_name="pull_request",
+            quality_zoo_scenarios=mapping,
+        )
+        self.assertEqual(unknown.quality_zoo_mode, "all")
+        self.assertIn("fail-closed", unknown.quality_zoo_reason)
+
+        docs = select_scope(
+            ("abilens",),
+            ["quality-zoo/README.md"],
+            event_name="pull_request",
+            quality_zoo_scenarios=mapping,
+        )
+        self.assertEqual(docs.quality_zoo_mode, "skipped")
+        self.assertEqual(docs.quality_zoo_scenarios, ())
+
+    def test_push_manual_and_explicit_full_always_select_everything(self) -> None:
+        names = ("diskmap", "abilens")
+        for event_name in ("push", "workflow_dispatch", "workflow_call"):
+            with self.subTest(event_name=event_name):
+                selection = select_scope(
+                    names,
+                    ["README.md"],
+                    event_name=event_name,
+                )
+                self.assertEqual(selection.mode, "full")
+                self.assertEqual(selection.selected_names, names)
+                self.assertEqual(selection.quality_zoo_mode, "all")
+        selection = select_scope(
+            names,
+            [],
+            event_name="pull_request",
+            force_full=True,
+        )
+        self.assertEqual(selection.mode, "full")
+        self.assertEqual(selection.selected_names, names)
+
+    def test_malformed_diff_path_fails_closed_to_full_scope(self) -> None:
+        selection = select_scope(
+            ("diskmap", "abilens"),
+            ["../abilens/src/main.cpp"],
+            event_name="pull_request",
+        )
+        self.assertEqual(selection.mode, "full")
+        self.assertEqual(selection.selected_names, ("diskmap", "abilens"))
+        self.assertIn("fail-closed", selection.reason)
+        self.assertEqual(selection.quality_zoo_mode, "all")
+
+    def test_scoped_discovery_filters_verify_and_gui_matrices(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._write_repository(root, self._manifest_for("sample"))
+            verify_projects, gui_projects, names, selection = discover_with_scope(
+                root,
+                event_name="pull_request",
+                changed_paths=["sample/src/main.cpp"],
+            )
+
+        self.assertEqual(names, ["sample"])
+        self.assertEqual(verify_projects, [{"name": "sample"}])
+        self.assertEqual(len(gui_projects), len(SUPPORTED_QT_MAJORS))
+        self.assertEqual(selection.selected_names, ("sample",))
+        self.assertEqual(selection.skipped_names, ())
+
+    def test_github_outputs_expose_selected_and_skipped_scope(self) -> None:
+        selection = ScopeSelection(
+            mode="affected",
+            all_names=("diskmap", "abilens"),
+            selected_names=("abilens",),
+            skipped_names=("diskmap",),
+            reason="affected project paths",
+            changed_paths=("abilens/src/main.cpp",),
+            quality_zoo_mode="skipped",
+            quality_zoo_scenarios=(),
+            quality_zoo_reason="no Quality Zoo paths changed",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "output"
+            with mock.patch.dict(os.environ, {"GITHUB_OUTPUT": str(output)}):
+                write_github_outputs(
+                    [{"name": "abilens"}],
+                    [],
+                    ["diskmap", "abilens"],
+                    selection,
+                )
+            lines = output.read_text(encoding="utf-8").splitlines()
+
+        self.assertIn("names=abilens", lines)
+        self.assertIn("count=1", lines)
+        self.assertIn("all_names=diskmap,abilens", lines)
+        self.assertIn("skipped_names=diskmap", lines)
+        self.assertIn("skipped_count=1", lines)
+        self.assertIn("scope_mode=affected", lines)
+        self.assertIn('changed_paths=["abilens/src/main.cpp"]', lines)
+        self.assertIn("quality_zoo_mode=skipped", lines)
 
     def test_manifest_root_must_be_an_object(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

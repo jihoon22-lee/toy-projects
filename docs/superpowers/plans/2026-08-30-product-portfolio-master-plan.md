@@ -1,7 +1,7 @@
 # toy-projects 제품 포트폴리오와 ici 실물 검증 마스터 계획
 
 **상태:** 승인된 장기 마스터 계획. 2026-08-30 이후 toy-projects의 기능 우선순위, 신규 프로젝트 선정과 완료 조건은 이 문서를 기준으로 판단한다.
-**문서 기준일:** 2026-09-03. 이 계획은 toy-projects [PR #12](https://github.com/jihoon22-lee/toy-projects/pull/12)로 `main`에 병합됐다. 현재 완료 상태는 이 문서의 체크리스트와 병합된 PR을 함께 기준으로 삼는다.
+**문서 기준일:** 2026-09-04. 이 계획은 toy-projects [PR #12](https://github.com/jihoon22-lee/toy-projects/pull/12)로 `main`에 병합됐다. 현재 완료 상태는 이 문서의 체크리스트와 병합된 PR을 함께 기준으로 삼는다.
 
 **목표:** `loglens`와 `diskmap`을 실제로 쓸 만한 완성도 높은 Qt 제품으로 발전시키고, ici의 Python·C++·Qt 분석 공백을 메우는 `buildscope`, `envlens`, `abilens`와 `quality-zoo`를 단계적으로 구축한다.
 
@@ -26,15 +26,16 @@
 
 ## 2. 현재 포트폴리오와 검증 공백
 
-2026-09-03 기준:
+2026-09-04 기준:
 
 | 프로젝트 | 현재 형태 | 실측 | 제품 상태 |
 |---|---|---|---|
-| loglens | C++17, Qt, CMake | L2 bounded/background slice · PR #25 CI green · local Qt5/Qt6 14 CTest targets · 1 GiB benchmark PR #26 merged · main Qt5/Qt6 sweep green | Tail N/From start와 worker UX, benchmark/default 8192 완료 |
+| loglens | C++17, Qt, CMake | L2 bounded/background slice · local Qt5/Qt6 native CTest 18/18·18/18 · TSan partition 41/41 · WSLg smoke · 1 GiB benchmark PR #26 merged | L4/L5 triage·window analysis와 L6 local-only gate 완료; current remote PR/Pages·stable release는 pending |
 | diskmap | C++17, Qt, qmake | D1/D2 complete · D3 explorer workbench merged by PR #46 and exact-main green · D4~D6 local storage implementation/aggregate/deep evidence · `0.1.0`/`Unreleased` | treemap/table, filters, uncertainty, accessible navigation, rescan restoration과 storage evidence workbench verified; D4~D6 remote evidence와 D7 release 조건은 pending |
 | buildscope | Python + C++17/Qt, CMake | B0~B5 implementation, remote acceptance, exact-main CI, trusted main Pages와 `0.5.0` tag/release/public asset audit complete | B3~B5 첫 usable release boundary published and audited |
 | envlens | pure Python 3.10+ package/CLI | deterministic snapshot core · path-aware manifest/CI matrix · PR #50 merged · exact-main green | `0.1.0`/`Unreleased`; E2/E3 local implementation은 완료됐고 ici 교차검증과 release는 pending |
-| quality-zoo | Python 3.10, stdlib runner | scenario contract/local candidate consumer · four C++ sanitizer scenarios locally verified for released/candidate digests · released-artifact PR #49 remote PR CI/sticky/exact-main complete · exact-revision candidate cross-repo acceptance complete (run `33710695336`) · Q2 runtime ASan/LSan/UBSan-plus-clean sub-scope complete | test asset only; broader Q2 and Q1~Q5 corpus pending |
+| abilens | C++20, Linux, hand-written Makefile | local `make check coverage sanitize thread-sanitize` exit 0 · single-open input identity · current ici candidate deep binary/integration/sanitizer/TSan evidence | ELF/ABI 기능과 local gate 완료; remote PR/Pages·stable release는 pending |
+| quality-zoo | Python 3.10, stdlib runner | scenario contract/local candidate consumer · current candidate 16 scenarios 중 15/16 local contract PASS (Qt는 host `clazy` unavailable) · 새 Python/C++ 6개 focused contract 6/6 PASS | test asset only; 새 6개는 candidate-local evidence만 완료, remote candidate acceptance·Pages·stable corpus promotion은 pending |
 | ici/viewer | Qt-free core + Qt6 GUI | 3 tests, TEM 4.94 | core 중심, 셸과 report workflow 부족 |
 
 현재 공백:
@@ -386,8 +387,9 @@ PR #45로, GUI explorer workbench는 PR #46으로 병합됐고 exact-main verifi
 DiskMap product version은 `0.1.0`/`Unreleased`를 유지한다. exact PR/main artifact·Pages 표는
 [D3 explorer workthrough](../../../workthrough/2026-09-02-diskmap-explorer-workbench.md)에
 중앙화했다.
-L3 parser/filter 구현과 local evidence는 완료됐고, L4~L6 triage/window analysis와 release 완료
-조건은 체크리스트에 남긴다.
+L3 parser/filter 구현과 local evidence는 완료됐다. 2026-09-04 기준 L4/L5 기능과 L6의
+local-only gate도 구현·검증됐지만, remote PR/Pages·released-ici cross-check와 stable release
+조건은 pending으로 남긴다.
 
 ### L3. parser와 filter 완성도
 
@@ -434,31 +436,45 @@ L3 parser/filter 구현과 local evidence는 완료됐고, L4~L6 triage/window a
 
 **브랜치:** `feat/loglens-triage-workbench`
 
-- [ ] 기존 HighlightRules를 table delegate/detail view에 연결한다.
-- [ ] rule create/edit/delete/reorder, preview, persistence를 제공한다.
-- [ ] bookmark, annotation, selected rows export를 제공한다.
-- [ ] record detail pane에 raw/parsed fields와 source location을 표시한다.
-- [ ] filter/timeline/table selection을 같은 visible record set으로 동기화한다.
-- [ ] malformed rules와 config migration을 테스트한다.
+2026-09-04 local Qt5/Qt6 focused GUI/native evidence에서 아래 구현을 확인했다. 이 상태는
+remote PR/Pages 또는 stable release를 의미하지 않는다.
+
+- [x] 기존 HighlightRules를 table delegate/detail view에 연결한다.
+- [x] rule create/edit/delete/reorder, preview, persistence를 제공한다.
+- [x] bookmark, annotation, selected rows export를 제공한다.
+- [x] record detail pane에 raw/parsed fields와 source location을 표시한다.
+- [x] filter/timeline/table selection을 같은 visible record set으로 동기화한다.
+- [x] malformed rules와 config migration을 테스트한다.
 
 ### L5. 구간 비교와 이상 신호
 
 **브랜치:** `feat/loglens-window-analysis`
 
-- [ ] 두 시간 구간의 level/source/pattern rate를 비교한다.
-- [ ] deterministic rate spike와 new-pattern detection을 먼저 제공한다.
-- [ ] correlation/request/thread id field grouping을 지원한다.
-- [ ] heuristic 결과에 score와 설명을 붙이고 “AI 판정”처럼 표현하지 않는다.
-- [ ] 분석 결과에서 원본 record 구간으로 이동한다.
+2026-09-04 local window-analysis tests와 GUI 연결 검증에서 아래 기능을 확인했다. 결과는
+결정적 heuristic evidence이며 원격 acceptance나 release evidence가 아니다.
+
+- [x] 두 시간 구간의 level/source/pattern rate를 비교한다.
+- [x] deterministic rate spike와 new-pattern detection을 먼저 제공한다.
+- [x] correlation/request/thread id field grouping을 지원한다.
+- [x] heuristic 결과에 score와 설명을 붙이고 “AI 판정”처럼 표현하지 않는다.
+- [x] 분석 결과에서 원본 record 구간으로 이동한다.
 
 ### L6. loglens release 완료 조건
 
-- [ ] bounded memory와 partial/rotation correctness benchmark 통과
-- [ ] Qt5/Qt6 CI, headless test와 실제 WSLg smoke 통과
-- [ ] CLI와 GUI가 parser/filter/store 의미론을 공유
-- [ ] highlight/bookmark/export가 실제 UI에서 사용 가능
-- [ ] ici standard profile PASS, deep profile limitation 문서화
-- [ ] install/run/recovery guide와 sample data 제공
+L4/L5와 함께 local-only 범위는 닫혔다. Qt5 정상 `18/18`, Qt6 정상 `18/18`, TSan
+partition `41/41`, WSLg smoke, exact ici candidate deep no-cache 실행(종료 `0`,
+test engine `18/18 PASS`, line/function/branch `90.5% / 96.1% / 78.0%`, TEM `4.81`,
+`10 PASS / 2 WARN / 4 SKIP`)을 local evidence로 보존한다. 원격 PR/Pages,
+released-ici standard profile과 stable release artifact는 아직 확인하지 않았다.
+
+- [x] bounded memory와 partial/rotation correctness benchmark 통과
+- [x] Qt5/Qt6 native CTest·headless test와 실제 WSLg smoke를 local에서 통과한다.
+- [ ] PR/exact-main CI·Pages에서 Qt5/Qt6와 GUI smoke를 통과하고 결과를 게시한다. (remote pending)
+- [x] CLI와 GUI가 parser/filter/store 의미론을 공유한다.
+- [x] highlight/bookmark/export가 실제 UI에서 사용 가능하다.
+- [x] exact ici candidate deep no-cache 결과와 lint/tool limitation을 문서화한다.
+- [ ] released-ici standard profile 및 stable release artifact/provenance gate를 통과한다. (pending)
+- [x] install/run/recovery guide와 sample data를 제공한다.
 
 ---
 
@@ -1395,47 +1411,73 @@ abilens/
 - standard targets와 argv는 ici Make adapter 설계와 함께 확정한다.
 - readelf/objdump를 실행할 경우 subprocess adapter와 output parser를 core에서 분리한다.
 
-- [ ] `make all`, `make test`, coverage/sanitize variant의 요구 계약을 문서화한다.
-- [ ] ici adapter가 없는 초기 red state를 ICI-GAPS에 기록하고 숨기지 않는다.
+2026-09-04 기준 AbiLens의 기능 구현과 native Make gate는 local에서 완료됐다. ici
+[PR #154](https://github.com/jihoon22-lee/ici/pull/154)가 Make adapter의 `make test`
+process evidence를 sanitizer/ThreadSanitizer에 연결했고 exact-main run `33851206764`도
+통과했다. 제품 version은 `0.1.0`/`Unreleased`를 유지한다.
+
+- [x] `make all`, `make test`, coverage/sanitize variant의 요구 계약을 문서화한다.
+- [x] ici adapter가 없는 초기 red state를 ICI-GAPS에 기록하고 숨기지 않는다. (A-2 historical gap; current Make evidence issue는 ici PR #154에서 해결)
 
 ### A1. ELF evidence reader
 
 **브랜치:** `feat/abilens-elf-reader`
 
-- [ ] input identity, magic/class/endian/machine을 검증한다.
-- [ ] system readelf capability와 version을 확인한다.
-- [ ] dynamic section과 version need output을 typed record로 파싱한다.
-- [ ] stripped binary, static binary, non-ELF, corrupted ELF를 구분한다.
-- [ ] tool output truncation/locale variation을 fixture로 테스트한다.
-- [ ] binary를 실행하거나 library를 load하지 않는다.
+2026-09-04 local parser/integration/strict-report tests와 bounded GNU `readelf` capability
+검증을 통과했다. 지원 범위와 제한은 AbiLens 문서에 기록했으며 remote/stable release
+evidence는 별도 pending이다.
+
+- [x] 하나의 open descriptor로 input identity를 고정하고 magic/class/endian/machine과
+      `readelf` evidence가 같은 파일을 가리키는지 검증한다. 수집 전후 fd와 원래 path의
+      device/inode/mode/size/mtime/ctime을 재검증해 일반적인 path 교체·in-place 변경을
+      fail closed한다. Linux `/proc/self/fd`가 필요하며 privileged content-change-and-restore를
+      막는 cryptographic snapshot은 지원 경계 밖이다.
+- [x] system readelf capability와 version을 확인한다.
+- [x] dynamic section과 version need output을 typed record로 파싱한다.
+- [x] stripped binary, static binary, non-ELF, corrupted ELF를 구분한다.
+- [x] bounded tool output truncation과 fixed C-locale capability 경계를 fixture로 테스트한다.
+- [x] binary를 실행하거나 library를 load하지 않는다.
 
 ### A2. compatibility policy와 diff
 
 **브랜치:** `feat/abilens-compat-diff`
 
-- [ ] maximum GLIBC/GLIBCXX/CXXABI required version을 계산한다.
-- [ ] configured platform floor와 비교해 actionable result를 만든다.
-- [ ] NEEDED/RPATH additions/removals과 static/dynamic drift를 비교한다.
-- [ ] text/JSON report와 stable schema를 제공한다.
-- [ ] ici binary compatibility result와 같은 fixture binary에서 수치를 대조한다.
+2026-09-04 local JSON/text report, schema validation, deterministic diff와 ici candidate
+binary/integration cross-check를 확인했다. 이는 local candidate evidence이며 cross-repository
+acceptance와 stable release gate는 pending이다.
+
+- [x] maximum GLIBC/GLIBCXX/CXXABI required version을 계산한다.
+- [x] configured platform floor와 비교해 actionable result를 만든다.
+- [x] NEEDED/RPATH additions/removals과 static/dynamic drift를 비교한다.
+- [x] text/JSON report와 stable schema를 제공한다.
+- [x] ici binary compatibility result와 같은 fixture binary에서 수치를 대조한다. (local candidate cross-check; remote acceptance pending)
 
 ### A3. Makefile 다중 산출물과 안전성
 
 **브랜치:** `feat/abilens-build-matrix`
 
-- [ ] executable, static core와 shared fixture를 명시적으로 빌드한다.
-- [ ] tests가 parser와 real ELF integration을 분리한다.
-- [ ] ASan/UBSan, gcov build가 일반 release artifact를 오염시키지 않는다.
-- [ ] parallel make와 clean/rebuild가 재현 가능하다.
-- [ ] ici artifact manifest가 모든 expected artifact를 찾는다.
+2026-09-04 `make check coverage sanitize thread-sanitize` local gate가 exit `0`으로
+완료됐고, JSON schema와 clean/rebuild reproducibility도 확인했다. 이 결과는 AbiLens의
+local gate이며 remote PR/Pages와 release artifact acceptance는 pending이다.
+
+- [x] executable, static core와 shared fixture를 명시적으로 빌드한다.
+- [x] tests가 parser와 real ELF integration을 분리한다.
+- [x] ASan/UBSan, gcov build가 일반 release artifact를 오염시키지 않는다.
+- [x] parallel make와 clean/rebuild가 재현 가능하다.
+- [x] ici artifact manifest가 모든 expected artifact를 찾는다.
 
 ### A4. abilens release 완료 조건
 
-- [ ] configured Make adapter로 build/test/sanitize/coverage PASS
-- [ ] viewer static CLI와 abilens shared fixture를 정확히 분류
-- [ ] malformed/untrusted binary를 실행하지 않고 처리
-- [ ] C++20 compile context와 binary compatibility engine 실측
-- [ ] supported ELF/binutils 범위와 limitation 문서화
+local implementation과 native gate 및 ici Make process-evidence 보완은 완료했지만, 이
+항목의 release-facing 조건은 아직 닫지 않는다. 현재 consolidated toy PR의 remote
+PR/Pages와 stable artifact/provenance가 pending이다.
+
+- [x] local Make build/test/sanitize/coverage/TSan gate가 PASS한다.
+- [x] viewer static CLI와 AbiLens shared fixture를 정확히 분류한다.
+- [x] malformed/untrusted binary를 실행하지 않고 처리한다.
+- [x] local C++20 compile context와 binary compatibility/integration engine을 실측한다.
+- [x] supported ELF/binutils 범위와 limitation을 README/workthrough에 문서화한다.
+- [ ] remote PR/Pages, ici candidate acceptance와 stable release artifact/provenance gate를 완료한다. (pending)
 
 ---
 
@@ -1472,20 +1514,31 @@ expectation 경로를 선언하고, 각 경로가 가리키는 full strict schem
 - 반드시 없어야 하는 finding
 - 필요한 capability와 skip 조건
 
-**현재 상태 (2026-09-03):** scenario contract, dependency-free runner, candidate archive intake와
+**현재 상태 (2026-09-04):** scenario contract, dependency-free runner, candidate archive intake와
 local candidate consumer 구현은 완료됐다. Released-artifact Q0의 toy PR/exact-main acceptance와
-ici-hosted candidate consumer의 exact-revision remote cross-repository acceptance도 완료됐다.
-정확한 원격 증거는 아래 run `33710695336`에 기록한다. Registry는 Python 3.10 표준 라이브러리만 사용하는
-`manifest.json`으로 고정했으며, scenario의 `ici.toml`은 ici 입력으로 남기고 runner가 TOML
-parser를 추가하지 않는다. `ICI_BIN`은 명시적인 local executable path이고, ordinary CI는
-released ici `v0.10.2` pin을 유지한다. Candidate ZIP과 optional exact five authenticated
-GitHub API snapshots의 provenance/digest/identity validation은 local evidence에서 통과했다.
+이전 ici-hosted candidate consumer의 exact-revision remote cross-repository acceptance는
+historical evidence로 아래에 보존한다. 현재 consolidated candidate 확장은 local-only이며,
+이 브랜치의 remote candidate acceptance·PR/Pages·stable release는 pending이다. Registry는
+Python 3.10 표준 라이브러리만 사용하는 `manifest.json`으로 고정했으며, scenario의 `ici.toml`은
+ici 입력으로 남기고 runner가 TOML parser를 추가하지 않는다. `ICI_BIN`은 명시적인 local
+executable path이고, ordinary CI는 released ici `v0.10.2` pin을 유지한다. Candidate ZIP과
+optional exact five authenticated GitHub API snapshots의 provenance/digest/identity validation은
+기존 local evidence에서 통과했다.
 Released ici `v0.10.2` digest `8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4`는
 legacy `MEASURED`/`high`를, 같은 package version의 candidate digest
 `53fc75f0a073a74689babfe9ef8a4b2378995002d7d563bdc52da548fdbb9ee8`는 provenance-aware
 `ESTIMATED`/`medium`을 보고한다. 따라서 schema-2 selector는 exact executable SHA-256으로
 full strict schema-1 expectation을 고르고 unknown digest는 fail closed한다. Ordinary CI는
 released expectation을, candidate validation은 candidate expectation을 사용한다.
+
+Current candidate는 ici target `ccb2067c656492c549dae8f4abc198a69ea013c2`의 exact-main
+green run `33851206764` 뒤 candidate run `33852539205`가 만들었다. Artifact `9928909508`의
+raw ZIP SHA-256은 `c21437a7abb1b9016d351584b97a8ffc813ae17a699a3153262b31e9fa53af4b`,
+contained `ici.pyz` SHA-256은
+`23d9922b94b2ba34ab8884cd2d39c8eda358ccb32d0925af5c0a3d52a7ddc893`이며 package version은
+`0.10.2`, channel은 non-stable candidate다. 이 digest로 실행한 local full corpus는
+`15/16 PASS`; 유일한 미통과는 host `clazy` 부재로 실행되지 못한 Qt lifetime scenario이고
+나머지 15개 contract에는 error가 없었다.
 
 - [x] runner는 `ICI_BIN`/`--ici-bin`으로 local pyz를 받고, archive consumer는 검증된 candidate를 받는다.
 - [x] scenario project 밖 path, symlink와 shell command를 거부한다.
@@ -1507,7 +1560,10 @@ released expectation을, candidate validation은 candidate expectation을 사용
 - [x] ici-hosted exact-revision candidate acceptance도 [run `33710695336`](https://github.com/jihoon22-lee/ici/actions/runs/33710695336)에서
       toy main `2d0d7c0b2dcc137a782d6042438fc287bffdf570`과 candidate target
       `9d470edca7ab037a24dcd6594531a822f116548b`를 사용해 완료했다. 다섯 scenario contract는
-      `PASS`/zero errors였고, 결과는 별도 acceptance artifact로만 보존됐다.
+      `PASS`/zero errors였고, 결과는 별도 acceptance artifact로만 보존됐다. (historical Q0
+      acceptance; current consolidated candidate에는 적용하지 않음)
+- [ ] current consolidated candidate의 remote candidate acceptance, PR/exact-main CI와 Pages를
+      완료한다. 새 6개 scenario는 local focused contract만 `6/6 PASS`이며 원격 근거가 pending이다.
 
 첫 local candidate evidence는 candidate run `33689056008`, source/target
 `7872a7b80899cbd3d40d92d18e7920cd7e2283e7`, artifact `9869395069`, ZIP SHA-256
@@ -1589,31 +1645,46 @@ artifact `9872561713`의 contract는 `PASS`였고, stable scenario 하나의 obs
 결과였으며 error는 0개였다. EnvLens merge와 함께 current manifest가 네 project Page를 생성했지만,
 Q1~Q5 corpus expansion은 여전히 pending이다.
 
+**새 candidate six-scenario local evidence (2026-09-04).**
+`python.compatibility-package-metadata`, `python.import-cycle-exception`,
+`python.maintainability-thresholds`, `cpp.static-build-context`, `cpp.quality-coverage`,
+`cpp.malformed-compile-db`의 focused runner contract는 ici candidate SHA-256
+`50d41d36775394f66f6620091f42a7a0333ee90758e19449a848d7ee0875a93c`로 최초 `6/6 PASS`였고,
+current candidate `23d9922b94b2ba34ab8884cd2d39c8eda358ccb32d0925af5c0a3d52a7ddc893`의
+full local run에서도 이 여섯 scenario가 모두 `PASS`였다.
+이는 각 known-answer와 nearby clean/malformed boundary의 local evidence만 닫으며, stable
+manifest 편입이나 remote candidate acceptance·PR/Pages·release를 의미하지 않는다.
+
 ### Q1. Python stable corpus
 
 **브랜치:** `test/quality-zoo-python`
 
 - [ ] syntax/lint와 formatter mismatch
 - [ ] mypy type error와 unresolved import policy
-- [ ] open/close/context manager ownership positive·negative case
-- [ ] mutable default와 exception swallowing
-- [ ] hardcoded secret redaction, unsafe subprocess, weak crypto
-- [ ] import cycle, dead/unreachable, complexity, duplication
-- [ ] Python 3.10 compatibility와 package metadata error
-- [ ] 각 rule의 nearby clean code가 false positive를 만들지 않는지 확인
+- [x] open/close/context manager ownership positive·negative case (`python.security-resource-correctness`; candidate-local)
+- [x] mutable default와 exception swallowing (`python.security-resource-correctness` 및 `python.import-cycle-exception`; candidate-local)
+- [x] hardcoded secret redaction (`python.security-resource-correctness`; candidate-local)
+- [ ] unsafe subprocess와 weak crypto
+- [x] import cycle, dead private function, complexity와 duplication (`python.import-cycle-exception`, `python.maintainability-thresholds` 및 기존 dead scenario; candidate/local)
+- [ ] dead/unreachable control-flow 변형
+- [x] Python 3.10 compatibility와 package metadata error (`python.compatibility-package-metadata`; candidate-local)
+- [x] 새 candidate scenario의 nearby clean code가 false positive를 만들지 않는지 확인한다. (focused `6/6 PASS`)
+- [ ] 새 scenario를 released stable corpus로 승격하고 remote acceptance를 완료한다. (candidate-local evidence only; pending)
 
 ### Q2. C++ stable corpus
 
 **브랜치:** `test/quality-zoo-cpp`
 
-- [ ] compile error와 warning location
-- [ ] target별 C++17/C++20 define/include 차이
+- [x] compile error와 warning location (`cpp.static-build-context`; candidate-local)
+- [x] target별 C++17/C++20 define/include 차이 (`cpp.static-build-context`; candidate-local)
 - [ ] same-basename include와 actual search order
-- [ ] header/include cycle과 unresolved generated header
-- [ ] complexity/duplicate/unused finding
+- [x] header/include cycle과 unresolved generated header (`cpp.static-build-context`; candidate-local)
+- [x] complexity/duplicate/unused finding (`cpp.quality-coverage`; candidate-local)
 - [x] ASan UAF, UBSan overflow, leak와 clean counterpart (released/candidate exact-digest local runs; broader C++ corpus remains pending)
-- [ ] gcov function/branch location
-- [ ] malformed compile DB와 missing TU
+- [x] gcov function/branch location (`cpp.quality-coverage`; candidate-local)
+- [x] malformed compile DB (`cpp.malformed-compile-db`; candidate-local)
+- [ ] missing TU와 broader C++ stable corpus
+- [ ] 새 candidate scenario를 released stable corpus로 승격하고 remote PR/exact-main acceptance를 완료한다. (candidate-local evidence only; pending)
 
 ### Q3. Qt stable corpus
 
@@ -1634,11 +1705,13 @@ acceptance, PR CI, exact-main CI와 Pages 검증이 끝날 때까지 아래 Qt l
 
 **브랜치:** `test/quality-zoo-integration`
 
-- [ ] CMake/qmake/Make configured success와 failure
+- [x] Make configured success (`cpp.make-elf-integration` 및 AbiLens local gate)
+- [ ] CMake/qmake/Make configured failure
 - [ ] artifact missing/escape/stale manifest
-- [ ] ELF floor, RPATH와 forbidden dependency
+- [x] ELF floor, RPATH와 forbidden dependency (`cpp.make-elf-integration`/AbiLens local policy evidence)
 - [ ] Python→C++ process contract success, timeout, bad placeholder
 - [ ] tool missing, timeout, signal, truncated output evidence
+- [ ] Q4 stable corpus의 remote candidate acceptance와 Pages를 완료한다. (local implementation/evidence only; pending)
 
 ### Q5. corpus 운영 기준
 
@@ -1653,11 +1726,16 @@ acceptance, PR CI, exact-main CI와 Pages 검증이 끝날 때까지 아래 Qt l
 
 ### 13.1 path-aware CI
 
-- [ ] root workflow가 변경된 프로젝트와 공통 문서/runner 영향을 계산한다.
-- [ ] 각 프로젝트의 native test와 ici verify를 별도 job으로 보여준다.
-- [ ] Qt5/Qt6, Python version matrix는 관련 프로젝트에만 적용한다.
-- [ ] quality-zoo full suite는 nightly/release와 ici version bump에서 실행하고 PR에는 affected scenario를 우선 실행한다.
-- [ ] job이 실행되지 않은 것을 PASS처럼 표시하지 않고 summary에 scope를 기록한다.
+2026-09-04 기준 dependency-free discovery와 workflow contract/unit tests가 path selection,
+project/scenario matrix와 skipped-scope ledger를 local에서 확인했다. 이 구현 증거는 current
+remote CI/Pages 실행 또는 release acceptance를 대신하지 않는다.
+
+- [x] root workflow가 변경된 프로젝트와 공통 문서/runner 영향을 계산한다.
+- [x] 각 프로젝트의 native test와 ici verify를 별도 job으로 보여준다.
+- [x] Qt5/Qt6, Python version matrix는 관련 프로젝트에만 적용한다.
+- [x] PR에서는 affected Quality Zoo scenario를 우선 실행하고 common/main/manual scope에서는 전체 scope를 선택한다.
+- [ ] nightly/release와 ici version bump에서 Quality Zoo full suite를 별도 보장한다. (현재 workflow의 remote/release evidence pending)
+- [x] job이 실행되지 않은 것을 PASS처럼 표시하지 않고 summary에 scope를 기록한다.
 - [x] write 권한이 필요한 `report-pr`는 PR base SHA에서
       `ci/check_published_html.py`만 `persist-credentials: false`로 sparse-checkout한 뒤
       published HTML을 검증해 PR-controlled validator 실행을 차단한다.
@@ -1705,8 +1783,9 @@ ici와 toy-projects가 함께 바뀌는 기능은 다음 순서를 따른다.
   PR/exact-main matrix와 Merge Gate evidence complete; 상세 기준은 handover의 현재 기준을 따른다)
 - [ ] L1~L3: loglens streaming correctness, bounded storage, parser pipeline 완료 (L1/L2와 L3
   parser/filter slice의 구현·local evidence는 완료됐지만, 이 checkpoint의 PR/exact-main/release
-  evidence는 아직 pending; L4~L6 triage/window analysis와 release도 미완료)
-- [ ] L4~L6: loglens triage/window analysis와 release 완료
+  evidence는 아직 pending; L4~L6 local-only 구현·evidence는 완료됐고 remote/release는 pending)
+- [ ] L4~L6: loglens triage/window analysis와 stable release 완료 (L4/L5 및 L6 local-only는
+  완료됐지만 remote PR/Pages·released-ici standard profile·stable artifact가 pending)
 - [x] D1~D3: diskmap identity-safe scan, cancellation, explorer UX 구현·PR·exact-main evidence 완료
   (D1/D2는 PR #23/#28, D3 core는 PR #45, D3 GUI는 PR #46 및 exact-main run으로 검증)
 - [ ] D4~D7: cleanup/trash/snapshot과 release 완료 (D4~D6 local implementation/aggregate/deep
@@ -1716,15 +1795,19 @@ ici와 toy-projects가 함께 바뀌는 기능은 다음 순서를 따른다.
 - [ ] E0~E4: envlens pure-Python environment explorer와 release 완료 (E1 snapshot 구현·PR #50
   merge·exact-main evidence 및 E2/E3 local implementation complete; ici compatibility cross-check와
   E4 release evidence는 pending)
-- [ ] A0~A4: abilens Makefile/ELF explorer와 release 완료
+- [ ] A0~A4: abilens Makefile/ELF explorer와 stable release 완료 (주요 기능·native local
+  gate, single-open input identity와 ici Make adapter process evidence는 완료됐지만
+  remote PR/Pages·release는 pending)
 - [ ] Q0~Q5: Python/C++/Qt/build/hybrid stable expected-finding corpus 완료 (released-artifact Q0
   implementation과 PR #49 remote acceptance, EnvLens merge의 exact-main QZ artifact, 새
   candidate SHA selector/local authenticated evidence, ici-hosted exact-revision candidate
   cross-repository acceptance, 그리고 C++ sanitizer ASan/UBSan/LSan 및 clean counterpart
   Q2 runtime sub-scope evidence, Qt6 lifetime candidate fixture/expectation과 local
-  five-scenario candidate evidence는 기록됐다. Qt remote/PR/main CI·Pages와 broader Q2
-  corpus 및 Q1/Q3~Q5는 pending)
-- [ ] repository path-aware CI, ici pin/candidate와 artifact 정책 완료
+  five-scenario candidate evidence는 기록됐다. 새 Python/C++ six-scenario candidate focused
+  contract `6/6 PASS`도 local에서 확인했지만, current candidate remote acceptance, stable
+  promotion, Qt remote/PR/main CI·Pages와 broader Q2 corpus 및 Q1/Q3~Q5는 pending)
+- [x] repository path-aware CI implementation과 local workflow contract를 완료한다.
+- [ ] ici pin/candidate와 artifact 정책의 remote/release acceptance를 완료한다. (pending)
 
 체크포인트는 기능이 시연되는 것만으로 닫지 않는다. 공통 제품 완성 불변식, native tests, ici 실측, 문서와 오류 처리까지 모두 충족해야 한다.
 

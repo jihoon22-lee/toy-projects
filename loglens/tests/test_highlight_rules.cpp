@@ -98,6 +98,13 @@ void testWholeLine() {
     if (!mixedSpans.empty()) {
         CHECK_EQ(mixedSpans[0].style, std::string("word"));
     }
+
+    HighlightRules ordered;
+    ordered.add(makeRule("", 3, "first", true));
+    ordered.add(makeRule("", 8, "strongest", true));
+    ordered.add(makeRule("", 8, "tie-loses", true));
+    CHECK(ordered.rowStyle().has_value());
+    CHECK_EQ(*ordered.rowStyle(), std::string("strongest"));
 }
 
 void testNonOverlappingCoexist() {
@@ -120,6 +127,7 @@ void testClear() {
     rules.clear();
     CHECK_EQ(rules.size(), static_cast<std::size_t>(0));
     CHECK(rules.apply("x").empty());
+    CHECK(!rules.rowStyle().has_value());
 }
 
 } // namespace

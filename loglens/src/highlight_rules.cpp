@@ -80,4 +80,15 @@ std::vector<Span> HighlightRules::apply(const std::string& text) const {
     return accepted;
 }
 
+std::optional<std::string> HighlightRules::rowStyle() const {
+    const Rule* selected = nullptr;
+    for (const Rule& rule : rules_) {
+        if (rule.whole_line && (selected == nullptr || rule.priority > selected->priority)) {
+            selected = &rule;
+        }
+    }
+    return selected == nullptr ? std::nullopt
+                               : std::optional<std::string>(selected->style);
+}
+
 } // namespace loglens

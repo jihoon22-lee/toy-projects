@@ -1,0 +1,70 @@
+# Overlay for an exact ici candidate that implements the handwritten Make,
+# binary-compatibility, and integration contracts. Use only with a verified
+# candidate artifact: ICI_CONFIG=ici-candidate.toml ./ici.pyz verify ...
+
+[engines.test]
+enabled = true
+mode = "pass_fail"
+
+[engines.sanitize]
+enabled = true
+mode = "pass_fail"
+
+[engines.thread_sanitize]
+enabled = true
+mode = "pass_fail"
+
+# The Make adapter runs from the project root. The command-specific OUT values
+# intentionally put each variant below one owned shadow tree while keeping
+# release, coverage, ASan/UBSan, and TSan artifacts disjoint.
+[build.make]
+enabled = true
+workdir = "."
+shadow_dir = "build/ici-make"
+out_of_tree = "allow"
+jobs = 2
+build_argv = ["make", "--jobs", "{jobs}", "all", "OUT=build/ici-make/release"]
+test_argv = ["make", "--jobs", "{jobs}", "test", "OUT=build/ici-make/release"]
+coverage_build_argv = ["make", "--jobs", "{jobs}", "all", "OUT=build/ici-make/coverage", "CXXFLAGS=-std=c++20 -O0 -g -Wall -Wextra -Wpedantic -Wconversion -Wshadow --coverage", "LDFLAGS=--coverage"]
+coverage_test_argv = ["make", "--jobs", "{jobs}", "test", "OUT=build/ici-make/coverage", "CXXFLAGS=-std=c++20 -O0 -g -Wall -Wextra -Wpedantic -Wconversion -Wshadow --coverage", "LDFLAGS=--coverage"]
+sanitize_build_argv = ["make", "--jobs", "{jobs}", "all", "OUT=build/ici-make/sanitize", "CXXFLAGS=-std=c++20 -O1 -g -Wall -Wextra -Wpedantic -Wconversion -Wshadow -fno-omit-frame-pointer -fsanitize=address,undefined", "LDFLAGS=-fsanitize=address,undefined"]
+sanitize_test_argv = ["make", "--jobs", "{jobs}", "test", "OUT=build/ici-make/sanitize", "CXXFLAGS=-std=c++20 -O1 -g -Wall -Wextra -Wpedantic -Wconversion -Wshadow -fno-omit-frame-pointer -fsanitize=address,undefined", "LDFLAGS=-fsanitize=address,undefined"]
+thread_sanitize_build_argv = ["make", "--jobs", "{jobs}", "all", "OUT=build/ici-make/thread-sanitize", "CXXFLAGS=-std=c++20 -O1 -g -Wall -Wextra -Wpedantic -Wconversion -Wshadow -fno-omit-frame-pointer -fsanitize=thread", "LDFLAGS=-fsanitize=thread"]
+thread_sanitize_test_argv = ["make", "--jobs", "{jobs}", "test", "OUT=build/ici-make/thread-sanitize", "CXXFLAGS=-std=c++20 -O1 -g -Wall -Wextra -Wpedantic -Wconversion -Wshadow -fno-omit-frame-pointer -fsanitize=thread", "LDFLAGS=-fsanitize=thread"]
+
+[engines.build]
+enabled = true
+required = true
+mode = "pass_fail"
+
+[engines.binary_compat]
+enabled = true
+required = true
+mode = "pass_fail"
+artifacts = ["release:shadow:release/bin/abilens", "release:shadow:release/lib/libabilens-fixture.so"]
+expected_class = "ELF64"
+expected_machine = "Advanced Micro Devices X86-64"
+forbid_absolute_rpath = true
+forbid_build_paths = true
+allow_non_elf = false
+
+[engines.integration]
+enabled = true
+required = true
+mode = "pass_fail"
+max_cases = 4
+max_output_bytes = 65536
+
+[[engines.integration.cases]]
+name = "self-report"
+argv = ["{artifact:release:shadow:release/bin/abilens}", "inspect", "--json", "{artifact:release:shadow:release/bin/abilens}"]
+stdout_contains = ['"schema":"abilens.report/v1"', '"status":"valid"', '"dynamic":true']
+timeout_seconds = 30.0
+required = true
+
+[[engines.integration.cases]]
+name = "fixture-diff"
+argv = ["{artifact:release:shadow:release/bin/abilens}", "diff", "--json", "{artifact:release:shadow:release/bin/abilens}", "{artifact:release:shadow:release/lib/libabilens-fixture.so}"]
+stdout_contains = ['"schema":"abilens.diff/v1"', '"changed":true']
+timeout_seconds = 30.0
+required = true

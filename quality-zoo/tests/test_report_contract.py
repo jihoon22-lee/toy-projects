@@ -6,6 +6,7 @@ import unittest
 
 from runner.common import ContractError
 from runner.report_contract import evaluate_contract, validate_report
+
 from tests.helpers import engine, finding, location, report
 
 

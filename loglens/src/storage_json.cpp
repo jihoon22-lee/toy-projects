@@ -82,11 +82,15 @@ private:
         }
         if (first == 't') {
             node.kind = StorageJsonKind::Boolean;
-            return parseLiteral("true");
+            if (!parseLiteral("true")) return false;
+            node.text = "true";
+            return true;
         }
         if (first == 'f') {
             node.kind = StorageJsonKind::Boolean;
-            return parseLiteral("false");
+            if (!parseLiteral("false")) return false;
+            node.text = "false";
+            return true;
         }
         if (first == 'n') {
             node.kind = StorageJsonKind::Null;

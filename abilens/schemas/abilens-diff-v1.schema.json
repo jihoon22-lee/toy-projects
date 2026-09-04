@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/abilens/diff/v1",
+  "title": "AbiLens ELF diff",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "left", "right", "changed", "compatible", "left_status", "right_status", "header_changes", "dependencies", "abi", "diagnostics"],
+  "properties": {
+    "schema": {"const": "abilens.diff/v1"},
+    "left": {"type": "string"},
+    "right": {"type": "string"},
+    "changed": {"type": "boolean"},
+    "compatible": {"type": "boolean"},
+    "left_status": {"type": "string"},
+    "right_status": {"type": "string"},
+    "header_changes": {"type": "array", "items": {"type": "string"}},
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["needed", "rpath", "runpath"],
+      "properties": {
+        "needed": {"$ref": "#/$defs/setDiff"},
+        "rpath": {"$ref": "#/$defs/setDiff"},
+        "runpath": {"$ref": "#/$defs/setDiff"}
+      }
+    },
+    "abi": {"$ref": "#/$defs/setDiff"},
+    "diagnostics": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "setDiff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["added", "removed"],
+      "properties": {
+        "added": {"type": "array", "items": {"type": "string"}},
+        "removed": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}
