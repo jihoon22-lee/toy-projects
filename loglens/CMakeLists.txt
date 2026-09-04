@@ -43,6 +43,7 @@ add_library(loglens_core STATIC
     src/persistence_io_posix.cpp
     src/persistence_io_windows.cpp
     src/timestamp_parser.cpp
+    src/window_analysis.cpp
 )
 target_include_directories(loglens_core PUBLIC include)
 
@@ -67,7 +68,7 @@ add_test(
 
 foreach(name IN ITEMS
         filter_expr highlight_rules initial_load log_parser log_record log_source log_stats
-        persistence ring_buffer)
+        persistence ring_buffer window_analysis)
     add_executable(test_${name} tests/test_${name}.cpp)
     target_link_libraries(test_${name} PRIVATE loglens_core)
     target_include_directories(test_${name} PRIVATE tests)
