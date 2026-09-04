@@ -202,12 +202,14 @@ void testSnapshotFileIo() {
                 const bool pastSet = setMtime(-kTimestampOverflowSeconds);
                 if (!pastSet) {
                     std::printf("SKIP past snapshot timestamp clamp: filesystem range\n");
-                } else {
-                    diskmap::writeSnapshotAtomically(second, path);
-                    CHECK(!hasSnapshotTemporary(temporary.path()));
-                    CHECK_EQ(diskmap::serializeSnapshot(diskmap::readSnapshotFile(path)),
-                             diskmap::serializeSnapshot(second));
                 }
+                // Restore the baseline even when the filesystem cannot
+                // represent the past timestamp. When it can, this write is
+                // also the overflow-clamping exercise.
+                diskmap::writeSnapshotAtomically(second, path);
+                CHECK(!hasSnapshotTemporary(temporary.path()));
+                CHECK_EQ(diskmap::serializeSnapshot(diskmap::readSnapshotFile(path)),
+                         diskmap::serializeSnapshot(second));
             }
         }
     }

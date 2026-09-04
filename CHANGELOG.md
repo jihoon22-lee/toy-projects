@@ -23,6 +23,8 @@
   defense-in-depth, not protection from non-cooperating same-UID processes.
 - Cleanup identity-replacement coverage now retains the reviewed inode while
   creating its replacement, avoiding filesystem-dependent immediate inode reuse.
+- Snapshot timestamp-range coverage now restores its baseline on unsupported
+  past timestamps, so a legitimate skip cannot leak state into later I/O checks.
 - This remains local-only evidence under DiskMap `0.1.0`/`Unreleased`; no
   product version bump or release is implied. The integrated deep no-cache
   result remains `WARN` (`10 PASS / 2 WARN / 0 FAIL / 0 ERROR / 2 SKIP`), with
