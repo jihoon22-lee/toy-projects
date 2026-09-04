@@ -161,7 +161,7 @@ def _normalize_distribution(value: Any, homes: tuple[str, ...], *, redact: bool)
             }
         )
     errors.sort(key=lambda item: (item["code"], item["field"], item["type"], item["message"]))
-    return {
+    normalized: dict[str, Any] = {
         "name": name,
         "normalized_name": normalize_project_name(name),
         "version": version,
@@ -183,6 +183,46 @@ def _normalize_distribution(value: Any, homes: tuple[str, ...], *, redact: bool)
         "status": "ok" if not errors else "error",
         "errors": errors,
     }
+    # These fields were added after the v1 snapshot skeleton.  They remain
+    # optional so snapshots made by older probes continue to normalize and
+    # compare.  Import names are evidence, not a claim that every namespace
+    # package can be recovered from installed metadata.
+    if "import_names" in raw:
+        import_names = sorted(
+            {
+                _redact_if_enabled(
+                    _string(item, "distribution.import_names item", allow_empty=False),
+                    homes,
+                    redact,
+                )
+                for item in _array(
+                    raw.get("import_names"),
+                    "distribution.import_names",
+                    maximum=MAX_COLLECTION_ITEMS,
+                )
+            }
+        )
+        normalized["import_names"] = import_names
+    wheel_tag_value = (
+        metadata.get("wheel_tags") if "wheel_tags" in metadata else raw.get("wheel_tags")
+    )
+    if "wheel_tags" in metadata or "wheel_tags" in raw:
+        wheel_tags = sorted(
+            {
+                _redact_if_enabled(
+                    _string(item, "distribution.metadata.wheel_tags item", allow_empty=False),
+                    homes,
+                    redact,
+                )
+                for item in _array(
+                    wheel_tag_value,
+                    "distribution.metadata.wheel_tags",
+                    maximum=MAX_COLLECTION_ITEMS,
+                )
+            }
+        )
+        normalized["metadata"]["wheel_tags"] = wheel_tags
+    return normalized
 
 
 def _validate_collection_options(

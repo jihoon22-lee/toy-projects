@@ -92,7 +92,8 @@ ctest --test-dir /tmp/toy-loglens-filter-qt6 --output-on-failure
 
 The CLI stream regression verifies the exact `[12,17)` diagnostic and the
 focused `test_filter_expr` passed in both full suites. Final local validation
-used the public ici `v0.10.2` `ici.pyz` with SHA-256
+used a versioned `ici v0.10.2` local candidate `ici.pyz` (not the public release
+asset) with SHA-256
 `2af5198d1348a64c39f4f37d12657aa9a2c4bf3ddf034a9099909c41e86e30e7`. The
 uncached deep suite is `WARN` only because clazy is unavailable and
 pre-existing lint findings remain. The changed `filter_expr.cpp`, `main.cpp`,

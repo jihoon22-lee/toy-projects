@@ -1,8 +1,8 @@
 # envlens
 
-envlens is a pure-Python library and CLI for making a deterministic, offline
-inventory of one explicitly selected Python interpreter. It answers “what is in
-this environment?” before a later diff or compatibility decision is attempted.
+envlens is a pure-Python library and CLI for making deterministic, offline
+inventories of explicitly selected Python interpreters, comparing those
+inventories, and checking a project against configured runtimes.
 
 The package metadata and `--version` output are currently `0.1.0`. This is an
 unreleased development identity: no envlens tag, GitHub Release, or stable
@@ -35,7 +35,8 @@ The selected executable is run once with a fixed `python -c` probe and
 - environment variables; and
 - every discovered distribution’s display name, PEP 503 normalized name,
   version, raw `Requires-Python`, `Requires-Dist`, entry points, install
-  location, status, and any metadata errors.
+  location, status, and any metadata errors; when available, import names
+  (`top_level.txt`/installed file evidence) and wheel `Tag:` records.
 
 One malformed distribution does not discard healthy distributions. Its error
 records are retained in that distribution and the overall collection is marked
@@ -113,20 +114,96 @@ directly symlinked output directory, and replacing the selected interpreter
 (including an existing hardlink alias) are rejected. `--output -` writes the
 canonical JSON to stdout.
 
+## Compare snapshots
+
+The `diff` command consumes only local snapshot files. It classifies
+distributions by normalized project name as added, removed, upgraded,
+downgraded, or uncertainly changed. It keeps project names separate from
+observed import names, checks recorded `Requires-Python` expressions and wheel
+tags against the “after” interpreter, and reports direct missing or conflicting
+dependencies from offline metadata.
+
+```bash
+envlens diff \
+  --before before.json \
+  --after after.json \
+  --project pyproject.toml \
+  --format markdown \
+  --output diff.md
+
+# text is the default; json supports --pretty
+envlens diff --before before.json --after after.json --format json
+```
+
+Compatibility and dependency records always include `certainty`. `certain`
+means the bounded metadata and version evaluator reached a direct conclusion;
+`unknown` is used for partial snapshots, unsupported requirement/marker
+syntax, absent import/wheel evidence, or versions outside the evaluator. No
+resolver, package index, wheel download, or network request is performed.
+
+## Project and runtime smoke checks
+
+`runtime` (also available as `smoke`) reads `pyproject.toml` without importing
+or executing project code, then runs compileall and each explicit import for
+every configured interpreter. Entry points are reported with their file and
+line location and remain dry-inspected unless execution is explicitly opted in.
+When `--pyproject` is omitted and the project root has no `pyproject.toml`,
+metadata inspection is skipped as a normal no-metadata case. A present but
+malformed or unreadable metadata file produces a `project-inspection` failed
+check with its `error_code` and `{path, line}` location; the runtime summary
+cannot pass merely because compileall and imports succeeded. An explicitly
+provided `--pyproject` path is inspected under the same rule.
+
+```bash
+envlens runtime \
+  --project-root . \
+  --interpreter /path/to/python \
+  --interpreter /path/to/another/python \
+  --import myproject \
+  --import myproject.cli \
+  --entry-point console-name \
+  --format text
+
+# Entry-point execution is opt-in and still uses argv, no shell.
+envlens runtime --project-root . --entry-point console-name \
+  --execute-entry-points --format json --pretty
+```
+
+`--entry-point` accepts either a bare name or an exact `group/name` selector.
+A bare name retains the existing behavior of selecting every matching group;
+qualified selection does not broaden that match. Every requested selector
+that is not found is retained as a deterministic failed check with
+`error_code: "missing-entry-point"` and contributes to the summary failure
+count. Missing selectors are reported without importing or executing code.
+
+Runtime results distinguish `passed`, `missing-interpreter`,
+`missing-import`, `import-error`, `timeout`, `signal`, and ordinary process
+failure, including project metadata and requested-entry-point failures.
+Source enumeration is bounded to 10,000 Python files and 64 MiB;
+probe/check output and process lifetime are bounded, and POSIX/Windows process
+groups are cleaned up on timeout. Compile bytecode is redirected to a temporary
+cache, and the compileall argv is capped at 65,536 UTF-8 bytes. Import checks
+set `PYTHONPATH` to the project root and `src/` only; a host `PYTHONPATH` is not
+inherited. Runtime checks execute with the current user’s permissions and are
+not a sandbox; inspect untrusted projects in an externally isolated environment.
+
 ## Validation and CI
 
-The current local E1 core slice is covered on Python 3.10 by 50/50 tests:
+The current local E1–E3 slice is covered on Python 3.10 by 113/113 tests:
 
 ```text
-7 CLI · 6 atomic I/O · 12 probe/process-boundary ·
-7 redaction · 18 snapshot normalization/schema
+16 CLI/E2-E3 CLI · 6 atomic I/O · 12 probe/process-boundary ·
+7 redaction · 19 snapshot normalization/schema · 10 snapshot diff ·
+43 project/runtime/report/input boundaries
 ```
 
 The same checkout also passes Ruff check and format validation, and strict mypy
-for the six envlens source modules. Released ici `v0.10.2` local deep verification
-passes with 14 total engines: 13 PASS, one `compile_db` SKIP, and no
-WARN/FAIL/ERROR; TEM is 5.00, line/function/branch coverage is
-93.0%/100.0%/84.6%, and complexity max is 13 (cycle and sanitize also PASS).
+for the eighteen envlens source modules. Released ici `v0.10.2` self-dogfood
+passes the test, complexity, type, sanitize, and line gates: 113/113 tests with
+92.4%/97.6%/83.1% line/function/branch coverage, TEM 4.88, maximum cyclomatic
+complexity 15, and no per-file pure-code warning.
+The full verification suite has no FAIL or ERROR engines; its only remaining
+WARN is the existing duplication finding (12.9%, 57 clone groups).
 `envlens/ici.toml` records the intended
 Python quality gate (test pass/fail with coverage, TEM at least 4.0, branch
 coverage at least 80%, and function coverage at least 90%). The path-aware CI
@@ -141,9 +218,8 @@ Stable release remains pending.
 
 ## Deliberate current boundary
 
-This release-free snapshot slice inventories one interpreter; it does not yet
-compare two snapshots, resolve dependencies, decide compatibility, parse wheel
-tags, import project modules, run entry points, or perform runtime smoke tests.
-Those are separate E2 (diff/compatibility), E3 (project/runtime check), and E4
-(release) policies, which remain pending. A snapshot is evidence for those
-later operations, not their result.
+This release-free E1–E3 slice compares captured evidence and performs explicit
+runtime checks; it does not resolve dependencies, build or install wheels, or
+claim compatibility when metadata is incomplete. E4 release work remains
+pending: Python-version matrix publication, clean-wheel release smoke,
+packaging evidence, and the ici release gate are separate policies.

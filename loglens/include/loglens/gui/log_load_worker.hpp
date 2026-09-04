@@ -22,6 +22,11 @@ struct LoadRequest {
     InitialLoadMode mode = InitialLoadMode::TailRecords;
     std::size_t tail_records = 1;
     std::size_t source_chunk_bytes = kDefaultSourceChunkBytes;
+    // Source-profile settings are copied into the worker request so the GUI
+    // thread never touches parser state owned by the loader thread.
+    Format format = Format::Auto;
+    MultilinePolicy multiline = MultilinePolicy::FoldContinuations;
+    std::size_t max_record_bytes = kDefaultMaxRecordBytes;
 };
 
 struct LoadBatch {

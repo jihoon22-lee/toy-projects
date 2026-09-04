@@ -24,6 +24,8 @@ SOURCES += \
     main_window.cpp \
     main_window_ui.cpp \
     main_window_projection.cpp \
+    main_window_cleanup.cpp \
+    main_window_storage.cpp \
     treemap_widget.cpp \
     node_table_model.cpp \
     node_table_model_presentation.cpp \

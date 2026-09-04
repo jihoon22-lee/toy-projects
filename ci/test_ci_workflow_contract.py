@@ -103,6 +103,23 @@ class WorkflowPublicationContractTests(unittest.TestCase):
         self.assertNotIn("marked.sort(", block)
         self.assertNotRegex(block, r"gh api --method DELETE")
 
+    def test_pr_pages_require_the_published_html_contract(self) -> None:
+        block = _job_block("report-pr")
+
+        self.assertIn("ref: ${{ github.event.pull_request.base.sha }}", block)
+        self.assertIn("persist-credentials: false", block)
+        self.assertIn("sparse-checkout: ci/check_published_html.py", block)
+        self.assertLess(
+            block.index("ref: ${{ github.event.pull_request.base.sha }}"),
+            block.index(
+                'python3 ci/check_published_html.py "$body_file" --project "$project"'
+            ),
+        )
+        self.assertIn(
+            'python3 ci/check_published_html.py "$body_file" --project "$project"',
+            block,
+        )
+
     def test_pr_sticky_comment_verifier_accepts_one_marker_across_pages(self) -> None:
         run_url = "https://github.com/example/toy-projects/actions/runs/99"
         body = "\n".join(

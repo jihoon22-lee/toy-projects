@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -15,6 +16,14 @@ from check_manifest import SUPPORTED_QT_MAJORS, discover
 
 
 class ManifestDiscoveryTests(unittest.TestCase):
+    def test_diskmap_qmake_aggregate_registers_every_test_project(self) -> None:
+        tests_dir = CI_DIR.parent / "diskmap" / "tests"
+        aggregate = (tests_dir / "tests.pro").read_text(encoding="utf-8")
+        registered = set(re.findall(r"\b(test_[A-Za-z0-9_]+\.pro)\b", aggregate))
+        available = {path.name for path in tests_dir.glob("test_*.pro")}
+
+        self.assertEqual(registered, available)
+
     @staticmethod
     def _manifest_for(*names: str) -> dict[str, object]:
         return {

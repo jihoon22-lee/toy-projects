@@ -417,3 +417,21 @@ def test_real_current_interpreter_smoke_is_structural() -> None:
     assert all(isinstance(item["name"], str) for item in result["distributions"])
     assert all(item["status"] in {"ok", "error"} for item in result["distributions"])
     assert json.loads(snapshot_module.dumps_snapshot(result)) == result
+
+
+def test_snapshot_preserves_optional_import_and_wheel_metadata() -> None:
+    raw = _raw_probe([_distribution("sample-project", "1.0", location="/site/sample")])
+    distribution = raw["distributions"][0]
+    distribution["import_names"] = ["sample", "sample_plugins"]  # type: ignore[index]
+    distribution["metadata"]["wheel_tags"] = [  # type: ignore[index]
+        "py3-none-any",
+        "cp310-cp310-manylinux_2_17_x86_64",
+    ]
+
+    result = _collect(raw)
+
+    assert result["distributions"][0]["import_names"] == ["sample", "sample_plugins"]
+    assert result["distributions"][0]["metadata"]["wheel_tags"] == [
+        "cp310-cp310-manylinux_2_17_x86_64",
+        "py3-none-any",
+    ]

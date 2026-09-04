@@ -11,6 +11,21 @@
 
 namespace loglens {
 
+namespace {
+
+bool supportedFormat(Format format) {
+    return format == Format::Auto || format == Format::PlainIso
+           || format == Format::Syslog || format == Format::JsonLine
+           || format == Format::Raw;
+}
+
+bool supportedMultilinePolicy(MultilinePolicy policy) {
+    return policy == MultilinePolicy::FoldContinuations
+           || policy == MultilinePolicy::SeparateLines;
+}
+
+} // namespace
+
 LogLoadWorker::LogLoadWorker(QObject* parent) : QObject(parent) {}
 
 void LogLoadWorker::selectJob(quint64 jobId) {
@@ -58,13 +73,22 @@ void LogLoadWorker::startLoad(loglens::LoadRequest request) {
 
     try {
         if (request_.tail_records == 0 || request_.source_chunk_bytes == 0
-            || request_.source_chunk_bytes > kMaxSourceChunkBytes) {
+            || request_.source_chunk_bytes > kMaxSourceChunkBytes
+            || request_.max_record_bytes == 0
+            || request_.max_record_bytes > kMaxRecordBytes
+            || !supportedFormat(request_.format)
+            || !supportedMultilinePolicy(request_.multiline)) {
             throw std::invalid_argument("background load request is outside supported bounds");
         }
+        // Constructing the assembler here makes the selected source profile a
+        // property of this load generation. Follow polls and recovery resets
+        // keep these settings because reset() only clears stream state.
+        assembler_ = RecordAssembler(request_.format, EncodingErrorPolicy::PreserveBytes,
+                                      request_.max_record_bytes, request_.multiline);
         if (request_.mode == InitialLoadMode::TailRecords) {
             const InitialLoadWindow window = locateTailWindow(
                 request_.path.toStdString(), request_.tail_records,
-                request_.source_chunk_bytes, [this] { return cancelled(); });
+                request_.source_chunk_bytes, [this] { return cancelled(); }, request_.multiline);
             if (window.cancelled || cancelled()) {
                 return;
             }

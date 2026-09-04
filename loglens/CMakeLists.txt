@@ -28,11 +28,21 @@ add_library(loglens_core STATIC
     src/filter_expr.cpp
     src/highlight_rules.cpp
     src/initial_load.cpp
+    src/json_line_parser.cpp
+    src/json_string_parser.cpp
     src/log_parser.cpp
     src/log_record.cpp
     src/log_source.cpp
     src/log_stats.cpp
     src/ring_buffer.cpp
+    src/persistence_io.cpp
+    src/persistence_validation.cpp
+    src/persistence_writer.cpp
+    src/storage_json.cpp
+    src/persistence.cpp
+    src/persistence_io_posix.cpp
+    src/persistence_io_windows.cpp
+    src/timestamp_parser.cpp
 )
 target_include_directories(loglens_core PUBLIC include)
 
@@ -56,7 +66,8 @@ add_test(
 )
 
 foreach(name IN ITEMS
-        filter_expr highlight_rules initial_load log_parser log_record log_source log_stats ring_buffer)
+        filter_expr highlight_rules initial_load log_parser log_record log_source log_stats
+        persistence ring_buffer)
     add_executable(test_${name} tests/test_${name}.cpp)
     target_link_libraries(test_${name} PRIVATE loglens_core)
     target_include_directories(test_${name} PRIVATE tests)
@@ -89,9 +100,16 @@ target_link_libraries(test_main_window PRIVATE loglens_gui Qt${QT_VERSION_MAJOR}
 target_include_directories(test_main_window PRIVATE tests)
 add_test(NAME test_main_window COMMAND test_main_window WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# Persistence controls are kept in a focused Qt test so the store contract is
+# exercised through the same widgets and worker request as the application.
+add_executable(test_gui_persistence tests/test_gui_persistence.cpp)
+target_link_libraries(test_gui_persistence PRIVATE loglens_gui Qt${QT_VERSION_MAJOR}::Test)
+target_include_directories(test_gui_persistence PRIVATE tests)
+add_test(NAME test_gui_persistence COMMAND test_gui_persistence WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # Widget tests are intentionally headless in every environment. This keeps
 # CTest reproducible even when a developer happens to have no display server.
-set_tests_properties(test_log_model test_main_window PROPERTIES
+set_tests_properties(test_log_model test_main_window test_gui_persistence PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
 )
 set_tests_properties(test_log_load_worker PROPERTIES

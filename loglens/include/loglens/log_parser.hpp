@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -18,7 +19,16 @@ enum class Format {
     PlainIso, // 2026-08-26T04:15:22.123Z INFO  [component] message
     Syslog,   // Aug 26 04:15:22 host component: message
     JsonLine, // {"ts":"...","level":"warn","logger":"x","msg":"..."}
+    Raw,      // Preserve every line as an unstructured message.
 };
+
+// Controls whether indented/"at " physical lines extend the preceding record
+// or stay as independent records.  FoldContinuations is the historical
+// default and keeps existing CLI/GUI behaviour unchanged.
+enum class MultilinePolicy { FoldContinuations, SeparateLines };
+
+const char* multilinePolicyName(MultilinePolicy policy);
+std::optional<MultilinePolicy> parseMultilinePolicyName(const std::string& name);
 
 // Parsing is byte preserving at this layer: invalid UTF-8 is neither dropped
 // nor silently rewritten, so raw evidence can always be exported. UI adapters
@@ -27,6 +37,8 @@ enum class Format {
 enum class EncodingErrorPolicy { PreserveBytes };
 
 Format detectFormat(const std::string& line);
+const char* formatName(Format format);
+std::optional<Format> parseFormatName(const std::string& name);
 
 // Never throws: an unparseable line still comes back with raw set, level
 // Unknown, and message holding the whole supplied line.
@@ -63,7 +75,8 @@ public:
     explicit RecordAssembler(
         Format format = Format::Auto,
         EncodingErrorPolicy encodingPolicy = EncodingErrorPolicy::PreserveBytes,
-        std::size_t maxRecordBytes = kDefaultMaxRecordBytes);
+        std::size_t maxRecordBytes = kDefaultMaxRecordBytes,
+        MultilinePolicy multilinePolicy = MultilinePolicy::FoldContinuations);
 
     std::vector<RecordDelta> consumeBytes(std::string_view bytes);
     std::vector<RecordDelta> consumeLine(const std::string& line);
@@ -86,6 +99,7 @@ public:
     std::size_t nextLineNumber() const;
     std::size_t recordCount() const;
     std::size_t maxRecordBytes() const;
+    MultilinePolicy multilinePolicy() const;
     std::size_t partialBytes() const;
 
 private:
@@ -100,6 +114,7 @@ private:
     std::size_t pending_index_ = 0;
     bool has_pending_ = false;
     std::size_t max_record_bytes_ = kDefaultMaxRecordBytes;
+    MultilinePolicy multiline_policy_ = MultilinePolicy::FoldContinuations;
 
     std::vector<RecordDelta> consumeCompleteLine(const std::string& line,
                                                  std::size_t omittedBytes = 0);

@@ -83,4 +83,32 @@ std::size_t levelIndex(Level level) {
     return value < 0 ? kLevelCount - 1 : static_cast<std::size_t>(value);
 }
 
+const char* parseStatusName(ParseStatus status) {
+    switch (status) {
+        case ParseStatus::Parsed: return "parsed";
+        case ParseStatus::Partial: return "partial";
+        case ParseStatus::Invalid: return "invalid";
+        case ParseStatus::Unstructured: return "unstructured";
+    }
+    return "unstructured";
+}
+
+const char* parseDiagnosticCodeName(ParseDiagnosticCode code) {
+    switch (code) {
+        case ParseDiagnosticCode::MissingField: return "missing-field";
+        case ParseDiagnosticCode::InvalidField: return "invalid-field";
+        case ParseDiagnosticCode::InvalidFieldType: return "invalid-field-type";
+        case ParseDiagnosticCode::InvalidTimestamp: return "invalid-timestamp";
+        case ParseDiagnosticCode::InvalidTimestampOffset:
+            return "invalid-timestamp-offset";
+        case ParseDiagnosticCode::InvalidJson: return "invalid-json";
+        case ParseDiagnosticCode::InvalidEscape: return "invalid-escape";
+        case ParseDiagnosticCode::InvalidUnicode: return "invalid-unicode";
+        case ParseDiagnosticCode::DuplicateField: return "duplicate-field";
+        case ParseDiagnosticCode::TrailingData: return "trailing-data";
+        case ParseDiagnosticCode::LimitExceeded: return "limit-exceeded";
+    }
+    return "invalid-field";
+}
+
 } // namespace loglens

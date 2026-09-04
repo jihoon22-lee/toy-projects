@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QString>
 
 #include <cstddef>
 #include <optional>
@@ -10,6 +11,7 @@
 #include "loglens/filter_expr.hpp"
 #include "loglens/gui/log_load_worker.hpp"
 #include "loglens/log_parser.hpp"
+#include "loglens/persistence.hpp"
 #include "loglens/ring_buffer.hpp"
 
 class LogModel;
@@ -26,6 +28,10 @@ class TimelineWidget;
 struct MainWindowOptions {
     std::size_t recordCapacity = loglens::kDefaultRecordCapacity;
     std::size_t sourceChunkBytes = loglens::kDefaultSourceChunkBytes;
+    // Empty paths use the per-user QStandardPaths app-config location. Tests
+    // and embedders can inject file paths for deterministic stores.
+    QString sourceProfilesPath;
+    QString savedQueriesPath;
 };
 
 // Loads a log file, shows it filtered, and draws a level histogram over time.
@@ -52,6 +58,11 @@ signals:
 private slots:
     void chooseFile();
     void applyFilter();
+    void applySourceProfile();
+    void selectSourceProfile(int index);
+    void saveSourceProfile();
+    void applySavedQuery();
+    void saveSavedQuery();
     void pollSource();
     void setFollowing(bool following);
     void handleLoadBatch(const loglens::LoadBatch& batch);
@@ -65,9 +76,21 @@ private:
     QLineEdit* searchEdit_ = nullptr;
     QComboBox* loadMode_ = nullptr;
     QSpinBox* tailRecords_ = nullptr;
+    QComboBox* sourceProfile_ = nullptr;
+    QComboBox* sourceFormat_ = nullptr;
+    QComboBox* multilinePolicy_ = nullptr;
+    QSpinBox* maxRecordBytes_ = nullptr;
+    QComboBox* savedQuery_ = nullptr;
     QLabel* status_ = nullptr;
     TimelineWidget* timeline_ = nullptr;
     std::optional<loglens::Filter> filter_;
+    std::vector<loglens::SourceProfile> sourceProfiles_;
+    std::vector<loglens::SavedQuery> savedQueries_;
+    QString sourceProfilesPath_;
+    QString savedQueriesPath_;
+    bool sourceProfilesPathIsDefault_ = false;
+    bool savedQueriesPathIsDefault_ = false;
+    QString currentPath_;
     QThread* loaderThread_ = nullptr;
     loglens::LogLoadWorker* loader_ = nullptr;
     QTimer* pollTimer_ = nullptr;
@@ -89,4 +112,16 @@ private:
     void applyDeltas(const std::vector<loglens::RecordDelta>& deltas);
     void handleLoadError(const loglens::LoadBatch& batch);
     loglens::InitialLoadMode selectedLoadMode() const;
+    void loadPersistenceState();
+    void rebuildSourceProfiles(const QString& selectedName = QString());
+    void rebuildSavedQueries(const QString& selectedName = QString());
+    void setProfileControls(const loglens::SourceProfile& profile);
+    loglens::SourceProfile profileFromControls() const;
+    loglens::Format selectedFormat() const;
+    loglens::MultilinePolicy selectedMultilinePolicy() const;
+    bool applyFilterText(const QString& text, const QString& successMessage = QString());
+    void showPersistenceError(const QString& action,
+                              const loglens::PersistenceError& error);
+    bool prepareDefaultStoreDirectory(bool profiles);
+    QString storePath(bool profiles) const;
 };

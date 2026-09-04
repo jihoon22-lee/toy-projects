@@ -5,6 +5,7 @@
 #include <functional>
 #include <string>
 
+#include "loglens/log_parser.hpp"
 #include "loglens/log_source.hpp"
 
 namespace loglens {
@@ -28,10 +29,13 @@ struct InitialLoadWindow {
 
 // Finds the first byte of the last recordCount complete logical records while
 // retaining only O(recordCount) offsets. The scan is byte-only and bounded by
-// sourceChunkBytes; parsing and model mutation remain separate stages.
+// sourceChunkBytes; parsing and model mutation remain separate stages. The
+// multiline policy must match the RecordAssembler that will consume the
+// selected suffix, otherwise Tail N could select a different logical window.
 InitialLoadWindow locateTailWindow(
     const std::string& path, std::size_t recordCount,
     std::size_t sourceChunkBytes = kDefaultSourceChunkBytes,
-    const std::function<bool()>& cancelled = std::function<bool()>());
+    const std::function<bool()>& cancelled = std::function<bool()>(),
+    MultilinePolicy multilinePolicy = MultilinePolicy::FoldContinuations);
 
 } // namespace loglens
