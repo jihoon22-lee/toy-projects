@@ -35,10 +35,11 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 | 이름 | 설명 | 상태 |
 |---|---|---|
 | [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어 | Qt5/Qt6 GUI · D1~D6 local implementation/evidence · D3 explorer workbench merged (PR #46; exact-main green) · `0.1.0`/`Unreleased` |
-| [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · L2 1 GiB benchmark merged in PR #26 · default capacity 8192 |
+| [loglens](loglens/) | 로그 뷰어 / 분석기 | Qt5/Qt6 GUI · bounded background loader · triage/export/timeline comparison workbench implemented locally · `0.1.0`/`Unreleased` |
 | [buildscope](buildscope/) | compile DB explorer | 0.5.0 stable · published 2026-09-02 · immutable GitHub Release |
 | [envlens](envlens/) | Python 환경 snapshot CLI/library | pure Python 3.10+ · deterministic snapshot core · PR #50 merged · exact-main green · release pending · `0.1.0`/`Unreleased` |
-| [quality-zoo](quality-zoo/) | ici known-answer expected-finding corpus | Q0 contract/candidate intake/PR/exact-main complete · Q1~Q5 pending · no product release |
+| [abilens](abilens/) | Linux ELF/ABI artifact inspector | C++20 · bounded inspect/diff/policy reports · `0.1.0`/`Unreleased` |
+| [quality-zoo](quality-zoo/) | ici known-answer expected-finding corpus | released six-scenario slice · candidate sixteen-scenario local corpus · remote acceptance pending · no product release |
 
 ### envlens deterministic snapshot — merged evidence
 
@@ -121,6 +122,78 @@ expectation. This candidate validation does not bump a toy version or create a r
 acceptance is complete; Q1~Q5 corpus work remains pending. The exact local evidence and Q0 remote
 closeout are captured in the [Quality Zoo workthrough](docs/workthroughs/2026-09-03-quality-zoo-contract.md);
 the post-merge four-project evidence is in the [EnvLens workthrough](workthrough/2026-09-03-envlens-snapshot.md).
+
+현재 consolidated worktree의 candidate registry는 released six scenarios에 ThreadSanitizer
+2개, C++ build/quality 3개, Python depth 3개, security/resource/correctness 1개,
+Make-to-ELF/integration 1개를 더한 16개다. accepted non-stable candidate digest를 사용한
+로컬 contract run은 `15/16 PASS`였고, 유일한 미통과는 이 호스트에 `clazy`가 없어 Qt lifetime
+scenario를 실행하지 못한 경우다. 새 C++ family와 Python family는 각각 focused `3/3 PASS`다.
+이 실행은 ici `ccb2067c656492c549dae8f4abc198a69ea013c2`의 non-stable candidate
+`23d9922b94b2ba34ab8884cd2d39c8eda358ccb32d0925af5c0a3d52a7ddc893`를 사용했고,
+나머지 15개 contract에는 error가 없었다.
+이 확장은 candidate-only corpus이며, 해당 worktree에 대한 remote PR/Pages acceptance와
+version/release 변경은 아직 주장하지 않는다.
+
+### LogLens investigation workbench — local implementation
+
+LogLens의 현재 로컬 slice는 로그를 읽고 끝나는 뷰어가 아니라, 한 행의 원본 증거와 분석
+결과를 함께 보존하는 investigation workbench다. 제품 버전은 `0.1.0`/`Unreleased`를
+유지하며, 이 절은 아직 consolidated toy PR의 원격 CI·Pages 결과나 release를 의미하지
+않는다.
+
+- `loglens.triage/v1`에 highlight rule, bookmark, source-line annotation을 저장한다.
+  규칙은 literal/whole-row highlight, priority, 안전한 색상 표현을 가지며 CRUD·reorder와
+  legacy `loglens.triage/v0`의 명시적 migration을 지원한다. 저장은 bounded strict JSON과
+  atomic replacement를 사용한다.
+- Investigation dock의 Record 탭은 선택한 행의 parsed fields, parse diagnostics, source
+  위치, input/omitted bytes와 raw evidence를 함께 보여준다. 선택 행 export는
+  `loglens.selection/v1` JSON으로 스트리밍하며 raw/message/source의 base64 필드로
+  malformed/비 UTF-8 바이트도 손실 없이 보존한다. 출력은 누적 16 MiB로 제한되고 atomic
+  save를 거치며, 현재 연 source 로그를 대상으로 선택할 수 없다.
+- Timeline은 bucket을 half-open `[begin, end)` 범위로 선택한다. 선택 범위는 기존 filter와
+  raw search에 추가로 적용되며, 두 범위를 baseline/comparison으로 지정하면 level/source/
+  normalized-pattern의 new-pattern·rate-spike 신호와 request/thread 같은 raw correlation을
+  deterministic하게 계산한다. 결과의 first/last source line을 선택하면 원래 표 행으로
+  이동한다.
+- GUI는 Qt5/Qt6에서 같은 core 계약을 사용한다. focused investigation suite는 timeline
+  mouse interaction, UTF-8 highlight paint, triage persistence, byte-preserving export, diagnostics,
+  window comparison/navigation, empty/error paths를 함께 확인한다. 로컬 실행에서 두 Qt
+  major의 focused CTest는 각각 `18/18`로 통과했다. 최종 exact ici candidate deep local run은
+  test engine `18/18 PASS`, line/function/branch `90.5% / 96.1% / 78.0%`, TEM `4.81`을
+  기록했고, native TSan partition은 `41/41 PASS`였다. 원격 PR acceptance는 별도 gate이며,
+  이 수치는 remote PR/Pages 또는
+  stable release evidence가 아니다.
+
+### AbiLens ELF/ABI inspector — local implementation
+
+`abilens`는 Linux build artifact를 실행하지 않고 직접 검사하는 dependency-free C++20 CLI다.
+제품 버전은 `0.1.0`/`Unreleased`이며, 현재 구현 범위는 다음과 같다.
+
+- ELF identification/header와 table bound를 bounded integer arithmetic으로 먼저 확인하고,
+  shell 없는 GNU `readelf` capability probe 및 C-locale evidence 수집을 수행한다. timeout,
+  signal, stream bound, 비 GNU/파싱 불가 Binutils는 incomplete/tool error로 닫힌다.
+- `DT_NEEDED`, `DT_RPATH`, `DT_RUNPATH`, GLIBC/GLIBCXX/CXXABI 요구 버전을 정규화하고,
+  ELF class/endian/type/machine, dynamic/static, stripped 상태를 포함한 deterministic
+  `abilens.report/v1`을 생성한다. 두 ELF 또는 두 report는 `abilens.diff/v1`로 비교할 수
+  있고, class/machine/ABI floor/RPATH/forbidden dependency policy를 적용할 수 있다.
+- strict hand-written JSON reader는 schema/version/status/namespace/tool, duplicate key와
+  ABI tuple/maximum 일관성을 fail closed로 검증한다. Make output은 ownership marker가 있는
+  tree만 clean 대상이 되며, release·coverage·ASan/UBSan·TSan output은 서로 격리된다.
+- ELF header와 GNU `readelf` evidence는 한 번 연 descriptor를 공유한다. 수집 전후
+  device/inode/mode/size/mtime/ctime과 원래 경로 identity가 달라진 일반적인 path replacement와
+  in-place mutation은 report를 버리고 `tool-error`로 닫힌다. Linux `/proc/self/fd`가 필요하며,
+  권한 있는 공격자가 내용을 바꿨다가 동일 metadata와 함께 복원하는 경우까지 보장하는
+  cryptographic snapshot 계약은 아니다.
+
+정확한 ici candidate deep 실행은 exit `0`, suite `WARN`, `11 PASS / 3 WARN / 0 FAIL /
+0 ERROR / 5 SKIP`, TEM `4.75`, complexity maximum `14`/194 functions, duplication `3.71%`였고
+sanitizer·ThreadSanitizer·build·binary compatibility·integration은 모두 measured `PASS`였다.
+테스트 2/2는 통과했지만 coverage는 이 실행에서 estimated evidence이므로 threshold 근거로
+사용하지 않는다.
+
+현재 AbiLens 설명과 local verification 기록은 [AbiLens README](abilens/README.md)와
+[hardening workthrough](abilens/workthrough/2026-09-04-abilens-hardening.md)에 있다. 이
+문서들은 remote PR/Pages acceptance와 stable release를 아직 주장하지 않는다.
 
 ### buildscope B0 hybrid skeleton — release-backed evidence
 
@@ -979,6 +1052,14 @@ matrix와 Qt GUI build/smoke matrix는 모두 같은 manifest 출력에서 생�
 discovery 단계에서 자동으로 Qt5·Qt6 두 major로 확장된다. 따라서 새 프로젝트를 추가할 때
 한쪽 matrix만 수정하는 실수를 허용하지 않는다. GUI가 없는 순수 CLI 프로젝트는
 `gui.enabled = false`를 명시해야 하며, 그 경우에도 ici verify에는 포함된다.
+
+PR에서는 변경된 경로를 기준으로 영향받은 프로젝트와 Quality Zoo scenario만 선택한다.
+프로젝트 공통 계약(`ci/`, workflow, runner/test, manifest)이 바뀌면 전체 프로젝트와 전체
+stable scenario로 확장하고, `main` push·수동 실행은 전체 범위를 사용한다. 선택되지 않은
+프로젝트는 성공으로 위장하지 않고 별도 skipped ledger에 남는다. 문서 전용 PR처럼 선택
+대상이 없는 경우에도 scope-only sticky comment 하나를 남겨 오래된 report link를 재사용하지
+않는다. 이 경로 선택은 실행 시간을 줄이면서도 공통 계약 변경의 누락을 fail closed로
+방지하기 위한 CI 동작이며, 제품 버전이나 release cadence를 변경하지 않는다.
 
 DiskMap qmake test discovery에도 같은 누락 방지 계약을 적용한다. `ci/test_check_manifest.py`는
 `diskmap/tests/`에서 찾은 모든 `test_*.pro`와 `diskmap/tests/tests.pro`의 등록 집합을 비교한다.

@@ -72,6 +72,17 @@ is deliberately versioned and self-contained; see
 `schemas/abilens-report-v1.schema.json` and
 `schemas/abilens-diff-v1.schema.json`.
 
+Each inspection opens the target once and reads the ELF header and program
+headers from that descriptor. The same descriptor is passed to `readelf` as a
+`/proc/self/fd/<n>` path, so the structural and tool evidence refer to one
+opened file rather than independently reopened path names. AbiLens records the
+descriptor's device, inode, mode, size, mtime, and ctime and also rechecks the
+original path identity; an ordinary path replacement or in-place metadata
+change during evidence collection fails closed as a tool error. This requires
+Linux `/proc/self/fd`. It is an input-identity guard, not a cryptographic
+content snapshot: an adversary that changes bytes and restores every observed
+metadata value before the final check is outside this guarantee.
+
 Output directories are protected by an ownership marker.  A non-empty
 unowned `OUT`, a symlink, the project root, and `/` are refused by the Make
 adapter; `make clean` removes only an explicitly marked output tree.

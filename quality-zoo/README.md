@@ -31,21 +31,21 @@ acceptance is complete through the toy repository's remote PR/exact-main path, a
 the earlier six-scenario candidate cross-repository acceptance is complete through
 the exact-revision dispatch of the ici-hosted workflow recorded below.
 
-The currently accepted candidate is explicitly non-stable: it reports package
-version `0.10.2`, has `stable=false`, and is never the released artifact. Its
-authenticated producer is [run `33840314232`](https://github.com/jihoon22-lee/ici/actions/runs/33840314232)
-with [artifact `9924697353`](https://github.com/jihoon22-lee/ici/actions/artifacts/9924697353),
+The current candidate is explicitly non-stable: it reports package version
+`0.10.2`, has `stable=false`, and is never the released artifact. Its
+authenticated producer is [run `33852539205`](https://github.com/jihoon22-lee/ici/actions/runs/33852539205)
+with [artifact `9928909508`](https://github.com/jihoon22-lee/ici/actions/artifacts/9928909508),
 raw ZIP SHA-256
-`2583e7a69b5a14316968d67c08d1510c13a9e32a9f7810bf0a4800df61004126`, executable
+`c21437a7abb1b9016d351584b97a8ffc813ae17a699a3153262b31e9fa53af4b`, executable
 SHA-256
-`50d41d36775394f66f6620091f42a7a0333ee90758e19449a848d7ee0875a93c`, and exact
-source target `0b7e620bdb80423c3532d3ce3979a8dbdfaf6b11`. All sixteen candidate
-registry scenarios now have an exact selector for this executable; the released
+`23d9922b94b2ba34ab8884cd2d39c8eda358ccb32d0925af5c0a3d52a7ddc893`, and exact
+source target `ccb2067c656492c549dae8f4abc198a69ea013c2`. All sixteen candidate
+registry scenarios have an exact selector for this executable; the released
 six-scenario `manifest.json` remains unchanged.
 
-Using the accepted executable locally, fifteen of sixteen candidate contracts
-pass. The only local failure is the Qt scenario because `clazy` is unavailable
-on this host; the other fifteen scenarios have no runner errors. The three
+Using this candidate locally, fifteen of sixteen candidate contracts pass. The
+only local failure is the Qt scenario because `clazy` is unavailable on this
+host; the other fifteen scenarios have zero runner errors. The three
 newly integrated C++ scenarios add build-context, malformed compilation
 database, and coverage/quality checks. Their focused runner contract is
 `3/3 PASS`. The three Python depth scenarios add compatibility/package
@@ -53,7 +53,8 @@ metadata, import-cycle and exception, and maintainability-threshold coverage;
 their focused runner contract is also `3/3 PASS`. The existing candidate additions remain
 `python.security-resource-correctness` (`WARN`/`PASS` with four matched
 findings) and `cpp.make-elf-integration` (`PASS`/`PASS` with no findings). No
-version or release changed.
+version or release changed. Remote toy PR CI, sticky-comment/Pages verification,
+and ici-hosted candidate acceptance for this candidate remain pending.
 PR #49 head
 `f6ad1dc4e745d3d1a2703000a00a5d7c4eed61a0` ran as
 [`33693241255`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33693241255):
@@ -100,8 +101,8 @@ the released and candidate channels remain explicit and comparable:
 
 That earlier candidate was a candidate-channel artifact even though its package
 version was `0.10.2`; it did not change the toy repository version or create a
-release. The accepted current candidate and its provenance are recorded in the
-status section above.
+release. The current candidate and its provenance are recorded in the status
+section above.
 
 ### C++ sanitizer scenarios (local digest-bound evidence)
 
@@ -167,7 +168,7 @@ suite/engine `FAIL`, one `tsan.data-race` at `src/race.cpp:15`, and ici exit `1`
 `cpp.tsan-synchronized` observed `PASS`, zero TSan issues, and ici exit `0`. A full
 local eight-scenario aggregate had only the Qt contract failure because `clazy` was
 unavailable locally; CI installs `clazy`. This is historical pre-expansion evidence;
-the accepted current candidate's sixteen-scenario local result is summarized above.
+the current candidate's sixteen-scenario local result is summarized above.
 No PR, merge, Pages, release, or version change is claimed by that earlier run.
 
 ### Candidate-only C++ build and quality scenarios
@@ -193,7 +194,7 @@ level; the expected `FAIL`/`WARN` suite statuses are part of the known answer.
 with a deliberately embedded secret and dynamic `eval` in `src/bad.py`, plus an
 unmanaged `open()` and mutable default argument. Its nearby `src/clean.py`
 counterparts use no dynamic execution, a context manager, and a `None` default;
-the expectation forbids security/resource findings there. The accepted
+the expectation forbids security/resource findings there. The current
 non-stable candidate (package version `0.10.2`) reports `WARN` for both required
 engines with measured
 evidence and four exact findings: security at `src/bad.py:3:1` and `:7:12`,
@@ -203,7 +204,7 @@ by ici and is not retained by this corpus.
 This is a syntax-level, intraprocedural known-answer case. It does not prove
 runtime taint safety or interprocedural ownership. Its strict schema-1 expectation
 is stored under `expectations/candidate-0b7e620.json` and is selected only by the
-accepted candidate executable's exact SHA-256; the scenario remains outside the
+current candidate executable's exact SHA-256; the scenario remains outside the
 stable released-artifact manifest.
 
 ### Candidate-only Python depth scenarios
@@ -219,7 +220,7 @@ case:
 | `python.maintainability-thresholds` | Cyclomatic/cognitive thresholds and bounded Python AST duplication | `WARN` with four matched findings |
 
 Each scenario has a nearby clean counterpart where the relevant rule could
-overmatch ordinary code. Their schema-2 selectors are bound to the accepted
+overmatch ordinary code. Their schema-2 selectors are bound to the current
 candidate executable digest and select strict schema-1 expectations from
 `expectations/candidate-0b7e620.json`. The focused local run against that
 executable is `3/3 PASS` at the runner-contract level; these fixtures remain
@@ -349,9 +350,10 @@ earlier candidate executable with SHA-256
 `53fc75f0a073a74689babfe9ef8a4b2378995002d7d563bdc52da548fdbb9ee8` reports
 provenance-aware `ESTIMATED` evidence and `medium` confidence, even though both
 executables report package version `0.10.2`. The sanitizer-normalization candidate has its own
-strict expectation even though it reports the same package version. The accepted current
-candidate also reports `0.10.2`, but is selected by its distinct executable digest and
-remains non-stable.
+strict expectation even though it reports the same package version. The current candidate
+also reports `0.10.2`, but is selected by its distinct executable digest and remains
+non-stable. Its exact source target is
+`ccb2067c656492c549dae8f4abc198a69ea013c2`.
 
 The scenario's schema-2 `scenario.json` maps each exact executable SHA-256 to a
 contained, full strict schema-1 expectation:
@@ -361,7 +363,8 @@ contained, full strict schema-1 expectation:
 | `8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4` | released ici `v0.10.2` | `expectations/released-v0.10.2.json` |
 | `53fc75f0a073a74689babfe9ef8a4b2378995002d7d563bdc52da548fdbb9ee8` | ici candidate | `expectations/candidate-7872a7b.json` |
 | `e7f1a2ce7147057538873a802715c7bf2b12e530a85070af862e02e378caceb8` | ici sanitizer candidate | `expectations/candidate-9d470ed.json` |
-| `50d41d36775394f66f6620091f42a7a0333ee90758e19449a848d7ee0875a93c` | accepted non-stable candidate `0.10.2` | `expectations/candidate-9d470ed.json` (legacy sanitizer/dead cases) |
+| `50d41d36775394f66f6620091f42a7a0333ee90758e19449a848d7ee0875a93c` | previous non-stable candidate `0.10.2` | `expectations/candidate-9d470ed.json` (legacy sanitizer/dead cases) |
+| `23d9922b94b2ba34ab8884cd2d39c8eda358ccb32d0925af5c0a3d52a7ddc893` | current non-stable candidate `0.10.2` (target `ccb2067c656492c549dae8f4abc198a69ea013c2`) | scenario-specific candidate expectation selected by `scenario.json` |
 
 The runner selects one expectation by exact digest before checking the report;
 an unknown digest has no fallback and fails closed. Ordinary CI uses the
@@ -392,7 +395,7 @@ Candidate-only validation opts in explicitly with
 require their matching candidate executable. All sixteen candidate entries now
 select expectations by exact SHA-256, including the three C++ build/quality and
 three Python depth selectors whose full schema-1 expectations live under
-`candidate-0b7e620.json`. With the accepted `ici 0.10.2` executable, each new
+`candidate-0b7e620.json`. With the current `ici 0.10.2` executable, each new
 three-scenario family is locally `3/3 PASS` at the runner-contract level (their
 `FAIL`/`WARN` suite statuses are intentional); the full sixteen-scenario local
 run is `15/16 PASS` because this host lacks required `clazy` for the Qt
@@ -645,7 +648,7 @@ change. Released-artifact Q0 (the scenario contract, local runner, and toy
 PR/exact-main acceptance) and the earlier exact-revision candidate
 cross-repository acceptance are complete, as is the current candidate's
 authenticated local intake/selector evidence. The current non-stable candidate
-is bound to ici target `0b7e620bdb80423c3532d3ce3979a8dbdfaf6b11`; all sixteen
+is bound to ici target `ccb2067c656492c549dae8f4abc198a69ea013c2`; all sixteen
 candidate entries select its exact executable digest. The six newly added
 candidate scenarios have focused local contract `6/6 PASS`; the full local
 candidate run is `15/16 PASS` because this host has no `clazy` for the Qt
