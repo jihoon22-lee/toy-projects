@@ -43,8 +43,8 @@ ici 결함은 [ICI-GAPS.md](ICI-GAPS.md) 에 있다.
 
 제품별 사용법은 각 디렉터리의 README에 있다.
 [abilens](abilens/README.md) · [buildscope](buildscope/README.md) ·
-[envlens](envlens/README.md) · [loglens](loglens/README.md) ·
-[quality-zoo](quality-zoo/README.md)
+[diskmap](diskmap/README.md) · [envlens](envlens/README.md) ·
+[loglens](loglens/README.md) · [quality-zoo](quality-zoo/README.md)
 
 ## 공통 구조 규칙
 
