@@ -48,7 +48,10 @@ public:
 #if defined(_WIN32)
         return readRangePortable(path, expected, offset, max_bytes, bytes, error);
 #else
-        return readRangeNoFollow(path, expected, offset, max_bytes, bytes, error);
+        ReadRangeOutcome outcome = readRangeNoFollow(path, expected, offset, max_bytes);
+        bytes = std::move(outcome.bytes);
+        error = std::move(outcome.error);
+        return error.empty();
 #endif
     }
 
@@ -100,6 +103,16 @@ private:
         return true;
     }
 #else
+    // Bundles the read outcome in one typed value instead of a pair of
+    // same-typed output references, which clang-tidy's
+    // bugprone-easily-swappable-parameters flagged as swappable at the call
+    // site. Success is signaled by an empty error, matching ScanResult's
+    // fatal_error convention elsewhere in DiskMap.
+    struct ReadRangeOutcome {
+        std::string bytes;
+        std::string error;
+    };
+
     static std::int64_t modifiedNanoseconds(const struct stat& status) {
 #if defined(__APPLE__)
         const std::int64_t seconds =
@@ -146,16 +159,15 @@ private:
                           == expected.hard_link_count);
     }
 
-    bool readRangeNoFollow(const fs::path& path,
-                           const FsMetadata& expected,
-                           std::uint64_t offset,
-                           std::size_t max_bytes,
-                           std::string& bytes,
-                           std::string& error) const {
+    ReadRangeOutcome readRangeNoFollow(const fs::path& path,
+                                       const FsMetadata& expected,
+                                       std::uint64_t offset,
+                                       std::size_t max_bytes) const {
+        ReadRangeOutcome outcome;
         if (offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())
             || max_bytes > static_cast<std::size_t>(std::numeric_limits<ssize_t>::max())) {
-            error = "duplicate candidate range exceeds platform limit";
-            return false;
+            outcome.error = "duplicate candidate range exceeds platform limit";
+            return outcome;
         }
         int flags = O_RDONLY;
 #ifdef O_NONBLOCK
@@ -172,20 +184,20 @@ private:
 #endif
         const int descriptor = ::open(path.c_str(), flags);
         if (descriptor < 0) {
-            error = systemError("cannot open duplicate candidate without following symlink");
-            return false;
+            outcome.error = systemError("cannot open duplicate candidate without following symlink");
+            return outcome;
         }
         struct stat opened{};
         if (::fstat(descriptor, &opened) != 0) {
             const int savedErrno = errno;
             ::close(descriptor);
-            error = systemError("cannot validate opened duplicate candidate", savedErrno);
-            return false;
+            outcome.error = systemError("cannot validate opened duplicate candidate", savedErrno);
+            return outcome;
         }
         if (!matchesExpected(opened, expected)) {
             ::close(descriptor);
-            error = "opened duplicate candidate no longer matches retained evidence";
-            return false;
+            outcome.error = "opened duplicate candidate no longer matches retained evidence";
+            return outcome;
         }
         std::vector<char> buffer(max_bytes);
         ssize_t count = 0;
@@ -199,15 +211,15 @@ private:
                             && matchesExpected(finalState, expected);
         ::close(descriptor);
         if (count < 0) {
-            error = systemError("cannot read duplicate candidate", savedErrno);
-            return false;
+            outcome.error = systemError("cannot read duplicate candidate", savedErrno);
+            return outcome;
         }
         if (!stable) {
-            error = "duplicate candidate changed while its range was read";
-            return false;
+            outcome.error = "duplicate candidate changed while its range was read";
+            return outcome;
         }
-        bytes.assign(buffer.data(), static_cast<std::size_t>(count));
-        return true;
+        outcome.bytes.assign(buffer.data(), static_cast<std::size_t>(count));
+        return outcome;
     }
 #endif
 
