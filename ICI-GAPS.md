@@ -13,7 +13,7 @@ Phase 5(Qt/CMake 어댑터) 설계의 입력이다. 각 항목은 **코드 위�
 버전 수치는 발견 당시의 historical evidence로 유지한다.
 
 
-## 현황 (2026-09-02)
+## 현황 (2026-09-05)
 
 **A-3 이 닫혔다.** ici 0.6.0 이 CMake/CTest 와 qmake/Make 빌드 어댑터를 갖췄고, 이 저장소의
 두 프로젝트가 그 실측 대상이었다 — `loglens` 는 CMake, `diskmap` 은 qmake 로 전환했다.
@@ -23,17 +23,30 @@ Phase 5(Qt/CMake 어댑터) 설계의 입력이다. 각 항목은 **코드 위�
 
 | | 항목 | 성격 |
 |---|---|---|
-| **A-2** | 손으로 쓴 `Makefile` 만 있는 프로젝트는 여전히 거부 | **부분 수정** — CMake·qmake 는 해결 |
-| B-3 | `dead`/`cognitive`/`resource` 가 Python 전용 | **부분 해결** — 언어 범위 표기는 명시됐지만 C++ dead/resource/maintainability coverage는 ici I4-3/I4-4에 남음 |
+| **A-2** | 손으로 쓴 `Makefile` 만 있는 프로젝트 | **released 에서만 남음** — CMake·qmake 는 해결, Make 는 candidate ici 에서 해결 |
+| B-3 | `dead`/`cognitive`/`resource` 가 Python 전용 | **`resource` 만 남음** — `dead`·`cognitive` 는 C++ 지원, `resource` 는 여전히 Python 전용 |
 
-A-2 를 "수정됨" 으로 옮기지 않는 이유는 남은 거부 경로가 문서에서 사라지지 않게 하기
-위해서다. 실측 대상이 될 `Makefile` 전용 프로젝트가 없으므로 어댑터도 만들지 않았다.
+A-2 의 상황이 바뀌었다. 이 항목을 쓸 당시에는 실측 대상이 될 `Makefile` 전용 프로젝트가
+없어서 어댑터도 만들지 않았다. 지금은 [abilens](abilens/) 가 정확히 그 사례다 — 빌드
+파일이 손으로 쓴 `Makefile` 하나뿐인 C++20 프로젝트이고, ici 의 configured Make 어댑터가
+`build.make` 설정으로 이 프로젝트를 실제로 구동한다. release, coverage, ASan/UBSan, TSan 이
+각각 분리된 `OUT` 트리를 쓰고 build/test/binary_compat/integration 엔진이 모두 켜진다.
+
+다만 이 해결은 candidate ici 에만 있다. 공개 stable `v0.10.2` 는 Make 어댑터 이전 버전이라
+이 Makefile 을 C++17 로 재구성하려 들기 때문에, `abilens/ici.toml` 은 일반 CI 에서
+`test`/`sanitize` 를 끄고 native 검증을 별도 CI job 이 맡는다. Make 계약을 실제로 쓰는 설정은
+`abilens/ici-candidate.toml` 에 분리해 두었다. 따라서 A-2 는 "released 에서만 남은" 항목이며,
+다음 stable release 가 나오면 닫힌다.
 
 B-3의 언어별 적용 범위 표기와 `NOT_APPLICABLE`/지원 matrix의 source of truth는 ici I1-2
-support/capability matrix에서 명시됐다. 그러나 C++에서 `dead`/`resource` 및 관련
-maintainability 결과를 제공하는 capability gap 자체는 남아 있다. 이 표의 B-3 행은
-발견 당시의 문서 요구와 현재의 부분 해결을 함께 보존하며, 실제 C++ coverage 구현은
-toy 기능이 아니라 ici I4-3/I4-4에서 소유한다.
+support/capability matrix에서 명시됐다. 그 뒤 세 엔진 중 둘의 capability gap 자체가 닫혔다.
+`dead` 는 compiler-backed 한 translation-unit unused-function 과 GNU ELF target-local
+discarded-function 증거를 제공하고, `cognitive` 는 compiler-backed 함수 경계 안에서 C++
+metric 을 계산한다. 두 결과 모두 각자의 provenance 와 confidence 를 함께 남긴다.
+
+`resource` 는 아직 Python 전용이다. C++ 의 resource/lifetime 은 clang analyzer·clang-tidy·
+clazy 결과를 category 별로 매핑하는 broader taxonomy 에 속하고, 그 범위는 ici I4-3/I4-4 가
+소유한다. 따라서 B-3 는 닫히지 않고 `resource` 한 항목으로 좁혀진다.
 
 C-7의 예전 `ESTIMATED`/`SKIP` aggregate-status 제안은 현재 evidence taxonomy가 원래의
 inapplicable/실행불가 모호성을 줄인 뒤에도 남아 있는 historical policy 기록이다. 현재
