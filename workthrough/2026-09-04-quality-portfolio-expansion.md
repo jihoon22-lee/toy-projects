@@ -176,3 +176,47 @@ and restores both content and identity evidence.
   corresponding stable release boundary is independently satisfied.
 - Resolve or explicitly retain any remaining ici lint/duplication and external
   tool capability boundaries in the next evidence record.
+
+## Merge and Remote Acceptance
+
+This section records the remote evidence measured after the work above was merged. It adds no
+implementation change.
+
+[`PR #58`](https://github.com/jihoon22-lee/toy-projects/pull/58) squash-merged as
+[`413c75a9fa13621fc78046a8e1baf4a9183ce869`](https://github.com/jihoon22-lee/toy-projects/commit/413c75a9fa13621fc78046a8e1baf4a9183ce869),
+following [`#57`](https://github.com/jihoon22-lee/toy-projects/pull/57)
+(`6376bfc6c18e5dd74fc17387d4373b3688377d9b`) and
+[`#56`](https://github.com/jihoon22-lee/toy-projects/pull/56)
+(`d0b84d376d3f736da86308a49d21d8600297eb27`).
+
+The exact-main [run `33856573719`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33856573719)
+is `success`: 27 of 28 jobs succeeded and the single skip is the push-inapplicable
+`Publish Reports & Sticky Comment`. The successful set covers `ici verify` for all five projects
+(`abilens`, `buildscope`, `diskmap`, `envlens`, `loglens`), both Qt5 and Qt6 GUI builds,
+`Native product checks (abilens)`, `Validate project manifest`,
+`Quality-zoo known-answer contract`, `BuildScope release contract`,
+`BuildScope 100k model benchmark`, `BuildScope ici deep (Qt5)` and `(Qt6)`, the DiskMap and
+LogLens benchmark smokes, `Publish Main Portfolio Reports`, and `Merge Gate`.
+
+### Trusted main Pages
+
+The five main reports were published between 2026-09-04 09:18:09Z and 09:18:17Z. Each is
+byte-identical between its gh-pages blob and the live Pages response, and each served HTTP 200
+with `text/html; charset=utf-8`, an exact `ici Verification Report — <project>` title, and zero
+external `src`/`href` references.
+
+| Pages | bytes | SHA-256 |
+|---|---|---|
+| [`abilens/main/`](https://jihoon22-lee.github.io/toy-projects/abilens/main/index.html) | 275,675 | `d91e1141956de60cf16f77e620bf032ed9866f5abf232cab59b27a9537f8e7b3` |
+| [`buildscope/main/`](https://jihoon22-lee.github.io/toy-projects/buildscope/main/index.html) | 1,345,473 | `822e9147dfd53a6f286e1a187cc55e22c15c8f2ec2ef8145d8785ff47b490abd` |
+| [`diskmap/main/`](https://jihoon22-lee.github.io/toy-projects/diskmap/main/index.html) | 1,415,590 | `ae1210831bb0304ed0eabc5adc95ecc3ed1b840077babb87f5083456dc583126` |
+| [`envlens/main/`](https://jihoon22-lee.github.io/toy-projects/envlens/main/index.html) | 713,647 | `d977fdb23ebc06c2900a76aaaa7dbb470a3d660a0687693fd8f8d2b754ca08e3` |
+| [`loglens/main/`](https://jihoon22-lee.github.io/toy-projects/loglens/main/index.html) | 1,260,671 | `a80bedf2119fdb34844fe00ed9200ffb04891157d2fcd66f5b8b32549a49fd28` |
+
+### What this acceptance does not close
+
+No toy product version was bumped and no tag, GitHub release, or stable promotion was created.
+AbiLens stays at `0.1.0`/`Unreleased`. The sixteen-scenario Quality Zoo registry remains
+candidate-only; the released six-scenario manifest and the ordinary CI pin on released ici
+`v0.10.2` are unchanged. A candidate rerun against current ici `main@b712267` has not been
+dispatched.
