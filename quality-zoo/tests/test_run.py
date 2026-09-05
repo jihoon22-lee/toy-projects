@@ -20,9 +20,12 @@ from tests.helpers import (
     write_scenario,
 )
 
-CANDIDATE_DIGEST = "23d9922b94b2ba34ab8884cd2d39c8eda358ccb32d0925af5c0a3d52a7ddc893"
+CANDIDATE_DIGEST = "e90140186f84ff17c4cda039d34c241b99f9ba74b07ea3b089a542c4bb620d9b"
 PREVIOUS_CANDIDATE_DIGEST = (
-    "50d41d36775394f66f6620091f42a7a0333ee90758e19449a848d7ee0875a93c"
+    "23d9922b94b2ba34ab8884cd2d39c8eda358ccb32d0925af5c0a3d52a7ddc893"
+)
+EARLIER_CANDIDATE_DIGESTS = (
+    "50d41d36775394f66f6620091f42a7a0333ee90758e19449a848d7ee0875a93c",
 )
 
 
@@ -346,6 +349,7 @@ class RunContractTests(unittest.TestCase):
                     "e7f1a2ce7147057538873a802715c7bf2b12e530a85070af862e02e378caceb8",
                     "985c81a63363356619207870cddb0d8cd9854a46925a3e0a745e54bd543d5b51",
                     "424108397858470b1209bc2749b580a858fb06c8b09aaa2e4772c94e43690bb5",
+                    *EARLIER_CANDIDATE_DIGESTS,
                     PREVIOUS_CANDIDATE_DIGEST,
                     CANDIDATE_DIGEST,
                 },
@@ -362,6 +366,7 @@ class RunContractTests(unittest.TestCase):
                 "8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4",
                 "985c81a63363356619207870cddb0d8cd9854a46925a3e0a745e54bd543d5b51",
                 "424108397858470b1209bc2749b580a858fb06c8b09aaa2e4772c94e43690bb5",
+                *EARLIER_CANDIDATE_DIGESTS,
                 PREVIOUS_CANDIDATE_DIGEST,
                 CANDIDATE_DIGEST,
             },
@@ -420,6 +425,7 @@ class RunContractTests(unittest.TestCase):
                     set(selector["expectations"]),
                     {
                         "424108397858470b1209bc2749b580a858fb06c8b09aaa2e4772c94e43690bb5",
+                        *EARLIER_CANDIDATE_DIGESTS,
                         PREVIOUS_CANDIDATE_DIGEST,
                         CANDIDATE_DIGEST,
                     },
