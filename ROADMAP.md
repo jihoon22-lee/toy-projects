@@ -640,7 +640,7 @@ core RSS `≤ 256 MiB`, GUI RSS `≤ 512 MiB`다. best median load time 대비 1
 `c45176ce25f2efd66ea9b0ed9b48690e34cc8679`로 squash merge됐다.
 
 runner 재현 명령, Qt5/Qt6 guard, opt-in/nightly workflow와 `summary.json`·`summary.md`·
-`toolchain.*`·`samples/*.json` artifact allowlist는 [README의 benchmark 절](README.md#1-gib-benchmark-재현-opt-in)에 기록했다. 일반 PR에는 `.github/workflows/ci.yml`의
+`toolchain.*`·`samples/*.json` artifact allowlist는 [LogLens 문서의 benchmark 절](loglens/README.md#1-gib-benchmark-재현-opt-in)에 기록했다. 일반 PR에는 `.github/workflows/ci.yml`의
 1 MiB/1,000-record `benchmark-smoke`(capacity `64,256`, 1회, 30초, budget skip)가
 `Merge Gate` required check로 포함된다. 최종 PR gate인
 [workflow run `33355058919`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33355058919)은
@@ -754,3 +754,648 @@ cleanup/trash/snapshot/release는 pending 범위다.
 여기에 한 줄을 덧붙인다. **픽스처는 실물 프로젝트를 대신하지 못한다.** ici 저장소의 qmake
 픽스처는 통과하는데 `diskmap` 은 테스트 하나를 통째로 잃고 있었다(D-7). 픽스처는 만든 사람이
 상상한 모양만 담고, 실물은 그렇지 않은 모양을 갖고 있다.
+
+## 부록: 제품별 slice 증거 (README에서 이관)
+
+아래는 이전에 `README.md`에 누적돼 있던 제품별 slice 구현·검증 기록이다. README는 지금
+무엇을 하는 저장소이고 어떻게 쓰는지를 설명하고, 언제 무엇이 어떤 근거로 끝났는지는
+이 문서와 `CHANGELOG.md`, `workthrough/`가 맡는다. 내용은 옮기면서 바꾸지 않았다.
+
+### 제품 slice
+
+#### envlens deterministic snapshot — merged evidence
+
+[envlens 문서](envlens/README.md)의 현재 slice는 하나의 명시적으로 선택한 Python interpreter를
+네트워크 없이 조사해 `envlens.snapshot/v1` JSON으로 남기는 pure-Python CLI/library다. 고정된
+`python -c` probe를 `shell=False`로 실행하고 implementation/version, executable/prefix,
+platform/compiler, `sysconfig`, environment와 설치 distribution metadata를 수집한다.
+`Requires-Python`, `Requires-Dist`, entry point, location과 distribution별 metadata error도
+보존하며, 오류가 있는 distribution이 있어도 `collection.status = partial`로 나머지 결과를
+확인할 수 있다.
+
+Object와 unordered collection은 정렬하고, `captured_at`은 source identity와 분리한 명시적
+UTC timestamp로 정규화한다. strict schema는 top-level source/environment/distribution/
+collection 구조와 10,000 distribution, 4,096 mapping field, 100,000 nested-item, 65,536-character
+string bound를 정의한다. 기본 redaction은 target/host home path를 `<USER_HOME>`으로 바꾸고,
+token/password/API/access/private-key/auth/cookie/credential/secret/registry/repository 계열과
+`_URL`/`_URI` 환경변수 값을 `<REDACTED>`로 바꾼다. URL userinfo와 token·API key 등 secret query
+value도 distribution 문자열과 metadata error를 포함해 전부 scrub한다. CLI에는 unredacted 옵션이
+없고, library의 명시적 `redact=False`는 통제된 환경에서만 사용할 수 있다.
+
+Probe stdout은 8 MiB, stderr 보존은 64 KiB, 기본 timeout은 10초다. POSIX process group 또는
+Windows process group으로 descendant cleanup을 bounded하게 수행해 상속된 pipe 때문에 무한히
+기다리지 않으며, malformed/duplicate/non-finite protocol JSON, nonzero/timeout/oversized probe,
+잘못된 interpreter와 출력 대상 오류는 traceback 없이 exit `2`로 실패한다. Snapshot file은 같은
+directory에 atomic replacement하고 POSIX mode `0600`을 사용하며 symlink/special file과 선택한
+interpreter(기존 hardlink alias 포함) 덮어쓰기를 거부한다. 이는 sandbox가 아니므로 대상 interpreter는
+현재 사용자 권한으로 실행된다.
+
+2026-09-03 현재 local Python 3.10에서 CLI/I/O/probe·process/redaction/normalization-schema
+`50/50` tests, Ruff check/format, strict mypy(6 source modules)가 통과했다. released ici
+`v0.10.2` local deep 검증도 14 total engines에서 `13 PASS / 0 WARN / 0 FAIL / 0 ERROR /
+1 compile_db SKIP`로 PASS했으며, TEM `5.00`, line/function/branch
+`93.0% / 100.0% / 84.6%`, complexity max `13`, cycle/sanitize `PASS`였다. `envlens/ici.toml`은
+test/coverage, TEM `≥ 4.0`, branch `≥ 80%`, function `≥ 90%`의 intended quality contract를
+기록한다. Path-aware manifest와 Python 3.10/latest quality matrix가 연결됐고, [PR #50](https://github.com/jihoon22-lee/toy-projects/pull/50)은
+`c307ac1ab01e12e4ac81a34623eb669da0e43641`로 병합됐다. Exact-main
+[run `33698248293`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33698248293)도 성공했으며,
+EnvLens report와 package/Page byte evidence는 [EnvLens workthrough](workthrough/2026-09-03-envlens-snapshot.md)에
+중앙화했다. 제품 버전은 `0.1.0`/`Unreleased`로 유지한다. 두 snapshot diff,
+dependency/wheel compatibility, project import와 runtime smoke 및 release boundary는 E2~E4 후속 범위다.
+
+#### Quality Zoo known-answer corpus and candidate consumer
+
+Quality Zoo keeps intentionally defective, small scenarios outside the user-facing products and
+checks the complete ici report contract: schema, observed status, evidence, locations, expected
+findings, and forbidden findings in nearby clean code. Its registry is the dependency-free
+[`quality-zoo/manifest.json`](quality-zoo/manifest.json), deliberately JSON rather than a TOML
+parser so the runner stays standard-library-only and works on Python 3.10. Scenario projects may
+still contain `ici.toml`; ici reads that file, while the runner only validates its location and
+invokes a fixed argv contract.
+
+Local runs use an explicit executable path through `ICI_BIN` (or `--ici-bin`). Candidate intake
+accepts a checksum- and provenance-bound ZIP and, when authenticated provenance is being recorded,
+an optional directory containing exactly five API snapshots: `artifact.json`, `candidate-run.json`,
+`gate-check.json`, `gate-job.json`, and `gate-run.json`. The intake rejects unsafe archive members,
+path escapes, symlinks, digest/version mismatches, and identity mismatches; the detailed threat
+model and command examples are in the [Quality Zoo README](quality-zoo/README.md).
+
+The first local candidate consumer run used ici candidate workflow [33689056008](https://github.com/jihoon22-lee/ici/actions/runs/33689056008),
+source `7872a7b80899cbd3d40d92d18e7920cd7e2283e7`, artifact `9869395069`, ZIP SHA-256
+`640e50ecf5b099174c16f1ef5d2b5b87945329711e96f926d94c3cc04109081e`, and candidate `ici.pyz`
+SHA-256 `53fc75f0a073a74689babfe9ef8a4b2378995002d7d563bdc52da548fdbb9ee8` (version `0.10.2`).
+Authenticated API evidence validation passed. `python.dead-private-function` had contract `PASS`
+with observed suite `WARN`, exactly one matched finding, and no clean-counterpart false positive.
+PR #49 and its exact-main run completed Q0 remote acceptance: [PR run
+`33693241255`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33693241255)
+passed, exactly one sticky comment contained exactly one marker and three product
+HTML links at that time, the PR merged as
+`ed5fea2e881da77ac95482cf665e4e40bfe172f1`, and [exact-main run
+`33694452357`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33694452357)
+passed. The later EnvLens merge exact-main [run `33698248293`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33698248293)
+also passed all jobs, the main publisher, and `Merge Gate`; the PR-only publisher was
+skipped as expected, and the Quality Zoo artifact was `9872561713`. Package version alone is not an expectation selector: released ici `v0.10.2` digest
+`8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4` reports legacy `MEASURED`/`high`,
+while candidate digest `53fc75f0a073a74689babfe9ef8a4b2378995002d7d563bdc52da548fdbb9ee8` reports
+provenance-aware `ESTIMATED`/`medium`, despite the same package version. Schema-2 `scenario.json`
+therefore selects a full strict schema-1 expectation by exact executable SHA-256; unknown digests
+fail closed. Ordinary CI uses the released expectation, and candidate validation uses the candidate
+expectation. This candidate validation does not bump a toy version or create a release. Q0 remote
+acceptance is complete; Q1~Q5 corpus work remains pending. The exact local evidence and Q0 remote
+closeout are captured in the [Quality Zoo workthrough](workthrough/2026-09-03-quality-zoo-contract.md);
+the post-merge four-project evidence is in the [EnvLens workthrough](workthrough/2026-09-03-envlens-snapshot.md).
+
+현재 consolidated worktree의 candidate registry는 released six scenarios에 ThreadSanitizer
+2개, C++ build/quality 3개, Python depth 3개, security/resource/correctness 1개,
+Make-to-ELF/integration 1개를 더한 16개다. accepted non-stable candidate digest를 사용한
+로컬 contract run은 `15/16 PASS`였고, 유일한 미통과는 이 호스트에 `clazy`가 없어 Qt lifetime
+scenario를 실행하지 못한 경우다. 새 C++ family와 Python family는 각각 focused `3/3 PASS`다.
+이 실행은 ici `ccb2067c656492c549dae8f4abc198a69ea013c2`의 non-stable candidate
+`23d9922b94b2ba34ab8884cd2d39c8eda358ccb32d0925af5c0a3d52a7ddc893`를 사용했고,
+나머지 15개 contract에는 error가 없었다.
+이 확장은 candidate-only corpus이며, 해당 worktree에 대한 remote PR/Pages acceptance와
+version/release 변경은 아직 주장하지 않는다.
+
+#### LogLens investigation workbench — local implementation
+
+LogLens의 현재 로컬 slice는 로그를 읽고 끝나는 뷰어가 아니라, 한 행의 원본 증거와 분석
+결과를 함께 보존하는 investigation workbench다. 제품 버전은 `0.1.0`/`Unreleased`를
+유지하며, 이 절은 아직 consolidated toy PR의 원격 CI·Pages 결과나 release를 의미하지
+않는다.
+
+- `loglens.triage/v1`에 highlight rule, bookmark, source-line annotation을 저장한다.
+  규칙은 literal/whole-row highlight, priority, 안전한 색상 표현을 가지며 CRUD·reorder와
+  legacy `loglens.triage/v0`의 명시적 migration을 지원한다. 저장은 bounded strict JSON과
+  atomic replacement를 사용한다.
+- Investigation dock의 Record 탭은 선택한 행의 parsed fields, parse diagnostics, source
+  위치, input/omitted bytes와 raw evidence를 함께 보여준다. 선택 행 export는
+  `loglens.selection/v1` JSON으로 스트리밍하며 raw/message/source의 base64 필드로
+  malformed/비 UTF-8 바이트도 손실 없이 보존한다. 출력은 누적 16 MiB로 제한되고 atomic
+  save를 거치며, 현재 연 source 로그를 대상으로 선택할 수 없다.
+- Timeline은 bucket을 half-open `[begin, end)` 범위로 선택한다. 선택 범위는 기존 filter와
+  raw search에 추가로 적용되며, 두 범위를 baseline/comparison으로 지정하면 level/source/
+  normalized-pattern의 new-pattern·rate-spike 신호와 request/thread 같은 raw correlation을
+  deterministic하게 계산한다. 결과의 first/last source line을 선택하면 원래 표 행으로
+  이동한다.
+- GUI는 Qt5/Qt6에서 같은 core 계약을 사용한다. focused investigation suite는 timeline
+  mouse interaction, UTF-8 highlight paint, triage persistence, byte-preserving export, diagnostics,
+  window comparison/navigation, empty/error paths를 함께 확인한다. 로컬 실행에서 두 Qt
+  major의 focused CTest는 각각 `18/18`로 통과했다. 최종 exact ici candidate deep local run은
+  test engine `18/18 PASS`, line/function/branch `90.5% / 96.1% / 78.0%`, TEM `4.81`을
+  기록했고, native TSan partition은 `41/41 PASS`였다. 원격 PR acceptance는 별도 gate이며,
+  이 수치는 remote PR/Pages 또는
+  stable release evidence가 아니다.
+
+#### AbiLens ELF/ABI inspector — local implementation
+
+`abilens`는 Linux build artifact를 실행하지 않고 직접 검사하는 dependency-free C++20 CLI다.
+제품 버전은 `0.1.0`/`Unreleased`이며, 현재 구현 범위는 다음과 같다.
+
+- ELF identification/header와 table bound를 bounded integer arithmetic으로 먼저 확인하고,
+  shell 없는 GNU `readelf` capability probe 및 C-locale evidence 수집을 수행한다. timeout,
+  signal, stream bound, 비 GNU/파싱 불가 Binutils는 incomplete/tool error로 닫힌다.
+- `DT_NEEDED`, `DT_RPATH`, `DT_RUNPATH`, GLIBC/GLIBCXX/CXXABI 요구 버전을 정규화하고,
+  ELF class/endian/type/machine, dynamic/static, stripped 상태를 포함한 deterministic
+  `abilens.report/v1`을 생성한다. 두 ELF 또는 두 report는 `abilens.diff/v1`로 비교할 수
+  있고, class/machine/ABI floor/RPATH/forbidden dependency policy를 적용할 수 있다.
+- strict hand-written JSON reader는 schema/version/status/namespace/tool, duplicate key와
+  ABI tuple/maximum 일관성을 fail closed로 검증한다. Make output은 ownership marker가 있는
+  tree만 clean 대상이 되며, release·coverage·ASan/UBSan·TSan output은 서로 격리된다.
+- ELF header와 GNU `readelf` evidence는 한 번 연 descriptor를 공유한다. 수집 전후
+  device/inode/mode/size/mtime/ctime과 원래 경로 identity가 달라진 일반적인 path replacement와
+  in-place mutation은 report를 버리고 `tool-error`로 닫힌다. Linux `/proc/self/fd`가 필요하며,
+  권한 있는 공격자가 내용을 바꿨다가 동일 metadata와 함께 복원하는 경우까지 보장하는
+  cryptographic snapshot 계약은 아니다.
+
+정확한 ici candidate deep 실행은 exit `0`, suite `WARN`, `11 PASS / 3 WARN / 0 FAIL /
+0 ERROR / 5 SKIP`, TEM `4.75`, complexity maximum `14`/194 functions, duplication `3.71%`였고
+sanitizer·ThreadSanitizer·build·binary compatibility·integration은 모두 measured `PASS`였다.
+테스트 2/2는 통과했지만 coverage는 이 실행에서 estimated evidence이므로 threshold 근거로
+사용하지 않는다.
+
+현재 AbiLens 설명과 local verification 기록은 [AbiLens README](abilens/README.md)와
+[hardening workthrough](abilens/workthrough/2026-09-04-abilens-hardening.md)에 있다. 이
+문서들은 remote PR/Pages acceptance와 stable release를 아직 주장하지 않는다.
+
+#### buildscope B0 hybrid skeleton — release-backed evidence
+
+[BuildScope 문서](buildscope/README.md)에 producer/consumer contract와 repository 밖 scratch
+빌드 명령을 정리했다. Python backend는 `compile_commands.json`을 shell 실행 없이 64 MiB 및
+100,000-entry bound 안에서 읽고, raw `arguments`/`command`를 보존한 deterministic
+`buildscope.snapshot/v1` JSON을 만든다. C++20/Qt CLI와 GUI는 이 versioned contract를
+검증하고 소비하며, CMake는 `AUTOMOC`·`AUTOUIC`·`AUTORCC`와 compile DB export를 실제로
+활성화한다.
+
+2026-09-01 로컬 실측에서 Qt 5.15.18과 Qt 6.10.2 build가 각각 CTest 4/4를 통과했고,
+Python producer → C++ consumer hybrid test도 포함됐다. 같은 Python 3.10 interpreter의
+`python -m` probe에서 `pytest`/`coverage`/`mypy` capability가 READY였고, mypy 실제 argv는
+C++ roots를 제외한 `python` root만 받아 rc0이었다. 공개 ici v0.7.1 release asset의 cold
+isolated verify는 suite WARN, `12 PASS / 1 WARN / 0 FAIL / 0 ERROR / 0 SKIP` 및 `9/9` tests,
+TEM `5.00`, line/function/branch `96.3% / 100.0% / 86.8%`, complexity `14 PASS`, compile DB
+`4/4` production units·`13` configurations, 총 `63.37s`였다. WARN은 C++ type 미지원 하나뿐이다.
+D11/I5 interpreter/tool capability 경로도 release에서 재검증되어 고정됐다.
+
+ici [PR #109](https://github.com/jihoon22-lee/ici/pull/109)의 sticky report와 두 Pages 검증이
+완료됐고, exact `main` `b87afba`의
+[CI run `33419851128`](https://github.com/jihoon22-lee/ici/actions/runs/33419851128)과
+[v0.7.1 release run `33420348698`](https://github.com/jihoon22-lee/ici/actions/runs/33420348698)이
+성공했다. [공개 v0.7.1 release asset](https://github.com/jihoon22-lee/ici/releases/tag/v0.7.1)은
+9개 asset을 제공하며 `sha256sum --check ici.pyz.sha256`가 통과했다. B1의
+compiler/configuration normalization과 B2 Qt explorer는 아래에 별도로 기록한다. ici I3 target
+comparison은 B3 cross-repository comparison으로 완료됐다.
+
+#### buildscope B2 normalized Qt explorer — 0.3.0
+
+[BuildScope 문서](buildscope/README.md)의 B2는 `buildscope.snapshot/v2`를 native Qt model과
+explorer UI로 연결한다. normalized source 아래에 configuration을 묶는 tree를 제공하고,
+`missing > stale > present > unknown` 우선순위로 source 상태를 집계한다. 검색은 source /
+status / target / compiler / standard / configuration / define / include를 대소문자 구분 없이
+재귀적으로 찾으며, 선택 즉시 overview와 define/include/diagnostic 상세 표를 채운다.
+
+Command 탭은 structured argv를 compact JSON array로 렌더링하고 공백·따옴표·빈 인자를
+보존한다. 원본 `command` 문자열은 별도 raw 영역에 남기므로 두 표현의 의미를 혼동하지 않는다.
+v1 raw projection도 계속 읽을 수 있다. 상태 표시는 네 개의 local SVG resource를 Qt resource에
+내장해 CDN이나 외부 네트워크에 의존하지 않는다.
+
+`BUILDSCOPE_BUILD_BENCHMARKS=ON` opt-in benchmark는 100,000 entries / 25,000 source groups를
+검증한다. Qt6 측정은 model build `45 ms`, `unit_024999` filter `1,071 ms`, peak RSS
+`132,612 KiB`, budget `10,000 ms`로 PASS했다. 로컬 Qt 5.15.18과 Qt 6.10.2 전체 CTest는
+각각 `6/6` PASS였다. 공개 `ici v0.8.0` 검증은 `46/46` tests, line/function/branch
+`94.5% / 99.5% / 83.9%`, TEM `4.98`, compile DB `8/8` production units·`19` configurations를
+기록했다.
+
+B2 remote integration도 완료됐다. PR #32 head `41472a66e69477fde7a71fe78c3ae9e47ba7f292`는
+main에 `51a3480677a740475857dd92dd5a5a9373a287a4`로 squash-merge됐고, [PR run
+`33454143021`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33454143021)의 16개
+check가 모두 성공했다. [sticky comment #5486637533](https://github.com/jihoon22-lee/toy-projects/pull/32#issuecomment-5486637533)는
+marker 1개와 project link 3개를 포함한다. PR BuildScope report는 `46/46`, branch `84.2%`,
+TEM `4.98`, compile DB `8/8` production units·`19` configurations, complexity max `14`/`196`
+functions였다. PR 100k benchmark는 model `53 ms`, filter `1,518 ms`, summary JSON SHA-256
+`af7162b7603d558da6e7bc49d7bf5a80f546f412b7076992ded5e15739024db7`였고, exact-main run
+`33454634202`도 성공했다(Report job은 expected skipped). main benchmark는 model `58 ms`, filter
+`1,527 ms`, summary JSON SHA-256
+`247c0b33095e0a09e97a289af556eae30f47f4f5c4136c530e3d6ca0018ae2d2`였다.
+
+세 hosted report는 모두 HTTP 200·`text/html`, 올바른 title, 외부 resource reference 0개였다.
+
+| Project | Bytes | SHA-256 | Title |
+|---|---:|---|---|
+| [BuildScope](https://jihoon22-lee.github.io/toy-projects/buildscope/pr/32/) | 562,234 | `f15d18fe42ac172385e682ceb49e4b6d6f1d9bbfcc0ead301c11d1ee049c4c82` | `ici Verification Report — buildscope` |
+| [diskmap](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/32/) | 311,846 | `752f07251bc38285ea1633f5df879985131963e4b99f90532722eaedc9be1802` | `ici Verification Report — diskmap` |
+| [loglens](https://jihoon22-lee.github.io/toy-projects/loglens/pr/32/) | 446,791 | `7b2669fb7de82ada30bfdf28a2d82533f5566ad92779ea08c90528e188ea582b` | `ici Verification Report — loglens` |
+
+#### BuildScope 0.4.0 — historical include-resolution implementation and evidence
+
+BuildScope B3 구현에 대한 historical record다. PR #34에서 검증되어 `main`에 들어간 `0.4.0`
+main candidate였으며, 당시 제품 버전 `0.4.0`은 B5 hybrid release integration 전까지 release하지
+않았다. 옵션을 생략하면
+기존처럼 normalized `buildscope.snapshot/v2`를 만들고, `--schema-version v1`은 raw compatibility
+projection을 유지한다. `--include-analysis estimate|compiler`는 명시적으로 `v3`를 만들며,
+`--schema-version v3`만 쓰면 `estimate`가 기본이다. v3는 root/entry/analysis/edge/search/
+diagnostic 필드를 모두 담는 strict self-contained schema이며, 분석이 불가능한 entry도
+`evidence: unavailable` warning으로 같은 계약 안에 남긴다.
+
+`estimate`는 bounded source scan만 수행한다. `compiler`는 shell 없이 직접 실행되는 승인된
+system GCC/Clang driver에 `-E -H`를 적용하고, positive option allowlist·argv/trace/edge/source
+limits·unit/time budget을 지키며 response file, stdin, extra input, plugin/linker escape를
+거부한다. compiler trace가 실제 resolved edge를 결정하고 source scan이 parent:line 위치를
+보강하므로 `compiler-measured`와 `source-scan` location evidence가 별도로 보존된다. 각 edge는
+current/quote → include/framework → system → after 순서의 후보와 selected path, same-basename
+alternatives, project/vendor/generated/system/missing/unresolved classification을 기록한다. strict
+v3 consumer는 `resolved`가 선택된 단 하나의 후보와 일치하는지, `alternatives`가 distinct
+existing unselected 후보와 일치하는지 검증하며, 중복 search path에서는 최초 후보만 `selected`로
+표시한다.
+
+Qt **Include Edges** 탭에서는 provenance, ordered candidates, collision alternatives, directive
+위치와 replay command를 확인할 수 있다. Edge를 선택하면 상세가 열리고, 더블클릭 또는 **Open
+Source Location**으로 parent source 위치를 열며, **Compilation Command**로 원래 command 탭으로
+돌아간다. PR 전 historical local candidate 검증에서 Python 3.10 pytest `57/57`, Ruff check+format `14 files`,
+mypy `11 source files`, Qt5 5.15.18과 Qt6 6.10.2 Release CMake/CTest 각각 `6/6` PASS를
+확인했다. 현재 compiler execution/sanitization/process bounds는 새
+`buildscope/python/buildscope/compiler_replay.py`로 분리하고, `include_analysis.py`는 source
+scan/edge assembly/trace interpretation을 담당한다. checksum이 확인된 ici v0.8.0 release
+asset을 사용한 no-cache local public-release validation은 `Suite WARN`(검증 통과), engines
+`11 PASS / 2 WARN / 0 FAIL / 0 ERROR / 0 SKIP`, line `PASS`(`5,151` total / `4,591` code /
+`3` comment / `557` blank across `25` files), lint `PASS`, compile_db `8/8` production units·`19`
+configurations·`0` failures/warnings, tests `63/63`, line/function/branch `92.6% / 98.9% / 79.1%`,
+TEM `4.94`, complexity `PASS` (max `14` / `251` functions / `0` issues),
+sanitize/security/resource/cycle/dead/exception `PASS`, duplication `11.65%` (raw display `11.7%`,
+`78` groups, `179` findings), total `34.71s`를 기록했다. WARN은 type(C++ unsupported)와 dup뿐이다.
+`/tmp` HTML은 `851,656` bytes, SHA-256
+`07d25971e04ed6a4aece36724ce8cf5e3c0548b7c382941a810454d8521c3e34`, 정확한 title
+`ici Verification Report — buildscope`, external refs `0`이었다. B3 PR/remote Pages evidence와도
+별개다. 최종 benchmark는 `100,000` entries/`25,000` sources, model `61 ms`, filter `1,126 ms`,
+budget `10,000 ms`, correctness `true`였고, `buildscope-0.4.0-py3-none-any.whl`에
+`compiler_replay.py`와 v3 schema가 패키징되어 schema validation `PASS`였다. 이 local evidence는
+아래 B3 원격 evidence와 별개다.
+
+**B3 remote evidence (2026-09-01):** [PR #34](https://github.com/jihoon22-lee/toy-projects/pull/34)의
+feature head `c3835cd4b0c859c38ae0f4afbdb20aae970515dc`에 대한 PR CI
+[run 33459294092](https://github.com/jihoon22-lee/toy-projects/actions/runs/33459294092)은 `Merge Gate`와
+`Publish Reports & Sticky Comment`를 포함한 16개 check를 모두 성공시켰다. [sticky comment
+#5487386460](https://github.com/jihoon22-lee/toy-projects/pull/34#issuecomment-5487386460)는 marker
+정확히 1개와 project link 정확히 3개를 포함한다. BuildScope report는 `WARN`(`11 PASS / 2 WARN /
+0 FAIL / 0 ERROR / 0 SKIP`), TEM `4.94`, tests `63/63`, line/function/branch `92.7% / 98.9% /
+79.5%`를 기록했고, diskmap과 loglens는 각각 `PASS`, TEM `4.92`와 `4.80`이었다.
+
+PR BuildScope benchmark는 `100,000` entries / `25,000` sources, model `118 ms`, filter `1,424 ms`,
+budget `10,000 ms`, correctness `true`였다. 세 PR Pages report는 모두 HTTP 200 `text/html`, exact
+title, external attributes/CSS references `0`으로 독립 확인됐다.
+
+| Project | URL | Bytes | SHA-256 | Title |
+|---|---|---:|---|---|
+| BuildScope | [buildscope/pr/34](https://jihoon22-lee.github.io/toy-projects/buildscope/pr/34/) | 858,143 | `e0b9c9ece1fb7268aa519bd0a4c62fd3da7c44a52b2efe6121393474d3ad36d4` | `ici Verification Report — buildscope` |
+| diskmap | [diskmap/pr/34](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/34/) | 311,847 | `8a6b01544b99eee6f0c2b95758f81395032f2b67a7c1a600879447cf7fb5f3bf` | `ici Verification Report — diskmap` |
+| loglens | [loglens/pr/34](https://jihoon22-lee.github.io/toy-projects/loglens/pr/34/) | 446,786 | `1144759ef7e1b83ef7bd23f7bcfe9d02b05430a37af372350ec3b6e26d6c7ac7` | `ici Verification Report — loglens` |
+
+PR #34 was squash-merged to `main` as
+`9cce2699606e58ed67c3dac46f60dc7bf113bb60`, and its branch was deleted. Exact-main CI
+[run 33459591250](https://github.com/jihoon22-lee/toy-projects/actions/runs/33459591250) and Dependency
+Graph [run 33459594605](https://github.com/jihoon22-lee/toy-projects/actions/runs/33459594605) both succeeded
+on that head; on push, PR publish was correctly skipped while applicable jobs and `Merge Gate` passed.
+
+B3 implementation and remote evidence are complete, ici I3 cross-repository comparison is complete,
+and B4 configuration diff implementation/local evidence is now on `main` after PR #36. B4 compares
+raw `compile_commands.json` pairs without executing commands, normalizes relocation noise while
+retaining ordered defines/includes and compiler/standard/language/target drift, and exports strict
+`buildscope.diff/v1` JSON. Exit `0` means no visible drift, `1` means visible drift, and `2` means
+invalid/untrusted input, policy, security, or export failure. Native C++/Qt diff consumption and the
+Python-to-C++ hybrid fixture are covered by the local Release CTest evidence. Python is `83/83`,
+Ruff check/format covers `19` files, mypy covers `15` source files, and the default Qt5 5.15.18
+plus Qt6 6.10.2 Release CMake/CTest matrices are each `9/9` (`10/10` with the benchmark); the pure
+`buildscope-0.5.0-py3-none-any` wheel contains snapshot v1/v2/v3 and
+diff v1 schemas with no native extension. The public ici v0.9.0 uncached deep suite is historical
+local evidence: `WARN` (11 PASS / 3 WARN, no FAIL/ERROR/SKIP) with `92/92` tests,
+`93.5% / 99.0% / 76.7%` line/function/branch coverage, sanitizer PASS, compile DB `12/12`
+production units and `27` configurations, and TEM `4.95/5.0`.
+
+B4 remote evidence is complete on [PR #36](https://github.com/jihoon22-lee/toy-projects/pull/36): head
+`ce64613263f0c4358579012aab135e0b23341a0e`, [run `33485837830`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33485837830),
+and ici `v0.9.1` completed all `16/16` checks successfully. The BuildScope report was `WARN`
+(`10 PASS / 3 WARN / 0 FAIL / 0 ERROR / 0 SKIP`), with lint WARN (49 warnings), `92/92` tests,
+`93.5% / 99.0% / 77.3%` line/function/branch coverage, sanitizer PASS, compile DB `12/12`
+production units and `27` configurations, and TEM `4.95/5.0`. The remote 100,000-entry /
+25,000-source benchmark recorded model `65 ms`, filter `1,602 ms`, filtered sources `1`,
+budget `10,000 ms`, and correctness `true`. [Sticky comment #5489976814](https://github.com/jihoon22-lee/toy-projects/pull/36#issuecomment-5489976814)
+has exactly one marker and three hosted-report links.
+
+| Project | Hosted report | Bytes | SHA-256 |
+|---|---|---:|---|
+| BuildScope | [buildscope/pr/36](https://jihoon22-lee.github.io/toy-projects/buildscope/pr/36/) | 1,319,378 | `5dc517d3ec8324cb1aedb6e611120ac9ae2951e27851cbc6b0e28303d02c5d43` |
+| diskmap | [diskmap/pr/36](https://jihoon22-lee.github.io/toy-projects/diskmap/pr/36/) | 337,554 | `39a52d1e3d5b9eed6bbc1ec5253f1bf837deb4a7bb33ed2f2ef3b32df0f90e0e` |
+| loglens | [loglens/pr/36](https://jihoon22-lee.github.io/toy-projects/loglens/pr/36/) | 492,746 | `0480f07aea266c0777403ac37ebf90d4acd10f84b04e49aa2a9ccf99a6153007` |
+
+All three Pages responses were HTTP 200 with the exact `ici Verification Report — <project>` title
+and zero external resource references. Historical boundary note from PR #36: B4 implementation plus
+remote/hosted/merged-main evidence was complete on `main`, while the `0.5.0` product release artifact
+and B5 hybrid release integration were pending/not started. The later release-boundary evidence is
+recorded in the current section below.
+
+PR #36 was squash-merged to `main` as
+`590899a0a9430e9ce35162b301bfef5d7dfc78a4`, and its feature branch was deleted. Exact-main CI
+[run `33488169769`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33488169769) completed
+with all 14 prerequisite jobs and `Merge Gate` successful; the PR-only publisher was skipped as expected.
+[Dependency Graph run `33488174425`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33488174425)
+also succeeded on the same head.
+
+#### BuildScope 0.5.0 release evidence — reproducible packaging and guarded publication
+
+이 절은 구현된 B4를 배포 가능한 경계까지 연결한 BuildScope `0.5.0`의 release evidence를
+기록한다. 2026-09-02 KST (`published_at` `2026-09-01T22:36:42Z`)에
+[GitHub Release](https://github.com/jihoon22-lee/toy-projects/releases/tag/buildscope-v0.5.0) ID
+`380863869`로 공개됐고 `immutable=true`, `draft=false`, `prerelease=false`다. 구현과 계약의
+상세는 [BuildScope README](buildscope/README.md)를 참조한다.
+`tools/build_standalone.py`는
+Python/CMake/ici 버전 surface를 일치시키고 고정 zip metadata·정렬된 payload·schema inventory로
+재현 가능한 `buildscope.pyz`를 만들며, direct test는 두 번의 산출물이 byte-identical인지와
+`buildscope.pyz --version`이 `buildscope 0.5.0`을 보고하는지 확인한다.
+`CMakeLists.txt`의 install rule은 native `buildscope-cli`/`buildscope-gui`, 문서, examples, schemas를
+하나의 Linux bundle layout으로 설치한다. [B5 quickstart](buildscope/docs/quickstart.md)는
+`buildscope.pyz` 또는 `buildscope-0.5.0-py3-none-any.whl`로 compile DB를 JSON으로 만들고
+native CLI/GUI에서 소비하는 흐름, CMake/qmake examples와 qmake capture 제한을 설명한다.
+
+2026-09-01의 historical local B5 실측은 public ici `v0.10.0` asset을 literal
+`ICI_PYZ_SHA256=6d5f8c008b3b5393a61b2c1a418124eb66393c9eaab0abbb7d1c7922162bed9b`로 고정하고,
+`ICI_PYTHON=/tmp/toy-b5-py310/bin/python` tool environment에서 deep/no-cache로 실행했다. 결과는
+`Suite WARN`, 14 engines = `11 PASS / 3 WARN / 0 FAIL / 0 ERROR / 0 SKIP`, tests `96/96`,
+line/function/branch `93.4% / 99.0% / 76.7%`, TEM `4.95`, compile DB `12/12` production units·`27`
+configurations·`0` issues였다. Qt codegen은 exact input `3`, MOC `1`, UIC `1`, RCC `1`, Qt6
+compile units `12`를 기록했다. HTML은 1,264,867 bytes / SHA-256
+`4e12e77ee11f98b2d5bb146bd3d08252b088083726e6f11235e25a449471a565`, JSON은 2,873,207 bytes /
+SHA-256 `ea5fce118e6edad8fa5af24c821663e4290805570377e9b7c190de8da1029612`이며 title은
+`ici Verification Report — buildscope`, external refs는 `0`이다. 당시 로컬에는 `clang-tidy`와
+`clazy`가 설치되지 않아 unavailable로 남았지만, 이 제한은 아래 원격 PR gate에서 보완됐다.
+
+`.github/workflows/buildscope-release.yml`은 고정 annotated `buildscope-vX.Y.Z` tag의 peeled
+commit이 exact `origin/main`과 green `Merge Gate`를 가리키는지 확인하고, Python `3.10/3.14`와
+Qt `5/6` Release/CTest matrix, MOC/UIC/RCC generated-path 검사, Qt6 native bundle,
+wheel/pyz-to-native-CLI handoff, ici v0.10.2 literal SHA/API digest 검증을 정의한다. 최신
+`ci/check_buildscope_merge_gate.py`는 exact SHA의 `Merge Gate` 중 가장 최신 check-run ID를
+고르고 GitHub Actions app, 완료/성공 상태를 요구한 뒤 Actions run의 ID, repository/head repository,
+SHA, workflow name/path/event/status/conclusion과 canonical URL을 독립 검증한다. GitHub Release API의
+`target_commitish`는 비교하지 않으며 annotated tag의 peeled SHA가 authoritative proof다. 예정된 top-level release assets는
+`buildscope.pyz`, `buildscope.pyz.sha256`, pure `buildscope-<version>-py3-none-any.whl`, sdist,
+`buildscope-ici-deep.{json,html}`, `buildscope-provenance.json`,
+`buildscope-<version>-linux-x86_64.tar.gz`, `SHA256SUMS`의 정확히 9개다.
+
+게시 단계는 softprops의 기존 release 갱신 경로를 사용하지 않는다. 인증된 paginated release-slot
+검사가 fail-closed로 동작해 빈 슬롯에서만 direct private draft를 만들고, 기존 final release는
+변경 없이 audit-only로 처리하며, 기존 draft·중복·모호한 슬롯은 중단한다. 새 draft는 고정 numeric
+release ID를 끝까지 사용하고, 정확한 9개 경로를 `--clobber` 없이 fixed upload endpoint에
+업로드한다. 생성 draft의 body는 repository/run/target SHA를 담은 terminal current-run owner marker로
+끝나야 하며, POST가 모호할 때의 recovery는 그 marker와 exact tag/version, expected body digest를
+가진 zero-asset private draft 하나에만 허용된다. workflow는 `RELEASE_NOTES.md`를 UTF-8 기준으로 한 번 normalize한 뒤
+expected final body와 owner-marker가 붙은 expected draft body를 각각 고정 파일로 만들고, 두 body의
+정확한 SHA-256을 계산한다. draft digest는 create/upload/prepublish/failure-report에서, final digest는
+publish/final audit에서 반복 확인된다. 업로드는 numeric release ID, binary body, HTTPS/TLS, 20초 connect 및
+300초 transfer bound, HTTP 201과 uploaded/id/size/digest 응답을 요구한다. bounded downloader가
+draft asset을 fresh directory로 내려받은 뒤 manifest/sidecar, payload/archive와 schema bytes,
+provenance, B5 JSON, HTML Zero-CDN, pyz version을 검사하고, ZIP은 `ZipFile` 이전에 bounded
+EOCD/central-directory preflight를 거친다. 공개 직전 같은 draft를 재감사한다.
+PATCH가 모호하면 동일 release ID를 재조회해 exact final은 성공, exact private draft는 재시도,
+그 외 상태는 실패로 판정한다. write-token publish 단계에서는 다운로드한 원격 BuildScope pyz를
+실행하지 않고 payload data로만 검사한다. 공개 후에도 9개 final asset을 다시 내려받아 모든 파일을
+현재 `dist`와 byte-compare하며, 기존 final audit-only 경로에서도 이 비교를 수행한다. 다운로드
+후에는 ID/tag별 release metadata와 asset records 및 peeled tag를 다시 fetch해 안정성을 확인한다.
+실패한 current-run-owned draft는 명시적 수동 검토를 위해 보존하며 remote draft를 자동 삭제하지
+않는다. empty-slot failure-report 단계는 create output ID가 유실돼도 paginated listing에서 exact
+current-run-owned zero-asset draft 중 expected body digest까지 일치하는 항목만 복구해 보고·보존한다.
+tag-only release workflow [run `33566464110`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33566464110)은
+exact `main` `fda8b5fb068b68c04c8c40e297812fbe79cee3da`에서 성공했다. annotated tag object
+`dcaaf83a5842f6d7fc6c47e3b212e26b9528c342`는 같은 exact `main` SHA로 peel됐고,
+[Merge Gate job `100050176790`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33565542193/job/100050176790)은
+[run `33565542193`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33565542193)에서 성공했다.
+최종 release body SHA-256은
+`9e58639c280655bf50b510ef676bb3e5f458cf2021c3c6c6b24c3b625945dd3b`이고, fresh download 기준
+정확히 `9`개 asset을 audit했다.
+
+현재 dependency-free CI helper discovery suite는 Python `3.10`/`3.14` 각각 `145/145` PASS이며,
+`actionlint`, Ruff check/format, mypy도 통과했다. 이는 현재 구현의 사전 검증 기록이며 새 PR, tag,
+release를 의미하지 않는다.
+
+#### Release-boundary verification
+
+현재 deep 검증은 public ici `v0.10.2`를 literal SHA-256
+`8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4`로 고정한다.
+[PR #38](https://github.com/jihoon22-lee/toy-projects/pull/38)의 head
+`3ba645eae5181698e1272729dddaa8a72189b067`는 [run `33545168957`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33545168957)에서
+통과했고, [sticky comment #5494648837](https://github.com/jihoon22-lee/toy-projects/pull/38#issuecomment-5494648837)에
+세 HTML report link가 게시됐다. PR은 `069a3a86c0164a1d2a88710f9c3c48a398c8087e`로
+squash-merge됐으며, exact-main [run `33546046566`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33546046566)도
+통과했다.
+
+정확한 `main` Pages publisher는 [PR #39](https://github.com/jihoon22-lee/toy-projects/pull/39)의 head
+`b861ff5b4cc0314aae5ec9f6dab905648233216d`에서 [run `33548626203`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33548626203)와
+[sticky comment #5499184834](https://github.com/jihoon22-lee/toy-projects/pull/39#issuecomment-5499184834)를
+통해 검증됐다. PR은 `c80e922f0d0911019cfa8b5c67a8b654c556a68c`로 squash-merge됐고,
+exact-main [run `33549475034`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33549475034)도
+통과했다.
+
+Exact-main run `33549475034` 시점의 stable `main` Pages 응답은 모두 HTTP 200, exact title,
+Zero-CDN이며 그 실행의 local artifact와 byte-match됐다.
+
+| Project | Hosted report | Bytes | SHA-256 |
+|---|---|---:|---|
+| BuildScope | [buildscope/main](https://jihoon22-lee.github.io/toy-projects/buildscope/main/) | 1,349,088 | `dd7ec9b49281875f812b9a9c6b4e18a028051936a37441f19d907098c05dcc65` |
+| diskmap | [diskmap/main](https://jihoon22-lee.github.io/toy-projects/diskmap/main/) | 339,929 | `1bd6ebdce2206e4538fb28c20c17f2d504f1a160e15f5d8d4e2923b15b399e65` |
+| loglens | [loglens/main](https://jihoon22-lee.github.io/toy-projects/loglens/main/) | 495,237 | `11e4c78eed957e237bcea8ec5ea64c3894751eafbe639c454e47ab0acd70df96` |
+
+`0.5.0`은 B3 include explanation, B4 semantic configuration diff, B5 hybrid packaging/integration을
+한데 묶은 첫 usable BuildScope release boundary로, 위 GitHub Release를 통해 stable published됐다.
+최종 deep report와 9개 asset audit의 수치는 [CHANGELOG.md](CHANGELOG.md)와
+[ROADMAP.md](ROADMAP.md)에 고정했으며, B5의 historical local candidate 기록이나 ici pin 변경만으로
+다음 버전을 bump하지 않는다. `0.5.0` 이후의 기능은 다음 comparable checkpoint가 마련될 때까지
+`Unreleased`에 기록한다.
+
+### diskmap slice
+
+#### diskmap D1 identity-safe scan — Slice 2
+
+diskmap은 파일·디렉터리·심볼릭 링크와 링크 대상, 하드 링크를 서로 혼동하지 않도록
+물리적 identity와 메타데이터를 보존한다. 사용자는 이후 탐색·정리 기능에서 “링크 자체”와
+“대상 파일”을 구분하고, 권한 오류로 불완전한 디렉터리를 확정된 용량처럼 보지 않게 된다.
+
+개발자 관점에서는 `RealFsSource`가 POSIX `lstat`/`stat` 결과와 `*_known` 플래그를
+`DirEntry`에 담고, scanner가 `std::filesystem::path`와 함께 `FsNode`로 전달한다.
+`follow_symlinks=true`인 디렉터리는 물리적 `FileIdentity` 방문 집합으로 cycle을 차단하며,
+이미 방문한 target은 노드로 남기되 다시 확장하지 않는다. target identity를 확인할 수 없는
+followed directory는 안전하게 `complete=false`와 오류를 남긴다. listing/iterator 오류도 같은
+방식으로 보존하고, stat의 `metadata.logical_size`와 자식 합계인 `FsNode::size`는 별도 값이다.
+
+명시적으로 선택한 root가 regular file이면 디렉터리로 열려고 실패하지 않고, complete한 한
+노드 scan으로 반환한다. 이 노드는 logical/allocated/reclaimable facts와 `files_scanned=1`을
+그대로 가진다. 선택한 root가 symlink이면 `follow_symlinks`와 무관하게 target을 dereference
+하며, target이 file이면 leaf로 남긴다. 이 옵션은 root 아래 descendants에만 적용된다. 깨진
+root symlink target은 root를 incomplete로 남기고 오류를 `ScanResult.errors`에도 포함한다.
+
+`FsNode::size`는 directory entry마다 logical bytes를 세고, `allocated_size`는 non-directory
+entry data를 유효한 물리 identity별로 한 번만 합산한다. directory 자체의 filesystem metadata
+block은 이 값의 범위가 아니다. `reclaimable_size`는 해당 subtree가 known hard-link reference를
+모두 소유할 때만 known으로 계산하며, symlink target alias는 소유 reference로 세지 않는다.
+불완전한 subtree·unknown allocation/link-count는 조용히 0으로 바꾸지 않고 aggregate의
+`*_known=false`로 전파한다. 유한한 `max_depth`로 잘린 directory도
+`complete=false`, `scan depth limit reached`로 남기므로 allocated/reclaimable total을
+확정값처럼 보이지 않게 한다. logical aggregate도 `FsNode::logical_size_known`으로 정확성을
+보존하며, `uint64_t` overflow에서는 최댓값으로 포화(saturate)하고 해당 flag를 false로
+설정한다. 따라서 cleanup 기능은 확정된 값과 추정할 수 없는 값을 구분할 수 있다.
+
+D1 Slice 2의 검증은 fixed-identity fake source와 실제 POSIX temporary filesystem을 함께
+사용한다. 경로 component의 공백, cycle/back-edge, hard-link 중복·reclaimability, symlink
+alias, identity 없는 followed directory, allocation/link-count unknown 및 aggregate overflow를
+검증하는 9개 qmake test binary가 등록되어 있다. qmake의 static consumer에
+`PRE_TARGETDEPS`를 연결해 테스트가 최신 archive를 다시 링크하도록 했고, stale `.gcda`/`.gcno`
+혼입으로 coverage가 낮게 보이는 재현도 제거했다.
+
+최종 D1 Slice 2는 Qt5·Qt6 qmake `make check` 9/9와 8초 headless smoke를 통과했고,
+ici 0.6.0 qmake-clean 검증은 Suite PASS, TEM 4.90, line/function/branch
+96.6%/98.0%/85.0%, complexity 14, duplication 2.0, sanitizer clean이었다. PR
+[#23](https://github.com/jihoon22-lee/toy-projects/pull/23)의 workflow
+[`33338809225`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33338809225)는 모든
+checks를 통과했고 merge commit `039052f9f30e355e12f3c812065657e3be4576f2`로 병합됐다.
+[sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/23#issuecomment-5471613383)와
+Pages HTML도 HTTP 200·`text/html`·외부 참조 0개로 확인했다.
+
+#### diskmap D2 cancellable/latest-generation scan — complete
+
+D2는 스캔을 취소할 수 있고, 최신 요청의 결과만 화면에 반영하는 계약을 추가했다.
+core scanner는 `ScanCancellationToken`을 atomic flag로 공유하고 directory listing 전·중·후에
+협력적으로 checkpoint를 둔다. GUI의 `ProgressFn`은 queued callback으로 상태 라벨에
+`dirs/files` 진행을 전달하며, 새 `scanPath()`는 이전 token을 취소하고 generation을 증가시킨다.
+진행·완료 callback의 generation이 현재 값과 다르면 stale result로 폐기하므로, A가 늦게 끝나도
+그 결과가 나중에 시작한 B의 treemap이나 breadcrumb를 덮지 않는다.
+
+취소 정책은 명시적으로 **partial result를 폐기**하는 쪽이다. 취소된 `ScanResult`는
+`cancelled=true`와 incomplete root를 남기지만, GUI는 이를 `Scan cancelled — partial result
+discarded`로 표시하고 기존에 보이던 완전한 tree를 그대로 유지한다. 아직 표시된 결과가 없으면
+빈 화면을 유지한다. root metadata/open 실패와 비어 있는 root listing 실패는 fatal로 분류해
+CLI가 `fatal:` 한 줄을 내고 exit 1을 반환한다. 중간 subtree의 stat/list/iterator 실패와 entries를
+일부 반환한 listing 실패는 해당 node를 `complete=false`로 남기고 `error_count`와 오류 목록을
+보존하면서 형제 작업을 계속하는 partial/non-fatal 결과다. 의도적인 mount 경계 skip은 별도
+카운터로 표시하며 오류로 위장하지 않는다.
+
+scanner와 `aggregateSizes`, `aggregateStorage`, `sortBySizeDesc`, `countNodes`, `topFiles`,
+treemap layout은 explicit stack을 사용해 call stack recursion에 의존하지 않는다. scan의
+effective structural depth는 기본값과 512 초과 요청을 모두 `kMaxTreeDepth=512`로 제한하며,
+잘린 directory는 화면에 남기되 `complete=false`와 `scan depth limit reached`를 기록해
+physical total을 확정값처럼 보이지 않게 한다. CLI의 legacy `--depth`도 출력 깊이만 최대 512로
+제한한다 — `--depth`는 scan traversal을 줄이지 않고, 실제 traversal bound는 `--max-depth`다.
+
+CLI는 다음 옵션을 제공한다.
+
+| 옵션 | 의미 |
+|---|---|
+| `--max-depth N` | scanner traversal bound. `0`은 root만 list하며, 기본값/512 초과는 구조 안전 한계 512로 clamp한다. |
+| `--depth N` | legacy 출력(tree text/JSON) 깊이 제한. scan 자체는 계속 진행하며 출력 cap도 512다. |
+| `--follow-symlinks` | descendant directory symlink를 target identity 방문 집합으로 cycle-safe하게 확장한다. 명시적으로 선택한 root symlink는 이 flag와 무관하게 dereference한다. |
+| `--min-size BYTES` | regular file 중 지정 크기보다 작은 entry만 제외한다. directory와 symlink entry는 보존한다. |
+| `--one-file-system` | root와 device가 다른 directory를 visible incomplete node로 남기고 확장하지 않는다. identity를 확인할 수 없으면 안전하게 오류를 남긴다. |
+| `--exclude GLOB` | basename과 root-relative generic path에 `*`/`?` wildcard를 적용한다. repeatable이며 매칭된 entry는 aggregate에서 제외된다. |
+
+2026-08-31 local candidate 구현에서는 `/usr/bin/qmake` Qt 5.15.18과 `/usr/bin/qmake6` Qt 6.10.2의
+full build 및 `make check`가 모두 통과했고, 두 `test_main_window`가 각각 `10/10 PASS`를
+보고했다. CLI integration smoke도 fixture에 `--max-depth`, legacy `--depth`, `--min-size`와
+`--exclude`를 함께 적용한 JSON 검증으로 PASS했다. ici complexity-only gate에서 처음
+발견한 scan complexity/nesting FAIL은 `b7218c6`의 상태 전이 분리 refactor로 해소되어
+maximum cyclomatic 14 (limit 15), 129 functions, 0 issues로 PASS했다. 이 candidate의 local
+ici main commit
+`6a0eadb`의 candidate pyz SHA256 `8cd2d4b128ab2d181e708660c4c4f38bcc9d50f9ad91e3aa5670f557e6077fed`로
+수행한 full post-refactor local `ici verify`는 `Suite PASS`, 10 pass / 0 warn / 0 fail /
+0 error / 2 skip, test 9/9, TEM 4.92, line95.7% / function98.5% / branch84.4%, complexity
+max14 across129 functions / 0 issues, dup3.11%, sanitize clean, 30 tools/21 ready/0 incomplete/
+9 unavailable, total82.29s, cache hits0이었다. HTML은 299034 bytes, SHA256
+`cf75f9d6f28179d95645d0e1582022008804078d5e3844de503a8c1a130c64a0`, external resource tags0이다.
+이 local evidence는 candidate artifact에 대한 기록이며, 아래 원격 증거가 toy-projects `main`의
+D2 병합과 검증을 닫는다.
+
+#### D2 원격 완료 증거
+
+2026-08-31 [PR #28](https://github.com/jihoon22-lee/toy-projects/pull/28)은 squash merge
+commit `ec075e57874d20654f7cbfbc604ad8aaee8401a6`으로 toy-projects `main`에 병합됐다.
+[PR CI run `33368958698`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33368958698)의
+12개 check가 모두 green이었다. 여기에는 DiskMap benchmark smoke Qt5/Qt6, 네 GUI matrix
+job, 두 ici verification job, publish와 Merge Gate가 포함된다.
+[sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/28#issuecomment-5475254935)에는
+`diskmap: PASS · TEM 4.92 · 10 pass / 2 skip · tests 9/9`와
+`loglens: PASS · TEM 4.80 · 10 pass / 2 skip · tests 12/12`, 양쪽 report link가 게시됐다.
+
+Pages도 HTTP/2 `200`, content-type `text/html`, 외부 `script`/`link`/`img`/`iframe`
+resource 0개로 각각 확인했다.
+
+| Pages 경로 | bytes | SHA-256 |
+|---|---:|---|
+| `diskmap/pr/28/` | 199843 | `c8a0d8009e1c19cd2d9df041969396f6abce95275713fe7ead6a499ac0b33b72` |
+| `loglens/pr/28/` | 334215 | `acda3bfb29bf5f3534256f614719e678ec89ed21b3420ee2b282ec55e2107830` |
+
+이것은 toy-projects `main`의 기능 병합 및 검증 기록이며, 별도 제품 버전 release를 의미하지 않는다.
+
+#### diskmap D3 Qt-free view projection — core slice merged
+
+D3의 첫 core slice는 Qt에 의존하지 않는 view projection API로 병합됐다. [PR #45](https://github.com/jihoon22-lee/toy-projects/pull/45)의
+merge commit은 `0688e44fa99d1ec69aba0c9bf9995a4a857fea9e`이며, PR workflow
+[`33607634973`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33607634973)와 exact-main
+workflow [`33608884643`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33608884643)가
+모두 성공했다. 두 실행에서 required checks, Qt5/Qt6 native GUI matrix, ici 검증, benchmark,
+report publication과 Merge Gate를 확인했다.
+
+core는 logical/allocated/reclaimable metric, 불확실성·cycle·depth·mount·scanner-filter
+provenance, deterministic node key/issue, conjunctive search/type/size/age filter, visible
+children와 largest-files의 안정적인 정렬을 제공한다. hard-link이 겹칠 수 있는 physical 값은
+non-additive 범위를 보존하므로 형제 subtree를 합산하지 않는다.
+
+이 문단은 PR #45 core-only 병합 시점의 historical snapshot이다. 이후 GUI 범위도
+PR #46으로 병합됐고, 상세한 core native/ici 수치는
+[기존 workthrough 기록](workthrough/2026-09-02-diskmap-view-projection.md)에 보존한다.
+
+#### diskmap D3 explorer workbench — merged GUI evidence (2026-09-02)
+
+역사적 `feat/diskmap-explorer-ui` 구현은 shared immutable scan document와 `NodeKey`를 기준으로 treemap,
+sortable table, accessible breadcrumb를 연결했다. 두 화면은 current root, filter, metric을
+공유하며 table은 recursive largest-files projection도 제공한다. Search와 type/size/age/state
+filter, logical/allocated/reclaimable 설명, uncertainty 표시, rescan 시 path/selection 복원,
+stale generation 차단과 worker lifetime 보호까지 포함한다.
+
+[PR #46](https://github.com/jihoon22-lee/toy-projects/pull/46)은 이 D3 GUI 구현을
+`0cdd63953179a1dc885ed660e955b399d54243b7`로 `main`에 병합했다. PR run
+[`33627322683`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33627322683)와 exact-main
+run [`33628585439`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33628585439)는
+모두 green이며, sticky marker/link 수와 PR/main artifact·Pages byte-identical 결과를 포함한
+정확한 HTML 표는 [D3 explorer workthrough](workthrough/2026-09-02-diskmap-explorer-workbench.md)에
+중앙화했다.
+
+Qt 5.15.18/6.10.2 clean qmake(`-Werror`)와 native target `11/11`이 통과했다. Public ici
+`v0.10.2` deep no-cache 결과는 `10 PASS / 2 WARN / 0 FAIL / 0 ERROR / 2 SKIP`, TEM `4.95`,
+coverage `96.1% / 99.1% / 83.4%`다. 알려진 WARN과 정확한 asset/HTML provenance는
+[workthrough 기록](workthrough/2026-09-02-diskmap-explorer-workbench.md)에 보존한다.
+이 문단의 D3 historical snapshot에서 DiskMap은 `0.1.0`/`Unreleased`였고 D1~D3
+구현·PR/exact-main evidence만 완료된 상태였다. 당시 D4~D7 cleanup/trash/snapshot/release는
+pending 범위였으며, 이후 local storage integration은 다음 절에 별도로 기록한다.
+
+#### diskmap storage evidence workbench — local integration (2026-09-03)
+
+Storage workbench의 local integration은 기존 cleanup/Trash safety path 위에 bounded snapshot과
+duplicate evidence를 연결했다. GUI의 snapshot save/load/compare와 duplicate progress/cancel,
+CLI의 `diskmap.snapshot/v1`·snapshot-diff·duplicate versioned schema는 상세 workthrough에
+정리돼 있다. Loaded snapshot은 read-only이며 certain reclaimable copy만 cleanup dry run에
+staging되고, 실제 변경은 confirmation·identity revalidation·recoverable Trash를 거친다.
+
+Qt5/Qt6 clean qmake aggregate는 `test_storage_cli`와 cleanup/Trash를 포함한 17개 leaf를
+각각 `17/17 PASS`로 실행하고 실제 `diskmap_core` static library를 링크한다. 현재 DiskMap
+focused test slot은 `MainWindow=29`, `StorageWorkbench=3`이며, QTest 출력은 lifecycle
+hook을 포함해 각각 `31 PASS`와 `5 PASS`로 보인다. 자세한 구현·검증·metric provenance는
+[canonical storage workthrough](workthrough/2026-09-03-diskmap-storage-workbench.md)에 둔다.
+
+Safety boundary는 유지된다. Relative `CleanupTarget.path`와 unsupported kind은 mutation 전에
+`InvalidRequest`로 거부되고 false `trashed_path`/`restore_token`을 발행하지 않는다. Linux의
+no-follow/nonblocking regular-file I/O와 identity revalidation은 race를 incomplete/uncertain으로
+전파하며, advisory `flock`은 같은 경로를 쓰는 협력적 mutation만 직렬화한다. 비협조적 동일 UID
+프로세스는 보장 범위 밖이다. Move/restore source split은 각 translation unit의 line gate를
+회복했다.
+
+이 통합 트리에 released ici `v0.10.2`를 사용한 deep no-cache 결과는 `WARN`
+(`10 PASS / 2 WARN / 0 FAIL / 0 ERROR / 2 SKIP`)이다. `test`는 `17/17`, compile DB는
+`37/37`(58 configurations), line/function/branch는 `94.4% / 99.2% / 81.0%`, TEM은 `4.96`,
+sanitizer는 `PASS`였다. Line은 `13,041` total / `11,500` code lines across `60` files,
+complexity는 max `15` across `594` functions(`0 issues`)이며 WARN은 lint와 duplication뿐이다.
+이는 WARN/skip 경계를 포함한 local deep evidence이며 release 완료를 의미하지
+않는다. DiskMap 버전은 계속 `0.1.0`/`Unreleased`다. 자세한 변경·검증 범위는 [storage workbench
+workthrough](workthrough/2026-09-03-diskmap-storage-workbench.md)에 보존한다.

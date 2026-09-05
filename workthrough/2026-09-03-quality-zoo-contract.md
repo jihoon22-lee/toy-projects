@@ -27,7 +27,7 @@ with all jobs, the main publisher, and `Merge Gate` successful; the PR-only publ
 expected for a push. Its Quality Zoo artifact [`9872561713`](https://github.com/jihoon22-lee/toy-projects/actions/artifacts/9872561713)
 still recorded contract `PASS`, one stable scenario with the expected observed `WARN`, and zero
 errors. The current four-project Page artifact/hash table is centralized in the [EnvLens snapshot
-workthrough](../../workthrough/2026-09-03-envlens-snapshot.md); Q1–Q5 remain pending.
+workthrough](2026-09-03-envlens-snapshot.md); Q1–Q5 remain pending.
 
 This is a test-asset milestone, not a user-facing product milestone. No toy
 product version was changed and no release was created.
@@ -51,7 +51,7 @@ are not interchangeable.
 
 ### JSON registry and Python 3.10 boundary
 
-The registry is [`quality-zoo/manifest.json`](../../quality-zoo/manifest.json),
+The registry is [`quality-zoo/manifest.json`](../quality-zoo/manifest.json),
 not a TOML file. It only maps a scenario ID to a scenario directory, so JSON is
 the smallest sufficient format. The runner deliberately uses only the Python
 3.10 standard library; adding a TOML parser would add a dependency or force a
