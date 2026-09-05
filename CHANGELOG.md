@@ -55,6 +55,23 @@
   local evidence (`18/18` tests, `90.5% / 96.1% / 78.0%` coverage, TEM `4.81`),
   and its native TSan partition passes `41/41`. None of these local results is
   PR, Pages, merge, or stable-release evidence.
+- This consolidated work merged as
+  [`413c75a9fa13621fc78046a8e1baf4a9183ce869`](https://github.com/jihoon22-lee/toy-projects/commit/413c75a9fa13621fc78046a8e1baf4a9183ce869)
+  after [`#57`](https://github.com/jihoon22-lee/toy-projects/pull/57) and
+  [`#56`](https://github.com/jihoon22-lee/toy-projects/pull/56). The exact-main
+  [run `33856573719`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33856573719) is
+  `success` with 27 of 28 jobs successful and only the push-inapplicable
+  `Publish Reports & Sticky Comment` skipped, covering `ici verify` for all five projects, both Qt
+  legs, `Native product checks (abilens)`, the Quality Zoo known-answer contract, the BuildScope
+  release contract and 100k benchmark, the DiskMap/LogLens benchmark smokes, the main portfolio
+  publisher, and `Merge Gate`. The five trusted main Pages published between 09:18:09Z and
+  09:18:17Z are byte-identical to their gh-pages blobs and each served HTTP 200
+  `text/html; charset=utf-8` with an exact title and zero external `src`/`href`:
+  `abilens` 275,675 bytes, `buildscope` 1,345,473 bytes, `diskmap` 1,415,590 bytes, `envlens`
+  713,647 bytes, and `loglens` 1,260,671 bytes. Their SHA-256 digests are fixed in the
+  [quality portfolio expansion workthrough](workthrough/2026-09-04-quality-portfolio-expansion.md).
+  No toy version was bumped and no tag, release, or stable promotion was created; the candidate
+  rerun against current ici `main@b712267` remains pending.
 
 - Refactored DiskMap's UTF-8 lead-byte decoder to return one typed bounds value,
   removing easily-swapped output parameters and duplicate conditional bodies found by
