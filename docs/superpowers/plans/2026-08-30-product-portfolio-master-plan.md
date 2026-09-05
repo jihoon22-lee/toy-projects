@@ -334,7 +334,7 @@ capacity 8192의 median은 다음과 같다.
 | 6 | GUI | 18.055 ms | 18.843 ms | 18490.615 ms | 55.379 MiB/s | 54081.488 | 55.980 MiB |
 
 runner는 input의 정확한 크기·record 수·SHA-256을 확인하고 raw sample을 집계한다. benchmark
-target은 기본 빌드에 포함하지 않으며, local runner는 README의 [재현 명령](../../../README.md#1-gib-benchmark-재현-opt-in)으로
+target은 기본 빌드에 포함하지 않으며, local runner는 LogLens 문서의 [재현 명령](../../../loglens/README.md#1-gib-benchmark-재현-opt-in)으로
 실행한다. artifact에는 `summary.json`, `summary.md`, `toolchain.json`, `toolchain.txt`,
 `samples/*.json`만 남기고 1 GiB input과 process log는 scratch에 둔다. workflow는
 `workflow_dispatch`와 주간 schedule의 Qt5/Qt6 matrix이며 일반 PR/merge gate가 아니다.
