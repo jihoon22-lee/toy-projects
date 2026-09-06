@@ -693,6 +693,41 @@ The final deep report uses public ici `v0.10.2` with literal SHA-256
 `0a0b50f8e056ad561427fd2141dbd8649dd43fdf111b2d6e187c220b0a610ee9`, exact title
 `ici Verification Report — buildscope`, and zero external resources (Zero-CDN).
 
+## Hybrid integration contract (candidate ici only)
+
+BuildScope's whole point is a boundary: a dependency-free Python analyzer emits a versioned
+snapshot, and a C++20/Qt consumer validates and reads it. The release workflow already exercises
+that handoff in shell — wheel and pyz producers, native consumer, `grep` for the contract string.
+`ici-candidate.toml` makes the same handoff an ici measurement, so a broken boundary shows up as a
+finding in a report rather than as a grep in a log.
+
+Three cases run in order, and each one exists because the others do not cover it:
+
+1. `python-producer-emits-snapshot` — the Python analyzer reads `fixtures/compile_commands.json`
+   and writes `build/ici-e2e.snapshot.json`, asserted as a bounded output artifact.
+2. `native-consumer-reads-snapshot` — `buildscope-cli` reads exactly that file and must print
+   `contract: buildscope.snapshot/v2`. Asserting the contract string is the point: a consumer that
+   silently accepted a different schema version would still pass an exit-code-only check.
+3. `native-consumer-refuses-a-non-snapshot` — handed a raw compile database, the consumer must exit
+   `2` with a diagnostic. Without this the first two cases would still pass against a consumer that
+   ignored its input.
+
+```sh
+ICI_CONFIG=ici-candidate.toml /path/to/candidate/ici.pyz verify --profile deep \
+  --report --html verify_report.html
+```
+
+The overlay is candidate-only and must not be used with the public `v0.10.2` artifact, which
+predates the configurable `[engines.build]` and release-contract keys — naming them there is a
+configuration error, not a stricter run. The repository's stable ici pin and `ici.toml` are
+unchanged, the same split `abilens/ici-candidate.toml` uses for its Make contract.
+
+Local evidence, 2026-09-06, candidate ici built from `ici` main: `build` PASS and `integration`
+PASS with `3 run, 0 violation(s)`. Two mutations were checked and both failed the gate as they
+should — expecting `contract: buildscope.snapshot/v3`, and expecting exit `0` from the
+non-snapshot case. Deleting the snapshot and re-running confirmed the producer recreates it for
+the consumer within the same run rather than a stale file being read.
+
 ## Run without installing into the repository
 
 All build and temporary output below stays under a scratch directory. The Python package is loaded

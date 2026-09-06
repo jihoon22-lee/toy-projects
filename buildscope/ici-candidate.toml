@@ -1,0 +1,80 @@
+# Candidate-only overlay. The public stable ici (`v0.10.2`) predates the
+# configurable release-contract engines, so naming `[engines.build]` there is a
+# configuration error, not a stricter run. Keep the hybrid integration contract
+# in this file and let `ici.toml` stay valid for the pinned public release —
+# the same split `abilens/ici-candidate.toml` uses for its Make contract.
+#
+#   ICI_CONFIG=ici-candidate.toml /path/to/candidate/ici.pyz verify --profile deep
+#
+# BuildScope's whole point is a boundary: a dependency-free Python analyzer
+# emits a versioned snapshot, and a C++20/Qt consumer validates and reads it.
+# The release workflow already exercises that handoff in shell. These cases make
+# it an ici measurement, so a broken boundary appears as a finding in a report
+# instead of a grep in a log.
+
+name = "buildscope"
+type = "hybrid"
+version = "0.5.0"
+
+[project]
+source_dirs = ["python", "src", "include", "ui", "resources", "tools"]
+cpp_pkg_config = ["Qt6Core", "Qt6Widgets", "Qt5Core", "Qt5Widgets"]
+
+[engines.test]
+enabled = true
+mode = "pass_fail"
+coverage_required = true
+min_tem_score = 4.0
+min_branch_cov = 75.0
+min_func_cov = 90.0
+
+[engines.build]
+enabled = true
+required = true
+mode = "pass_fail"
+
+[engines.integration]
+enabled = true
+required = true
+mode = "pass_fail"
+max_cases = 4
+max_output_bytes = 65536
+# `current` is built in: the interpreter ici itself is running under. That is the
+# right target here — the contract is that the analyzer runs on a real supported
+# runtime, not that a particular virtualenv exists on this machine.
+
+# Step 1: the Python producer reads a real compile database and writes a
+# snapshot. PYTHONPATH is explicit because the engine passes no ambient
+# environment, and here the source tree is the package rather than an
+# installed wheel.
+[[engines.integration.cases]]
+name = "python-producer-emits-snapshot"
+argv = ["{python:current}", "-m", "buildscope", "fixtures/compile_commands.json",
+        "--project-root", ".", "--output", "build/ici-e2e.snapshot.json"]
+env = { PYTHONPATH = "python" }
+expected_exit = 0
+output_artifacts = [{ path = "build/ici-e2e.snapshot.json", min_size = 64 }]
+timeout_seconds = 60.0
+required = true
+
+# Step 2: the C++/Qt consumer reads exactly that file. Asserting the contract
+# string is the point — a consumer that silently accepted a different schema
+# version would still pass an exit-code-only check.
+[[engines.integration.cases]]
+name = "native-consumer-reads-snapshot"
+argv = ["{artifact:release:shadow:src/core/buildscope-cli}", "build/ici-e2e.snapshot.json"]
+expected_exit = 0
+stdout_contains = ["Compilation entries:", "contract: buildscope.snapshot/v2"]
+stderr_not_contains = ["ContractError", "usage:"]
+timeout_seconds = 60.0
+required = true
+
+# Step 3: a non-snapshot must be refused, not read as empty. Without this the
+# two cases above would still pass against a consumer that ignored its input.
+[[engines.integration.cases]]
+name = "native-consumer-refuses-a-non-snapshot"
+argv = ["{artifact:release:shadow:src/core/buildscope-cli}", "fixtures/compile_commands.json"]
+expected_exit = 2
+stderr_contains = ["buildscope-cli:"]
+timeout_seconds = 60.0
+required = true

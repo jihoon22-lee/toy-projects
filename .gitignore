@@ -1,6 +1,8 @@
 # Build output
 build/
 src/gui/build/
+# `ici build` installs into <project>/<version>/x86_64
+v[0-9]*/
 bin/
 *.o
 *.a
