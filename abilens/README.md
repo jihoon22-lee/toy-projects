@@ -36,6 +36,24 @@ make OUT=build thread-sanitize
 make clean
 ```
 
+### The release tree is byte-reproducible
+
+Two clean builds at the same `OUT` produce identical files — the executable, both
+libraries, every object, and even the generated `.d` dependency files:
+
+```sh
+out=/tmp/abilens-repro
+rm -rf "$out" && make --jobs 2 all OUT="$out" && cp -a "$out" /tmp/abilens-a
+rm -rf "$out" && make --jobs 2 all OUT="$out" && cp -a "$out" /tmp/abilens-b
+diff -rq /tmp/abilens-a /tmp/abilens-b   # no output
+```
+
+Measured 2026-09-06 with GCC on Linux x86-64. Building into two *different* `OUT`
+trees still yields identical `bin/abilens`, `lib/libabilens.a`,
+`lib/libabilens-fixture.so` and every `.o`; only the `.d` files differ, because
+they record the absolute output path they were generated for. The `.d` files are
+build bookkeeping, not release artifacts.
+
 Ordinary repository CI runs the checksummed public ici release against
 `ici.toml`. That gate covers the stable release's static source engines, while
 the native CI job owns `make test` and the sanitizer variants. To verify the
