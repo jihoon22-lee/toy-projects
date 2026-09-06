@@ -722,5 +722,116 @@ class RunContractTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, 2)
 
 
+class EngineRegressionSummaryTest(unittest.TestCase):
+    """The one-screen view must name the engine, not just list sentences."""
+
+    @staticmethod
+    def _results() -> list[dict]:
+        return [
+            {
+                "scenario_id": "cpp.asan-uaf",
+                "contract_verdict": "FAIL",
+                "failures": [
+                    {
+                        "engine": "sanitize",
+                        "kind": "finding-missing",
+                        "detail": "expected finding #0 was not matched",
+                    },
+                    {
+                        "engine": "sanitize",
+                        "kind": "engine-status",
+                        "detail": "engine sanitize status 'PASS' != 'FAIL'",
+                    },
+                ],
+            },
+            {
+                "scenario_id": "python.dead",
+                "contract_verdict": "FAIL",
+                "failures": [
+                    {
+                        "engine": "",
+                        "kind": "suite-status",
+                        "detail": "suite status WARN != FAIL",
+                    },
+                    {
+                        "engine": "dead",
+                        "kind": "finding-missing",
+                        "detail": "expected finding #1 was not matched",
+                    },
+                ],
+            },
+            {"scenario_id": "cpp.clean", "contract_verdict": "PASS", "failures": []},
+        ]
+
+    def test_failures_group_by_engine_worst_first(self):
+        grouped = run._engine_regressions(self._results())
+
+        self.assertEqual(
+            [(item["engine"], item["failure_count"]) for item in grouped],
+            [("sanitize", 2), ("", 1), ("dead", 1)],
+        )
+        sanitize = grouped[0]
+        self.assertEqual(sanitize["scenarios"], ["cpp.asan-uaf"])
+        self.assertEqual(sanitize["kinds"], ["engine-status", "finding-missing"])
+
+    def test_one_scenario_is_listed_once_per_engine(self):
+        results = self._results()
+        results[0]["failures"].append(
+            {
+                "engine": "sanitize",
+                "kind": "finding-missing",
+                "detail": "expected finding #1 was not matched",
+            }
+        )
+
+        grouped = run._engine_regressions(results)
+
+        self.assertEqual(grouped[0]["failure_count"], 3)
+        self.assertEqual(grouped[0]["scenarios"], ["cpp.asan-uaf"])
+
+    def test_detail_lines_are_capped_and_the_remainder_is_named(self):
+        results = [
+            {
+                "scenario_id": "python.dead",
+                "contract_verdict": "FAIL",
+                "failures": [
+                    {
+                        "engine": "dead",
+                        "kind": "finding-missing",
+                        "detail": f"expected finding #{index} was not matched",
+                    }
+                    for index in range(7)
+                ],
+            }
+        ]
+        aggregate = {
+            "contract_verdict": "FAIL",
+            "scenario_count": 1,
+            "ici": {"version": "0.10.2"},
+            "results": results,
+            "engine_regressions": run._engine_regressions(results),
+        }
+
+        rendered = run.render_engine_regression_summary(aggregate)
+
+        self.assertEqual(len(aggregate["engine_regressions"][0]["details"]), 3)
+        self.assertIn("(+4 more in suite.json)", rendered)
+        self.assertIn("0/1 scenario contracts passed", rendered)
+
+    def test_a_passing_suite_renders_a_single_line(self):
+        aggregate = {
+            "contract_verdict": "PASS",
+            "scenario_count": 16,
+            "ici": {"version": "0.10.2"},
+            "results": [],
+            "engine_regressions": [],
+        }
+
+        rendered = run.render_engine_regression_summary(aggregate)
+
+        self.assertEqual(rendered.count("\n"), 0)
+        self.assertIn("16/16 scenario contracts passed", rendered)
+
+
 if __name__ == "__main__":
     unittest.main()

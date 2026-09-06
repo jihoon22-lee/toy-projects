@@ -489,6 +489,59 @@ class ReportContractTests(unittest.TestCase):
                     evaluate_contract(payload, expected)
                 self.assertEqual(raised.exception.code, "invalid-field")
 
+    def test_contract_failures_name_the_engine_that_owns_them(self) -> None:
+        """The one-screen summary groups by engine, so attribution must be real."""
+
+        payload = report(
+            [engine("dead", status="PASS"), engine("sanitize", status="PASS")],
+            suite_status="PASS",
+        )
+        expected = self.expectation(
+            suite_status="FAIL",
+            engines=[{"name": "sanitize", "status": "FAIL"}],
+            findings=[{"engine": "dead", "rule_id": "ici.python.dead.unused"}],
+            forbidden_findings=[],
+        )
+
+        result = evaluate_contract(payload, expected)
+
+        self.assertEqual(result.verdict, "FAIL")
+        attributed = {(item.engine, item.kind) for item in result.failures}
+        self.assertIn(("dead", "finding-missing"), attributed)
+        self.assertIn(("sanitize", "engine-status"), attributed)
+        # A suite-level mismatch belongs to no single engine.
+        self.assertIn(("", "suite-status"), attributed)
+        # The message surface is derived from the same records, never separate.
+        self.assertEqual(result.errors, tuple(item.detail for item in result.failures))
+
+    def test_an_unattributable_finding_expectation_falls_back_to_suite_scope(self) -> None:
+        payload = report([engine("dead", status="PASS")], suite_status="PASS")
+        expected = self.expectation(findings=[{"rule_id": "ici.python.dead.unused"}])
+
+        result = evaluate_contract(payload, expected)
+
+        self.assertEqual(
+            [(item.engine, item.kind) for item in result.failures],
+            [("", "finding-missing")],
+        )
+
+    def test_a_forbidden_match_is_attributed_to_its_engine(self) -> None:
+        offending = finding(rule_id="ici.python.dead.unused", severity="high")
+        payload = report(
+            [engine("dead", status="WARN", findings=[offending])], suite_status="WARN"
+        )
+        expected = self.expectation(
+            suite_status="WARN",
+            forbidden_findings=[{"engine": "dead", "rule_id": "ici.python.dead.unused"}],
+        )
+
+        result = evaluate_contract(payload, expected)
+
+        self.assertEqual(
+            [(item.engine, item.kind) for item in result.failures],
+            [("dead", "finding-forbidden")],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

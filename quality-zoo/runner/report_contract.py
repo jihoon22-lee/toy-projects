@@ -24,6 +24,27 @@ RULE_RE = re.compile(r"^ici\.[a-z0-9][a-z0-9.-]*$")
 FINGERPRINT_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
+SUITE_SCOPE = ""
+
+
+@dataclass(frozen=True)
+class ContractFailure:
+    """One contract violation, attributed to the engine that owns it.
+
+    ``engine`` is ``SUITE_SCOPE`` for violations no single engine can be blamed
+    for — a suite status, a producer version, a missing capability. Everything
+    else names the engine so a failing run can be read as "which engine
+    regressed" instead of a list of sentences.
+    """
+
+    engine: str
+    kind: str
+    detail: str
+
+    def as_dict(self) -> dict[str, str]:
+        return {"engine": self.engine, "kind": self.kind, "detail": self.detail}
+
+
 @dataclass(frozen=True)
 class ContractResult:
     scenario_id: str
@@ -32,6 +53,7 @@ class ContractResult:
     producer_version: str
     matched_findings: int
     errors: tuple[str, ...]
+    failures: tuple[ContractFailure, ...] = ()
 
 
 def _object(value: Any, label: str) -> dict[str, Any]:
@@ -517,7 +539,7 @@ def _matches_finding(
 def _match_expected_findings(
     observed: list[tuple[dict[str, Any], dict[str, Any]]],
     expected: list[dict[str, Any]],
-) -> tuple[int, list[str]]:
+) -> tuple[int, list[ContractFailure]]:
     slots: list[tuple[int, dict[str, Any]]] = []
     for index, predicate in enumerate(expected):
         count = require_int(
@@ -545,14 +567,20 @@ def _match_expected_findings(
                 return True
         return False
 
-    errors: list[str] = []
+    failures: list[ContractFailure] = []
     matched = 0
-    for slot_index, (expectation_index, _) in enumerate(slots):
+    for slot_index, (expectation_index, predicate) in enumerate(slots):
         if assign(slot_index, set()):
             matched += 1
         else:
-            errors.append(f"expected finding #{expectation_index} was not matched")
-    return matched, errors
+            failures.append(
+                ContractFailure(
+                    engine=str(predicate.get("engine", SUITE_SCOPE)),
+                    kind="finding-missing",
+                    detail=f"expected finding #{expectation_index} was not matched",
+                )
+            )
+    return matched, failures
 
 
 def evaluate_contract(
@@ -564,13 +592,25 @@ def evaluate_contract(
     metadata, engines = validate_report(report)
     scenario_id = require_string(expectation.get("scenario_id"), "scenario_id")
     expected_status = require_string(expectation.get("suite_status"), "suite_status")
-    errors: list[str] = []
+    failures: list[ContractFailure] = []
     if report["suite_status"] != expected_status:
-        errors.append(f"suite status {report['suite_status']} != {expected_status}")
+        failures.append(
+            ContractFailure(
+                SUITE_SCOPE,
+                "suite-status",
+                f"suite status {report['suite_status']} != {expected_status}",
+            )
+        )
     expected_version = expectation.get("producer_version")
     producer_version = require_string(metadata["producer_version"], "producer_version")
     if expected_version is not None and producer_version != expected_version:
-        errors.append(f"producer version {producer_version} != {expected_version}")
+        failures.append(
+            ContractFailure(
+                SUITE_SCOPE,
+                "producer-version",
+                f"producer version {producer_version} != {expected_version}",
+            )
+        )
     required_capabilities = expectation["required_capabilities"]
     if required_capabilities:
         inventory = _object(report.get("capability_inventory"), "capability_inventory")
@@ -585,10 +625,20 @@ def evaluate_contract(
         for capability in required_capabilities:
             tool = by_tool.get(capability)
             if tool is None:
-                errors.append(f"required capability {capability!r} is absent")
+                failures.append(
+                    ContractFailure(
+                        SUITE_SCOPE,
+                        "capability-absent",
+                        f"required capability {capability!r} is absent",
+                    )
+                )
             elif tool.get("state") != "ready" or tool.get("complete") is not True:
-                errors.append(
-                    f"required capability {capability!r} is not ready and complete"
+                failures.append(
+                    ContractFailure(
+                        SUITE_SCOPE,
+                        "capability-incomplete",
+                        f"required capability {capability!r} is not ready and complete",
+                    )
                 )
     by_name = {engine["engine_name"]: engine for engine in engines}
     for index, raw_expected in enumerate(expectation.get("engines", [])):
@@ -596,16 +646,27 @@ def evaluate_contract(
         name = require_string(expected_engine.get("name"), f"engines[{index}].name")
         engine = by_name.get(name)
         if engine is None:
-            errors.append(f"expected engine {name!r} is absent")
+            failures.append(
+                ContractFailure(name, "engine-absent", f"expected engine {name!r} is absent")
+            )
             continue
         for field in ("status", "evidence", "required"):
             if field in expected_engine and engine.get(field) != expected_engine[field]:
-                errors.append(
-                    f"engine {name} {field} {engine.get(field)!r} != {expected_engine[field]!r}"
+                failures.append(
+                    ContractFailure(
+                        name,
+                        f"engine-{field}",
+                        f"engine {name} {field} {engine.get(field)!r} "
+                        f"!= {expected_engine[field]!r}",
+                    )
                 )
         for key, value in expected_engine.get("extra", {}).items():
             if engine.get("extra", {}).get(key) != value:
-                errors.append(f"engine {name} extra.{key} differs")
+                failures.append(
+                    ContractFailure(
+                        name, "engine-extra", f"engine {name} extra.{key} differs"
+                    )
+                )
     observed = [
         (engine, finding)
         for engine in engines
@@ -615,8 +676,8 @@ def evaluate_contract(
         _object(item, f"findings[{index}]")
         for index, item in enumerate(expectation.get("findings", []))
     ]
-    matched, finding_errors = _match_expected_findings(observed, expected_findings)
-    errors.extend(finding_errors)
+    matched, finding_failures = _match_expected_findings(observed, expected_findings)
+    failures.extend(finding_failures)
     for index, raw_forbidden in enumerate(expectation.get("forbidden_findings", [])):
         predicate = _object(raw_forbidden, f"forbidden_findings[{index}]")
         offenders = [
@@ -627,14 +688,22 @@ def evaluate_contract(
             and _matches_finding(engine, finding, predicate)
         ]
         if offenders:
-            errors.append(
-                f"forbidden finding #{index} matched {len(offenders)} result(s)"
+            failures.append(
+                ContractFailure(
+                    engine=str(predicate.get("engine", SUITE_SCOPE)),
+                    kind="finding-forbidden",
+                    detail=f"forbidden finding #{index} matched {len(offenders)} result(s)",
+                )
             )
     return ContractResult(
         scenario_id=scenario_id,
-        verdict="PASS" if not errors else "FAIL",
+        verdict="PASS" if not failures else "FAIL",
         observed_suite_status=report["suite_status"],
         producer_version=producer_version,
         matched_findings=matched,
-        errors=tuple(errors),
+        # The strings stay the contract's message surface; ``failures`` adds the
+        # engine attribution the one-screen summary groups by. Deriving one from
+        # the other is what keeps them from drifting apart.
+        errors=tuple(failure.detail for failure in failures),
+        failures=tuple(failures),
     )

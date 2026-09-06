@@ -8,6 +8,7 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -22,7 +23,7 @@ from runner.common import (
     require_string,
     sha256_file,
 )
-from runner.report_contract import evaluate_contract
+from runner.report_contract import SUITE_SCOPE, evaluate_contract
 
 MAX_TOOL_OUTPUT_BYTES = 1024 * 1024
 ALLOWED_PROFILES = {"fast", "standard", "deep"}
@@ -298,20 +299,31 @@ def run_scenario(
             "ERROR": 1,
             "SKIP": 2,
         }[contract.observed_suite_status]
-        errors = list(contract.errors)
+        failures = [failure.as_dict() for failure in contract.failures]
         if completed.returncode != expected_exit:
             if completed.returncode < 0:
                 signal_name = signal.Signals(-completed.returncode).name
-                errors.append(f"ici terminated by {signal_name}")
+                detail = f"ici terminated by {signal_name}"
             else:
-                errors.append(
+                detail = (
                     f"ici exit {completed.returncode} does not match suite status "
                     f"{contract.observed_suite_status} (expected {expected_exit})"
                 )
-        if producer_version != contract.producer_version:
-            errors.append(
-                f"--version producer {producer_version} != report {contract.producer_version}"
+            failures.append(
+                {"engine": SUITE_SCOPE, "kind": "exit-code", "detail": detail}
             )
+        if producer_version != contract.producer_version:
+            failures.append(
+                {
+                    "engine": SUITE_SCOPE,
+                    "kind": "producer-version",
+                    "detail": (
+                        f"--version producer {producer_version} "
+                        f"!= report {contract.producer_version}"
+                    ),
+                }
+            )
+        errors = [failure["detail"] for failure in failures]
         _copy_artifact(report_path, scenario_output / "report.json")
         _copy_artifact(html_path, scenario_output / "report.html")
         summary = {
@@ -330,6 +342,7 @@ def run_scenario(
             "stderr": stderr_text,
             "stderr_truncated": stderr_truncated,
             "errors": errors,
+            "failures": failures,
             "artifacts": {
                 "json": f"{scenario_id}/report.json",
                 "html": f"{scenario_id}/report.html",
@@ -339,6 +352,68 @@ def run_scenario(
             json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
         return summary
+
+
+MAX_SUMMARY_DETAILS = 3
+
+
+def _engine_regressions(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Group every contract failure by the engine that owns it.
+
+    A failing suite otherwise reads as a flat list of sentences spread over
+    sixteen scenario objects, which answers "what did not match" but not the
+    question an ici change actually raises: which engine regressed.
+    """
+
+    by_engine: dict[str, dict[str, Any]] = {}
+    for result in results:
+        for failure in result.get("failures", []):
+            engine = failure.get("engine") or SUITE_SCOPE
+            entry = by_engine.setdefault(
+                engine,
+                {"engine": engine, "failure_count": 0, "scenarios": [], "kinds": [], "details": []},
+            )
+            entry["failure_count"] += 1
+            scenario_id = result["scenario_id"]
+            if scenario_id not in entry["scenarios"]:
+                entry["scenarios"].append(scenario_id)
+            kind = failure.get("kind", "unknown")
+            if kind not in entry["kinds"]:
+                entry["kinds"].append(kind)
+            if len(entry["details"]) < MAX_SUMMARY_DETAILS:
+                entry["details"].append(f"{scenario_id}: {failure.get('detail', '')}")
+    for entry in by_engine.values():
+        entry["scenarios"].sort()
+        entry["kinds"].sort()
+    # Most failures first, then by name, so the engine to look at is on top.
+    return sorted(by_engine.values(), key=lambda item: (-item["failure_count"], item["engine"]))
+
+
+def render_engine_regression_summary(aggregate: dict[str, Any]) -> str:
+    """Render the one-screen "which engine regressed" view of a suite run."""
+
+    verdict = aggregate["contract_verdict"]
+    scenario_count = aggregate["scenario_count"]
+    failed = [item for item in aggregate["results"] if item["contract_verdict"] != "PASS"]
+    lines = [
+        f"quality-zoo {verdict} - {scenario_count - len(failed)}/{scenario_count} "
+        f"scenario contracts passed (ici {aggregate['ici']['version']})",
+    ]
+    if verdict == "PASS":
+        return lines[0]
+    lines.append("")
+    lines.append(f"{'ENGINE':<18} {'FAILS':>5}  SCENARIOS")
+    for entry in aggregate.get("engine_regressions", []):
+        engine = entry["engine"] or "<suite>"
+        scenarios = ", ".join(entry["scenarios"])
+        lines.append(f"{engine:<18} {entry['failure_count']:>5}  {scenarios}")
+        lines.append(f"{'':<18} {'':>5}  kinds: {', '.join(entry['kinds'])}")
+        for detail in entry["details"]:
+            lines.append(f"{'':<18} {'':>5}  - {detail}")
+        remaining = entry["failure_count"] - len(entry["details"])
+        if remaining > 0:
+            lines.append(f"{'':<18} {'':>5}  - (+{remaining} more in suite.json)")
+    return "\n".join(lines)
 
 
 def run_manifest(
@@ -397,6 +472,7 @@ def run_manifest(
         "scenario_count": len(results),
         "results": results,
     }
+    aggregate["engine_regressions"] = _engine_regressions(results)
     (output_root / "suite.json").write_text(
         json.dumps(aggregate, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -426,7 +502,10 @@ def main(argv: list[str] | None = None) -> int:
         )
     except (ContractError, OSError) as error:
         parser.exit(2, f"quality-zoo ERROR: {error}\n")
+    # stdout stays machine-readable for the acceptance workflows; the
+    # human summary goes to stderr so both can be captured separately.
     print(json.dumps(result, sort_keys=True))
+    print(render_engine_regression_summary(result), file=sys.stderr)
     return 0 if result["contract_verdict"] == "PASS" else 1
 
 
