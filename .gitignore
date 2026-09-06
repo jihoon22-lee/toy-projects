@@ -24,6 +24,8 @@ dist/
 *.egg-info/
 
 # ici reports
+python_compat_report.html
+python_compat_report.json
 verify_report.html
 verify_report.json
 verify_report.md

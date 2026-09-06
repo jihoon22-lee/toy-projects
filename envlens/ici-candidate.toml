@@ -1,0 +1,42 @@
+# Candidate-only overlay. `python_compat` did not exist in the public stable ici
+# (`v0.10.2`), so naming it there is a configuration error rather than a stricter
+# run — the same split `abilens/ici-candidate.toml` and
+# `buildscope/ici-candidate.toml` use.
+#
+#   ICI_CONFIG=ici-candidate.toml /path/to/candidate/ici.pyz verify --profile deep
+#
+# EnvLens is the portfolio's pure-Python packaging case: the repository's CI
+# already proves the wheel is byte-reproducible, and this points ici's own
+# package engine at that wheel so the purity claim is measured by the analyzer
+# rather than asserted by the build.
+
+name = "envlens"
+type = "python"
+version = "0.1.0"
+
+[project]
+source_dirs = ["src"]
+
+[engines.test]
+enabled = true
+mode = "pass_fail"
+coverage_required = true
+min_tem_score = 4.0
+min_branch_cov = 80.0
+min_func_cov = 90.0
+
+[engines.python_compat]
+enabled = true
+required = true
+mode = "pass_warn_fail"
+# The floor plus the newest runtime this project claims, the same contract ici
+# holds itself to. Both stay optional so the overlay works on a machine that has
+# only one of them; CI installs both.
+target_version = "3.10"
+interpreters = ["python3.10", "python3.14"]
+imports = ["envlens"]
+# `pure` makes a native extension member a failure rather than a note. EnvLens
+# builds `py3-none-any` and the repository asserts that in its own audit; this
+# makes the analyzer assert it too, from the wheel's own members.
+wheel_globs = ["dist/*.whl"]
+wheel_policy = "pure"

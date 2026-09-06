@@ -216,6 +216,34 @@ passed. The exact artifact IDs, four main Pages, and byte-level evidence are
 centralized in the [EnvLens workthrough](../workthrough/2026-09-03-envlens-snapshot.md).
 Stable release remains pending.
 
+## Wheel purity is measured, not asserted (candidate ici only)
+
+Repository CI already builds the wheel and sdist twice with `SOURCE_DATE_EPOCH`
+and compares the bytes, so reproducibility is measured. Purity was not: the
+audit read the `WHEEL` metadata, which is what the build *claims*.
+`ici-candidate.toml` points ici's own package engine at the produced wheel so
+the claim is checked against the wheel's actual members.
+
+```sh
+(cd envlens && SOURCE_DATE_EPOCH=1700000000 uv build --out-dir dist)
+ICI_CONFIG=ici-candidate.toml /path/to/candidate/ici.pyz python-compat --report
+```
+
+Local evidence, 2026-09-06, candidate ici built from `ici` main: `PASS`,
+`MEASURED`, one wheel checked with 24 members, `pure: true`, `native_members: []`,
+one entry point, 18 source modules, and both `python3.10` and `python3.14`
+exercised for version, `compileall` and import smoke.
+
+The gate stops something real. Injecting a fake
+`envlens/_accel.cpython-310-x86_64-linux-gnu.so` member into the wheel and
+re-running turns the result into `2 failure(s)` under `wheel_policy = "pure"`;
+restoring the wheel returns it to `PASS`.
+
+The overlay is candidate-only for the same reason the AbiLens and BuildScope
+ones are: the public `v0.10.2` predates the `python_compat` engine, so naming it
+there is a configuration error rather than a stricter run. The repository's
+stable ici pin and `ici.toml` are unchanged.
+
 ## Deliberate current boundary
 
 This release-free E1–E3 slice compares captured evidence and performs explicit
