@@ -40,5 +40,10 @@
       "metrics": {"entry_index": {"value": 1}}
     }
   ],
-  "forbidden_findings": []
+  "forbidden_findings": [
+    {
+      "engine": "compile_db",
+      "location": {"path": "src/main.cpp"}
+    }
+  ]
 }
