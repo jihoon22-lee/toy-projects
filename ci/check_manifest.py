@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from release_registry import _validate_release
+
 MANIFEST_PATH = Path("ci/projects.json")
 SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 SAFE_PATH = re.compile(r"^[A-Za-z0-9._/-]+$")
@@ -163,10 +165,13 @@ def discover(
             raise ValueError(f"{name} must be a directory containing ici.toml")
         if entry.get("verify") is not True:
             raise ValueError(f"{name} must opt into ici verification")
-        # Validate optional native metadata even when callers request only the
-        # historical verify/gui tuple. This keeps one manifest parser as the
-        # source of truth for every visible CI matrix.
+        # Validate optional native and release metadata even when callers
+        # request only the historical verify/gui tuple. This keeps one manifest
+        # parser as the source of truth for every visible CI matrix, and it
+        # means a malformed release block fails on the PR that wrote it rather
+        # than on the tag push that needed it.
         _native_entry(name, entry)
+        _validate_release(name, entry)
 
         names.append(name)
         verify_projects.append({"name": name})

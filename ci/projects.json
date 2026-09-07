@@ -10,6 +10,16 @@
         "build_descriptor": "diskmap.pro",
         "binary": "build/gui/src/gui/diskmap-gui",
         "smoke_arg": "src"
+      },
+      "release": {
+        "enabled": true,
+        "display_name": "DiskMap",
+        "artifacts": {
+          "pyz": false,
+          "wheel": false,
+          "sdist": false,
+          "native_bundle": true
+        }
       }
     },
     {
@@ -21,6 +31,16 @@
         "build_descriptor": "CMakeLists.txt",
         "binary": "build/gui/src/gui/loglens-gui",
         "smoke_arg": "tests/data/sample.log"
+      },
+      "release": {
+        "enabled": true,
+        "display_name": "LogLens",
+        "artifacts": {
+          "pyz": false,
+          "wheel": false,
+          "sdist": false,
+          "native_bundle": true
+        }
       }
     },
     {
@@ -32,6 +52,16 @@
         "build_descriptor": "CMakeLists.txt",
         "binary": "build/gui/src/gui/buildscope-gui",
         "smoke_arg": "fixtures/sample.snapshot.json"
+      },
+      "release": {
+        "enabled": true,
+        "display_name": "BuildScope",
+        "artifacts": {
+          "pyz": true,
+          "wheel": true,
+          "sdist": true,
+          "native_bundle": true
+        }
       }
     },
     {
@@ -39,6 +69,16 @@
       "verify": true,
       "gui": {
         "enabled": false
+      },
+      "release": {
+        "enabled": true,
+        "display_name": "EnvLens",
+        "artifacts": {
+          "pyz": false,
+          "wheel": true,
+          "sdist": true,
+          "native_bundle": false
+        }
       }
     },
     {
@@ -52,6 +92,16 @@
         "build_system": "make",
         "build_target": "all",
         "test_target": "test"
+      },
+      "release": {
+        "enabled": true,
+        "display_name": "AbiLens",
+        "artifacts": {
+          "pyz": false,
+          "wheel": false,
+          "sdist": false,
+          "native_bundle": true
+        }
       }
     }
   ]

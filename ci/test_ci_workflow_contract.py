@@ -273,10 +273,27 @@ class WorkflowPublicationContractTests(unittest.TestCase):
         self.assertIn('test "$REPORT_RESULT" = skipped', block)
         self.assertIn('test "$MAIN_PUBLISH_RESULT" = success', block)
 
-    def test_discovery_executes_this_contract_suite(self) -> None:
+    def test_every_ci_test_module_is_executed_by_some_job(self) -> None:
+        """No test under ci/ may exist without a job that runs it.
+
+        Jobs name their modules one per line rather than discovering them,
+        which is the safe choice for the discovery step that runs before any
+        toolchain setup. The cost is that adding a file and forgetting to
+        name it leaves a test that never runs and never reports.
+
+        Discovery is not the only legitimate home: the B5 report checker is
+        exercised by the BuildScope job that owns it. So the requirement is
+        that *some* job runs each module, not that discovery runs all of them.
+        """
+
         block = _job_block("discover")
+        ci_dir = Path(__file__).resolve().parent
+        modules = sorted(path.name for path in ci_dir.glob("test_*.py"))
+        self.assertGreater(len(modules), 1)
 
         self.assertIn("ci/test_ci_workflow_contract.py", block)
+        missing = [name for name in modules if f"ci/{name}" not in WORKFLOW]
+        self.assertEqual(missing, [], f"no job runs: {missing}")
 
     def test_quality_zoo_uses_the_pinned_release_and_uploads_evidence(self) -> None:
         block = _job_block("quality-zoo-contract")
