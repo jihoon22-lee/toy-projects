@@ -512,6 +512,30 @@ expected engine state, expected findings, and forbidden findings. Stable
 scenarios should include a nearby clean counterpart when the rule could
 overmatch ordinary code.
 
+### Absence is pinned for every engine, and that is enforced
+
+A corpus that only asserts what an engine *does* report is one-sided: it catches
+an engine that stops detecting and misses one that starts over-detecting. The
+second is the failure a user meets first, as noise in a report they trusted.
+
+So every engine the corpus pins for presence is also pinned for absence
+somewhere, and `tests/test_corpus_coverage.py` reads the scenarios to enforce
+it rather than trusting a hand-kept list. Adding a scenario for a new engine
+without a matching absence fails there.
+
+Two rules come with it. A forbidden predicate must constrain something — a bare
+`{}` forbids every finding, so it either fails for reasons unrelated to the
+engine it meant to guard or, on an empty run, passes while asserting nothing.
+And every expectation declares both `findings` and `forbidden_findings` even
+when one is empty, because a missing key reads as "absence was not considered"
+rather than "considered, and there is nothing to pin".
+
+Note that most scenarios disable every engine but the one under test, so a
+forbidden predicate naming a disabled engine would be vacuous. The useful guard
+in a single-engine scenario is a location: the valid compile-database entry that
+must stay quiet while the malformed one is reported, the clean module beside the
+complex one.
+
 Commands are intentionally narrow. The runner accepts only an argv array of
 `verify --profile fast|standard|deep`, optionally followed by `--no-cache`; it
 does not invoke a shell. Scenario and project paths must remain inside the
