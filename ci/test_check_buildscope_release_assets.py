@@ -79,7 +79,7 @@ class BuildScopeReleaseAssetTests(unittest.TestCase):
         check_release_assets(self.release_json, self.dist, TAG, VERSION)
 
     def test_accepts_final_release_with_exact_nine_streamed_assets(self) -> None:
-        with patch("check_buildscope_release_assets.HASH_CHUNK_BYTES", 7):
+        with patch("release_audit.HASH_CHUNK_BYTES", 7):
             self._check()
 
     def test_cli_returns_success_for_valid_release(self) -> None:
@@ -273,7 +273,7 @@ class BuildScopeReleaseAssetTests(unittest.TestCase):
             self._check()
 
     def test_rejects_release_metadata_bounds_encoding_and_symlink(self) -> None:
-        with patch("check_buildscope_release_assets.MAX_RELEASE_JSON_BYTES", 16):
+        with patch("release_audit.MAX_RELEASE_JSON_BYTES", 16):
             self.release_json.write_text('{"too": "large-value"}', encoding="utf-8")
             with self.assertRaisesRegex(
                 BuildScopeReleaseAssetError, "outside the accepted range"

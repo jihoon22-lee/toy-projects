@@ -58,7 +58,7 @@ class BuildScopeReleaseManifestTests(unittest.TestCase):
         (self.dist / "SHA256SUMS").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     def test_accepts_exact_manifest_sidecar_and_streamed_files(self) -> None:
-        with patch("check_buildscope_release_assets.HASH_CHUNK_BYTES", 7):
+        with patch("release_audit.HASH_CHUNK_BYTES", 7):
             check_release_manifest(self.dist, VERSION)
 
     def test_cli_accepts_the_valid_release_directory(self) -> None:
