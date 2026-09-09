@@ -120,5 +120,23 @@ Output directories are protected by an ownership marker.  A non-empty
 unowned `OUT`, a symlink, the project root, and `/` are refused by the Make
 adapter; `make clean` removes only an explicitly marked output tree.
 
-This product is currently `0.1.0` in the project metadata and remains
-Unreleased until the consolidated toy-project release gate is complete.
+## Release
+
+`0.1.0` is the first public release. It is published as a native bundle,
+`abilens-0.1.0-linux-x86_64.tar.gz`, containing `bin/abilens`,
+`lib/libabilens.a` and this README. The `lib/libabilens-fixture.so` that
+`make check` builds is an integration fixture and is not shipped.
+
+Every release also publishes the deep ici report it was gated on
+(`abilens-ici-deep.json` / `.html`), a provenance record naming the exact
+`main` commit it was built from (`abilens-provenance.json`), and `SHA256SUMS`
+covering the other four assets:
+
+```sh
+sha256sum --check SHA256SUMS
+```
+
+Releases are cut by pushing an annotated `abilens-v<version>` tag at an exact
+`main` commit whose Merge Gate is green. The workflow refuses before building
+if the version in `ici.toml`, the compiled constant reported by
+`abilens --version`, and the CHANGELOG entry do not agree.

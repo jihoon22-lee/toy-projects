@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+### AbiLens 0.1.0
+
+AbiLens's first public release. A dependency-free C++20 command-line inspector
+for Linux ELF build artifacts, released as a native bundle with no Python
+packaging.
+
+**What it does.** Reports ELF class, endian, type, machine, dynamic/static and
+stripped state where section evidence permits it. Collects `DT_NEEDED`,
+`DT_RPATH`, `DT_RUNPATH` and typed GLIBC/GLIBCXX/CXXABI version requirements.
+Compares a report against another report, or two binaries directly. Applies a
+small documented ABI/dependency policy and emits deterministic
+`abilens.report/v1` and `abilens.diff/v1` JSON.
+
+**The input is never loaded or executed.** AbiLens validates the ELF
+identification and table bounds itself, then asks the system `readelf` for
+bounded, C-locale evidence. Each inspection opens the target once; the same
+descriptor is passed to `readelf` as `/proc/self/fd/<n>`, so structural and
+tool evidence describe one file. Path replacement or in-place mutation between
+the two reads is rejected before a report can be accepted.
+
+**Where it fails closed.** A non-GNU or unparseable `readelf` is a
+`tool-error`, not a silent fallback. Extended ELF table counts and unknown byte
+orders or classes are reported as unsupported rather than guessed. ABI names
+outside the numeric GLIBC/GLIBCXX/CXXABI forms are not interpreted as floors.
+
+**What ships.** `bin/abilens` and `lib/libabilens.a`. The
+`lib/libabilens-fixture.so` shared object that `make check` builds is an
+integration fixture and is deliberately not part of the release bundle.
+
+Verified by ici's deep profile at the pinned public `v0.10.2`, with the
+report published as a release asset.
+
+
 ### Consolidated portfolio quality tooling
 
 - Kept AbiLens's ordinary ici configuration compatible with the checksummed
