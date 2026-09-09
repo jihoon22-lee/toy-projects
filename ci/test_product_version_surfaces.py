@@ -15,21 +15,19 @@ someone remembers to register it here.
 from __future__ import annotations
 
 import json
-import re
-import tomllib
+import sys
 import unittest
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-# Directories that hold fixtures, vendored samples or build output. A version
-# string in there describes something other than the product being released.
-EXCLUDED_DIR_NAMES = frozenset(
-    {"build", "dist", "examples", "fixtures", "tests", "third_party", "vendor"}
+from version_surfaces import (  # noqa: E402
+    CPP_VERSION_RE,
+    manifest_version,
+    version_surfaces,
 )
 
-PY_VERSION_RE = re.compile(r'^__version__\s*=\s*"([^"]+)"', re.MULTILINE)
-CPP_VERSION_RE = re.compile(r'\bkVersion\s*=\s*"([^"]+)"')
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _released_product_names() -> tuple[str, ...]:
@@ -41,80 +39,8 @@ def _released_product_names() -> tuple[str, ...]:
     )
 
 
-def _load_toml(path: Path) -> dict:
-    with path.open("rb") as handle:
-        return tomllib.load(handle)
-
-
-def _manifest_version(path: Path) -> str:
-    """Read the version an `ici.toml` cuts, failing loudly if it states none.
-
-    Both placements are in use across the portfolio: abilens, diskmap and
-    loglens put the identity keys inside `[project]`, while buildscope and
-    envlens put them at the top level. Accept either, and reject a file that
-    states the version twice without agreeing with itself.
-    """
-
-    document = _load_toml(path)
-    candidates = []
-    if "version" in document:
-        candidates.append(document["version"])
-    project = document.get("project", {})
-    if isinstance(project, dict) and "version" in project:
-        candidates.append(project["version"])
-
-    if not candidates:
-        raise AssertionError(f"{path} states no version")
-    if len(set(candidates)) > 1:
-        raise AssertionError(f"{path} states conflicting versions: {candidates!r}")
-    return candidates[0]
-
-
-def _pyproject_version(path: Path) -> str:
-    """Read `[project] version`, the one placement PEP 621 defines."""
-
-    return _load_toml(path)["project"]["version"]
-
-
-def _is_product_source(path: Path, product_root: Path) -> bool:
-    relative = path.relative_to(product_root)
-    return not EXCLUDED_DIR_NAMES.intersection(relative.parts)
-
-
 def _version_surfaces(product_root: Path) -> dict[str, str]:
-    """Map every place this product states a version to the value it states.
-
-    Keys are repo-relative paths so a failure names the file to edit.
-    """
-
-    surfaces: dict[str, str] = {}
-
-    pyproject = product_root / "pyproject.toml"
-    if pyproject.is_file():
-        key = str(pyproject.relative_to(REPO_ROOT))
-        surfaces[key] = _pyproject_version(pyproject)
-
-    for init in sorted(product_root.rglob("__init__.py")):
-        if not _is_product_source(init, product_root):
-            continue
-        found = PY_VERSION_RE.findall(init.read_text(encoding="utf-8"))
-        if not found:
-            continue
-        if len(found) > 1:
-            raise AssertionError(f"{init} declares __version__ more than once")
-        surfaces[str(init.relative_to(REPO_ROOT))] = found[0]
-
-    for source in sorted(product_root.rglob("*.cpp")) + sorted(product_root.rglob("*.hpp")):
-        if not _is_product_source(source, product_root):
-            continue
-        found = CPP_VERSION_RE.findall(source.read_text(encoding="utf-8"))
-        if not found:
-            continue
-        if len(found) > 1:
-            raise AssertionError(f"{source} declares kVersion more than once")
-        surfaces[str(source.relative_to(REPO_ROOT))] = found[0]
-
-    return surfaces
+    return version_surfaces(product_root, REPO_ROOT)
 
 
 class ProductVersionSurfaceTests(unittest.TestCase):
@@ -123,7 +49,7 @@ class ProductVersionSurfaceTests(unittest.TestCase):
 
         for product in _released_product_names():
             product_root = REPO_ROOT / product
-            declared = _manifest_version(product_root / "ici.toml")
+            declared = manifest_version(product_root / "ici.toml")
             for surface, stated in _version_surfaces(product_root).items():
                 with self.subTest(product=product, surface=surface):
                     self.assertEqual(

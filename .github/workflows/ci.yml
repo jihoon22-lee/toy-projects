@@ -69,6 +69,10 @@ jobs:
             ci/test_ci_workflow_contract.py \
             ci/test_release_registry.py \
             ci/test_product_version_surfaces.py \
+            ci/test_check_release_metadata.py \
+            ci/test_release_assets.py \
+            ci/test_release_manifest.py \
+            ci/test_write_release_provenance.py \
             -v
           python3 ci/check_manifest.py \
             --event-name "$GITHUB_EVENT_NAME" \
