@@ -6,39 +6,49 @@ the same nine local artifacts that it uploaded. Keeping this dependency-free
 standard-library audit in a normal Python module makes the final-publication
 contract testable on every supported interpreter and prevents the workflow
 from silently drifting away from its unit-tested checks.
+
+The filesystem and version primitives live in ``release_audit`` so every
+product's release enforces the same read contract; only the asset list and the
+tag prefix below are BuildScope's own.
 """
 
 from __future__ import annotations
 
 import argparse
-import errno
-import hashlib
 import json
 import math
 import os
-import re
-import stat
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-MAX_RELEASE_JSON_BYTES = 20_000_000
-HASH_CHUNK_BYTES = 1024 * 1024
-MAX_GITHUB_ID = (1 << 63) - 1
-MAX_ASSET_NAME_BYTES = 255
-MAX_ASSET_BYTES = 256 * 1024 * 1024
-MAX_TOTAL_ASSET_BYTES = 512 * 1024 * 1024
-VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
-SHA256_DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
+from release_audit import (
+    HASH_CHUNK_BYTES,
+    MAX_ASSET_BYTES,
+    MAX_ASSET_NAME_BYTES,
+    MAX_GITHUB_ID,
+    MAX_RELEASE_JSON_BYTES,
+    MAX_TOTAL_ASSET_BYTES,
+    SHA256_DIGEST_PATTERN,
+    VERSION_PATTERN,
+    ReleaseAssetError,
+    _assert_path_matches,
+    _open_real_directory,
+    _open_regular_file,
+    _read_release_json,
+    _regular_file_info,
+    _require_regular_directory,
+    _stat_signature,
+    _stream_sha256,
+    validate_version,
+)
 
-_NOFOLLOW = getattr(os, "O_NOFOLLOW", None)
-_CLOEXEC = getattr(os, "O_CLOEXEC", 0)
-_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
-_NONBLOCK = getattr(os, "O_NONBLOCK", 0)
+TAG_PREFIX = "buildscope-v"
+PRODUCT = "BuildScope"
 
-
-class BuildScopeReleaseAssetError(ValueError):
-    """The final BuildScope release or one of its assets is invalid."""
+# Kept as an alias: this module's public errors have always carried this name,
+# and callers catch it by name.
+BuildScopeReleaseAssetError = ReleaseAssetError
 
 
 def expected_asset_names(version: str) -> tuple[str, ...]:
@@ -57,247 +67,9 @@ def expected_asset_names(version: str) -> tuple[str, ...]:
     )
 
 
-def _open_flags(*, directory: bool = False) -> int:
-    """Return descriptor flags that never follow the final path component."""
-
-    if _NOFOLLOW is None:
-        raise BuildScopeReleaseAssetError(
-            "this platform does not provide O_NOFOLLOW for safe release audits"
-        )
-    flags = os.O_RDONLY | _CLOEXEC | _NOFOLLOW
-    if not directory:
-        # A FIFO must be rejected after fstat without allowing open(2) to block.
-        flags |= _NONBLOCK
-    if directory:
-        if not _DIRECTORY:
-            raise BuildScopeReleaseAssetError(
-                "this platform does not provide O_DIRECTORY for safe directory audits"
-            )
-        flags |= _DIRECTORY
-    return flags
-
-
-def _stat_signature(info: os.stat_result) -> tuple[int, ...]:
-    """Return metadata that must stay stable while a file is being consumed."""
-
-    return (
-        info.st_dev,
-        info.st_ino,
-        stat.S_IFMT(info.st_mode),
-        info.st_nlink,
-        info.st_size,
-        info.st_mtime_ns,
-        info.st_ctime_ns,
-    )
-
-
-def _assert_path_matches(path: Path, label: str, initial_info: os.stat_result) -> None:
-    """Reject a path that was replaced while its descriptor was consumed."""
-
-    try:
-        final_info = os.stat(path, follow_symlinks=False)
-    except OSError as exc:
-        raise BuildScopeReleaseAssetError(
-            f"{label} disappeared while it was being audited: {exc}"
-        ) from exc
-    if _stat_signature(final_info) != _stat_signature(initial_info):
-        raise BuildScopeReleaseAssetError(f"{label} changed while it was being audited")
-
-
-def _open_regular_file(path: Path, label: str) -> tuple[int, os.stat_result]:
-    """Open a regular file without following a symlink and return its first stat."""
-
-    try:
-        fd = os.open(path, _open_flags())
-    except BuildScopeReleaseAssetError:
-        raise
-    except OSError as exc:
-        if exc.errno == errno.ELOOP:
-            raise BuildScopeReleaseAssetError(
-                f"{label} must be a regular file (symlinks are not allowed)"
-            ) from exc
-        raise BuildScopeReleaseAssetError(
-            f"{label} cannot be inspected: {exc}"
-        ) from exc
-    try:
-        info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode):
-            raise BuildScopeReleaseAssetError(f"{label} must be a regular file")
-        return fd, info
-    except BuildScopeReleaseAssetError:
-        os.close(fd)
-        raise
-    except OSError as exc:
-        os.close(fd)
-        raise BuildScopeReleaseAssetError(
-            f"{label} cannot be inspected: {exc}"
-        ) from exc
-
-
-def _open_real_directory(path: Path, label: str) -> tuple[int, os.stat_result]:
-    """Open a directory descriptor without following its final symlink."""
-
-    try:
-        fd = os.open(path, _open_flags(directory=True))
-    except BuildScopeReleaseAssetError:
-        raise
-    except OSError as exc:
-        if exc.errno in {errno.ELOOP, errno.ENOTDIR}:
-            raise BuildScopeReleaseAssetError(
-                f"{label} must be a real directory (symlinks are not allowed)"
-            ) from exc
-        raise BuildScopeReleaseAssetError(
-            f"{label} cannot be inspected: {exc}"
-        ) from exc
-    try:
-        info = os.fstat(fd)
-        if not stat.S_ISDIR(info.st_mode):
-            raise BuildScopeReleaseAssetError(f"{label} must be a real directory")
-        return fd, info
-    except BuildScopeReleaseAssetError:
-        os.close(fd)
-        raise
-    except OSError as exc:
-        os.close(fd)
-        raise BuildScopeReleaseAssetError(
-            f"{label} cannot be inspected: {exc}"
-        ) from exc
-
-
-def _regular_file_info(path: Path, label: str) -> os.stat_result:
-    fd, info = _open_regular_file(path, label)
-    try:
-        _assert_path_matches(path, label, info)
-    finally:
-        os.close(fd)
-    return info
-
-
-def _require_regular_directory(path: Path, label: str) -> None:
-    fd, info = _open_real_directory(path, label)
-    try:
-        _assert_path_matches(path, label, info)
-    finally:
-        os.close(fd)
-
-
-def _read_release_json(path: Path) -> dict[str, Any]:
-    fd, info = _open_regular_file(path, "release metadata")
-    if info.st_size <= 0 or info.st_size > MAX_RELEASE_JSON_BYTES:
-        os.close(fd)
-        raise BuildScopeReleaseAssetError(
-            "release metadata size is outside the accepted range: "
-            f"{info.st_size} bytes (maximum {MAX_RELEASE_JSON_BYTES})"
-        )
-
-    try:
-        with os.fdopen(fd, "rb", closefd=True) as stream:
-            payload = stream.read(MAX_RELEASE_JSON_BYTES + 1)
-            final_info = os.fstat(stream.fileno())
-            if _stat_signature(final_info) != _stat_signature(info):
-                raise BuildScopeReleaseAssetError(
-                    "release metadata changed while it was being audited"
-                )
-            _assert_path_matches(path, "release metadata", info)
-    except BuildScopeReleaseAssetError:
-        raise
-    except OSError as exc:
-        raise BuildScopeReleaseAssetError(
-            f"release metadata cannot be read: {exc}"
-        ) from exc
-    if len(payload) > MAX_RELEASE_JSON_BYTES:
-        raise BuildScopeReleaseAssetError(
-            "release metadata exceeds the accepted bound "
-            f"of {MAX_RELEASE_JSON_BYTES} bytes"
-        )
-    try:
-        text = payload.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise BuildScopeReleaseAssetError(
-            f"release metadata is not valid UTF-8: {exc}"
-        ) from exc
-
-    def bounded_int(raw: str) -> int:
-        if len(raw) > 20:
-            raise ValueError("JSON integer exceeds 20 decimal digits")
-        return int(raw)
-
-    def bounded_float(raw: str) -> float:
-        if len(raw) > 100:
-            raise ValueError("JSON float exceeds 100 characters")
-        value = float(raw)
-        if not math.isfinite(value):
-            raise ValueError("JSON float must be finite")
-        return value
-
-    def reject_constant(raw: str) -> None:
-        raise ValueError(f"non-standard JSON constant: {raw}")
-
-    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-        value: dict[str, Any] = {}
-        for key, item in pairs:
-            if key in value:
-                raise ValueError(f"duplicate JSON key: {key}")
-            value[key] = item
-        return value
-
-    try:
-        release = json.loads(
-            text,
-            parse_int=bounded_int,
-            parse_float=bounded_float,
-            parse_constant=reject_constant,
-            object_pairs_hook=unique_object,
-        )
-    except (json.JSONDecodeError, ValueError) as exc:
-        raise BuildScopeReleaseAssetError(
-            f"release metadata is not valid JSON: {exc}"
-        ) from exc
-    if not isinstance(release, dict):
-        raise BuildScopeReleaseAssetError("release metadata must be a JSON object")
-    return release
-
-
-def _stream_sha256(
-    path: Path, label: str, initial_info: os.stat_result
-) -> tuple[int, str]:
-    """Read ``path`` in bounded chunks and return its byte count and SHA-256."""
-
-    digest = hashlib.sha256()
-    total = 0
-    fd, opened_info = _open_regular_file(path, label)
-    if _stat_signature(opened_info) != _stat_signature(initial_info):
-        os.close(fd)
-        raise BuildScopeReleaseAssetError(f"{label} changed while it was being audited")
-    try:
-        with os.fdopen(fd, "rb", closefd=True) as stream:
-            while True:
-                chunk = stream.read(HASH_CHUNK_BYTES)
-                if not chunk:
-                    break
-                digest.update(chunk)
-                total += len(chunk)
-            final_info = os.fstat(stream.fileno())
-            if _stat_signature(final_info) != _stat_signature(opened_info):
-                raise BuildScopeReleaseAssetError(
-                    f"{label} changed while it was being audited"
-                )
-            _assert_path_matches(path, label, opened_info)
-    except BuildScopeReleaseAssetError:
-        raise
-    except OSError as exc:
-        raise BuildScopeReleaseAssetError(f"{label} cannot be read: {exc}") from exc
-    return total, digest.hexdigest()
-
-
 def _validate_version(version: str, tag: str) -> None:
-    if VERSION_PATTERN.fullmatch(version) is None:
-        raise BuildScopeReleaseAssetError(f"invalid BuildScope version: {version!r}")
-    expected_tag = f"buildscope-v{version}"
-    if tag != expected_tag:
-        raise BuildScopeReleaseAssetError(
-            f"release tag argument does not match version: expected {expected_tag!r}, got {tag!r}"
-        )
+    validate_version(version, tag, TAG_PREFIX, PRODUCT)
+
 
 
 def load_release_assets(

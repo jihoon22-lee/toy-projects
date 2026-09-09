@@ -16,16 +16,18 @@ from pathlib import Path
 from typing import BinaryIO, cast
 
 from check_buildscope_release_assets import (
-    _NOFOLLOW,
-    MAX_ASSET_BYTES,
-    MAX_GITHUB_ID,
     BuildScopeReleaseAssetError,
-    _assert_path_matches,
-    _open_flags,
-    _open_real_directory,
     check_release_assets,
     expected_asset_names,
     load_release_assets,
+)
+from release_audit import (
+    _NOFOLLOW,
+    MAX_ASSET_BYTES,
+    MAX_GITHUB_ID,
+    _assert_path_matches,
+    _open_flags,
+    _open_real_directory,
 )
 
 REPOSITORY_PATTERN = re.compile(

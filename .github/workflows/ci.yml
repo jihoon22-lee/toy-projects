@@ -67,6 +67,7 @@ jobs:
             ci/test_check_buildscope_release_state.py \
             ci/test_download_buildscope_release_assets.py \
             ci/test_ci_workflow_contract.py \
+            ci/test_release_registry.py \
             -v
           python3 ci/check_manifest.py \
             --event-name "$GITHUB_EVENT_NAME" \
