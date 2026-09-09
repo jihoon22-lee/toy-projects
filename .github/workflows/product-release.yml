@@ -1,0 +1,543 @@
+name: Product Release
+
+# One workflow for the products whose release contract is derived rather than
+# hand-written. The audits it calls are product-agnostic and read the product's
+# own declaration in ci/projects.json, so adding a product here is a tag pattern
+# plus its build steps — not a fourth copy of a release pipeline.
+#
+# BuildScope keeps its own workflow. It is already published, and rewiring a
+# live release path while introducing new ones would put both at risk for no
+# gain.
+on:
+  push:
+    tags:
+      - "abilens-v*.*.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: product-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  ICI_VERSION: "v0.10.2"
+  # Public ici v0.10.2 asset digest. Both the published checksum file and a
+  # fresh digest are checked against this literal before ici can run.
+  ICI_PYZ_SHA256: "8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4"
+
+jobs:
+  provenance:
+    name: Validate release provenance
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      checks: read
+      actions: read
+    outputs:
+      product: ${{ steps.provenance.outputs.product }}
+      display_name: ${{ steps.provenance.outputs.display_name }}
+      tag: ${{ steps.provenance.outputs.tag }}
+      version: ${{ steps.provenance.outputs.version }}
+      target_sha: ${{ steps.provenance.outputs.target_sha }}
+      main_sha: ${{ steps.provenance.outputs.main_sha }}
+      merge_gate_url: ${{ steps.provenance.outputs.merge_gate_url }}
+
+    steps:
+      - name: Checkout tag ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate annotated tag, exact main, and green Merge Gate
+        id: provenance
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          test "$GITHUB_REF_TYPE" = tag
+          tag="$GITHUB_REF_NAME"
+          if ! printf '%s' "$tag" | grep -Eq '^[a-z][a-z0-9]*-v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Invalid product release tag: $tag" >&2
+            exit 1
+          fi
+          product="${tag%%-v*}"
+          version="${tag#"${product}-v"}"
+
+          # The tag alone does not make a product releasable; ci/projects.json does.
+          display_name="$(python3 - "$product" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          product = sys.argv[1]
+          manifest = json.loads(Path("ci/projects.json").read_text(encoding="utf-8"))
+          for project in manifest["projects"]:
+              release = project.get("release", {})
+              if project["name"] == product and release.get("enabled"):
+                  print(release["display_name"])
+                  break
+          else:
+              raise SystemExit(f"{product} is not a released product in ci/projects.json")
+          PY
+          )"
+
+          git fetch --force --tags origin
+          git fetch --force --no-tags origin refs/heads/main:refs/remotes/origin/main
+          tag_ref="refs/tags/$tag"
+          if [ "$(git cat-file -t "$tag_ref" 2>/dev/null || true)" != "tag" ]; then
+            echo "Releases require an annotated tag: $tag" >&2
+            exit 1
+          fi
+          target_sha="$(git rev-parse --verify "${tag_ref}^{commit}")"
+          main_sha="$(git rev-parse --verify refs/remotes/origin/main)"
+          if [ "$target_sha" != "$main_sha" ]; then
+            echo "Tag $tag must point at exact origin/main ($main_sha), got $target_sha" >&2
+            exit 1
+          fi
+          git checkout --detach "$target_sha"
+          test "$(git rev-parse HEAD)" = "$target_sha"
+
+          # Refuse before building anything if the product disagrees with itself
+          # about what version this is, or the CHANGELOG cannot describe it.
+          python3 ci/check_release_metadata.py "$product" "$version"
+          python3 ci/extract_release_notes.py "$display_name" "$version" > /dev/null
+
+          gate_ok=false
+          gate_url=""
+          check_runs="$RUNNER_TEMP/merge-gate-check-runs.json"
+          selection="$RUNNER_TEMP/merge-gate-selection.json"
+          workflow_run="$RUNNER_TEMP/merge-gate-workflow-run.json"
+          for attempt in $(seq 1 120); do
+            if ! gh api --paginate --slurp \
+                -H 'Accept: application/vnd.github+json' \
+                -H 'X-GitHub-Api-Version: 2022-11-28' \
+                "repos/${GITHUB_REPOSITORY}/commits/${target_sha}/check-runs?per_page=100&filter=all" \
+                > "$check_runs" \
+              || ! python3 ci/check_buildscope_merge_gate.py \
+                select "$check_runs" "$target_sha" "$GITHUB_REPOSITORY" \
+                > "$selection";
+            then
+              echo "Newest exact Merge Gate is absent, pending, or unsuccessful on attempt $attempt/120" >&2
+              sleep 10
+              continue
+            fi
+            run_id="$(jq -er '.workflow_run_id | select(type == "number" and . > 0)' "$selection")"
+            case "$run_id" in
+              ''|0|*[!0-9]*) echo "Invalid Merge Gate workflow run id: $run_id" >&2; exit 1 ;;
+            esac
+            if gh api \
+                -H 'Accept: application/vnd.github+json' \
+                -H 'X-GitHub-Api-Version: 2022-11-28' \
+                "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" > "$workflow_run" \
+              && python3 ci/check_buildscope_merge_gate.py \
+                verify "$workflow_run" "$target_sha" "$GITHUB_REPOSITORY" "$run_id";
+            then
+              gate_url="$(jq -er '.details_url | select(type == "string" and length > 0)' "$selection")"
+              gate_ok=true
+              break
+            fi
+            echo "Merge Gate workflow identity attempt $attempt/120 was not exact" >&2
+            sleep 10
+          done
+          if [ "$gate_ok" != true ]; then
+            echo "Exact main commit has no successful Merge Gate: $target_sha" >&2
+            exit 1
+          fi
+
+          {
+            echo "## $display_name release provenance"
+            echo
+            echo "- tag: $tag"
+            echo "- exact main commit: $target_sha"
+            echo "- Merge Gate: ${gate_url:-not reported}"
+            echo "- ici dependency: $ICI_VERSION (literal SHA-256 pin validated in build job)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          {
+            printf 'product=%s\n' "$product"
+            printf 'display_name=%s\n' "$display_name"
+            printf 'tag=%s\n' "$tag"
+            printf 'version=%s\n' "$version"
+            printf 'target_sha=%s\n' "$target_sha"
+            printf 'main_sha=%s\n' "$main_sha"
+            printf 'merge_gate_url=%s\n' "$gate_url"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build and audit release assets
+    needs: provenance
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout validated release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.provenance.outputs.target_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Confirm exact release commit
+        env:
+          TARGET_SHA: ${{ needs.provenance.outputs.target_sha }}
+        run: test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+
+      - name: Install the native toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++ make binutils
+
+      # The product's own gate runs before ici looks at it. A release that
+      # cannot pass `make check` is not a release regardless of what ici says.
+      - name: Run the product's native gate
+        working-directory: ${{ needs.provenance.outputs.product }}
+        run: make -j"$(nproc)" check
+
+      - name: Fetch and double-check the pinned public ici
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/ici-pin"
+          test ! -e "$dir"
+          mkdir -m 0700 "$dir"
+          base="https://github.com/jihoon22-lee/ici/releases/download/${ICI_VERSION}"
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            -o "$dir/ici.pyz" "$base/ici.pyz"
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            -o "$dir/ici.pyz.sha256" "$base/ici.pyz.sha256"
+          # Two independent checks against one literal: what the release says it
+          # is, and what the bytes actually hash to.
+          published="$(awk '{print $1}' "$dir/ici.pyz.sha256")"
+          actual="$(sha256sum "$dir/ici.pyz" | awk '{print $1}')"
+          test "$published" = "$ICI_PYZ_SHA256"
+          test "$actual" = "$ICI_PYZ_SHA256"
+          chmod +x "$dir/ici.pyz"
+          printf 'ICI_PYZ=%s\n' "$dir/ici.pyz" >> "$GITHUB_ENV"
+
+      - name: Run the deep ici profile and keep its report
+        working-directory: ${{ needs.provenance.outputs.product }}
+        env:
+          PRODUCT: ${{ needs.provenance.outputs.product }}
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set -euo pipefail
+          assets="$RUNNER_TEMP/release-assets"
+          test ! -e "$assets"
+          mkdir -m 0700 "$assets"
+          "$ICI_PYZ" verify \
+            --profile deep \
+            --no-cache \
+            --max-findings 0 \
+            --report \
+            --html "$assets/${PRODUCT}-ici-deep.html" \
+            --github-summary
+          mv verify_report.json "$assets/${PRODUCT}-ici-deep.json"
+          python3 "$GITHUB_WORKSPACE/ci/check_published_html.py" \
+            "$assets/${PRODUCT}-ici-deep.html" --project "$PRODUCT"
+
+      - name: Assemble provenance, deterministic bundle, and SHA256SUMS
+        env:
+          PRODUCT: ${{ needs.provenance.outputs.product }}
+          TAG: ${{ needs.provenance.outputs.tag }}
+          VERSION: ${{ needs.provenance.outputs.version }}
+          TARGET_SHA: ${{ needs.provenance.outputs.target_sha }}
+          MAIN_SHA: ${{ needs.provenance.outputs.main_sha }}
+          MERGE_GATE_URL: ${{ needs.provenance.outputs.merge_gate_url }}
+        run: |
+          set -euo pipefail
+          assets="$RUNNER_TEMP/release-assets"
+          python3 ci/write_release_provenance.py "$PRODUCT" \
+            "$assets/${PRODUCT}-provenance.json"
+
+          # The bundle carries what a user runs, not what the tests needed.
+          # abilens builds a shared object purely as an integration fixture; it
+          # is deliberately not shipped.
+          bundle="${PRODUCT}-${VERSION}-linux-x86_64"
+          staging="$RUNNER_TEMP/$bundle"
+          mkdir -p "$staging/bin" "$staging/lib"
+          cp "$PRODUCT/build/bin/$PRODUCT" "$staging/bin/$PRODUCT"
+          cp "$PRODUCT/build/lib/lib${PRODUCT}.a" "$staging/lib/lib${PRODUCT}.a"
+          cp "$PRODUCT/README.md" "$staging/README.md"
+          test ! -e "$staging/lib/lib${PRODUCT}-fixture.so"
+
+          # Reproducible archive: sorted, epoch mtimes, numeric root ownership,
+          # and gzip without the timestamp field.
+          tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
+            -cf "$RUNNER_TEMP/$bundle.tar" -C "$RUNNER_TEMP" "$bundle"
+          gzip -n -f "$RUNNER_TEMP/$bundle.tar"
+          mv "$RUNNER_TEMP/$bundle.tar.gz" "$assets/$bundle.tar.gz"
+
+          python3 - "$PRODUCT" "$VERSION" "$assets" <<'PY'
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, "ci")
+          from release_manifest import manifest_asset_names
+
+          product, version, assets = sys.argv[1:]
+          names = manifest_asset_names(product, version)
+          lines = subprocess.run(
+              ["sha256sum", *names],
+              cwd=assets,
+              check=True,
+              capture_output=True,
+              text=True,
+          ).stdout
+          Path(assets, "SHA256SUMS").write_text(lines, encoding="utf-8")
+          PY
+
+          python3 ci/release_manifest.py "$assets" "$PRODUCT" "$VERSION"
+          (cd "$assets" && sha256sum --check SHA256SUMS)
+
+      - name: Upload release candidate assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ needs.provenance.outputs.product }}-release-assets
+          path: ${{ runner.temp }}/release-assets
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish the GitHub Release
+    needs: [provenance, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout exact validated main commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.provenance.outputs.target_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Confirm exact release commit
+        env:
+          TARGET_SHA: ${{ needs.provenance.outputs.target_sha }}
+        run: test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+
+      - name: Download the built release assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ needs.provenance.outputs.product }}-release-assets
+          path: dist
+
+      # The bytes crossing a job boundary are re-audited rather than trusted.
+      - name: Re-audit the downloaded assets against their manifest
+        env:
+          PRODUCT: ${{ needs.provenance.outputs.product }}
+          VERSION: ${{ needs.provenance.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 ci/release_manifest.py dist "$PRODUCT" "$VERSION"
+          (cd dist && sha256sum --check SHA256SUMS)
+
+      - name: Compose the release body with this run's ownership marker
+        id: body
+        env:
+          DISPLAY_NAME: ${{ needs.provenance.outputs.display_name }}
+          VERSION: ${{ needs.provenance.outputs.version }}
+          PRODUCT: ${{ needs.provenance.outputs.product }}
+          TARGET_SHA: ${{ needs.provenance.outputs.target_sha }}
+        run: |
+          set -euo pipefail
+          notes="$RUNNER_TEMP/RELEASE_NOTES.md"
+          python3 ci/extract_release_notes.py "$DISPLAY_NAME" "$VERSION" > "$notes"
+          {
+            cat "$notes"
+            echo
+            echo "Built from the exact green \`main\` commit; see \`${PRODUCT}-provenance.json\`."
+            echo
+            printf '<!-- %s-release-owner:%s:%s:%s -->' \
+              "$PRODUCT" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" "$TARGET_SHA"
+          } > "$RUNNER_TEMP/release-body.md"
+          printf 'body_sha256=%s\n' \
+            "$(sha256sum "$RUNNER_TEMP/release-body.md" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Inspect the release slot without mutating it
+        id: slot
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRODUCT: ${{ needs.provenance.outputs.product }}
+          TAG: ${{ needs.provenance.outputs.tag }}
+          VERSION: ${{ needs.provenance.outputs.version }}
+          TARGET_SHA: ${{ needs.provenance.outputs.target_sha }}
+        run: |
+          set -euo pipefail
+          pages="$RUNNER_TEMP/releases.json"
+          gh api --paginate --slurp \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > "$pages"
+          slot="$(python3 ci/release_state.py slot "$pages" "$PRODUCT" "$TAG" "$VERSION" "$TARGET_SHA")"
+          printf 'mode=%s\n' "$(jq -er '.mode' <<<"$slot")" >> "$GITHUB_OUTPUT"
+
+      - name: Create a private draft for this exact tag and commit
+        id: draft
+        if: ${{ steps.slot.outputs.mode == 'empty' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DISPLAY_NAME: ${{ needs.provenance.outputs.display_name }}
+          TAG: ${{ needs.provenance.outputs.tag }}
+          VERSION: ${{ needs.provenance.outputs.version }}
+        run: |
+          set -euo pipefail
+          request="$RUNNER_TEMP/create-release.json"
+          python3 - "$request" "$TAG" "$DISPLAY_NAME" "$VERSION" "$RUNNER_TEMP/release-body.md" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          destination, tag, display_name, version, body_path = sys.argv[1:]
+          Path(destination).write_text(
+              json.dumps(
+                  {
+                      "tag_name": tag,
+                      "name": f"{display_name} {version}",
+                      "body": Path(body_path).read_text(encoding="utf-8"),
+                      "draft": True,
+                      "prerelease": False,
+                  },
+                  separators=(",", ":"),
+              )
+              + "\n",
+              encoding="utf-8",
+          )
+          PY
+          response="$RUNNER_TEMP/created-release.json"
+          gh api --method POST \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/${GITHUB_REPOSITORY}/releases" --input "$request" > "$response"
+          printf 'release_id=%s\n' "$(jq -er '.id' "$response")" >> "$GITHUB_OUTPUT"
+
+      - name: Upload exactly the declared assets to the draft
+        if: ${{ steps.slot.outputs.mode == 'empty' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
+          PRODUCT: ${{ needs.provenance.outputs.product }}
+          TAG: ${{ needs.provenance.outputs.tag }}
+          VERSION: ${{ needs.provenance.outputs.version }}
+          TARGET_SHA: ${{ needs.provenance.outputs.target_sha }}
+          BODY_SHA256: ${{ steps.body.outputs.body_sha256 }}
+        run: |
+          set -euo pipefail
+          marker="<!-- ${PRODUCT}-release-owner:${GITHUB_REPOSITORY}:${GITHUB_RUN_ID}:${TARGET_SHA} -->"
+          before="$RUNNER_TEMP/before-upload.json"
+          gh api -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" > "$before"
+          python3 ci/release_state.py state "$before" "$PRODUCT" "$TAG" "$VERSION" "$TARGET_SHA" \
+            --stage draft --expected-release-id "$RELEASE_ID" --expected-asset-count 0 \
+            --expected-owner-marker "$marker" --expected-body-sha256 "$BODY_SHA256"
+
+          names="$(python3 - "$PRODUCT" "$VERSION" <<'PY'
+          import sys
+          sys.path.insert(0, "ci")
+          from release_assets import expected_asset_names
+
+          print("\n".join(expected_asset_names(sys.argv[1], sys.argv[2])))
+          PY
+          )"
+          while IFS= read -r name; do
+            test -n "$name"
+            gh release upload "$TAG" "dist/$name" --clobber
+          done <<< "$names"
+
+      - name: Audit the private draft before publishing
+        if: ${{ steps.slot.outputs.mode == 'empty' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
+          PRODUCT: ${{ needs.provenance.outputs.product }}
+          TAG: ${{ needs.provenance.outputs.tag }}
+          VERSION: ${{ needs.provenance.outputs.version }}
+          TARGET_SHA: ${{ needs.provenance.outputs.target_sha }}
+          BODY_SHA256: ${{ steps.body.outputs.body_sha256 }}
+        run: |
+          set -euo pipefail
+          marker="<!-- ${PRODUCT}-release-owner:${GITHUB_REPOSITORY}:${GITHUB_RUN_ID}:${TARGET_SHA} -->"
+          draft="$RUNNER_TEMP/draft.json"
+          gh api -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" > "$draft"
+          count="$(python3 - "$PRODUCT" "$VERSION" <<'PY'
+          import sys
+          sys.path.insert(0, "ci")
+          from release_assets import expected_asset_names
+
+          print(len(expected_asset_names(sys.argv[1], sys.argv[2])))
+          PY
+          )"
+          python3 ci/release_state.py state "$draft" "$PRODUCT" "$TAG" "$VERSION" "$TARGET_SHA" \
+            --stage draft --expected-release-id "$RELEASE_ID" --expected-asset-count "$count" \
+            --expected-owner-marker "$marker" --expected-body-sha256 "$BODY_SHA256"
+          python3 ci/release_assets.py "$draft" dist "$PRODUCT" "$TAG" "$VERSION" --stage draft
+
+      - name: Publish the audited draft
+        if: ${{ steps.slot.outputs.mode == 'empty' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          gh api --method PATCH \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            -F draft=false > /dev/null
+
+      # Publication is the last chance to notice that what went public is not
+      # what was audited. Download it back from the public API and check again.
+      - name: Independently download and audit the public release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRODUCT: ${{ needs.provenance.outputs.product }}
+          TAG: ${{ needs.provenance.outputs.tag }}
+          VERSION: ${{ needs.provenance.outputs.version }}
+          TARGET_SHA: ${{ needs.provenance.outputs.target_sha }}
+        run: |
+          set -euo pipefail
+          final="$RUNNER_TEMP/final.json"
+          gh api -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" > "$final"
+          verify_dir="$RUNNER_TEMP/public"
+          test ! -e "$verify_dir"
+          mkdir -m 0700 "$verify_dir"
+          gh release download "$TAG" --dir "$verify_dir"
+          python3 ci/release_state.py state "$final" "$PRODUCT" "$TAG" "$VERSION" "$TARGET_SHA" \
+            --stage final
+          python3 ci/release_assets.py "$final" "$verify_dir" "$PRODUCT" "$TAG" "$VERSION" --stage final
+          python3 ci/release_manifest.py "$verify_dir" "$PRODUCT" "$VERSION"
+          (cd "$verify_dir" && sha256sum --check SHA256SUMS)
+          {
+            echo "## ${TAG} published"
+            echo
+            echo "- exact main commit: ${TARGET_SHA}"
+            echo "- assets audited after publication from the public API"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # A draft left behind after a failure is evidence, not garbage. Leaving it
+      # private and untouched is what lets the next run refuse to adopt it.
+      - name: Report a preserved draft on failure
+        if: ${{ failure() && steps.draft.outputs.release_id != '' }}
+        env:
+          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
+          TAG: ${{ needs.provenance.outputs.tag }}
+        run: |
+          echo "::warning::private draft ${RELEASE_ID} for ${TAG} was preserved for review"
