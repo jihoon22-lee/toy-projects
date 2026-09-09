@@ -163,7 +163,9 @@ class BuildScopeReleaseManifestTests(unittest.TestCase):
     ) -> None:
         manifest = self.dist / "SHA256SUMS"
         with (
-            patch("check_buildscope_release_manifest.MAX_MANIFEST_BYTES", 16),
+            # The bound lives in release_manifest now; patching the adapter would
+            # not bite, and this assertion would pass without testing anything.
+            patch("release_manifest.MAX_MANIFEST_BYTES", 16),
             self.assertRaisesRegex(BuildScopeReleaseAssetError, "outside"),
         ):
             check_release_manifest(self.dist, VERSION)

@@ -1,164 +1,62 @@
 #!/usr/bin/env python3
-"""Validate BuildScope's exact release checksum manifest and sidecar."""
+"""BuildScope's entry point into the shared release manifest audit.
+
+The audit lives in ``release_manifest`` and is product-agnostic. This module
+stays so BuildScope's release workflow and its tests keep calling the same
+signature — which is what makes them evidence that generalizing changed nothing
+about BuildScope's contract.
+"""
 
 from __future__ import annotations
 
 import argparse
 import os
-import re
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from check_buildscope_release_assets import (
-    BuildScopeReleaseAssetError,
-    _assert_path_matches,
-    _open_regular_file,
-    _regular_file_info,
-    _require_regular_directory,
-    _stat_signature,
-    _stream_sha256,
-    _validate_version,
-    expected_asset_names,
-)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-MAX_MANIFEST_BYTES = 128 * 1024
-MAX_SIDECAR_BYTES = 1024
-SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+from release_audit import ReleaseAssetError  # noqa: E402
+from release_manifest import (  # noqa: E402
+    MAX_MANIFEST_BYTES,
+    MAX_SIDECAR_BYTES,
+    SHA256_PATTERN,
+    _decode_checksum_file,
+    _parse_manifest,
+    _read_bounded_regular_file,
+)
+from release_manifest import check_release_manifest as _check_release_manifest  # noqa: E402
+from release_manifest import manifest_asset_names as _manifest_asset_names  # noqa: E402
+
+PRODUCT_KEY = "buildscope"
+
+BuildScopeReleaseAssetError = ReleaseAssetError
+
+__all__ = [
+    "MAX_MANIFEST_BYTES",
+    "MAX_SIDECAR_BYTES",
+    "SHA256_PATTERN",
+    "BuildScopeReleaseAssetError",
+    "_decode_checksum_file",
+    "_parse_manifest",
+    "_read_bounded_regular_file",
+    "check_release_manifest",
+    "main",
+    "manifest_asset_names",
+]
 
 
 def manifest_asset_names(version: str) -> tuple[str, ...]:
     """Return the exact eight files covered by ``SHA256SUMS`` in order."""
 
-    names = expected_asset_names(version)
-    if names[-1] != "SHA256SUMS":
-        raise BuildScopeReleaseAssetError("internal manifest asset order is invalid")
-    return names[:-1]
-
-
-def _read_bounded_regular_file(
-    path: Path,
-    label: str,
-    maximum_bytes: int,
-) -> bytes:
-    fd, info = _open_regular_file(path, label)
-    if info.st_size <= 0 or info.st_size > maximum_bytes:
-        os.close(fd)
-        raise BuildScopeReleaseAssetError(
-            f"{label} size is outside the accepted range: {info.st_size} bytes "
-            f"(maximum {maximum_bytes})"
-        )
-    try:
-        with os.fdopen(fd, "rb", closefd=True) as stream:
-            payload = stream.read(maximum_bytes + 1)
-            final_info = os.fstat(stream.fileno())
-            if _stat_signature(final_info) != _stat_signature(info):
-                raise BuildScopeReleaseAssetError(
-                    f"{label} changed while it was being audited"
-                )
-            _assert_path_matches(path, label, info)
-    except BuildScopeReleaseAssetError:
-        raise
-    except OSError as exc:
-        raise BuildScopeReleaseAssetError(f"{label} cannot be read: {exc}") from exc
-    if len(payload) > maximum_bytes:
-        raise BuildScopeReleaseAssetError(
-            f"{label} exceeds the accepted bound of {maximum_bytes} bytes"
-        )
-    return payload
-
-
-def _decode_checksum_file(path: Path, label: str, maximum_bytes: int) -> str:
-    payload = _read_bounded_regular_file(path, label, maximum_bytes)
-    try:
-        text = payload.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise BuildScopeReleaseAssetError(f"{label} is not valid UTF-8: {exc}") from exc
-    if "\x00" in text or "\r" in text:
-        raise BuildScopeReleaseAssetError(f"{label} contains forbidden control bytes")
-    if not text.endswith("\n"):
-        raise BuildScopeReleaseAssetError(f"{label} must end with one newline")
-    return text
-
-
-def _parse_manifest(text: str, version: str) -> dict[str, str]:
-    expected_names = manifest_asset_names(version)
-    # ``splitlines`` accepts Unicode separators such as U+2028.  Release
-    # manifests are byte-oriented sha256sum files and permit LF only.
-    lines_with_sentinel = text.split("\n")
-    if not lines_with_sentinel or lines_with_sentinel[-1] != "":
-        raise BuildScopeReleaseAssetError("SHA256SUMS must end with one newline")
-    lines = lines_with_sentinel[:-1]
-    if len(lines) != len(expected_names):
-        raise BuildScopeReleaseAssetError(
-            f"SHA256SUMS entry count mismatch: expected={len(expected_names)} "
-            f"actual={len(lines)}"
-        )
-
-    parsed: dict[str, str] = {}
-    for index, (line, expected_name) in enumerate(
-        zip(lines, expected_names, strict=True),
-        start=1,
-    ):
-        if len(line) < 67 or line[64:66] != "  ":
-            raise BuildScopeReleaseAssetError(
-                f"SHA256SUMS line {index} has invalid sha256sum syntax"
-            )
-        digest = line[:64]
-        name = line[66:]
-        if SHA256_PATTERN.fullmatch(digest) is None:
-            raise BuildScopeReleaseAssetError(
-                f"SHA256SUMS line {index} has an invalid SHA-256 digest"
-            )
-        if name != expected_name:
-            raise BuildScopeReleaseAssetError(
-                f"SHA256SUMS line {index} name mismatch: {name!r} != {expected_name!r}"
-            )
-        if name in parsed:
-            raise BuildScopeReleaseAssetError(
-                f"SHA256SUMS contains a duplicate name: {name}"
-            )
-        parsed[name] = digest
-    return parsed
+    return _manifest_asset_names(PRODUCT_KEY, version)
 
 
 def check_release_manifest(dist: Path, version: str) -> None:
     """Raise unless the exact manifest, sidecar, and eight files agree."""
 
-    _validate_version(version, f"buildscope-v{version}")
-    _require_regular_directory(dist, "release asset directory")
-    manifest_text = _decode_checksum_file(
-        dist / "SHA256SUMS",
-        "SHA256SUMS",
-        MAX_MANIFEST_BYTES,
-    )
-    expected_digests = _parse_manifest(manifest_text, version)
-
-    actual_digests: dict[str, str] = {}
-    for name in manifest_asset_names(version):
-        local = dist / name
-        info = _regular_file_info(local, f"manifest asset {name}")
-        if info.st_size <= 0:
-            raise BuildScopeReleaseAssetError(
-                f"manifest asset must not be empty: {name}"
-            )
-        _, digest = _stream_sha256(local, f"manifest asset {name}", info)
-        actual_digests[name] = digest
-        if digest != expected_digests[name]:
-            raise BuildScopeReleaseAssetError(
-                f"SHA256SUMS digest mismatch: {name}: "
-                f"{expected_digests[name]} != {digest}"
-            )
-
-    sidecar = _decode_checksum_file(
-        dist / "buildscope.pyz.sha256",
-        "buildscope.pyz.sha256",
-        MAX_SIDECAR_BYTES,
-    )
-    expected_sidecar = f"{actual_digests['buildscope.pyz']}  buildscope.pyz\n"
-    if sidecar != expected_sidecar:
-        raise BuildScopeReleaseAssetError(
-            "buildscope.pyz.sha256 must contain exactly the standalone pyz digest"
-        )
+    _check_release_manifest(dist, PRODUCT_KEY, version)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -168,7 +66,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         check_release_manifest(args.dist, args.version)
-    except BuildScopeReleaseAssetError as exc:
+    except ReleaseAssetError as exc:
         parser.exit(1, f"BuildScope release manifest audit failed: {exc}{os.linesep}")
     print(
         f"audited BuildScope {args.version}: exact 8-entry SHA256SUMS and pyz sidecar"
