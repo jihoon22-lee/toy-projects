@@ -12,6 +12,9 @@ on:
   push:
     tags:
       - "abilens-v*.*.*"
+      - "diskmap-v*.*.*"
+      - "envlens-v*.*.*"
+      - "loglens-v*.*.*"
 
 permissions:
   contents: read
@@ -38,6 +41,7 @@ jobs:
     outputs:
       product: ${{ steps.provenance.outputs.product }}
       display_name: ${{ steps.provenance.outputs.display_name }}
+      native_bundle: ${{ steps.provenance.outputs.native_bundle }}
       tag: ${{ steps.provenance.outputs.tag }}
       version: ${{ steps.provenance.outputs.version }}
       target_sha: ${{ steps.provenance.outputs.target_sha }}
@@ -68,7 +72,7 @@ jobs:
           version="${tag#"${product}-v"}"
 
           # The tag alone does not make a product releasable; ci/projects.json does.
-          display_name="$(python3 - "$product" <<'PY'
+          declaration="$(python3 - "$product" <<'PY'
           import json
           import sys
           from pathlib import Path
@@ -79,11 +83,14 @@ jobs:
               release = project.get("release", {})
               if project["name"] == product and release.get("enabled"):
                   print(release["display_name"])
+                  print("true" if release["artifacts"]["native_bundle"] else "false")
                   break
           else:
               raise SystemExit(f"{product} is not a released product in ci/projects.json")
           PY
           )"
+          display_name="$(printf '%s' "$declaration" | sed -n '1p')"
+          native_bundle="$(printf '%s' "$declaration" | sed -n '2p')"
 
           git fetch --force --tags origin
           git fetch --force --no-tags origin refs/heads/main:refs/remotes/origin/main
@@ -160,6 +167,7 @@ jobs:
           {
             printf 'product=%s\n' "$product"
             printf 'display_name=%s\n' "$display_name"
+            printf 'native_bundle=%s\n' "$native_bundle"
             printf 'tag=%s\n' "$tag"
             printf 'version=%s\n' "$version"
             printf 'target_sha=%s\n' "$target_sha"
@@ -193,16 +201,76 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Install the native toolchain
+      # Toolchains differ by product, so they are installed by product. The
+      # contract test asserts every product this workflow claims a tag for has
+      # both a toolchain step and a gate step, so adding a tag pattern without
+      # the steps fails in CI rather than at release time.
+      - name: Install the toolchain (abilens)
+        if: ${{ needs.provenance.outputs.product == 'abilens' }}
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends g++ make binutils
 
+      - name: Install the toolchain (diskmap)
+        if: ${{ needs.provenance.outputs.product == 'diskmap' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++ make binutils qt6-base-dev qmake6 pkg-config
+
+      - name: Install the toolchain (loglens)
+        if: ${{ needs.provenance.outputs.product == 'loglens' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++ make cmake binutils qt6-base-dev pkg-config
+
+      # envlens is pure Python, but ici's test engine needs pytest and coverage
+      # to be resolvable or it reports NOT_RUN and the suite errors out. That is
+      # a release blocker, not a soft degradation, so they are installed here.
+      - name: Install the toolchain (envlens)
+        if: ${{ needs.provenance.outputs.product == 'envlens' }}
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet --upgrade build pytest coverage
+          python3 -c "import pytest, coverage, build"
+          printf '%s\n' "$(python3 -c 'import sysconfig; print(sysconfig.get_path("scripts"))')" >> "$GITHUB_PATH"
+
       # The product's own gate runs before ici looks at it. A release that
-      # cannot pass `make check` is not a release regardless of what ici says.
-      - name: Run the product's native gate
-        working-directory: ${{ needs.provenance.outputs.product }}
+      # cannot pass its own tests is not a release regardless of what ici says.
+      - name: Run the product gate (abilens)
+        if: ${{ needs.provenance.outputs.product == 'abilens' }}
+        working-directory: abilens
         run: make -j"$(nproc)" check
+
+      - name: Run the product gate (diskmap)
+        if: ${{ needs.provenance.outputs.product == 'diskmap' }}
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set -euo pipefail
+          build="$RUNNER_TEMP/diskmap-build"
+          mkdir -p "$build"
+          (cd "$build" && qmake6 "$GITHUB_WORKSPACE/diskmap/diskmap.pro" && make -j"$(nproc)")
+          (cd "$build/tests" && make check)
+          printf 'PRODUCT_BUILD=%s\n' "$build" >> "$GITHUB_ENV"
+
+      - name: Run the product gate (loglens)
+        if: ${{ needs.provenance.outputs.product == 'loglens' }}
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set -euo pipefail
+          build="$RUNNER_TEMP/loglens-build"
+          cmake -S loglens -B "$build" -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$build" -j"$(nproc)"
+          (cd "$build" && ctest --output-on-failure -j4)
+          printf 'PRODUCT_BUILD=%s\n' "$build" >> "$GITHUB_ENV"
+
+      - name: Run the product gate (envlens)
+        if: ${{ needs.provenance.outputs.product == 'envlens' }}
+        working-directory: envlens
+        run: PYTHONPATH=src python3 -m pytest tests
 
       - name: Fetch and double-check the pinned public ici
         run: |
@@ -245,6 +313,15 @@ jobs:
           python3 "$GITHUB_WORKSPACE/ci/check_published_html.py" \
             "$assets/${PRODUCT}-ici-deep.html" --project "$PRODUCT"
 
+      # envlens declares wheel+sdist and no native bundle, so its artifacts are
+      # built rather than staged. Purity is not asserted here: ici measures it.
+      - name: Build the Python distributions (envlens)
+        if: ${{ needs.provenance.outputs.native_bundle == 'false' }}
+        working-directory: envlens
+        run: |
+          set -euo pipefail
+          python3 -m build --outdir "$RUNNER_TEMP/release-assets"
+
       - name: Assemble provenance, deterministic bundle, and SHA256SUMS
         env:
           PRODUCT: ${{ needs.provenance.outputs.product }}
@@ -253,6 +330,7 @@ jobs:
           TARGET_SHA: ${{ needs.provenance.outputs.target_sha }}
           MAIN_SHA: ${{ needs.provenance.outputs.main_sha }}
           MERGE_GATE_URL: ${{ needs.provenance.outputs.merge_gate_url }}
+          NATIVE_BUNDLE: ${{ needs.provenance.outputs.native_bundle }}
         run: |
           set -euo pipefail
           assets="$RUNNER_TEMP/release-assets"
@@ -260,15 +338,35 @@ jobs:
             "$assets/${PRODUCT}-provenance.json"
 
           # The bundle carries what a user runs, not what the tests needed.
-          # abilens builds a shared object purely as an integration fixture; it
-          # is deliberately not shipped.
+          # abilens builds a shared object purely as an integration fixture and
+          # it is deliberately not shipped; the Qt GUIs are shipped but named as
+          # development-environment assets because they need Qt at runtime.
+          if [ "$NATIVE_BUNDLE" = true ]; then
           bundle="${PRODUCT}-${VERSION}-linux-x86_64"
           staging="$RUNNER_TEMP/$bundle"
-          mkdir -p "$staging/bin" "$staging/lib"
-          cp "$PRODUCT/build/bin/$PRODUCT" "$staging/bin/$PRODUCT"
-          cp "$PRODUCT/build/lib/lib${PRODUCT}.a" "$staging/lib/lib${PRODUCT}.a"
+          case "$PRODUCT" in
+            abilens)
+              mkdir -p "$staging/bin" "$staging/lib"
+              cp "$PRODUCT/build/bin/$PRODUCT" "$staging/bin/$PRODUCT"
+              cp "$PRODUCT/build/lib/lib${PRODUCT}.a" "$staging/lib/lib${PRODUCT}.a"
+              test ! -e "$staging/lib/lib${PRODUCT}-fixture.so"
+              ;;
+            diskmap)
+              mkdir -p "$staging/bin"
+              cp "$PRODUCT_BUILD/src/diskmap" "$staging/bin/diskmap"
+              cp "$PRODUCT_BUILD/src/gui/diskmap-gui" "$staging/bin/diskmap-gui"
+              ;;
+            loglens)
+              mkdir -p "$staging/bin"
+              cp "$PRODUCT_BUILD/loglens" "$staging/bin/loglens"
+              cp "$PRODUCT_BUILD/src/gui/loglens-gui" "$staging/bin/loglens-gui"
+              ;;
+            *)
+              echo "no bundle layout declared for $PRODUCT" >&2
+              exit 1
+              ;;
+          esac
           cp "$PRODUCT/README.md" "$staging/README.md"
-          test ! -e "$staging/lib/lib${PRODUCT}-fixture.so"
 
           # Reproducible archive: sorted, epoch mtimes, numeric root ownership,
           # and gzip without the timestamp field.
@@ -276,6 +374,7 @@ jobs:
             -cf "$RUNNER_TEMP/$bundle.tar" -C "$RUNNER_TEMP" "$bundle"
           gzip -n -f "$RUNNER_TEMP/$bundle.tar"
           mv "$RUNNER_TEMP/$bundle.tar.gz" "$assets/$bundle.tar.gz"
+          fi
 
           python3 - "$PRODUCT" "$VERSION" "$assets" <<'PY'
           import subprocess

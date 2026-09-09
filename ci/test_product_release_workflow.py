@@ -121,6 +121,65 @@ class ProductReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("was preserved for review", block)
         self.assertNotIn("gh release delete", block)
 
+    def test_every_claimed_product_has_a_toolchain_and_a_gate(self) -> None:
+        """Claiming a tag without build steps would fail at release time.
+
+        The steps are per product because the build systems genuinely differ —
+        make, qmake, cmake and a Python build. What must not differ is that
+        every product this workflow accepts a tag for can actually be built.
+        """
+
+        patterns = re.findall(r'^      - "([a-z0-9]+)-v\*\.\*\.\*"$', WORKFLOW, re.MULTILINE)
+        block = _job_block("build")
+        for product in patterns:
+            with self.subTest(product=product):
+                self.assertIn(f"Install the toolchain ({product})", block)
+                self.assertIn(f"Run the product gate ({product})", block)
+
+    def test_each_product_produces_the_artifacts_it_declared(self) -> None:
+        """A native-bundle product stages one; a wheel product builds one."""
+
+        import json
+
+        manifest = json.loads((REPO_ROOT / "ci" / "projects.json").read_text(encoding="utf-8"))
+        declared = {
+            project["name"]: project["release"]["artifacts"]
+            for project in manifest["projects"]
+            if project.get("release", {}).get("enabled")
+        }
+        patterns = re.findall(r'^      - "([a-z0-9]+)-v\*\.\*\.\*"$', WORKFLOW, re.MULTILINE)
+        block = _job_block("build")
+        for product in patterns:
+            with self.subTest(product=product):
+                if declared[product]["native_bundle"]:
+                    self.assertRegex(
+                        block, re.compile(rf"^\s+{product}\)$", re.MULTILINE)
+                    )
+                else:
+                    self.assertIn("python3 -m build --outdir", block)
+
+    def test_envlens_installs_the_tools_ici_requires(self) -> None:
+        """Without pytest and coverage ici reports NOT_RUN and the suite errors.
+
+        That is a release blocker rather than a soft degradation, and it is the
+        same failure mode that blocked an ici release when ruff was missing.
+        """
+
+        block = _job_block("build")
+        install = block.index("Install the toolchain (envlens)")
+        segment = block[install : install + 800]
+        # Pin the install line, not merely a later `import pytest` check: the
+        # import proves the tools are present, but only installing them makes
+        # that true, and a loose match passes on either.
+        self.assertRegex(
+            segment,
+            re.compile(r"^\s+python3 -m pip install .*\bpytest\b.*", re.MULTILINE),
+        )
+        self.assertRegex(
+            segment,
+            re.compile(r"^\s+python3 -m pip install .*\bcoverage\b.*", re.MULTILINE),
+        )
+
     def test_tag_patterns_only_cover_products_the_manifest_releases(self) -> None:
         import json
 
