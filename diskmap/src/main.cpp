@@ -17,6 +17,10 @@
 
 namespace {
 
+// Pinned to diskmap/ici.toml by ci/test_product_version_surfaces.py so the
+// shipped binary and the manifest can never disagree about what was released.
+constexpr const char* kVersion = "0.1.0";
+
 struct CliOptions {
     std::string path;
     int depth = -1;
@@ -32,6 +36,7 @@ struct CliOptions {
     std::string compare_snapshot;
     bool duplicates = false;
     bool help = false;
+    bool version = false;
     bool valid = true;
     std::string error;
 };
@@ -51,7 +56,8 @@ void printUsage(std::ostream& out) {
         << "  --load-snapshot FILE inspect a saved snapshot without scanning\n"
         << "  --compare-snapshot FILE compare the scan with a saved snapshot\n"
         << "  --duplicates        inspect duplicate evidence (review-only)\n"
-        << "  --help              show this message\n";
+        << "  --help              show this message\n"
+        << "  --version           print the version and exit\n";
 }
 
 bool parseNonNegativeInt(const std::string& value, int& out) {
@@ -115,6 +121,10 @@ bool takeStringOption(const std::vector<std::string>& args,
 bool applyFlag(const std::string& arg, CliOptions& options) {
     if (arg == "--help") {
         options.help = true;
+        return true;
+    }
+    if (arg == "--version") {
+        options.version = true;
         return true;
     }
     if (arg == "--json") {
@@ -418,6 +428,10 @@ int runDiskmap(const CliOptions& options) {
 
 int main(int argc, char** argv) {
     const CliOptions options = parseArgs(argc, argv);
+    if (options.version) {
+        std::cout << "diskmap " << kVersion << '\n';
+        return 0;
+    }
     if (options.help) {
         printUsage(std::cout);
         return 0;

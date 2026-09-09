@@ -15,6 +15,10 @@
 
 namespace {
 
+// Pinned to loglens/ici.toml by ci/test_product_version_surfaces.py so the
+// shipped binary and the manifest can never disagree about what was released.
+constexpr const char* kVersion = "0.1.0";
+
 struct CliOptions {
     std::string path;
     std::string filter;
@@ -22,6 +26,7 @@ struct CliOptions {
     std::string format = "auto";
     bool stats = false;
     bool help = false;
+    bool version = false;
     bool valid = true;
     std::uint64_t bucket_ms = 60000;
     std::size_t top = 10;
@@ -54,7 +59,8 @@ void printUsage(std::ostream& out) {
         << "  --bucket MS     histogram bucket size (default 60000)\n"
         << "  --top N         number of patterns to show (default 10)\n"
         << "  --capacity N    retained record limit (default 8192)\n"
-        << "  --help          show this message\n";
+        << "  --help          show this message\n"
+        << "  --version       print the version and exit\n";
 }
 
 bool takeValue(const std::vector<std::string>& args, std::size_t& index, std::string& out) {
@@ -69,6 +75,10 @@ bool takeValue(const std::vector<std::string>& args, std::size_t& index, std::st
 bool applyFlag(const std::string& arg, CliOptions& options) {
     if (arg == "--help") {
         options.help = true;
+        return true;
+    }
+    if (arg == "--version") {
+        options.version = true;
         return true;
     }
     if (arg == "--stats") {
@@ -323,6 +333,10 @@ int run(const CliOptions& options) {
 
 int main(int argc, char** argv) {
     const CliOptions options = parseArgs(argc, argv);
+    if (options.version) {
+        std::cout << "loglens " << kVersion << '\n';
+        return 0;
+    }
     if (options.help) {
         printUsage(std::cout);
         return 0;
