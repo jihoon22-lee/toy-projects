@@ -650,7 +650,9 @@ class BuildScopeReleaseStateTests(unittest.TestCase):
     def test_rejects_oversized_json_payload(self) -> None:
         self.release_json.write_text('{"id":"too-large"}', encoding="utf-8")
         with (
-            patch("check_buildscope_release_state.MAX_JSON_BYTES", 8),
+            # The bound lives in release_state now; patching the adapter would not
+            # bite, leaving this assertion passing without testing anything.
+            patch("release_state.MAX_JSON_BYTES", 8),
             self.assertRaisesRegex(
                 BuildScopeReleaseStateError, "outside the accepted range"
             ),
