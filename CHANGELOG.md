@@ -2,6 +2,106 @@
 
 ## Unreleased
 
+### DiskMap 0.1.0
+
+DiskMap's first public release. A Linux disk usage explorer with a Qt-free core,
+a console tool over it, and a Qt Widgets treemap shell. Released as a native
+bundle with no Python packaging.
+
+**The scan is conservative about what it claims.** Directory entries carry a
+`FileIdentity` of device and file id rather than a path, so a rename between
+reads cannot be mistaken for the same entry. Symlinked directories are not
+followed and filesystem boundaries are not crossed unless asked. Anything the
+scan could not resolve is reported as uncertain instead of being folded into a
+total that looks authoritative.
+
+**Destructive actions require re-verification.** Cleanup will not run on
+identity that was not revalidated at the moment of the action, and only
+recoverable trash operations are supported, with the audit result surfaced
+rather than assumed. Anchored destination and Trash-root `flock(LOCK_EX|LOCK_NB)`
+serializes cooperating mutations on the same path; a non-cooperating process
+under the same UID is explicitly outside the guarantee.
+
+**What ships.** `bin/diskmap`, the Qt-free CLI, and `bin/diskmap-gui`, which
+requires Qt at runtime and is therefore a development-environment asset rather
+than a portable one. Built with qmake and verified against both Qt 5.15 and
+Qt 6.
+
+Verified by ici's deep profile at the pinned public `v0.10.2`, with the report
+published as a release asset.
+
+### EnvLens 0.1.0
+
+EnvLens's first public release. A pure-Python library and CLI for deterministic,
+offline inventories of explicitly selected Python interpreters. Released as a
+`py3-none-any` wheel and an sdist.
+
+**Nothing is resolved implicitly.** EnvLens does not resolve command names
+through `PATH` and does not invoke a shell; an interpreter is an explicit
+executable path or the one running EnvLens. Snapshots are offline: distribution
+metadata is read, never installed or executed.
+
+**Damaged input does not discard healthy input.** One malformed distribution is
+reported with its error rather than aborting the inventory, and the collection
+records whether it is `complete` or `partial` along with the error count. A
+resolver conclusion that cannot be made with certainty is marked as an estimate
+instead of being stated as fact.
+
+**Bounded by construction.** Requirement, entry-point and error arrays are
+capped, and string fields are bounded to 65,536 characters, so a hostile or
+broken environment cannot produce an unbounded report.
+
+**Runtime checks.** For each configured interpreter EnvLens runs `compileall`
+and explicit import cases, distinguishing timeout, signal, missing interpreter
+and missing import rather than collapsing them into one failure. Project entry
+points are inspected without being executed; the smoke run is opt-in.
+
+**What ships.** `envlens-0.1.0-py3-none-any.whl` and `envlens-0.1.0.tar.gz`. The
+wheel is pure: CI rejects native extensions and duplicate members, and the
+package is type-checked with `mypy --strict` against Python 3.10 and the newest
+supported runtime.
+
+Verified by ici's deep profile at the pinned public `v0.10.2`, with the report
+published as a release asset.
+
+
+### LogLens 0.1.0
+
+LogLens's first public release. A Qt log investigation workbench with a Qt-free
+CLI, released as a native bundle with no Python packaging.
+
+**Parsing never discards evidence.** Every record keeps its source bytes in
+`raw`. Structured fields are populated only when they are trustworthy, and
+`parse_status` says which of `Parsed`, `Partial`, `Invalid` or `Unstructured`
+applies. Each diagnostic carries a stable code, the field name where there is
+one, and a byte offset into the original line — so a caller renders what the
+parser found instead of re-implementing its heuristics.
+
+**Memory is bounded by construction.** A fixed record window retains the newest
+records and reports what it dropped rather than growing without limit: the CLI
+prints `N seen, M dropped, lines A-B, capacity C`. JSON nesting is capped, the
+record size is bounded from 1 byte to 1 MiB, and oversized records are truncated
+with the omission surfaced rather than hidden.
+
+**Formats.** Auto-detection, plain, RFC3164 syslog, JSON Lines and raw. A syslog
+line that parses structurally but carries an unusable field becomes `Partial`
+with a bounded diagnostic; the original line stays intact.
+
+**Investigation workbench.** Persistent profiles and saved queries, filter
+expressions over level and message, level histograms and top-pattern statistics,
+and a triage document (`loglens.triage/v1`) holding bookmarks, annotations and
+highlight rules. `loglens.triage/v0` rule-only files are accepted for
+compatibility. Profile and triage files are read without following the final
+symlink, with bounded reads on both POSIX and Windows paths.
+
+**What ships.** `bin/loglens`, the Qt-free CLI, and `bin/loglens-gui`, which
+requires Qt at runtime and is therefore a development-environment asset rather
+than a portable one.
+
+Verified by ici's deep profile at the pinned public `v0.10.2`, with the report
+published as a release asset.
+
+
 ### AbiLens 0.1.0
 
 AbiLens's first public release. A dependency-free C++20 command-line inspector
