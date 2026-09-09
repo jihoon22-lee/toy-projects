@@ -15,6 +15,7 @@ gui.depends  = core
 app.file   = src/gui/app.pro
 app.depends  = core gui
 tests.file = tests/tests.pro
-tests.depends = core gui
+# test_cli_version runs the linked CLI, so the tests need it built first.
+tests.depends = core cli gui
 
 SUBDIRS = core cli gui app tests

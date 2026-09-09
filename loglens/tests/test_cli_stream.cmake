@@ -1,3 +1,22 @@
+# `--version` must answer before any input is required: a shipped binary has to
+# be able to state its identity without being handed a log to read. The exact
+# number is pinned against ici.toml by ci/test_product_version_surfaces.py, so
+# this test asserts the shape and the short-circuit, not the literal.
+execute_process(
+    COMMAND "${LOGLENS}" --version
+    RESULT_VARIABLE version_result
+    OUTPUT_VARIABLE version_output
+    ERROR_VARIABLE version_error
+)
+
+if(NOT version_result EQUAL 0)
+    message(FATAL_ERROR "loglens --version failed (${version_result}): ${version_error}")
+endif()
+
+if(NOT version_output MATCHES "^loglens [0-9]+\\.[0-9]+\\.[0-9]+\n$")
+    message(FATAL_ERROR "loglens --version did not report an identity:\n${version_output}")
+endif()
+
 execute_process(
     COMMAND "${LOGLENS}" "${INPUT}" --format auto
     RESULT_VARIABLE result

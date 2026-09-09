@@ -20,5 +20,6 @@ SUBDIRS = \
     test_main_window.pro \
     test_storage_workbench.pro \
     test_storage_cli.pro \
+    test_cli_version.pro \
     test_view.pro \
     test_node_table_model.pro
