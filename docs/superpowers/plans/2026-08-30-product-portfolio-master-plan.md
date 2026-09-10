@@ -469,11 +469,18 @@ released-ici standard profile과 stable release artifact는 아직 확인하지 
 
 - [x] bounded memory와 partial/rotation correctness benchmark 통과
 - [x] Qt5/Qt6 native CTest·headless test와 실제 WSLg smoke를 local에서 통과한다.
-- [ ] PR/exact-main CI·Pages에서 Qt5/Qt6와 GUI smoke를 통과하고 결과를 게시한다. (remote pending)
+- [x] PR/exact-main CI·Pages에서 Qt5/Qt6와 GUI smoke를 통과하고 결과를 게시한다.
 - [x] CLI와 GUI가 parser/filter/store 의미론을 공유한다.
 - [x] highlight/bookmark/export가 실제 UI에서 사용 가능하다.
 - [x] exact ici candidate deep no-cache 결과와 lint/tool limitation을 문서화한다.
-- [ ] released-ici standard profile 및 stable release artifact/provenance gate를 통과한다. (pending)
+- [x] released-ici standard profile 및 stable release artifact/provenance gate를 통과한다.
+      (released ici `v0.10.2` 의 deep 프로파일로 통과했다 — standard 보다 강한 게이트다.)
+**2026-09-10 공개 릴리스.** [loglens-v0.1.0](https://github.com/jihoon22-lee/toy-projects/releases/tag/loglens-v0.1.0)
+가 공개됐다. 공유 릴리스 워크플로(`.github/workflows/product-release.yml`)가 annotated tag,
+exact `main`, 초록 Merge Gate, 버전 표면 합치, CHANGELOG 노트를 빌드 전에 확인하고,
+released ici `v0.10.2` 의 **deep** 프로파일(9 PASS / 3 WARN / 0 FAIL)을 통과시킨 뒤 draft → 감사 → 발행 →
+재다운로드 감사 순으로 게시했다. 자산은 독립적으로 내려받아 `sha256sum --check` 로 확인했다.
+
 - [x] install/run/recovery guide와 sample data를 제공한다.
 
 ---
@@ -788,8 +795,23 @@ WARN/SKIP 경계, D4~D6 remote/cross-project acceptance와 D7 release 조건은 
 - [ ] scan cancel/rescan race와 stale result 테스트 통과
 - [ ] cleanup은 review와 identity revalidation 없이는 실행 불가
 - [ ] recoverable trash만 지원하고 audit 결과 제공
-- [ ] Qt5/Qt6 build/test와 qmake ici verify PASS
+- [x] Qt5/Qt6 build/test와 qmake ici verify PASS
+      (Qt5 는 CI 의 GUI build 매트릭스가, Qt6 는 릴리스 잡의 qmake shadow build 와
+      `make check` 가 통과시킨다.)
 - [ ] 규모 benchmark와 safety guide 제공
+
+
+**2026-09-10 공개 릴리스.** [diskmap-v0.1.0](https://github.com/jihoon22-lee/toy-projects/releases/tag/diskmap-v0.1.0)
+가 공개됐다. 공유 릴리스 워크플로(`.github/workflows/product-release.yml`)가 annotated tag,
+exact `main`, 초록 Merge Gate, 버전 표면 합치, CHANGELOG 노트를 빌드 전에 확인하고,
+released ici `v0.10.2` 의 **deep** 프로파일(10 PASS / 2 WARN / 0 FAIL)을 통과시킨 뒤 draft → 감사 → 발행 →
+재다운로드 감사 순으로 게시했다. 자산은 독립적으로 내려받아 `sha256sum --check` 로 확인했다.
+
+**남은 항목에 대해.** 위 릴리스는 D7 의 나머지 다섯 항목을 증명하지 않는다. `test_scanner_safety`
+와 `test_scanner_real_safety` 에 symlink/hardlink/permission 관련 커버리지가 있고
+`test_cleanup`/`test_trash` 도 존재하지만, 각 시나리오가 항목이 요구하는 것을 정확히 덮는지는
+확인하지 않았다. 파일이 있다는 것과 계약이 충족됐다는 것은 다르므로 열어 둔다.
+
 
 ---
 
@@ -1372,11 +1394,29 @@ E2 snapshot diff/compatibility, E3 project/runtime smoke와 E4 release 조건은
 
 ### E4. envlens release 완료 조건
 
-- [ ] Python 3.10과 최신 설치 runtime에서 unit/E2E 통과
-- [ ] mypy strict 목표와 Ruff explicit rule set 통과
-- [ ] pure `py3-none-any` wheel과 clean environment smoke 통과
+- [x] Python 3.10과 최신 설치 runtime에서 unit/E2E 통과
+      (CI 의 `envlens Python quality` 매트릭스가 3.10 과 3.14 를 모두 돌린다.)
+- [x] mypy strict 목표와 Ruff explicit rule set 통과
+      (`mypy --strict --python-version 3.10` 과 `ruff check` / `ruff format --check`.)
+- [x] pure `py3-none-any` wheel과 clean environment smoke 통과
+      (CI 가 native extension 과 중복 member 를 거부하고, 공개된 wheel 을 빈 venv 에
+      설치해 `envlens 0.1.0` 을 확인했다.)
 - [ ] missing interpreter/package/malformed metadata error guide 제공
 - [ ] ici standard profile PASS, package/runtime finding의 정확한 위치·evidence 확인
+      (deep 프로파일 PASS 는 확인했다. finding 의 정확한 위치·evidence 대조는 하지 않았으므로
+      항목은 열어 둔다.)
+
+
+**2026-09-10 공개 릴리스.** [envlens-v0.1.0](https://github.com/jihoon22-lee/toy-projects/releases/tag/envlens-v0.1.0)
+가 공개됐다. 공유 릴리스 워크플로(`.github/workflows/product-release.yml`)가 annotated tag,
+exact `main`, 초록 Merge Gate, 버전 표면 합치, CHANGELOG 노트를 빌드 전에 확인하고,
+released ici `v0.10.2` 의 **deep** 프로파일(11 PASS / 2 WARN / 0 FAIL)을 통과시킨 뒤 draft → 감사 → 발행 →
+재다운로드 감사 순으로 게시했다. 자산은 독립적으로 내려받아 `sha256sum --check` 로 확인했다.
+
+릴리스는 한 번 실패한 뒤 통과했다. `pytest`/`coverage` 를 설치해도 ici 는 `ICI_PYTHON` 이
+가리키는 인터프리터로 도구를 찾으므로 `pytest=unavailable` 로 `test` 엔진이 NOT_RUN 이 됐다.
+PATH 만으로는 해결되지 않고 `ICI_PYTHON` 만으로 해결된다는 것을 양방향으로 측정해 고쳤다(#77).
+
 
 ---
 
@@ -1477,7 +1517,13 @@ PR/Pages와 stable artifact/provenance가 pending이다.
 - [x] malformed/untrusted binary를 실행하지 않고 처리한다.
 - [x] local C++20 compile context와 binary compatibility/integration engine을 실측한다.
 - [x] supported ELF/binutils 범위와 limitation을 README/workthrough에 문서화한다.
-- [ ] remote PR/Pages, ici candidate acceptance와 stable release artifact/provenance gate를 완료한다. (pending)
+- [ ] remote PR/Pages, ici candidate acceptance와 stable release artifact/provenance gate를 완료한다.
+      (remote PR/Pages 와 stable release artifact/provenance 는 닫혔다 —
+      [abilens-v0.1.0](https://github.com/jihoon22-lee/toy-projects/releases/tag/abilens-v0.1.0)
+      이 2026-09-10 에 공개됐고, released ici `v0.10.2` 의 deep 프로파일
+      `7 PASS / 3 WARN / 0 FAIL` 을 통과했으며 `abilens-provenance.json` 이 exact main commit
+      을 기록한다. **ici candidate acceptance 는 남는다** — 이 릴리스는 released ici 로만
+      검증했고 candidate 경로는 타지 않았다.)
 
 ---
 
@@ -1784,20 +1830,27 @@ ici와 toy-projects가 함께 바뀌는 기능은 다음 순서를 따른다.
 - [ ] L1~L3: loglens streaming correctness, bounded storage, parser pipeline 완료 (L1/L2와 L3
   parser/filter slice의 구현·local evidence는 완료됐지만, 이 checkpoint의 PR/exact-main/release
   evidence는 아직 pending; L4~L6 local-only 구현·evidence는 완료됐고 remote/release는 pending)
-- [ ] L4~L6: loglens triage/window analysis와 stable release 완료 (L4/L5 및 L6 local-only는
-  완료됐지만 remote PR/Pages·released-ici standard profile·stable artifact가 pending)
+- [x] L4~L6: loglens triage/window analysis와 stable release 완료
+  (2026-09-10 [loglens-v0.1.0](https://github.com/jihoon22-lee/toy-projects/releases/tag/loglens-v0.1.0)
+  공개. remote PR/Pages, released ici `v0.10.2` deep 프로파일 `9 PASS / 3 WARN / 0 FAIL`,
+  provenance 를 포함한 stable artifact 4 개, 독립 다운로드 후 `sha256sum --check` 통과)
 - [x] D1~D3: diskmap identity-safe scan, cancellation, explorer UX 구현·PR·exact-main evidence 완료
   (D1/D2는 PR #23/#28, D3 core는 PR #45, D3 GUI는 PR #46 및 exact-main run으로 검증)
-- [ ] D4~D7: cleanup/trash/snapshot과 release 완료 (D4~D6 local implementation/aggregate/deep
-  evidence complete with WARN/SKIP boundary; cross-project/remote acceptance와 D7 release 조건은
-  pending)
+- [ ] D4~D7: cleanup/trash/snapshot과 release 완료
+  (2026-09-10 [diskmap-v0.1.0](https://github.com/jihoon22-lee/toy-projects/releases/tag/diskmap-v0.1.0)
+  공개 — released ici `v0.10.2` deep `10 PASS / 2 WARN / 0 FAIL`, stable artifact 4 개.
+  **D7 의 제품 계약 항목 다섯은 남는다**: fixture 커버리지·race·cleanup 재검증·trash audit·
+  규모 benchmark 는 릴리스가 증명하지 않는다)
 - [x] B0~B5: buildscope hybrid compile explorer와 release 완료 (implementation·remote acceptance·trusted main Pages·`0.5.0` tag/release/public asset audit complete)
-- [ ] E0~E4: envlens pure-Python environment explorer와 release 완료 (E1 snapshot 구현·PR #50
-  merge·exact-main evidence 및 E2/E3 local implementation complete; ici compatibility cross-check와
-  E4 release evidence는 pending)
-- [ ] A0~A4: abilens Makefile/ELF explorer와 stable release 완료 (주요 기능·native local
-  gate, single-open input identity와 ici Make adapter process evidence는 완료됐지만
-  remote PR/Pages·release는 pending)
+- [ ] E0~E4: envlens pure-Python environment explorer와 release 완료
+  (2026-09-10 [envlens-v0.1.0](https://github.com/jihoon22-lee/toy-projects/releases/tag/envlens-v0.1.0)
+  공개 — released ici `v0.10.2` deep `11 PASS / 2 WARN / 0 FAIL`, pure `py3-none-any` wheel 과
+  sdist, 빈 venv 설치 smoke 통과. **E3 의 ici compatibility cross-check 와 E4 의 finding
+  위치·evidence 대조는 남는다**)
+- [ ] A0~A4: abilens Makefile/ELF explorer와 stable release 완료
+  (2026-09-10 [abilens-v0.1.0](https://github.com/jihoon22-lee/toy-projects/releases/tag/abilens-v0.1.0)
+  공개 — released ici `v0.10.2` deep `7 PASS / 3 WARN / 0 FAIL`, stable artifact 5 개.
+  remote PR/Pages 와 release 는 닫혔고 **ici candidate acceptance 만 남는다**)
 - [ ] Q0~Q5: Python/C++/Qt/build/hybrid stable expected-finding corpus 완료 (released-artifact Q0
   implementation과 PR #49 remote acceptance, EnvLens merge의 exact-main QZ artifact, 새
   candidate SHA selector/local authenticated evidence, ici-hosted exact-revision candidate
