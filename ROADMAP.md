@@ -40,6 +40,16 @@
 - BuildScope `0.5.0`은 B3/B4/B5를 함께 묶은 첫 usable release boundary이며 2026-09-02 KST에
   stable release로 공개됐다. 그 이후 작업은 이에 상응하는 checkpoint가 생길 때까지
   `Unreleased`에 누적한다.
+- 2026-09-10 에 나머지 네 제품이 각각 `0.1.0` 으로 공개됐다:
+  [AbiLens](https://github.com/jihoon22-lee/toy-projects/releases/tag/abilens-v0.1.0),
+  [LogLens](https://github.com/jihoon22-lee/toy-projects/releases/tag/loglens-v0.1.0),
+  [DiskMap](https://github.com/jihoon22-lee/toy-projects/releases/tag/diskmap-v0.1.0),
+  [EnvLens](https://github.com/jihoon22-lee/toy-projects/releases/tag/envlens-v0.1.0).
+  넷 다 공유 워크플로 `.github/workflows/product-release.yml` 로 나갔고, 자산 목록·감사·버전
+  표면은 `ci/projects.json` 에서 유도된다. BuildScope 는 이미 공개된 경로를 흔들지 않기 위해
+  자기 워크플로를 그대로 유지한다.
+- 제품 버전은 여전히 독립이다. 네 제품이 같은 날 같은 번호로 나간 것은 릴리스 배관이 그때
+  갖춰졌기 때문이지 버전을 맞춘 것이 아니다.
 
 PR 제목과 요약은 plan code가 아니라 제품/기술 결과를 설명해야 한다. `T0`, `B1`, `D2` 같은 plan
 code는 본문이나 label의 보조 메타데이터로만 쓰며, 제목·요약의 유일하거나 주된 식별자로 삼지 않는다.
