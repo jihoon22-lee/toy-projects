@@ -167,7 +167,7 @@ class ProductReleaseWorkflowTests(unittest.TestCase):
 
         block = _job_block("build")
         install = block.index("Install the toolchain (envlens)")
-        segment = block[install : install + 800]
+        segment = block[install : install + 1400]
         # Pin the install line, not merely a later `import pytest` check: the
         # import proves the tools are present, but only installing them makes
         # that true, and a loose match passes on either.
@@ -178,6 +178,27 @@ class ProductReleaseWorkflowTests(unittest.TestCase):
         self.assertRegex(
             segment,
             re.compile(r"^\s+python3 -m pip install .*\bcoverage\b.*", re.MULTILINE),
+        )
+
+    def test_envlens_names_the_interpreter_ici_resolves_tools_through(self) -> None:
+        """Installing the tools is necessary and not sufficient.
+
+        The envlens 0.1.0 release failed with `pytest=unavailable` even though
+        the install step had succeeded and `python3 -m pytest` had just run the
+        product's own gate. ici resolves the tools through the interpreter named
+        by ICI_PYTHON, not through PATH — measured both ways: PATH alone left it
+        unavailable, ICI_PYTHON alone made it ready.
+
+        The previous version of this test pinned only the install line, which is
+        exactly why it stayed green through a failing release.
+        """
+
+        block = _job_block("build")
+        install = block.index("Install the toolchain (envlens)")
+        segment = block[install : install + 1400]
+        self.assertRegex(
+            segment,
+            re.compile(r"^\s+printf 'ICI_PYTHON=.*GITHUB_ENV", re.MULTILINE),
         )
 
     def test_tag_patterns_only_cover_products_the_manifest_releases(self) -> None:

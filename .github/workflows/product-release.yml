@@ -226,15 +226,22 @@ jobs:
             g++ make cmake binutils qt6-base-dev pkg-config
 
       # envlens is pure Python, but ici's test engine needs pytest and coverage
-      # to be resolvable or it reports NOT_RUN and the suite errors out. That is
-      # a release blocker, not a soft degradation, so they are installed here.
+      # or it reports NOT_RUN and the suite errors out — a release blocker, not
+      # a soft degradation.
+      #
+      # Installing them is necessary and not sufficient. ici resolves the tools
+      # through the project interpreter named by ICI_PYTHON, not through PATH:
+      # with the tools installed and their scripts directory on PATH but
+      # ICI_PYTHON unset, ici still reported `pytest=unavailable` and the suite
+      # errored. Setting ICI_PYTHON alone, with no PATH change, is what makes it
+      # `pytest=ready`. Both directions were measured before this was written.
       - name: Install the toolchain (envlens)
         if: ${{ needs.provenance.outputs.product == 'envlens' }}
         run: |
           set -euo pipefail
           python3 -m pip install --quiet --upgrade build pytest coverage
           python3 -c "import pytest, coverage, build"
-          printf '%s\n' "$(python3 -c 'import sysconfig; print(sysconfig.get_path("scripts"))')" >> "$GITHUB_PATH"
+          printf 'ICI_PYTHON=%s\n' "$(python3 -c 'import sys; print(sys.executable)')" >> "$GITHUB_ENV"
 
       # The product's own gate runs before ici looks at it. A release that
       # cannot pass its own tests is not a release regardless of what ici says.
