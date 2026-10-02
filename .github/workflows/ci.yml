@@ -741,3 +741,42 @@ jobs:
       - name: Tests
         working-directory: abilens
         run: make test
+
+  # Branch protection requires a single stable check named "Merge Gate".
+  # Keeping the aggregate job means the ruleset does not need to change when
+  # product jobs are added — a new product only has to join `needs`.
+  merge-gate:
+    name: Merge Gate
+    if: ${{ always() }}
+    needs: [loglens, diskmap, buildscope, buildscope-python, envlens, abilens]
+    runs-on: ubuntu-latest
+    permissions: {}
+
+    steps:
+      - name: Require every product gate
+        env:
+          LOGLENS: ${{ needs.loglens.result }}
+          DISKMAP: ${{ needs.diskmap.result }}
+          BUILDSCOPE: ${{ needs.buildscope.result }}
+          BUILDSCOPE_PYTHON: ${{ needs.buildscope-python.result }}
+          ENVLENS: ${{ needs.envlens.result }}
+          ABILENS: ${{ needs.abilens.result }}
+        run: |
+          set -euo pipefail
+          failed=0
+          for pair in \
+            "loglens:$LOGLENS" \
+            "diskmap:$DISKMAP" \
+            "buildscope:$BUILDSCOPE" \
+            "buildscope-python:$BUILDSCOPE_PYTHON" \
+            "envlens:$ENVLENS" \
+            "abilens:$ABILENS"; do
+            name="${pair%%:*}"
+            result="${pair##*:}"
+            if [ "$result" != success ]; then
+              echo "::error::$name gate result: $result"
+              failed=1
+            fi
+          done
+          test "$failed" = 0
+          echo "All product gates passed."
