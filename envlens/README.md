@@ -187,67 +187,25 @@ set `PYTHONPATH` to the project root and `src/` only; a host `PYTHONPATH` is not
 inherited. Runtime checks execute with the current user’s permissions and are
 not a sandbox; inspect untrusted projects in an externally isolated environment.
 
-## Validation and CI
+## Validation
 
-The current local E1–E3 slice is covered on Python 3.10 by 113/113 tests:
-
-```text
-16 CLI/E2-E3 CLI · 6 atomic I/O · 12 probe/process-boundary ·
-7 redaction · 19 snapshot normalization/schema · 10 snapshot diff ·
-43 project/runtime/report/input boundaries
-```
-
-The same checkout also passes Ruff check and format validation, and strict mypy
-for the eighteen envlens source modules. Released ici `v0.10.2` self-dogfood
-passes the test, complexity, type, sanitize, and line gates: 113/113 tests with
-92.4%/97.6%/83.1% line/function/branch coverage, TEM 4.88, maximum cyclomatic
-complexity 15, and no per-file pure-code warning.
-The full verification suite has no FAIL or ERROR engines; its only remaining
-WARN is the existing duplication finding (12.9%, 57 clone groups).
-`envlens/ici.toml` records the intended
-Python quality gate (test pass/fail with coverage, TEM at least 4.0, branch
-coverage at least 80%, and function coverage at least 90%). The path-aware CI
-manifest runs a dedicated Python 3.10/latest matrix for tests, schema
-validation, strict typing, reproducible wheel/sdist builds, pure
-`py3-none-any` metadata, and clean-wheel smoke. [PR #50](https://github.com/jihoon22-lee/toy-projects/pull/50)
-merged as `c307ac1ab01e12e4ac81a34623eb669da0e43641`, and exact-main run
-[`33698248293`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33698248293)
-passed. The exact artifact IDs, four main Pages, and byte-level evidence are
-centralized in the [EnvLens workthrough](../workthrough/2026-09-03-envlens-snapshot.md).
-Stable release remains pending.
-
-## Wheel purity is measured, not asserted (candidate ici only)
-
-Repository CI already builds the wheel and sdist twice with `SOURCE_DATE_EPOCH`
-and compares the bytes, so reproducibility is measured. Purity was not: the
-audit read the `WHEEL` metadata, which is what the build *claims*.
-`ici-candidate.toml` points ici's own package engine at the produced wheel so
-the claim is checked against the wheel's actual members.
+The test suite covers the CLI, atomic I/O, the probe/process boundary,
+redaction, snapshot normalization and schema, snapshot diff, and the
+project/runtime/input boundaries:
 
 ```sh
-(cd envlens && SOURCE_DATE_EPOCH=1700000000 uv build --out-dir dist)
-ICI_CONFIG=ici-candidate.toml /path/to/candidate/ici.pyz python-compat --report
+PYTHONPATH=src python -m pytest tests
+ruff check src tests && ruff format --check src tests
+mypy --strict --python-version 3.10 src/envlens
 ```
 
-Local evidence, 2026-09-06, candidate ici built from `ici` main: `PASS`,
-`MEASURED`, one wheel checked with 24 members, `pure: true`, `native_members: []`,
-one entry point, 18 source modules, and both `python3.10` and `python3.14`
-exercised for version, `compileall` and import smoke.
-
-The gate stops something real. Injecting a fake
-`envlens/_accel.cpython-310-x86_64-linux-gnu.so` member into the wheel and
-re-running turns the result into `2 failure(s)` under `wheel_policy = "pure"`;
-restoring the wheel returns it to `PASS`.
-
-The overlay is candidate-only for the same reason the AbiLens and BuildScope
-ones are: the public `v0.10.2` predates the `python_compat` engine, so naming it
-there is a configuration error rather than a stricter run. The repository's
-stable ici pin and `ici.toml` are unchanged.
+CI runs the suite on Python 3.10 and the newest interpreter, validates the
+snapshot schema against a real capture, builds the wheel and sdist twice under
+`SOURCE_DATE_EPOCH` to prove reproducibility, audits the wheel for
+`py3-none-any` purity, and smoke-tests a clean install.
 
 ## Deliberate current boundary
 
-This release-free E1–E3 slice compares captured evidence and performs explicit
-runtime checks; it does not resolve dependencies, build or install wheels, or
-claim compatibility when metadata is incomplete. E4 release work remains
-pending: Python-version matrix publication, clean-wheel release smoke,
-packaging evidence, and the ici release gate are separate policies.
+envlens compares captured evidence and performs explicit runtime checks; it
+does not resolve dependencies, build or install wheels, or claim compatibility
+when metadata is incomplete.

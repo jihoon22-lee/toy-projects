@@ -54,21 +54,6 @@ trees still yields identical `bin/abilens`, `lib/libabilens.a`,
 they record the absolute output path they were generated for. The `.d` files are
 build bookkeeping, not release artifacts.
 
-Ordinary repository CI runs the checksummed public ici release against
-`ici.toml`. That gate covers the stable release's static source engines, while
-the native CI job owns `make test` and the sanitizer variants. To verify the
-newer Make/ELF/integration engine contract with an exact, separately attested
-candidate artifact, apply the candidate-only overlay explicitly:
-
-```sh
-ICI_CONFIG=ici-candidate.toml /path/to/candidate/ici.pyz verify --profile deep \
-  --report --html verify_report.html
-```
-
-The overlay does not change the repository's stable ici pin and must not be
-used with the public `v0.10.2` artifact, which predates those configuration
-keys.
-
 The policy file is a bounded UTF-8 text file with one `key=value` per line.
 Supported keys are `expected_class`, `expected_machine`, `max_glibc`,
 `max_glibcxx`, `max_cxxabi`, `forbid_absolute_rpath`, and
@@ -127,16 +112,11 @@ adapter; `make clean` removes only an explicitly marked output tree.
 `lib/libabilens.a` and this README. The `lib/libabilens-fixture.so` that
 `make check` builds is an integration fixture and is not shipped.
 
-Every release also publishes the deep ici report it was gated on
-(`abilens-ici-deep.json` / `.html`), a provenance record naming the exact
-`main` commit it was built from (`abilens-provenance.json`), and `SHA256SUMS`
-covering the other four assets:
+Every release publishes a `SHA256SUMS` covering its assets:
 
 ```sh
 sha256sum --check SHA256SUMS
 ```
 
-Releases are cut by pushing an annotated `abilens-v<version>` tag at an exact
-`main` commit whose Merge Gate is green. The workflow refuses before building
-if the version in `ici.toml`, the compiled constant reported by
-`abilens --version`, and the CHANGELOG entry do not agree.
+Releases are cut by pushing an annotated `abilens/v<version>` tag at a `main`
+commit whose CI is green.
