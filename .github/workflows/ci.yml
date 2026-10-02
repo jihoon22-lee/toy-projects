@@ -45,6 +45,7 @@ jobs:
         working-directory: loglens
         run: |
           set -euo pipefail
+          mkdir -p build
           cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON \
             2>&1 | tee build/configure.log
@@ -283,6 +284,7 @@ jobs:
         working-directory: buildscope
         run: |
           set -euo pipefail
+          mkdir -p build
           cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON \
             2>&1 | tee build/configure.log
