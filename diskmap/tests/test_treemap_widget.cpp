@@ -113,8 +113,8 @@ private slots:
     void accessibilityAndEmptyStateRenderAreStable();
 };
 
-// A Q_OBJECT widget links only when moc has run. Before ici 0.6.0 the gate could
-// not build this test at all, which is why diskmap's widget had no unit tests.
+// A Q_OBJECT widget links only when moc has run; this test keeps the widget
+// honestly covered rather than anecdotal.
 void TestTreemapWidget::clearingTheProjectionLeavesNoCurrentNode() {
     const std::shared_ptr<ScanResult> document = makeTreeDocument();
     TreemapWidget widget;

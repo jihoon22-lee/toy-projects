@@ -1,6 +1,6 @@
 #pragma once
 
-// Minimal hand-rolled assertions. ici compiles each tests/*.cpp into its own
+// Minimal hand-rolled assertions. Each tests/*.cpp compiles into its own
 // binary with no framework linked, so every test file defines its own main()
 // and returns checkSummary().
 

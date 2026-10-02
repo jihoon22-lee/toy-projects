@@ -1,7 +1,7 @@
 #pragma once
 
-// Shared test doubles and builders. Keeping them here rather than inline in
-// each test avoids the copy-paste that ici's dup engine flags as a clone.
+// Shared test doubles and builders. Keeping them here rather than inline
+// in each test avoids copy-paste duplication.
 
 #include <string>
 #include <vector>

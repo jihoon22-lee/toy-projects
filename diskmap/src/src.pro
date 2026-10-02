@@ -22,9 +22,8 @@ HEADERS += \
     $$PWD/../include/diskmap/view.hpp \
     snapshot_json_dom.hpp
 
-# main.cpp is the CLI entry point and stays out of the library so tests can link
-# it without a second main(). ici excludes entry points from coverage scope for
-# the same reason.
+# main.cpp is the CLI entry point and stays out of the library so tests can
+# link it without a second main().
 SOURCES += \
     cleanup.cpp \
     duplicates.cpp \

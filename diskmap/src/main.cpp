@@ -17,8 +17,7 @@
 
 namespace {
 
-// Pinned to diskmap/ici.toml by ci/test_product_version_surfaces.py so the
-// shipped binary and the manifest can never disagree about what was released.
+// The version --version prints. diskmap's single version surface.
 constexpr const char* kVersion = "0.1.0";
 
 struct CliOptions {

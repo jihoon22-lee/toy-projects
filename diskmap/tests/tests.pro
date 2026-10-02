@@ -1,9 +1,9 @@
 TEMPLATE = subdirs
 CONFIG += ordered
 
-# Each test binary defines its own main(), so qmake needs one app project per
-# file. CONFIG += testcase in each of them is what generates the `check` target
-# that ici's adapter runs.
+# Each test binary defines its own main(), so qmake needs one app project
+# per file. CONFIG += testcase in each of them is what generates the `check`
+# target CI runs.
 SUBDIRS = \
     test_format.pro \
     test_fs_node.pro \

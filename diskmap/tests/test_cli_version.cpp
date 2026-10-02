@@ -1,8 +1,8 @@
 // The shipped CLI has to be able to state its identity without being handed a
 // path to scan. That short-circuit only exists in main(), which no library test
 // links, so this test runs the real `diskmap` binary and reads what it prints.
-// The exact number is pinned against diskmap/ici.toml by
-// ci/test_product_version_surfaces.py; here we assert the shape and the exit.
+// The exact number lives in main.cpp; here we assert the shape and the
+// exit.
 
 #include "assert.hpp"
 

@@ -1,8 +1,6 @@
 # Build output
 build/
 src/gui/build/
-# `ici build` installs into <project>/<version>/x86_64
-v[0-9]*/
 bin/
 *.o
 *.a
@@ -22,13 +20,6 @@ htmlcov/
 .ruff_cache/
 dist/
 *.egg-info/
-
-# ici reports
-python_compat_report.html
-python_compat_report.json
-verify_report.html
-verify_report.json
-verify_report.md
 
 # IDE & OS
 .vscode/
