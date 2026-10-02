@@ -61,11 +61,6 @@ def validate_version(project_root: Path) -> str:
             r"^project\(buildscope VERSION ([^ )]+)",
             "CMake project version",
         ),
-        "ici.toml": _single_match(
-            project_root / "ici.toml",
-            r'^version\s*=\s*"([^"]+)"$',
-            "ici project version",
-        ),
     }
     mismatched = {name: value for name, value in values.items() if value != version}
     if mismatched:

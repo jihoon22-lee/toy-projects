@@ -1,7 +1,7 @@
 # `--version` must answer before any input is required: a shipped binary has to
 # be able to state its identity without being handed a log to read. The exact
-# number is pinned against ici.toml by ci/test_product_version_surfaces.py, so
-# this test asserts the shape and the short-circuit, not the literal.
+# number lives in main.cpp, so this test asserts the shape and the
+# short-circuit, not the literal.
 execute_process(
     COMMAND "${LOGLENS}" --version
     RESULT_VARIABLE version_result

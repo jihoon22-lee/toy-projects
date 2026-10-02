@@ -1,8 +1,7 @@
 TEMPLATE = subdirs
 CONFIG += ordered
 
-# ici drives this file: the build, test and sanitize engines each configure
-# their own shadow tree from here and run `make check`.
+# CI configures a shadow build from this file and runs `make check`.
 #
 # Subprojects are named so the dependencies can be stated rather than implied by
 # ordering alone. In a shadow build each one lands at <shadow>/<its path>, which

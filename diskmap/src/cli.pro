@@ -4,8 +4,8 @@ CONFIG += console
 CONFIG -= app_bundle qt
 QT =
 
-# The Qt-free CLI. Kept out of src.pro because a library cannot hold a main(),
-# and ici excludes entry points from coverage scope for the same reason.
+# The Qt-free CLI. Kept out of src.pro because a library cannot hold a
+# main().
 TARGET = diskmap
 INCLUDEPATH += $$PWD/../include $$PWD
 

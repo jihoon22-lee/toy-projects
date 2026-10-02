@@ -1,8 +1,8 @@
-name: CI Quality Gate (ici)
+name: CI
 
-# 이 저장소의 CI 는 곧 "ici 로 검증한다" 는 뜻이다.
-# ici 를 소스에서 빌드하지 않고 공개 릴리스 에셋을 그대로 내려받아 쓴다 —
-# 외부 소비자와 완전히 같은 경로로 도그푸딩하기 위해서다.
+# Product gates only: each job builds and tests one product with its own
+# native toolchain. There is no shared analysis layer — a green gate means the
+# product itself built, passed its tests, and ran headlessly.
 
 on:
   push:
@@ -14,517 +14,15 @@ on:
 permissions:
   contents: read
 
-env:
-  ICI_VERSION: v0.10.2
-  ICI_SHA256: "8e6237302ff3b6198cad86c97dd6bcd666ecab9204e9e19209e2e310c7fd18f4"
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  # ci/projects.json is the only project list. Verification, GUI, and project
-  # quality jobs consume outputs from this job, so adding a project without
-  # adding its verification or GUI metadata fails before a matrix can silently
-  # omit it. The dependency-free discovery script writes its selected/skipped
-  # ledger to GITHUB_STEP_SUMMARY as well as exposing machine-readable outputs.
-  discover:
-    name: Validate project manifest
+  loglens:
+    name: LogLens build, test and smoke (Qt6)
     runs-on: ubuntu-latest
-    outputs:
-      projects: ${{ steps.manifest.outputs.projects }}
-      gui_projects: ${{ steps.manifest.outputs.gui_projects }}
-      native_projects: ${{ steps.manifest.outputs.native_projects }}
-      names: ${{ steps.manifest.outputs.names }}
-      count: ${{ steps.manifest.outputs.count }}
-      gui_count: ${{ steps.manifest.outputs.gui_count }}
-      native_count: ${{ steps.manifest.outputs.native_count }}
-      all_names: ${{ steps.manifest.outputs.all_names }}
-      all_count: ${{ steps.manifest.outputs.all_count }}
-      skipped_names: ${{ steps.manifest.outputs.skipped_names }}
-      skipped_count: ${{ steps.manifest.outputs.skipped_count }}
-      scope_mode: ${{ steps.manifest.outputs.scope_mode }}
-      scope_reason: ${{ steps.manifest.outputs.scope_reason }}
-      changed_paths: ${{ steps.manifest.outputs.changed_paths }}
-      quality_zoo_mode: ${{ steps.manifest.outputs.quality_zoo_mode }}
-      quality_zoo_scenarios: ${{ steps.manifest.outputs.quality_zoo_scenarios }}
-      quality_zoo_count: ${{ steps.manifest.outputs.quality_zoo_count }}
-      quality_zoo_reason: ${{ steps.manifest.outputs.quality_zoo_reason }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-
-      - name: Validate manifest and discover matrices
-        id: manifest
-        run: |
-          set -euo pipefail
-          python3 -m unittest \
-            ci/test_check_manifest.py \
-            ci/test_check_published_html.py \
-            ci/test_check_buildscope_release_assets.py \
-            ci/test_check_buildscope_release_manifest.py \
-            ci/test_check_buildscope_merge_gate.py \
-            ci/test_check_buildscope_release_payload.py \
-            ci/test_check_buildscope_release_state.py \
-            ci/test_download_buildscope_release_assets.py \
-            ci/test_ci_workflow_contract.py \
-            ci/test_release_registry.py \
-            ci/test_product_version_surfaces.py \
-            ci/test_check_release_metadata.py \
-            ci/test_release_assets.py \
-            ci/test_release_manifest.py \
-            ci/test_write_release_provenance.py \
-            ci/test_release_state.py \
-            ci/test_extract_release_notes.py \
-            ci/test_product_release_workflow.py \
-            -v
-          python3 ci/check_manifest.py \
-            --event-name "$GITHUB_EVENT_NAME" \
-            --base-sha "$GITHUB_BASE_SHA" \
-            --head-sha "$GITHUB_HEAD_SHA"
-        env:
-          GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-
-  verify:
-    name: ici verify (${{ matrix.project.name }})
-    if: ${{ needs.discover.outputs.count != '0' }}
-    needs: discover
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        project: ${{ fromJSON(needs.discover.outputs.projects) }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      # ici.pyz 는 3.10+ 를 요구한다. 하한 버전으로 돌려 실제 지원 범위를 같이 검증한다.
-      - name: Set up Python 3.10
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.10"
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-
-      # BuildScope's Python checks and ici's subprocess engines must use the
-      # same interpreter. An isolated runner-temp environment avoids relying
-      # on whichever modules happen to exist in the hosted tool cache.
-      - name: Install pinned Python analysis and test tools
-        run: |
-          set -euo pipefail
-          python_bin="$(python -c 'import sys; print(sys.executable)')"
-          tool_env="$RUNNER_TEMP/ici-python-tools"
-          uv venv --python "$python_bin" "$tool_env"
-          uv pip install --python "$tool_env/bin/python" \
-            ruff==0.16.5 \
-            pytest==9.1.1 \
-            coverage==7.15.4 \
-            mypy==2.3.1
-          echo "ICI_PYTHON=$tool_env/bin/python" >> "$GITHUB_ENV"
-          echo "$tool_env/bin" >> "$GITHUB_PATH"
-          "$tool_env/bin/ruff" --version
-          "$tool_env/bin/python" -m pytest --version
-          "$tool_env/bin/python" -m coverage --version
-          "$tool_env/bin/python" -m mypy --version
-
-      # Every GUI project is driven by its own build system. The Qt
-      # headers are needed by ici lint as well as by the build adapters.
-      - name: Install the Qt6 build toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qt6-base-dev qmake6 pkg-config
-
-      - name: Fetch ici release asset
-        run: |
-          set -euo pipefail
-          base="https://github.com/jihoon22-lee/ici/releases/download/${ICI_VERSION}"
-          curl -fsSL --retry 3 -o ici.pyz "${base}/ici.pyz"
-          curl -fsSL --retry 3 -o ici.pyz.sha256 "${base}/ici.pyz.sha256"
-          sha256sum --check ici.pyz.sha256
-          test "$(awk '{print $1}' ici.pyz.sha256)" = "$ICI_SHA256"
-          printf '%s  ici.pyz\n' "$ICI_SHA256" | sha256sum --check -
-          chmod +x ici.pyz
-
-      - name: Report toolchain
-        run: |
-          ./ici.pyz --version
-          g++ --version | head -1
-          gcov --version | head -1
-
-      # verify 는 FAIL/ERROR 에서 exit 1, SKIP 에서 exit 2, PASS/WARN 에서 exit 0 이다.
-      - name: Verify ${{ matrix.project.name }}
-        working-directory: ${{ matrix.project.name }}
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: ../ici.pyz verify --report --html verify_report.html --github-summary
-
-      - name: Upload report
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: ici-report-${{ matrix.project.name }}
-          path: ${{ matrix.project.name }}/verify_report.*
-          if-no-files-found: warn
-          retention-days: 14
-
-  # quality-zoo is a known-answer compatibility surface, not another product.
-  # The ordinary gate deliberately consumes the same checksummed public ici
-  # release as external users. Candidate bundles are injected only through the
-  # separate local intake contract after their Actions evidence is verified.
-  # Unknown Quality Zoo paths use the explicit "unknown Quality Zoo path; fail-closed full scenario scope" fallback from discovery.
-  quality-zoo-contract:
-    name: Quality-zoo known-answer contract
-    if: ${{ needs.discover.outputs.quality_zoo_mode != 'skipped' }}
-    needs: discover
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Set up Python 3.10
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.10"
-
-      - name: Install C++ and Qt analysis tools
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            clang clang-tidy clazy cmake g++ pkg-config qt6-base-dev
-
-      - name: Fetch checksummed public ici release
-        run: |
-          set -euo pipefail
-          ici_root="$RUNNER_TEMP/quality-zoo-ici"
-          ici_pyz="$ici_root/ici.pyz"
-          mkdir -p "$ici_root"
-          base="https://github.com/jihoon22-lee/ici/releases/download/${ICI_VERSION}"
-          curl -fsSL --retry 3 -o "$ici_pyz" "${base}/ici.pyz"
-          curl -fsSL --retry 3 -o "$ici_root/ici.pyz.sha256" "${base}/ici.pyz.sha256"
-          manifest_hash="$(awk 'NR == 1 {print $1}' "$ici_root/ici.pyz.sha256")"
-          manifest_name="$(awk 'NR == 1 {print $2}' "$ici_root/ici.pyz.sha256")"
-          test "$manifest_name" = ici.pyz
-          test "$manifest_hash" = "$ICI_SHA256"
-          (cd "$ici_root" && sha256sum --check ici.pyz.sha256)
-          printf '%s  %s\n' "$ICI_SHA256" "$ici_pyz" | sha256sum --check -
-          chmod +x "$ici_pyz"
-          test -x "$ici_pyz"
-          printf 'QUALITY_ZOO_ICI=%s\n' "$ici_pyz" >> "$GITHUB_ENV"
-          ICI_PYTHON=python3.10 "$ici_pyz" --version
-
-      - name: Test runner trust boundaries
-        working-directory: quality-zoo
-        run: python3 -m unittest discover -s tests -v
-
-      - name: Run stable known-answer scenarios
-        working-directory: quality-zoo
-        env:
-          ICI_PYTHON: python3.10
-          QUALITY_ZOO_MODE: ${{ needs.discover.outputs.quality_zoo_mode }}
-          QUALITY_ZOO_SCENARIOS: ${{ needs.discover.outputs.quality_zoo_scenarios }}
-          QUALITY_ZOO_COUNT: ${{ needs.discover.outputs.quality_zoo_count }}
-          QUALITY_ZOO_REASON: ${{ needs.discover.outputs.quality_zoo_reason }}
-        run: |
-          set -euo pipefail
-          echo "Quality Zoo scope: mode=$QUALITY_ZOO_MODE count=$QUALITY_ZOO_COUNT reason=$QUALITY_ZOO_REASON"
-          echo "Quality Zoo selected/skipped scope is recorded in GITHUB_STEP_SUMMARY."
-          scenario_args=()
-          if [ "$QUALITY_ZOO_MODE" = selected ]; then
-            while IFS= read -r scenario; do
-              [ -n "$scenario" ] || continue
-              scenario_args+=(--scenario "$scenario")
-            done < <(python3 - "$QUALITY_ZOO_SCENARIOS" <<'PY'
-          import json
-          import sys
-
-          values = json.loads(sys.argv[1])
-          if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
-              raise SystemExit("invalid Quality Zoo scenario selection")
-          print("\n".join(values))
-          PY
-            )
-            test "${#scenario_args[@]}" -gt 0
-          elif [ "$QUALITY_ZOO_MODE" != all ]; then
-            echo "::error::unexpected Quality Zoo mode: $QUALITY_ZOO_MODE"
-            exit 1
-          fi
-          python3 -m runner.run \
-            --manifest manifest.json \
-            --ici-bin "$QUALITY_ZOO_ICI" \
-            --output-dir "$RUNNER_TEMP/quality-zoo-results" \
-            --timeout-seconds 300 \
-            "${scenario_args[@]}"
-          python3 - "$RUNNER_TEMP/quality-zoo-results/suite.json" <<'PY'
-          import json
-          import sys
-          from pathlib import Path
-
-          payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-          if payload.get("schema") != "quality-zoo.suite/v1":
-              raise SystemExit("quality-zoo suite schema mismatch")
-          if payload.get("contract_verdict") != "PASS":
-              raise SystemExit("quality-zoo contract did not pass")
-          if payload.get("ici", {}).get("sha256") != "${{ env.ICI_SHA256 }}":
-              raise SystemExit("quality-zoo did not use the pinned release")
-          expected_mode = "${{ needs.discover.outputs.quality_zoo_mode }}"
-          expected_count = int("${{ needs.discover.outputs.quality_zoo_count }}")
-          actual_count = payload.get("scenario_count")
-          if expected_mode == "selected" and actual_count != expected_count:
-              raise SystemExit(
-                  f"Quality Zoo selection count mismatch: {actual_count} != {expected_count}"
-              )
-          if not isinstance(actual_count, int) or actual_count < 1:
-              raise SystemExit("Quality Zoo ran no scenarios")
-          PY
-
-      - name: Upload quality-zoo evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: quality-zoo-contract
-          path: ${{ runner.temp }}/quality-zoo-results
-          if-no-files-found: warn
-          retention-days: 14
-
-  # ici builds and unit-tests the widget libraries now, but it never launches
-  # the application. This matrix does: a GUI that links and then dies on
-  # startup still fails the gate here. Discovery expands every GUI project to
-  # one leg per supported Qt major, so a new project gets the same coverage
-  # without another workflow edit.
-  gui-build:
-    name: Qt${{ matrix.project.qt_major }} GUI build (${{ matrix.project.name }})
-    if: ${{ needs.discover.outputs.gui_count != '0' }}
-    needs: discover
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        project: ${{ fromJSON(needs.discover.outputs.gui_projects) }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install Qt${{ matrix.project.qt_major }}
-        env:
-          QT_MAJOR: ${{ matrix.project.qt_major }}
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          case "$QT_MAJOR" in
-            5)
-              sudo apt-get install -y --no-install-recommends qtbase5-dev qt5-qmake pkg-config
-              ;;
-            6)
-              sudo apt-get install -y --no-install-recommends qt6-base-dev qmake6 pkg-config
-              ;;
-            *)
-              echo "::error::unsupported Qt major: $QT_MAJOR"
-              exit 1
-              ;;
-          esac
-
-      - name: Verify Qt${{ matrix.project.qt_major }} pkg-config metadata
-        env:
-          QT_MAJOR: ${{ matrix.project.qt_major }}
-        run: |
-          set -euo pipefail
-          case "$QT_MAJOR" in
-            5) modules=(Qt5Core Qt5Gui Qt5Widgets Qt5Concurrent Qt5Test) ;;
-            6) modules=(Qt6Core Qt6Gui Qt6Widgets Qt6Concurrent Qt6Test) ;;
-            *) echo "::error::unsupported Qt major: $QT_MAJOR"; exit 1 ;;
-          esac
-          for module in "${modules[@]}"; do
-            version="$(pkg-config --modversion "$module")"
-            echo "$module=$version"
-            case "$version" in
-              "$QT_MAJOR".*) ;;
-              *)
-                echo "::error::$module resolved to $version, expected Qt $QT_MAJOR"
-                exit 1
-                ;;
-            esac
-          done
-
-      - name: Configure and build
-        working-directory: ${{ matrix.project.name }}
-        env:
-          BUILD_SYSTEM: ${{ matrix.project.build_system }}
-          BUILD_DESCRIPTOR: ${{ matrix.project.build_descriptor }}
-          GUI_BINARY: ${{ matrix.project.gui_binary }}
-          QT_MAJOR: ${{ matrix.project.qt_major }}
-        run: |
-          set -euo pipefail
-          case "$BUILD_SYSTEM" in
-            cmake)
-              mkdir -p build
-              if [ "$QT_MAJOR" = 5 ]; then
-                qt_guard=-DCMAKE_DISABLE_FIND_PACKAGE_Qt6=ON
-              elif [ "$QT_MAJOR" = 6 ]; then
-                qt_guard=-DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON
-              else
-                echo "::error::unsupported Qt major: $QT_MAJOR"
-                exit 1
-              fi
-              cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release "$qt_guard" \
-                2>&1 | tee build/configure.log
-              # CMake GUI projects expose the selected major in a stable
-              # `-- <project>: using Qt<major> <version>` status line.
-              selected_major="$(sed -n 's/^-- .*using Qt\([56]\) .*/\1/p' \
-                build/configure.log | tail -1)"
-              if [ "$selected_major" != "$QT_MAJOR" ]; then
-                echo "::error::CMake selected Qt $selected_major, expected Qt $QT_MAJOR"
-                exit 1
-              fi
-              cmake --build build/gui --parallel
-              ;;
-            qmake)
-              mkdir -p build/gui
-              if [ "$QT_MAJOR" = 5 ]; then
-                qmake=/usr/bin/qmake
-              elif [ "$QT_MAJOR" = 6 ]; then
-                qmake=/usr/bin/qmake6
-              else
-                echo "::error::unsupported Qt major: $QT_MAJOR"
-                exit 1
-              fi
-              qmake_version="$("$qmake" -query QT_VERSION)"
-              echo "$qmake QT_VERSION=$qmake_version"
-              case "$qmake_version" in
-                "$QT_MAJOR".*) ;;
-                *)
-                  echo "::error::$qmake selected Qt $qmake_version, expected Qt $QT_MAJOR"
-                  exit 1
-                  ;;
-              esac
-              (cd build/gui && "$qmake" "../../$BUILD_DESCRIPTOR" && make -j"$(nproc)")
-              ;;
-            *)
-              echo "::error::unsupported GUI build system: $BUILD_SYSTEM"
-              exit 1
-              ;;
-          esac
-
-          if ! ldd "$GUI_BINARY" | grep -Eq "libQt${QT_MAJOR}Widgets"; then
-            echo "::error::$GUI_BINARY is not linked to Qt${QT_MAJOR}Widgets"
-            ldd "$GUI_BINARY" || true
-            exit 1
-          fi
-          echo "linked Qt${QT_MAJOR}Widgets: $(ldd "$GUI_BINARY" | grep -E "libQt${QT_MAJOR}Widgets" | head -1)"
-
-      - name: Native tests
-        working-directory: ${{ matrix.project.name }}
-        env:
-          BUILD_SYSTEM: ${{ matrix.project.build_system }}
-          QT_QPA_PLATFORM: offscreen
-        run: |
-          set -euo pipefail
-          case "$BUILD_SYSTEM" in
-            cmake)
-              ctest --test-dir build/gui --output-on-failure
-              ;;
-            qmake)
-              (cd build/gui && make check)
-              ;;
-            *)
-              echo "::error::unsupported GUI build system: $BUILD_SYSTEM"
-              exit 1
-              ;;
-          esac
-
-      # Runs the real binary headlessly against a known directory, so a GUI
-      # that links but crashes on startup or on its first scan still fails.
-      - name: Headless smoke run
-        working-directory: ${{ matrix.project.name }}
-        env:
-          QT_QPA_PLATFORM: offscreen
-          GUI_BINARY: ${{ matrix.project.gui_binary }}
-          SMOKE_ARG: ${{ matrix.project.smoke_arg }}
-        run: |
-          set -euo pipefail
-          "$GUI_BINARY" "$PWD/$SMOKE_ARG" &
-          pid=$!
-          cleanup() {
-            kill "$pid" 2>/dev/null || true
-            wait "$pid" 2>/dev/null || true
-          }
-          trap cleanup EXIT
-          sleep 8
-          if ! kill -0 "$pid" 2>/dev/null; then
-            echo "::error::GUI exited before the smoke window elapsed"
-            exit 1
-          fi
-          echo "GUI stayed up through a scan"
-
-  # Non-GUI products still need a visible native build/test gate.  The manifest
-  # carries only fixed Make target names; no PR-controlled shell is evaluated.
-  # This deliberately remains separate from the ici verify matrix so a healthy
-  # analyzer report cannot hide a broken product build (or vice versa).
-  native-product:
-    name: Native product checks (${{ matrix.project.name }})
-    if: ${{ needs.discover.outputs.native_count != '0' }}
-    needs: discover
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        project: ${{ fromJSON(needs.discover.outputs.native_projects) }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install native build tools
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential binutils
-
-      - name: Build native product
-        working-directory: ${{ matrix.project.name }}
-        env:
-          BUILD_SYSTEM: ${{ matrix.project.build_system }}
-          BUILD_TARGET: ${{ matrix.project.build_target }}
-          TEST_TARGET: ${{ matrix.project.test_target }}
-        run: |
-          set -euo pipefail
-          test "$BUILD_SYSTEM" = make
-          make --version | head -1
-          make -j"$(nproc)" "$BUILD_TARGET"
-
-      - name: Run native product tests
-        working-directory: ${{ matrix.project.name }}
-        env:
-          BUILD_SYSTEM: ${{ matrix.project.build_system }}
-          TEST_TARGET: ${{ matrix.project.test_target }}
-        run: |
-          set -euo pipefail
-          test "$BUILD_SYSTEM" = make
-          make "$TEST_TARGET"
-
-  # The large-file benchmark is opt-in for local builds, but this small
-  # deterministic run keeps the benchmark harness itself inside the PR gate.
-  # Its input and reports live below RUNNER_TEMP so a generated log can never
-  # be mistaken for an artifact to publish or upload.
-  benchmark-smoke:
-    name: LogLens benchmark smoke
-    if: ${{ contains(needs.discover.outputs.names, 'loglens') }}
-    needs: discover
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -540,9 +38,59 @@ jobs:
       - name: Install Qt6
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qt6-base-dev qmake6 pkg-config
+          sudo apt-get install -y --no-install-recommends \
+            qt6-base-dev qmake6 pkg-config
 
-      - name: Build and run benchmark smoke
+      - name: Configure and build
+        working-directory: loglens
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON \
+            2>&1 | tee build/configure.log
+          selected_major="$(sed -n 's/^-- .*using Qt\([56]\) .*/\1/p' \
+            build/configure.log | tail -1)"
+          if [ "$selected_major" != 6 ]; then
+            echo "::error::CMake selected Qt $selected_major, expected Qt 6"
+            exit 1
+          fi
+          cmake --build build/gui --parallel
+          if ! ldd build/gui/src/gui/loglens-gui | grep -Eq 'libQt6Widgets'; then
+            echo "::error::loglens-gui is not linked to Qt6Widgets"
+            ldd build/gui/src/gui/loglens-gui || true
+            exit 1
+          fi
+
+      - name: Tests
+        working-directory: loglens
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build/gui --output-on-failure
+
+      # Runs the real binary headlessly against a known log, so a GUI that
+      # links but crashes on startup or on its first load still fails.
+      - name: Headless smoke run
+        working-directory: loglens
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set -euo pipefail
+          build/gui/src/gui/loglens-gui "$PWD/tests/data/sample.log" &
+          pid=$!
+          cleanup() { kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; }
+          trap cleanup EXIT
+          sleep 8
+          if ! kill -0 "$pid" 2>/dev/null; then
+            echo "::error::GUI exited before the smoke window elapsed"
+            exit 1
+          fi
+          echo "GUI stayed up through a log load"
+
+      # The large-file benchmark is opt-in for local builds, but this small
+      # deterministic run keeps the harness itself inside the PR gate.
+      - name: Benchmark smoke
+        working-directory: loglens
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
@@ -552,14 +100,12 @@ jobs:
           artifact_dir="$benchmark_root/artifact"
           build_dir="$benchmark_root/build"
           mkdir -p "$scratch_dir" "$artifact_dir" "$build_dir"
-
-          cmake -S loglens -B "$build_dir" -DCMAKE_BUILD_TYPE=Release \
+          cmake -S . -B "$build_dir" -DCMAKE_BUILD_TYPE=Release \
             -DLOGLENS_BUILD_BENCHMARKS=ON \
             -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON
           cmake --build "$build_dir" --parallel \
             --target loglens-bench-generate loglens-bench-core loglens-bench-gui
-
-          python3 loglens/benchmarks/run_benchmark.py \
+          python3 benchmarks/run_benchmark.py \
             --build-dir "$build_dir" \
             --scratch "$scratch_dir" \
             --artifact-dir "$artifact_dir" \
@@ -574,7 +120,6 @@ jobs:
             --timeout-seconds 30 \
             --skip-budgets \
             --commit "$GITHUB_SHA"
-
           test -s "$artifact_dir/summary.json"
           python3 - "$artifact_dir/summary.json" <<'PY'
           import json
@@ -600,20 +145,10 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  # Keep the deterministic DiskMap benchmark harness on the ordinary quality
-  # path without pulling the full million-entry run into every PR.  The core
-  # library is Qt-free, but build the benchmark once through each supported
-  # qmake major so the matrix remains aligned with the GUI coverage above.
-  diskmap-benchmark-smoke:
-    name: DiskMap benchmark smoke (Qt${{ matrix.qt_major }})
-    if: ${{ contains(needs.discover.outputs.names, 'diskmap') }}
-    needs: discover
+  diskmap:
+    name: DiskMap build, test and smoke (Qt6)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        qt_major: [5, 6]
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -626,68 +161,82 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Install Qt${{ matrix.qt_major }} toolchain
-        env:
-          QT_MAJOR: ${{ matrix.qt_major }}
+      - name: Install Qt6 toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            qt6-base-dev qmake6 pkg-config g++
+
+      - name: Configure and build
+        working-directory: diskmap
         run: |
           set -euo pipefail
-          sudo apt-get update
-          if [ "$QT_MAJOR" = 5 ]; then
-            sudo apt-get install -y --no-install-recommends qtbase5-dev qt5-qmake pkg-config g++
-          elif [ "$QT_MAJOR" = 6 ]; then
-            sudo apt-get install -y --no-install-recommends qt6-base-dev qmake6 pkg-config g++
-          else
-            echo "::error::unsupported Qt major: $QT_MAJOR"
+          qmake_version="$(qmake6 -query QT_VERSION)"
+          echo "qmake6 QT_VERSION=$qmake_version"
+          case "$qmake_version" in
+            6.*) ;;
+            *) echo "::error::qmake6 selected Qt $qmake_version, expected Qt 6"; exit 1 ;;
+          esac
+          mkdir -p build/gui
+          (cd build/gui && qmake6 ../../diskmap.pro && make -j"$(nproc)")
+          if ! ldd build/gui/src/gui/diskmap-gui | grep -Eq 'libQt6Widgets'; then
+            echo "::error::diskmap-gui is not linked to Qt6Widgets"
+            ldd build/gui/src/gui/diskmap-gui || true
             exit 1
           fi
 
-      - name: Build and run benchmark smoke
+      - name: Tests
+        working-directory: diskmap
         env:
-          QT_MAJOR: ${{ matrix.qt_major }}
+          QT_QPA_PLATFORM: offscreen
+        run: (cd build/gui && make check)
+
+      # Runs the real binary headlessly against a known directory, so a GUI
+      # that links but crashes on startup or on its first scan still fails.
+      - name: Headless smoke run
+        working-directory: diskmap
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set -euo pipefail
+          build/gui/src/gui/diskmap-gui "$PWD/src" &
+          pid=$!
+          cleanup() { kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; }
+          trap cleanup EXIT
+          sleep 8
+          if ! kill -0 "$pid" 2>/dev/null; then
+            echo "::error::GUI exited before the smoke window elapsed"
+            exit 1
+          fi
+          echo "GUI stayed up through a scan"
+
+      # Keeps the deterministic scan benchmark harness on the ordinary
+      # quality path without pulling the full million-entry run into a PR.
+      - name: Benchmark smoke
+        working-directory: diskmap
         run: |
           set -euo pipefail
           benchmark_root="$RUNNER_TEMP/diskmap-benchmark"
           build_dir="$benchmark_root/build"
           artifact_dir="$benchmark_root/artifact"
           mkdir -p "$build_dir/src" "$build_dir/benchmarks" "$artifact_dir"
-
-          if [ "$QT_MAJOR" = 5 ]; then
-            qmake=qmake
-          elif [ "$QT_MAJOR" = 6 ]; then
-            qmake=qmake6
-          else
-            echo "::error::unsupported Qt major: $QT_MAJOR"
-            exit 1
-          fi
-          qmake_version="$($qmake -query QT_VERSION)"
-          echo "$qmake QT_VERSION=$qmake_version"
-          case "$qmake_version" in
-            "$QT_MAJOR".*) ;;
-            *)
-              echo "::error::$qmake selected Qt $qmake_version, expected Qt $QT_MAJOR"
-              exit 1
-              ;;
-          esac
-
           (
             cd "$build_dir/src"
-            "$qmake" "$GITHUB_WORKSPACE/diskmap/src/src.pro"
+            qmake6 "$GITHUB_WORKSPACE/diskmap/src/src.pro"
             make -j"$(nproc)"
           )
           (
             cd "$build_dir/benchmarks"
-            "$qmake" "$GITHUB_WORKSPACE/diskmap/benchmarks/scan_benchmark.pro"
+            qmake6 "$GITHUB_WORKSPACE/diskmap/benchmarks/scan_benchmark.pro"
             make -j"$(nproc)"
           )
-
-          python3 diskmap/benchmarks/run_benchmark.py \
+          python3 benchmarks/run_benchmark.py \
             --binary "$build_dir/benchmarks/diskmap-scan-benchmark" \
             --entries 10000 \
             --cancel-after 1000 \
             --timeout-seconds 30 \
             --skip-budgets \
             --output-dir "$artifact_dir"
-
           test -s "$artifact_dir/summary.json"
           python3 - "$artifact_dir/summary.json" <<'PY'
           import json
@@ -705,25 +254,19 @@ jobs:
               raise SystemExit("DiskMap benchmark smoke contains a failed correctness sample")
           PY
 
-      - name: Upload DiskMap benchmark smoke report
+      - name: Upload benchmark smoke report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: diskmap-benchmark-smoke-qt${{ matrix.qt_major }}
+          name: diskmap-benchmark-smoke-qt6
           path: ${{ runner.temp }}/diskmap-benchmark/artifact
           if-no-files-found: warn
           retention-days: 14
 
-  # BuildScope keeps 100k compilation entries in one owned Snapshot but exposes
-  # configuration rows through QModelIndex identities instead of allocating a
-  # second tree of child objects. Exercise that production-size boundary on
-  # every PR so the "lazy model" claim remains measured rather than anecdotal.
-  buildscope-benchmark-smoke:
-    name: BuildScope 100k model benchmark
-    if: ${{ contains(needs.discover.outputs.names, 'buildscope') }}
-    needs: discover
+  buildscope:
+    name: BuildScope build, test and smoke (Qt6)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -734,16 +277,66 @@ jobs:
       - name: Install Qt6
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qt6-base-dev qmake6 pkg-config
+          sudo apt-get install -y --no-install-recommends \
+            qt6-base-dev qmake6 pkg-config
 
-      - name: Build and measure the 100k-entry model
+      - name: Configure and build
+        working-directory: buildscope
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON \
+            2>&1 | tee build/configure.log
+          selected_major="$(sed -n 's/^-- .*using Qt\([56]\) .*/\1/p' \
+            build/configure.log | tail -1)"
+          if [ "$selected_major" != 6 ]; then
+            echo "::error::CMake selected Qt $selected_major, expected Qt 6"
+            exit 1
+          fi
+          cmake --build build/gui --parallel
+          if ! ldd build/gui/src/gui/buildscope-gui | grep -Eq 'libQt6Widgets'; then
+            echo "::error::buildscope-gui is not linked to Qt6Widgets"
+            ldd build/gui/src/gui/buildscope-gui || true
+            exit 1
+          fi
+
+      - name: Tests
+        working-directory: buildscope
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build/gui --output-on-failure
+
+      # Runs the real binary headlessly against a known snapshot, so a GUI
+      # that links but crashes on startup or on its first load still fails.
+      - name: Headless smoke run
+        working-directory: buildscope
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set -euo pipefail
+          build/gui/src/gui/buildscope-gui "$PWD/fixtures/sample.snapshot.json" &
+          pid=$!
+          cleanup() { kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; }
+          trap cleanup EXIT
+          sleep 8
+          if ! kill -0 "$pid" 2>/dev/null; then
+            echo "::error::GUI exited before the smoke window elapsed"
+            exit 1
+          fi
+          echo "GUI stayed up through a snapshot load"
+
+      # Exercises the production-size boundary on every PR so the lazy-model
+      # claim stays measured rather than anecdotal.
+      - name: 100k model benchmark
+        working-directory: buildscope
         run: |
           set -euo pipefail
           benchmark_root="$RUNNER_TEMP/buildscope-benchmark"
           build_dir="$benchmark_root/build"
           artifact_dir="$benchmark_root/artifact"
           mkdir -p "$build_dir" "$artifact_dir"
-          cmake -S buildscope -B "$build_dir" -DCMAKE_BUILD_TYPE=Release \
+          cmake -S . -B "$build_dir" -DCMAKE_BUILD_TYPE=Release \
             -DBUILDSCOPE_BUILD_BENCHMARKS=ON \
             -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON
           cmake --build "$build_dir" --parallel --target buildscope-model-benchmark
@@ -767,7 +360,7 @@ jobs:
               raise SystemExit(f"filter budget exceeded: {summary!r}")
           PY
 
-      - name: Upload BuildScope benchmark report
+      - name: Upload benchmark smoke report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -776,207 +369,8 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  # B5 runs the public ici release against the native project once per Qt major.
-  # The build directory is deliberately the path discovered by BuildScope's ici
-  # configuration, so compile-db, codegen, and tool-backed C++ evidence all
-  # describe the exact matrix build rather than a checked-in fixture.
-  buildscope-ici-deep:
-    name: BuildScope ici deep (Qt${{ matrix.qt_major }})
-    if: ${{ contains(needs.discover.outputs.names, 'buildscope') }}
-    needs: discover
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        qt_major: [5, 6]
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Set up Python 3.10
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.10"
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-
-      - name: Install pinned Python analysis and test tools
-        run: |
-          set -euo pipefail
-          python_bin="$(python -c 'import sys; print(sys.executable)')"
-          tool_env="$RUNNER_TEMP/buildscope-b5-ici-tools"
-          uv venv --python "$python_bin" "$tool_env"
-          uv pip install --python "$tool_env/bin/python" \
-            ruff==0.16.5 \
-            pytest==9.1.1 \
-            coverage==7.15.4 \
-            mypy==2.3.1
-          echo "ICI_PYTHON=$tool_env/bin/python" >> "$GITHUB_ENV"
-          echo "$tool_env/bin" >> "$GITHUB_PATH"
-
-      - name: Install Qt${{ matrix.qt_major }} and C++ analysis tools
-        env:
-          QT_MAJOR: ${{ matrix.qt_major }}
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          case "$QT_MAJOR" in
-            5)
-              sudo apt-get install -y --no-install-recommends \
-                qtbase5-dev qt5-qmake pkg-config clang-tidy clazy
-              ;;
-            6)
-              sudo apt-get install -y --no-install-recommends \
-                qt6-base-dev qmake6 pkg-config clang-tidy clazy
-              ;;
-            *)
-              echo "::error::unsupported Qt major: $QT_MAJOR"
-              exit 1
-              ;;
-          esac
-          clang-tidy --version
-          clazy-standalone --version 2>/dev/null || clazy --version
-
-      - name: Configure and build BuildScope
-        env:
-          QT_MAJOR: ${{ matrix.qt_major }}
-        run: |
-          set -euo pipefail
-          build_dir="$GITHUB_WORKSPACE/buildscope/build/ici-cmake-build"
-          if [ "$QT_MAJOR" = 5 ]; then
-            qt_guard=(-DCMAKE_DISABLE_FIND_PACKAGE_Qt6=ON)
-          elif [ "$QT_MAJOR" = 6 ]; then
-            qt_guard=(-DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON)
-          else
-            echo "::error::unsupported Qt major: $QT_MAJOR"
-            exit 1
-          fi
-          cmake -S buildscope -B "$build_dir" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DPython3_EXECUTABLE="$ICI_PYTHON" \
-            "${qt_guard[@]}" \
-            2>&1 | tee "$RUNNER_TEMP/buildscope-b5-cmake-configure.log"
-          selected_major="$(sed -n 's/^-- buildscope: using Qt\([56]\) .*/\1/p' \
-            "$RUNNER_TEMP/buildscope-b5-cmake-configure.log" | tail -1)"
-          test "$selected_major" = "$QT_MAJOR"
-          cmake --build "$build_dir" --parallel
-          QT_QPA_PLATFORM=offscreen ctest --test-dir "$build_dir" --output-on-failure
-
-      - name: Fetch and double-check public ici v0.10.2 for deep verification
-        run: |
-          set -euo pipefail
-          ici_root="$RUNNER_TEMP/buildscope-b5-ici"
-          ici_pyz="$ici_root/ici.pyz"
-          mkdir -p "$ici_root"
-          base="https://github.com/jihoon22-lee/ici/releases/download/${ICI_VERSION}"
-          curl -fsSL --retry 3 -o "$ici_pyz" "${base}/ici.pyz"
-          curl -fsSL --retry 3 -o "$ici_root/ici.pyz.sha256" "${base}/ici.pyz.sha256"
-          manifest_hash="$(awk 'NR == 1 {print $1}' "$ici_root/ici.pyz.sha256")"
-          manifest_name="$(awk 'NR == 1 {print $2}' "$ici_root/ici.pyz.sha256")"
-          test "$manifest_name" = "ici.pyz"
-          test "$manifest_hash" = "$ICI_SHA256"
-          (cd "$ici_root" && sha256sum --check ici.pyz.sha256)
-          printf '%s  %s\n' "$ICI_SHA256" "$ici_pyz" | sha256sum --check -
-          downloaded_hash="$(sha256sum "$ici_pyz" | awk '{print $1}')"
-          test "$downloaded_hash" = "$ICI_SHA256"
-          chmod +x "$ici_pyz"
-          test -x "$ici_pyz"
-          case "$ici_pyz" in
-            /*) ;;
-            *) echo "::error::deep ici path must be absolute" >&2; exit 1 ;;
-          esac
-          printf 'ICI_DEEP_BIN=%s\n' "$ici_pyz" >> "$GITHUB_ENV"
-          ICI_PYTHON="$ICI_PYTHON" "$ici_pyz" --version
-          echo "validated ici ${ICI_VERSION}: manifest=$manifest_hash downloaded=$downloaded_hash"
-
-      - name: Verify BuildScope with checksummed public ici v0.10.2
-        env:
-          QT_MAJOR: ${{ matrix.qt_major }}
-          QT_QPA_PLATFORM: offscreen
-          ICI_REQUIRE_STATIC_ANALYSIS_TOOLS: "1"
-        working-directory: buildscope
-        run: |
-          set -euo pipefail
-          test -x "$ICI_DEEP_BIN"
-          case "$ICI_DEEP_BIN" in
-            /*) ;;
-            *) echo "::error::ICI_DEEP_BIN must be absolute" >&2; exit 1 ;;
-          esac
-          if [ "$QT_MAJOR" = 5 ]; then
-            # Qt 5's offscreen platform plugin retains process-global GUI state
-            # at shutdown on the hosted runner. Keep leak detection enabled and
-            # suppress only stacks that pass through that plugin.
-            suppression_file="$GITHUB_WORKSPACE/ci/fixtures/outside/qt5-offscreen-platform.supp"
-            test -f "$suppression_file"
-            LSAN_OPTIONS="detect_leaks=1:suppressions=$suppression_file" \
-              "$ICI_DEEP_BIN" verify --profile deep --no-cache --report \
-                --html verify_report.html --github-summary
-          else
-            "$ICI_DEEP_BIN" verify --profile deep --no-cache --report \
-              --html verify_report.html --github-summary
-          fi
-          cd "$GITHUB_WORKSPACE"
-          "$ICI_PYTHON" ci/check_buildscope_b5_report.py \
-            buildscope/verify_report.json --expected-qt-major "$QT_MAJOR"
-
-      # This fixture is deliberately outside buildscope/ici.toml source_dirs.
-      # Running it with the exact Qt5 LSAN_OPTIONS must still fail, proving that
-      # the platform-plugin suppression does not mask project-owned leaks.
-      - name: Prove Qt5 LSAN suppression preserves real leak detection
-        if: ${{ matrix.qt_major == 5 }}
-        run: |
-          set -euo pipefail
-          suppression_file="$GITHUB_WORKSPACE/ci/fixtures/outside/qt5-offscreen-platform.supp"
-          fixture="$GITHUB_WORKSPACE/ci/fixtures/outside/project_leak.cpp"
-          control_root="$RUNNER_TEMP/buildscope-lsan-control"
-          control_binary="$control_root/project-leak"
-          test -f "$suppression_file"
-          test -f "$fixture"
-          mkdir -p "$control_root"
-          g++ -std=c++17 -O0 -g \
-            -fsanitize=address,undefined -fno-omit-frame-pointer \
-            "$fixture" -o "$control_binary"
-
-          set +e
-          control_output="$(
-            LSAN_OPTIONS="detect_leaks=1:suppressions=$suppression_file" \
-            ASAN_OPTIONS="detect_leaks=1:halt_on_error=1" \
-            UBSAN_OPTIONS="halt_on_error=1" \
-            "$control_binary" 2>&1
-          )"
-          control_status=$?
-          set -e
-          printf '%s\n' "$control_output"
-          test "$control_status" -ne 0
-          grep -Fq 'LeakSanitizer: detected memory leaks' <<<"$control_output"
-          grep -Fq 'project_leak.cpp' <<<"$control_output"
-
-      # Keep this artifact outside the ici-report-* namespace. report-pr's
-      # manifest-report contract must continue to consume only its project
-      # reports.
-      - name: Upload BuildScope B5 deep report
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: buildscope-b5-ici-deep-qt${{ matrix.qt_major }}
-          path: |
-            buildscope/verify_report.json
-            buildscope/verify_report.html
-          if-no-files-found: warn
-          retention-days: 14
-
-  # Run the product's Python quality surface at the supported floor and on the
-  # newest setup-python release. The checker itself is tested under both
-  # interpreters, so its dependency-free contract remains portable too.
-  buildscope-python-quality:
+  buildscope-python:
     name: BuildScope Python quality (${{ matrix.label }})
-    if: ${{ contains(needs.discover.outputs.names, 'buildscope') }}
-    needs: discover
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -1006,20 +400,18 @@ jobs:
         run: |
           set -euo pipefail
           python_bin="$(python -c 'import sys; print(sys.executable)')"
-          tool_env="$RUNNER_TEMP/buildscope-b5-python-${{ matrix.label }}"
+          tool_env="$RUNNER_TEMP/buildscope-python-${{ matrix.label }}"
           uv venv --python "$python_bin" "$tool_env"
           uv pip install --python "$tool_env/bin/python" \
             ruff==0.16.5 \
             pytest==9.1.1 \
-            coverage==7.15.4 \
             mypy==2.3.1
           echo "B5_PYTHON=$tool_env/bin/python" >> "$GITHUB_ENV"
 
       - name: Run Python tests, lint, format, and types
         run: |
           set -euo pipefail
-          quality_root="$RUNNER_TEMP/buildscope-b5-python-${{ matrix.label }}"
-          mkdir -p "$quality_root"
+          quality_root="$RUNNER_TEMP/buildscope-python-${{ matrix.label }}"
           (
             cd buildscope
             PYTHONPATH=python:. "$quality_root/bin/python" -m pytest tests/python
@@ -1028,32 +420,9 @@ jobs:
             MYPYPATH=python "$quality_root/bin/mypy" --python-version 3.10 \
               python/buildscope tools/build_standalone.py
           )
-          "$B5_PYTHON" -m unittest ci/test_check_buildscope_b5_report.py -v
-          {
-            echo "python=${{ matrix.python_version }}"
-            "$B5_PYTHON" --version
-            "$quality_root/bin/ruff" --version
-            "$quality_root/bin/pytest" --version
-            "$quality_root/bin/mypy" --version
-            echo "status=PASS"
-          } > "$quality_root/quality.txt"
 
-      - name: Upload BuildScope B5 Python quality evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: buildscope-b5-python-quality-${{ matrix.label }}
-          path: ${{ runner.temp }}/buildscope-b5-python-${{ matrix.label }}/quality.txt
-          if-no-files-found: warn
-          retention-days: 14
-
-  # Run envlens's Python quality surface at the supported floor and on the
-  # newest setup-python release. Each leg validates source behavior, typing,
-  # the checked-in schema, and both pure-Python distribution artifacts.
-  envlens-python-quality:
+  envlens:
     name: envlens Python quality (${{ matrix.label }})
-    if: ${{ contains(needs.discover.outputs.names, 'envlens') }}
-    needs: discover
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -1093,10 +462,6 @@ jobs:
             mypy==2.3.1 \
             jsonschema==4.25.1
           echo "ENVLENS_PYTHON=$tool_env/bin/python" >> "$GITHUB_ENV"
-          "$tool_env/bin/ruff" --version
-          "$tool_env/bin/python" -m pytest --version
-          "$tool_env/bin/python" -m mypy --version
-          "$tool_env/bin/python" -c 'import importlib.metadata; print("jsonschema " + importlib.metadata.version("jsonschema"))'
 
       - name: Run envlens tests, lint, format, and types
         run: |
@@ -1140,6 +505,8 @@ jobs:
           print("envlens schema metaschema and real snapshot validation: PASS")
           PY
 
+      # envlens ships a pure-Python wheel and sdist; both must build
+      # reproducibly and install into a clean environment with no extras.
       - name: Build and audit pure Python wheel and sdist
         run: |
           set -euo pipefail
@@ -1339,7 +706,7 @@ jobs:
             echo "status=PASS"
           } > "$quality_root/quality.txt"
 
-      - name: Upload envlens Python quality evidence
+      - name: Upload envlens quality evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -1350,16 +717,10 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  # Build each Python distribution, feed every artifact through the same
-  # consumer contract, and retain the native Qt6 CLI/GUI as release evidence.
-  # This is a validation job, not a publication step, so no tag or GitHub
-  # release is mutated by CI.
-  buildscope-release-contract:
-    name: BuildScope release contract
-    if: ${{ contains(needs.discover.outputs.names, 'buildscope') }}
-    needs: [discover, buildscope-ici-deep, buildscope-python-quality]
+  abilens:
+    name: AbiLens build and test
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
@@ -1367,834 +728,55 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Python 3.10
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.10"
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-
-      - name: Install Qt6 native consumer toolchain
+      - name: Install native build tools
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qt6-base-dev qmake6 pkg-config
+          sudo apt-get install -y --no-install-recommends build-essential binutils
 
-      - name: Build and inspect wheel, sdist, and pyz
-        run: |
-          set -euo pipefail
-          contract_root="$RUNNER_TEMP/buildscope-release-contract"
-          artifact_dir="$contract_root/artifacts"
-          mkdir -p "$artifact_dir"
-          python_bin="$(python -c 'import sys; print(sys.executable)')"
-          (cd buildscope && uv build --out-dir "$artifact_dir")
-          "$python_bin" buildscope/tools/build_standalone.py \
-            --project-root buildscope \
-            --output "$artifact_dir/buildscope-0.5.0.pyz"
-          "$python_bin" - "$artifact_dir" <<'PY'
-          import os
-          import sys
-          import tarfile
-          import zipfile
-          from pathlib import Path
+      - name: Build
+        working-directory: abilens
+        run: make -j"$(nproc)" all
 
-          artifact_dir = Path(sys.argv[1])
-          wheel = artifact_dir / "buildscope-0.5.0-py3-none-any.whl"
-          sdist = artifact_dir / "buildscope-0.5.0.tar.gz"
-          pyz = artifact_dir / "buildscope-0.5.0.pyz"
-          for path in (wheel, sdist, pyz):
-              if not path.is_file() or path.stat().st_size == 0:
-                  raise SystemExit(f"missing release artifact: {path}")
-          if not os.access(pyz, os.X_OK):
-              raise SystemExit(f"standalone artifact is not executable: {pyz}")
+      - name: Tests
+        working-directory: abilens
+        run: make test
 
-          with zipfile.ZipFile(wheel) as archive:
-              names = set(archive.namelist())
-              native = tuple(
-                  name
-                  for name in names
-                  if name.lower().endswith((".so", ".pyd", ".dylib", ".dll"))
-              )
-              if native:
-                  raise SystemExit(f"wheel contains native extensions: {native!r}")
-              wheel_meta = next(
-                  (name for name in names if name.endswith(".dist-info/WHEEL")), None
-              )
-              entry_points = next(
-                  (name for name in names if name.endswith(".dist-info/entry_points.txt")),
-                  None,
-              )
-              if wheel_meta is None or entry_points is None:
-                  raise SystemExit("wheel metadata is incomplete")
-              if "Root-Is-Purelib: true" not in archive.read(wheel_meta).decode():
-                  raise SystemExit("wheel is not marked pure Python")
-              scripts = archive.read(entry_points).decode()
-              for command in ("buildscope = ", "buildscope-diff = "):
-                  if command not in scripts:
-                      raise SystemExit(f"missing console script: {command}")
-              schema_names = sorted(
-                  name.removeprefix("buildscope/schemas/")
-                  for name in names
-                  if name.startswith("buildscope/schemas/")
-                  and name.endswith(".schema.json")
-              )
-              expected_schemas = [
-                  "buildscope-diff-v1.schema.json",
-                  "buildscope-snapshot-v1.schema.json",
-                  "buildscope-snapshot-v2.schema.json",
-                  "buildscope-snapshot-v3.schema.json",
-              ]
-              if schema_names != expected_schemas:
-                  raise SystemExit(
-                      f"unexpected wheel schema inventory: {schema_names!r}"
-                  )
-
-          with tarfile.open(sdist, "r:gz") as archive:
-              names = set(archive.getnames())
-              native = tuple(
-                  name
-                  for name in names
-                  if name.lower().endswith((".so", ".pyd", ".dylib", ".dll"))
-              )
-              if native:
-                  raise SystemExit(f"sdist contains native extensions: {native!r}")
-              required = {name for name in names if name.endswith("/pyproject.toml")}
-              if not required:
-                  raise SystemExit("sdist has no pyproject.toml")
-              if not any(name.endswith("/docs/quickstart.md") for name in names):
-                  raise SystemExit("sdist is missing the release quickstart")
-          PY
-
-      - name: Exercise every Python artifact through the native contract
-        run: |
-          set -euo pipefail
-          contract_root="$RUNNER_TEMP/buildscope-release-contract"
-          artifact_dir="$contract_root/artifacts"
-          python_bin="$(python -c 'import sys; print(sys.executable)')"
-          database="$GITHUB_WORKSPACE/buildscope/examples/cmake/compile_commands.json"
-          project_root="$GITHUB_WORKSPACE/buildscope/examples/cmake"
-          uv venv --python "$python_bin" "$contract_root/wheel-env"
-          uv venv --python "$python_bin" "$contract_root/sdist-env"
-          uv pip install --python "$contract_root/wheel-env/bin/python" --no-deps \
-            "$artifact_dir/buildscope-0.5.0-py3-none-any.whl"
-          uv pip install --python "$contract_root/sdist-env/bin/python" --no-deps \
-            "$artifact_dir/buildscope-0.5.0.tar.gz"
-          for format in wheel sdist; do
-            if [ "$format" = wheel ]; then
-              producer="$contract_root/wheel-env/bin/buildscope"
-            else
-              producer="$contract_root/sdist-env/bin/buildscope"
-            fi
-            "$producer" "$database" --project-root "$project_root" \
-              --schema-version v3 --include-analysis estimate \
-              --output "$contract_root/$format.snapshot.json"
-          done
-          ICI_PYTHON="$python_bin" "$artifact_dir/buildscope-0.5.0.pyz" \
-            "$database" --project-root "$project_root" \
-            --schema-version v3 --include-analysis estimate \
-            --output "$contract_root/pyz.snapshot.json"
-          cmp "$contract_root/wheel.snapshot.json" "$contract_root/sdist.snapshot.json"
-          cmp "$contract_root/wheel.snapshot.json" "$contract_root/pyz.snapshot.json"
-
-      - name: Build Qt6 native consumers and consume all release snapshots
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: |
-          set -euo pipefail
-          contract_root="$RUNNER_TEMP/buildscope-release-contract"
-          artifact_dir="$contract_root/artifacts"
-          native_dir="$contract_root/native-qt6"
-          python_bin="$(python -c 'import sys; print(sys.executable)')"
-          cmake -S buildscope -B "$native_dir" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON \
-            -DPython3_EXECUTABLE="$python_bin"
-          cmake --build "$native_dir" --parallel
-          ctest --test-dir "$native_dir" --output-on-failure
-          native_cli="$native_dir/src/core/buildscope-cli"
-          native_gui="$native_dir/src/gui/buildscope-gui"
-          for format in wheel sdist pyz; do
-            "$native_cli" "$contract_root/$format.snapshot.json" \
-              | tee "$contract_root/native-$format.txt"
-            grep -F "buildscope.snapshot/v3" "$contract_root/native-$format.txt"
-          done
-          cp "$native_cli" "$artifact_dir/buildscope-cli-qt6"
-          cp "$native_gui" "$artifact_dir/buildscope-gui-qt6"
-          test -x "$artifact_dir/buildscope-cli-qt6"
-          test -x "$artifact_dir/buildscope-gui-qt6"
-          "$native_gui" "$contract_root/pyz.snapshot.json" \
-            > "$contract_root/gui-smoke.log" 2>&1 &
-          gui_pid=$!
-          trap 'kill "$gui_pid" 2>/dev/null || true; wait "$gui_pid" 2>/dev/null || true' EXIT
-          sleep 3
-          if ! kill -0 "$gui_pid" 2>/dev/null; then
-            echo "::error::native GUI exited during release smoke"
-            exit 1
-          fi
-          echo "native Qt6 CLI and GUI consumed all Python snapshots"
-
-      - name: Record and verify release-contract checksums
-        run: |
-          set -euo pipefail
-          contract_root="$RUNNER_TEMP/buildscope-release-contract"
-          artifact_dir="$contract_root/artifacts"
-          {
-            echo "BuildScope 0.5.0 release contract: PASS"
-            echo "wheel, sdist, and pyz snapshots consumed by native Qt6 CLI"
-            echo "native Qt6 CLI and GUI built and GUI smoke stayed alive"
-          } > "$artifact_dir/release-contract.txt"
-          checksum_file="$contract_root/SHA256SUMS"
-          (
-            cd "$artifact_dir"
-            find . -maxdepth 1 -type f ! -name SHA256SUMS ! -name .gitignore \
-              -printf '%f\n' | sort | xargs sha256sum > "$checksum_file"
-          )
-          mv "$checksum_file" "$artifact_dir/SHA256SUMS"
-          (cd "$artifact_dir" && sha256sum --check SHA256SUMS)
-
-      - name: Upload BuildScope B5 release contract
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: buildscope-b5-release-contract
-          path: ${{ runner.temp }}/buildscope-release-contract/artifacts
-          if-no-files-found: warn
-          retention-days: 30
-
-  # One comment for the whole run, not one per project. It always starts after
-  # the report and quality prerequisites have reached a terminal result,
-  # including failures, so a PR never loses the report job behind a skipped
-  # dependency.
-  report-pr:
-    name: Publish Reports & Sticky Comment
-    if: ${{ always() && github.event_name == 'pull_request' }}
-    needs: [discover, verify, gui-build, native-product, quality-zoo-contract, envlens-python-quality]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    concurrency:
-      group: gh-pages-${{ github.repository }}
-      cancel-in-progress: false
-    permissions:
-      contents: write       # gh-pages 업로드
-      pull-requests: write  # sticky 댓글
-      pages: read           # Pages 활성화 여부 조회
-
-    steps:
-      # This job has write permissions, so its executable validator must come
-      # from the trusted base revision rather than PR-controlled source.
-      - name: Check out trusted report validator
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.base.sha }}
-          persist-credentials: false
-          sparse-checkout: ci/check_published_html.py
-          sparse-checkout-cone-mode: false
-
-      - name: Set up Python 3.10
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.10"
-
-      - name: Fetch ici release asset
-        run: |
-          set -euo pipefail
-          base="https://github.com/jihoon22-lee/ici/releases/download/${ICI_VERSION}"
-          curl -fsSL --retry 3 -o ici.pyz "${base}/ici.pyz"
-          curl -fsSL --retry 3 -o ici.pyz.sha256 "${base}/ici.pyz.sha256"
-          sha256sum --check ici.pyz.sha256
-          test "$(awk '{print $1}' ici.pyz.sha256)" = "$ICI_SHA256"
-          printf '%s  ici.pyz\n' "$ICI_SHA256" | sha256sum --check -
-          chmod +x ici.pyz
-
-      - name: Download all project reports
-        if: ${{ needs.discover.outputs.count != '0' }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          pattern: ici-report-*
-          path: reports
-
-      # Each artifact's root is the project directory's contents, so a download
-      # lands at reports/ici-report-<project>/verify_report.*. Strip the prefix
-      # so the directory name is the manifest label used by ici publish.
-      - name: Normalise report directory names
-        run: |
-          set -euo pipefail
-          mkdir -p reports
-          for dir in reports/ici-report-*; do
-            [ -d "$dir" ] || continue
-            project="${dir##*/ici-report-}"
-            mv "$dir" "reports/$project"
-          done
-          find reports -maxdepth 2 -type f -print | sort
-
-      - name: Validate complete report set
-        env:
-          PROJECT_NAMES: ${{ needs.discover.outputs.names }}
-          EXPECTED_REPORTS: ${{ needs.discover.outputs.count }}
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import os
-          from pathlib import Path
-
-          names = [name for name in os.environ["PROJECT_NAMES"].split(",") if name]
-          expected = int(os.environ["EXPECTED_REPORTS"])
-          if len(names) != expected:
-              raise SystemExit(f"manifest count mismatch: {len(names)} != {expected}")
-          actual = sorted(path.name for path in Path("reports").iterdir() if path.is_dir())
-          if sorted(names) != actual:
-              raise SystemExit(f"artifact/project mismatch: expected={sorted(names)!r} actual={actual!r}")
-          for name in names:
-              directory = Path("reports") / name
-              for filename in ("verify_report.html", "verify_report.json"):
-                  if not (directory / filename).is_file():
-                      raise SystemExit(f"missing {directory / filename}")
-          PY
-
-      - name: Publish reports and update the sticky comment
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          args=()
-          while IFS= read -r dir; do
-            args+=(--report-dir "$dir")
-          done < <(find reports -mindepth 1 -maxdepth 1 -type d -print | sort)
-          if [ "${#args[@]}" -gt 0 ]; then
-            ./ici.pyz publish "${args[@]}"
-          else
-            echo "No affected project reports; the scope-only sticky comment will be created."
-          fi
-
-      # ici publish owns report uploads and the single marker.  Add the scope
-      # ledger afterwards so omitted projects are visibly skipped, never an
-      # implicit PASS.  The API operation is deliberately based only on the
-      # trusted comment endpoint and manifest outputs, not PR source files.
-      - name: Annotate selected and skipped project scope
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PROJECT_NAMES: ${{ needs.discover.outputs.names }}
-          SKIPPED_PROJECTS: ${{ needs.discover.outputs.skipped_names }}
-          SCOPE_MODE: ${{ needs.discover.outputs.scope_mode }}
-          SCOPE_REASON: ${{ needs.discover.outputs.scope_reason }}
-          QUALITY_ZOO_MODE: ${{ needs.discover.outputs.quality_zoo_mode }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          comments_file="$RUNNER_TEMP/ici-comments.json"
-          gh api --paginate --slurp \
-            "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments?per_page=100" \
-            > "$comments_file"
-          python3 - "$comments_file" <<'PY'
-          import json
-          import os
-          import re
-          import subprocess
-          import sys
-          from pathlib import Path
-
-          comments_pages = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-          comments = [comment for page in comments_pages for comment in page]
-          marker = "<!-- ici-report -->"
-          marked = [
-              comment
-              for comment in comments
-              if marker in (comment.get("body") or "")
-          ]
-          if len(marked) > 1:
-              raise SystemExit("sticky comment cardinality mismatch before scope annotation")
-
-          selected = [name for name in os.environ["PROJECT_NAMES"].split(",") if name]
-          skipped = [name for name in os.environ["SKIPPED_PROJECTS"].split(",") if name]
-          scope_marker = "<!-- ici-scope -->"
-          scope = "\n".join(
-              (
-                  scope_marker,
-                  "### CI scope",
-                  f"- selected projects ({len(selected)}): "
-                  + (", ".join(f"`{name}`" for name in selected) or "none"),
-                  f"- skipped projects ({len(skipped)}): "
-                  + (", ".join(f"`{name}`" for name in skipped) or "none")
-                  + " — not run (not PASS)",
-                  f"- project mode: `{os.environ['SCOPE_MODE']}`; "
-                  f"reason: {os.environ['SCOPE_REASON']}",
-                  f"- Quality Zoo mode: `{os.environ['QUALITY_ZOO_MODE']}`",
-                  "",
-                  f"[CI scope run]({os.environ['RUN_URL']})",
-              )
-          )
-          if marked:
-              comment = marked[0]
-              if selected:
-                  body = comment.get("body") or ""
-                  body = re.sub(
-                      r"\n\n<!-- ici-scope -->.*?(?=\n\n<!-- ici-scope -->|\Z)",
-                      "",
-                      body,
-                      flags=re.DOTALL,
-                  ).rstrip()
-                  body = body + "\n\n" + scope
-              else:
-                  # A docs-only PR must not retain links from a previous run;
-                  # those links would falsely make out-of-scope projects look
-                  # like they were verified by this run.
-                  body = marker + "\n\n" + scope
-              endpoint = f"repos/{os.environ['GITHUB_REPOSITORY']}/issues/comments/{comment['id']}"
-              request = [
-                  "gh",
-                  "api",
-                  "--method",
-                  "PATCH",
-                  endpoint,
-                  "--input",
-                  "-",
-              ]
-          else:
-              body = marker + "\n\n" + scope
-              endpoint = (
-                  f"repos/{os.environ['GITHUB_REPOSITORY']}/issues/"
-                  f"{os.environ['PR_NUMBER']}/comments"
-              )
-              request = ["gh", "api", "--method", "POST", endpoint, "--input", "-"]
-          subprocess.run(
-              request,
-              input=json.dumps({"body": body}),
-              text=True,
-              check=True,
-          )
-          PY
-
-      # ici publish checks that the upload/comment API calls succeeded. This
-      # second check verifies the user-visible contract too: the current sticky
-      # comment contains exactly one Pages link per manifest project, and every
-      # link serves actual HTML after GitHub Pages catches up with gh-pages.
-      - name: Verify Sticky Comment & Published HTML
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PROJECT_NAMES: ${{ needs.discover.outputs.names }}
-          EXPECTED_REPORTS: ${{ needs.discover.outputs.count }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          pages_url="$(gh api "repos/${GITHUB_REPOSITORY}/pages" --jq '.html_url // empty')"
-          test -n "$pages_url"
-          pages_url="${pages_url%/}"
-          comments_file="$(mktemp)"
-          comment_file="$(mktemp)"
-          for attempt in $(seq 1 36); do
-            echo "checking sticky comment and Pages deployment (attempt $attempt/36)"
-            gh api --paginate --slurp \
-              "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments?per_page=100" \
-              > "$comments_file"
-            if python3 - "$comments_file" "$comment_file" "$pages_url" "$PR_NUMBER" \
-              "$PROJECT_NAMES" "$EXPECTED_REPORTS" "$RUN_URL" <<'PY'
-          import json
-          import re
-          import sys
-          from pathlib import Path
-
-          comments_pages = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-          comments = [comment for page in comments_pages for comment in page]
-          marker = "<!-- ici-report -->"
-          marked = [
-              comment
-              for comment in comments
-              if marker in (comment.get("body") or "")
-          ]
-          marker_count = sum(
-              (comment.get("body") or "").count(marker) for comment in comments
-          )
-          if len(marked) != 1 or marker_count != 1:
-              raise SystemExit(
-                  "sticky comment cardinality mismatch: expected one marker in "
-                  f"one comment, found {marker_count} markers across {len(marked)} comments"
-              )
-          body = marked[0].get("body") or ""
-          pages_url = sys.argv[3].rstrip("/")
-          pr_number = sys.argv[4]
-          names = [name for name in sys.argv[5].split(",") if name]
-          expected_count = int(sys.argv[6])
-          run_url = sys.argv[7]
-          if len(names) != expected_count:
-              raise SystemExit("manifest count changed while checking comment")
-          if f"]({run_url})" not in body:
-              raise SystemExit("sticky comment is not from the current workflow run")
-          expected_urls = {
-              f"{pages_url}/{name}/pr/{pr_number}/" for name in names
-          }
-          links = re.findall(r"\]\((https?://[^)\s]+)\)", body)
-          report_link_values = [link for link in links if link.startswith(pages_url + "/")]
-          report_links = set(report_link_values)
-          if (
-              report_links != expected_urls
-              or len(report_link_values) != expected_count
-              or len(report_links) != expected_count
-          ):
-              raise SystemExit(
-                  f"sticky report links not ready: expected={sorted(expected_urls)!r} "
-                  f"actual={sorted(report_links)!r}"
-              )
-          Path(sys.argv[2]).write_text(body, encoding="utf-8")
-          PY
-            then
-              pages_ok=true
-              while IFS= read -r project; do
-                [ -n "$project" ] || continue
-                url="${pages_url}/${project}/pr/${PR_NUMBER}/"
-                header_file="$(mktemp)"
-                body_file="$(mktemp)"
-                if curl -fsSL --location --max-time 20 -D "$header_file" -o "$body_file" "$url" \
-                  && grep -Eiq '^content-type:[[:space:]]*text/html' "$header_file" \
-                  && grep -Eiq '<!doctype[[:space:]]+html|<html([[:space:]]>])' "$body_file" \
-                  && python3 ci/check_published_html.py "$body_file" --project "$project"; then
-                  echo "verified HTML: $url"
-                else
-                  echo "Pages not ready: $url"
-                  pages_ok=false
-                fi
-              done < <(tr ',' '\n' <<< "$PROJECT_NAMES")
-              if [ "$pages_ok" = true ]; then
-                echo "verified ${EXPECTED_REPORTS} sticky HTML links and Pages responses"
-                exit 0
-              fi
-            fi
-            sleep 10
-          done
-          echo "::error::sticky comment or Pages HTML did not become ready"
-          exit 1
-
-      - name: Enforce prerequisite matrix results
-        env:
-          DISCOVER_RESULT: ${{ needs.discover.result }}
-          VERIFY_RESULT: ${{ needs.verify.result }}
-          GUI_RESULT: ${{ needs.gui-build.result }}
-          NATIVE_RESULT: ${{ needs.native-product.result }}
-          QUALITY_ZOO_RESULT: ${{ needs.quality-zoo-contract.result }}
-          ENVLENS_RESULT: ${{ needs.envlens-python-quality.result }}
-          PROJECT_COUNT: ${{ needs.discover.outputs.count }}
-          GUI_COUNT: ${{ needs.discover.outputs.gui_count }}
-          NATIVE_COUNT: ${{ needs.discover.outputs.native_count }}
-          PROJECT_NAMES: ${{ needs.discover.outputs.names }}
-          QUALITY_ZOO_MODE: ${{ needs.discover.outputs.quality_zoo_mode }}
-        run: |
-          set -euo pipefail
-          test "$DISCOVER_RESULT" = success
-          if [ "$PROJECT_COUNT" -gt 0 ]; then test "$VERIFY_RESULT" = success; else test "$VERIFY_RESULT" = skipped; fi
-          if [ "$GUI_COUNT" -gt 0 ]; then test "$GUI_RESULT" = success; else test "$GUI_RESULT" = skipped; fi
-          if [ "$NATIVE_COUNT" -gt 0 ]; then test "$NATIVE_RESULT" = success; else test "$NATIVE_RESULT" = skipped; fi
-          if [ "$QUALITY_ZOO_MODE" = skipped ]; then test "$QUALITY_ZOO_RESULT" = skipped; else test "$QUALITY_ZOO_RESULT" = success; fi
-          if [[ ",$PROJECT_NAMES," == *,envlens,* ]]; then test "$ENVLENS_RESULT" = success; else test "$ENVLENS_RESULT" = skipped; fi
-
-  # Main reports are a separate trusted publication boundary. PR publication
-  # updates one sticky comment; a main push writes stable <project>/main paths
-  # only after every quality job in the exact run has reached success.
-  publish-main:
-    name: Publish Main Portfolio Reports
-    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    needs:
-      - discover
-      - verify
-      - gui-build
-      - native-product
-      - benchmark-smoke
-      - diskmap-benchmark-smoke
-      - buildscope-benchmark-smoke
-      - buildscope-ici-deep
-      - buildscope-python-quality
-      - envlens-python-quality
-      - buildscope-release-contract
-      - quality-zoo-contract
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    concurrency:
-      group: gh-pages-${{ github.repository }}
-      cancel-in-progress: false
-    permissions:
-      contents: write
-      pages: read
-
-    steps:
-      - name: Require every main quality result before publication
-        env:
-          DISCOVER_RESULT: ${{ needs.discover.result }}
-          VERIFY_RESULT: ${{ needs.verify.result }}
-          GUI_RESULT: ${{ needs.gui-build.result }}
-          NATIVE_RESULT: ${{ needs.native-product.result }}
-          BENCHMARK_SMOKE_RESULT: ${{ needs.benchmark-smoke.result }}
-          DISKMAP_BENCHMARK_SMOKE_RESULT: ${{ needs.diskmap-benchmark-smoke.result }}
-          BUILDSCOPE_BENCHMARK_SMOKE_RESULT: ${{ needs.buildscope-benchmark-smoke.result }}
-          BUILDSCOPE_DEEP_RESULT: ${{ needs.buildscope-ici-deep.result }}
-          BUILDSCOPE_PYTHON_RESULT: ${{ needs.buildscope-python-quality.result }}
-          ENVLENS_RESULT: ${{ needs.envlens-python-quality.result }}
-          BUILDSCOPE_RELEASE_RESULT: ${{ needs.buildscope-release-contract.result }}
-          QUALITY_ZOO_RESULT: ${{ needs.quality-zoo-contract.result }}
-          GUI_COUNT: ${{ needs.discover.outputs.gui_count }}
-          NATIVE_COUNT: ${{ needs.discover.outputs.native_count }}
-        run: |
-          set -euo pipefail
-          test "$DISCOVER_RESULT" = success
-          test "$VERIFY_RESULT" = success
-          test "$BENCHMARK_SMOKE_RESULT" = success
-          test "$DISKMAP_BENCHMARK_SMOKE_RESULT" = success
-          test "$BUILDSCOPE_BENCHMARK_SMOKE_RESULT" = success
-          test "$BUILDSCOPE_DEEP_RESULT" = success
-          test "$BUILDSCOPE_PYTHON_RESULT" = success
-          test "$ENVLENS_RESULT" = success
-          test "$BUILDSCOPE_RELEASE_RESULT" = success
-          test "$QUALITY_ZOO_RESULT" = success
-          if [ "$GUI_RESULT" != success ]; then
-            test "$GUI_COUNT" = 0
-            test "$GUI_RESULT" = skipped
-          fi
-          if [ "$NATIVE_RESULT" != success ]; then
-            test "$NATIVE_COUNT" = 0
-            test "$NATIVE_RESULT" = skipped
-          else
-            test "$NATIVE_COUNT" -gt 0
-          fi
-
-      - name: Checkout exact main source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-
-      - name: Validate exact current main identity
-        env:
-          EXPECTED_REF: ${{ github.ref }}
-          EXPECTED_SHA: ${{ github.sha }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          test "$EXPECTED_REF" = refs/heads/main
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          remote_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
-          test "$remote_main" = "$EXPECTED_SHA"
-
-      - name: Set up Python 3.10
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.10"
-
-      - name: Fetch checksummed public ici release
-        run: |
-          set -euo pipefail
-          ici_root="$RUNNER_TEMP/toy-main-ici"
-          ici_pyz="$ici_root/ici.pyz"
-          mkdir -p "$ici_root"
-          base="https://github.com/jihoon22-lee/ici/releases/download/${ICI_VERSION}"
-          curl -fsSL --retry 3 -o "$ici_pyz" "${base}/ici.pyz"
-          curl -fsSL --retry 3 -o "$ici_root/ici.pyz.sha256" "${base}/ici.pyz.sha256"
-          manifest_hash="$(awk 'NR == 1 {print $1}' "$ici_root/ici.pyz.sha256")"
-          manifest_name="$(awk 'NR == 1 {print $2}' "$ici_root/ici.pyz.sha256")"
-          test "$manifest_name" = ici.pyz
-          test "$manifest_hash" = "$ICI_SHA256"
-          (cd "$ici_root" && sha256sum --check ici.pyz.sha256)
-          printf '%s  %s\n' "$ICI_SHA256" "$ici_pyz" | sha256sum --check -
-          test "$(sha256sum "$ici_pyz" | awk '{print $1}')" = "$ICI_SHA256"
-          chmod +x "$ici_pyz"
-          test -x "$ici_pyz"
-          case "$ici_pyz" in
-            /*) ;;
-            *) echo "::error::main ici path must be absolute" >&2; exit 1 ;;
-          esac
-          printf 'ICI_MAIN_BIN=%s\n' "$ici_pyz" >> "$GITHUB_ENV"
-          ICI_PYTHON=python3.10 "$ici_pyz" --version
-
-      - name: Download all project reports
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          pattern: ici-report-*
-          path: reports
-
-      - name: Normalise and validate the complete report set
-        env:
-          PROJECT_NAMES: ${{ needs.discover.outputs.names }}
-          EXPECTED_REPORTS: ${{ needs.discover.outputs.count }}
-        run: |
-          set -euo pipefail
-          for dir in reports/ici-report-*; do
-            [ -d "$dir" ] || continue
-            project="${dir##*/ici-report-}"
-            mv "$dir" "reports/$project"
-          done
-          python3 - <<'PY'
-          import os
-          from pathlib import Path
-
-          names = [name for name in os.environ["PROJECT_NAMES"].split(",") if name]
-          expected = int(os.environ["EXPECTED_REPORTS"])
-          if len(names) != expected:
-              raise SystemExit(f"manifest count mismatch: {len(names)} != {expected}")
-          actual = sorted(path.name for path in Path("reports").iterdir() if path.is_dir())
-          if sorted(names) != actual:
-              raise SystemExit(
-                  f"artifact/project mismatch: expected={sorted(names)!r} actual={actual!r}"
-              )
-          for name in names:
-              directory = Path("reports") / name
-              for filename in ("verify_report.html", "verify_report.json"):
-                  if not (directory / filename).is_file():
-                      raise SystemExit(f"missing {directory / filename}")
-          PY
-          while IFS= read -r project; do
-            [ -n "$project" ] || continue
-            python3 ci/check_published_html.py \
-              "reports/$project/verify_report.html" --project "$project"
-          done < <(tr ',' '\n' <<< "$PROJECT_NAMES")
-
-      - name: Publish exact trusted main reports
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PROJECT_NAMES: ${{ needs.discover.outputs.names }}
-          EXPECTED_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          remote_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
-          test "$remote_main" = "$EXPECTED_SHA"
-          args=()
-          while IFS= read -r project; do
-            [ -n "$project" ] || continue
-            args+=(--report-dir "$project=$GITHUB_WORKSPACE/reports/$project")
-          done < <(tr ',' '\n' <<< "$PROJECT_NAMES")
-          test "${#args[@]}" -gt 0
-          "$ICI_MAIN_BIN" publish "${args[@]}"
-
-      - name: Verify exact-title Zero-CDN main Pages
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PROJECT_NAMES: ${{ needs.discover.outputs.names }}
-          EXPECTED_REPORTS: ${{ needs.discover.outputs.count }}
-        run: |
-          set -euo pipefail
-          pages_url="$(gh api "repos/${GITHUB_REPOSITORY}/pages" --jq '.html_url // empty')"
-          test -n "$pages_url"
-          pages_url="${pages_url%/}"
-          for attempt in $(seq 1 36); do
-            echo "checking trusted main Pages (attempt $attempt/36)"
-            passed=0
-            while IFS= read -r project; do
-              [ -n "$project" ] || continue
-              url="${pages_url}/${project}/main/?run=${GITHUB_RUN_ID}"
-              header_file="$RUNNER_TEMP/main-${project}.headers"
-              body_file="$RUNNER_TEMP/main-${project}.html"
-              if curl -fsSL --location --max-time 20 -D "$header_file" -o "$body_file" "$url" \
-                && grep -Eiq '^content-type:[[:space:]]*text/html' "$header_file" \
-                && cmp -s "reports/$project/verify_report.html" "$body_file" \
-                && python3 ci/check_published_html.py "$body_file" --project "$project"; then
-                passed=$((passed + 1))
-              else
-                echo "Pages not ready: ${pages_url}/${project}/main/"
-              fi
-            done < <(tr ',' '\n' <<< "$PROJECT_NAMES")
-            if [ "$passed" -eq "$EXPECTED_REPORTS" ]; then
-              echo "verified $passed trusted main report pages"
-              exit 0
-            fi
-            sleep 10
-          done
-          echo "::error::trusted main Pages did not satisfy the HTML contract"
-          exit 1
-
-  # A stable check name for branch protection. Matrix check names can change as
-  # projects are added, but this job always requires every current matrix leg
-  # and the event-specific publication contract.
+  # Branch protection requires a single stable check named "Merge Gate".
+  # Keeping the aggregate job means the ruleset does not need to change when
+  # product jobs are added — a new product only has to join `needs`.
   merge-gate:
     name: Merge Gate
     if: ${{ always() }}
-    needs: [discover, verify, gui-build, native-product, quality-zoo-contract, benchmark-smoke, diskmap-benchmark-smoke, buildscope-benchmark-smoke, buildscope-ici-deep, buildscope-python-quality, envlens-python-quality, buildscope-release-contract, report-pr, publish-main]
+    needs: [loglens, diskmap, buildscope, buildscope-python, envlens, abilens]
     runs-on: ubuntu-latest
+    permissions: {}
+
     steps:
-      - name: Require every quality job
+      - name: Require every product gate
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          DISCOVER_RESULT: ${{ needs.discover.result }}
-          VERIFY_RESULT: ${{ needs.verify.result }}
-          GUI_RESULT: ${{ needs.gui-build.result }}
-          NATIVE_RESULT: ${{ needs.native-product.result }}
-          QUALITY_ZOO_RESULT: ${{ needs.quality-zoo-contract.result }}
-          BENCHMARK_SMOKE_RESULT: ${{ needs.benchmark-smoke.result }}
-          DISKMAP_BENCHMARK_SMOKE_RESULT: ${{ needs.diskmap-benchmark-smoke.result }}
-          BUILDSCOPE_BENCHMARK_SMOKE_RESULT: ${{ needs.buildscope-benchmark-smoke.result }}
-          BUILDSCOPE_DEEP_RESULT: ${{ needs.buildscope-ici-deep.result }}
-          BUILDSCOPE_PYTHON_RESULT: ${{ needs.buildscope-python-quality.result }}
-          ENVLENS_RESULT: ${{ needs.envlens-python-quality.result }}
-          BUILDSCOPE_RELEASE_RESULT: ${{ needs.buildscope-release-contract.result }}
-          GUI_COUNT: ${{ needs.discover.outputs.gui_count }}
-          NATIVE_COUNT: ${{ needs.discover.outputs.native_count }}
-          PROJECT_COUNT: ${{ needs.discover.outputs.count }}
-          PROJECT_NAMES: ${{ needs.discover.outputs.names }}
-          QUALITY_ZOO_MODE: ${{ needs.discover.outputs.quality_zoo_mode }}
-          REPORT_RESULT: ${{ needs.report-pr.result }}
-          MAIN_PUBLISH_RESULT: ${{ needs.publish-main.result }}
+          LOGLENS: ${{ needs.loglens.result }}
+          DISKMAP: ${{ needs.diskmap.result }}
+          BUILDSCOPE: ${{ needs.buildscope.result }}
+          BUILDSCOPE_PYTHON: ${{ needs.buildscope-python.result }}
+          ENVLENS: ${{ needs.envlens.result }}
+          ABILENS: ${{ needs.abilens.result }}
         run: |
           set -euo pipefail
-          require_selected() {
-            local label="$1" result="$2" selected="$3"
-            if [ "$selected" -gt 0 ]; then
-              test "$result" = success || {
-                echo "::error::$label was selected but concluded $result"
-                return 1
-              }
-            else
-              test "$result" = skipped || {
-                echo "::error::$label was not selected but concluded $result"
-                return 1
-              }
+          failed=0
+          for pair in \
+            "loglens:$LOGLENS" \
+            "diskmap:$DISKMAP" \
+            "buildscope:$BUILDSCOPE" \
+            "buildscope-python:$BUILDSCOPE_PYTHON" \
+            "envlens:$ENVLENS" \
+            "abilens:$ABILENS"; do
+            name="${pair%%:*}"
+            result="${pair##*:}"
+            if [ "$result" != success ]; then
+              echo "::error::$name gate result: $result"
+              failed=1
             fi
-          }
-          has_project() {
-            case ",$PROJECT_NAMES," in
-              *,"$1",*) return 0 ;;
-              *) return 1 ;;
-            esac
-          }
-          test "$DISCOVER_RESULT" = success
-          require_selected verify "$VERIFY_RESULT" "$PROJECT_COUNT"
-          require_selected native-product "$NATIVE_RESULT" "$NATIVE_COUNT"
-          require_selected gui-build "$GUI_RESULT" "$GUI_COUNT"
-          if [ "$QUALITY_ZOO_MODE" = skipped ]; then
-            test "$QUALITY_ZOO_RESULT" = skipped
-          else
-            test "$QUALITY_ZOO_RESULT" = success
-          fi
-          if has_project loglens; then
-            test "$BENCHMARK_SMOKE_RESULT" = success
-          else
-            test "$BENCHMARK_SMOKE_RESULT" = skipped
-          fi
-          if has_project diskmap; then
-            test "$DISKMAP_BENCHMARK_SMOKE_RESULT" = success
-          else
-            test "$DISKMAP_BENCHMARK_SMOKE_RESULT" = skipped
-          fi
-          if has_project buildscope; then
-            test "$BUILDSCOPE_BENCHMARK_SMOKE_RESULT" = success
-            test "$BUILDSCOPE_DEEP_RESULT" = success
-            test "$BUILDSCOPE_PYTHON_RESULT" = success
-            test "$BUILDSCOPE_RELEASE_RESULT" = success
-          else
-            test "$BUILDSCOPE_BENCHMARK_SMOKE_RESULT" = skipped
-            test "$BUILDSCOPE_DEEP_RESULT" = skipped
-            test "$BUILDSCOPE_PYTHON_RESULT" = skipped
-            test "$BUILDSCOPE_RELEASE_RESULT" = skipped
-          fi
-          if has_project envlens; then test "$ENVLENS_RESULT" = success; else test "$ENVLENS_RESULT" = skipped; fi
-          if [ "$EVENT_NAME" = pull_request ]; then
-            test "$REPORT_RESULT" = success
-            test "$MAIN_PUBLISH_RESULT" = skipped
-          elif [ "$EVENT_NAME" = push ]; then
-            test "$EVENT_NAME" = push
-            test "$REPORT_RESULT" = skipped
-            test "$MAIN_PUBLISH_RESULT" = success
-          elif [ "$EVENT_NAME" = workflow_dispatch ]; then
-            test "$REPORT_RESULT" = skipped
-            test "$MAIN_PUBLISH_RESULT" = skipped
-          else
-            echo "::error::unsupported event: $EVENT_NAME"
-            exit 1
-          fi
+          done
+          test "$failed" = 0
+          echo "All product gates passed."
