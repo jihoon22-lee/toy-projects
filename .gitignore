@@ -27,6 +27,6 @@ dist/
 *.swp
 .DS_Store
 
-# CI helper
+# Python caches
 __pycache__/
 *.pyc

@@ -1,4 +1,23 @@
-# LogLens parser and GUI contract
+# LogLens
+
+LogLens is a log viewer, parser, and investigation workbench for Linux. A
+Qt-free core turns raw log bytes into structured records with honest
+diagnostics, a console tool exposes filtering and streaming, and a Qt Widgets
+shell adds tailing, search, triage state, bookmarks, annotations, timeline
+comparison, and byte-preserving export.
+
+## Build and test
+
+```sh
+cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON
+cmake --build build/gui --parallel
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/gui --output-on-failure
+```
+
+Qt6 is the default leg; drop `CMAKE_DISABLE_FIND_PACKAGE_Qt5=ON` and pass
+`CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON` instead for the Qt 5.15 leg.
+
+## Parser and GUI contract
 
 LogLens keeps the source bytes of every record in `LogRecord::raw`.  Parsing is
 best effort and never treats malformed input as permission to discard evidence:
@@ -235,16 +254,12 @@ and intentionally do not claim a diagnosis.
 
 ### Verification and current boundary
 
-The Qt5 and Qt6 focused investigation tests cover timeline mouse interaction,
-UTF-8 highlight rendering (including byte-to-UTF-16 offset conversion), triage
-CRUD/migration and persistence, bookmark/annotation display, byte-preserving export,
-diagnostic rendering, comparison navigation, and empty/error paths.  The
-  current local focused CTest result is `18/18` for each Qt major, and the native
-  TSan partition is `41/41 PASS`.  The final exact ici candidate deep local run
-  reports test engine `18/18 PASS`, line/function/branch coverage
-  `90.5% / 96.1% / 78.0%`, and TEM `4.81`.  Remote PR/Pages acceptance is a
-  separate gate; this README does not treat a local candidate or an unreleased
-  toy build as a stable LogLens release.  The product remains `0.1.0`/`Unreleased`.
+The focused investigation tests cover timeline mouse interaction, UTF-8
+highlight rendering (including byte-to-UTF-16 offset conversion), triage
+CRUD/migration and persistence, bookmark/annotation display, byte-preserving
+export, diagnostic rendering, comparison navigation, and empty/error paths.
+The focused suite is `18/18` under Qt6, and the native TSan partition is
+`41/41 PASS`.
 
 ## loglens 스트림 계약
 
@@ -329,29 +344,13 @@ CLI의 --level shorthand와 --filter는 각각 독립적으로 parse한 뒤 결�
 GUI도 입력을 trim해서 버리지 않고 untrimmed UTF-8 bytes를 parser에 전달한다. depth 제한 오류는
 허용 한도를 넘긴 추가 NOT/괄호 nesting token을 가리키며, unsupported escape가 multibyte UTF-8
 scalar를 시작하면 backslash부터 scalar 전체를 range에 포함한다. 실패한 apply는 이전에 적용된
-정상 filter를 계속 유지한다. parser의 TokenRange/PredicateTokens 구조화로 새 clang-tidy
-swapped-parameter 경고도 제거했다.
-
-이 slice의 Qt5/Qt6 native suite는 각각 12/12 pass이고, versioned `ici v0.10.2` local candidate
-`ici.pyz`(공개 release asset 아님)로 수행한 uncached deep 검증의 artifact SHA-256은
-`2af5198d1348a64c39f4f37d12657aa9a2c4bf3ddf034a9099909c41e86e30e7`이다. 전체 suite는 clazy가
-사용 불가하고 기존 lint finding이 남아 `WARN`이지만 다른 실패는 없다. 변경된
-`filter_expr.cpp`, `main.cpp`, `main_window.cpp`는 actionable lint target 0건이다. 전체 lint는
-26개 target으로 보이며, 그중 clang-tidy `note:` 16줄은 ici가 별도 target으로 부풀려 세고 있다.
-이는 ici 엔진의 알려진 후속 보완 과제로 기록한다. `compile_db`는 40개 configuration의 production
-unit 14/14 `PASS`, `test`는 12/12 `PASS`이며 line/function/branch coverage는
-`93.3% / 96.7% / 82.4%`, `complexity`는 218개 대상에서 max 15 `PASS`, `sanitize`는 `PASS`다.
-HTML은 484,899 bytes이며 exact title `ici Verification Report — loglens`와 Zero-CDN을 확인했다.
-LogLens product version/release는 아직 pending이고, 더 넓은 L3 parser-pipeline 완료를 의미하지 않는다.
+정상 filter를 계속 유지한다.
 
 2026-08-31에 canonical 1 GiB synthetic log(정확히 1,073,741,824 bytes, 1,000,000 records,
 SHA-256 `11186d3021e558c8ed5e33473198a6f9f281ca0605ae79739a928a87156435bb`)의 전체 sweep을
 완료했다. capacity `8192, 16384, 32768, 65536, 131072, 262144`를 각 3회, process timeout
 180초로 실행했으며, 두 Qt major에서 `8192..65536`이 모든 correctness·성능·RSS budget을
-만족했다. `131072`은 core RSS, `262144`는 core와 GUI RSS budget을 넘겼다. PR #26은
-`c45176ce25f2efd66ea9b0ed9b48690e34cc8679`로 squash merge됐고, [main 대용량 workflow
-run](https://github.com/jihoon22-lee/toy-projects/actions/runs/33355312096)의 Qt5/Qt6
-benchmark·combine·verdict가 모두 green이었다.
+만족했다. `131072`은 core RSS, `262144`는 core와 GUI RSS budget을 넘겼다.
 
 고정한 budget은 first result `≤ 5000 ms`, first paint `≤ 5000 ms`, 전체 load `≤ 60000 ms`,
 throughput `≥ 25 MiB/s`, records `≥ 25000 records/s`, core peak RSS `≤ 256 MiB`, GUI peak
@@ -392,39 +391,9 @@ Qt 5는 `build/benchmark-qt5`를 사용하고 `CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON
 검증한 뒤 core/GUI raw sample을 집계한다. `summary.json`, `summary.md`, `toolchain.json`,
 `toolchain.txt`, `samples/*.json`만 artifact로 남기며 1 GiB input과 process log는 scratch에
 둔다. `.github/workflows/loglens-benchmark.yml`의 Qt5/Qt6 matrix는 `workflow_dispatch`와
-주간 schedule에서만 실행되고 일반 PR/merge gate에는 포함하지 않는다. 이 benchmark는
-[PR #26](https://github.com/jihoon22-lee/toy-projects/pull/26)으로
-`c45176ce25f2efd66ea9b0ed9b48690e34cc8679`에 squash merge됐다. 최종 PR gate인
-[workflow run `33355058919`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33355058919)은
-모든 checks가 green이었고, 기존 [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/26#issuecomment-5473343910)는
-`diskmap: PASS · TEM 4.90`, `loglens: PASS · TEM 4.80`, warn 0과 HTML 링크를 유지한다.
-Pages `diskmap/pr/26/`와 `loglens/pr/26/`는 각각 HTTP 200·`text/html`·external refs 0개
-(180160/334215 bytes)였다. main 대용량 workflow의 combined summary SHA-256은
-`5e3292950958a4c678a0c54bf75e7b2546ad1528f43529b6cce1c3dff4e150a8`이다.
+주간 schedule에서만 실행되고 일반 PR에는 포함하지 않는다.
 
-일반 PR에는 별도로 `.github/workflows/ci.yml`의 `benchmark-smoke`가 포함된다. 이것은
+일반 PR에는 별도로 `.github/workflows/ci.yml`의 benchmark smoke가 포함된다. 이것은
 1 MiB/1,000 records, capacity `64,256`, 1회, 30초 timeout의 Qt6 harness correctness run이며
-budget을 건너뛰고 결과 artifact만 업로드한다. `Merge Gate`가 이 smoke 성공을 required check로
-요구하므로 benchmark harness 자체의 회귀는 PR에서 막지만, 비용이 큰 1 GiB budget sweep은
+budget을 건너뛰고 결과 artifact만 업로드한다. 비용이 큰 1 GiB budget sweep은
 opt-in/nightly workflow에 남긴다.
-
-PR [#24](https://github.com/jihoon22-lee/toy-projects/pull/24)의 구현 head `fa4fd1a`는
-workflow [`33348597272`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33348597272)에서
-공개 ici 검증, 두 프로젝트 Qt5·Qt6 GUI, report publish와 Merge Gate를 모두 통과했다.
-[sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/24#issuecomment-5472700934)에
-두 PASS 결과와 HTML 링크가 게시됐고, 두 Pages 문서는 HTTP 200·`text/html`·외부 참조 0개로
-직접 확인했다.
-
-위 원격 기록은 bounded foundation에 대한 과거 증거다. background/Tail N 변경의 이전 local
-ici deep no-cache 결과는 구현 head `e19fea9`에서 Suite PASS, 11 pass / 0 warn / 0 fail / 0
-error / 2 skip, TEM 4.83, line/function/branch 93.4%/96.6%/81.6%, maximum complexity
-15(0 issues), duplication 1.72%, sanitizer PASS, HTML 428,025 bytes·external refs 0개였다.
-최신 background/Tail N 구현 head `ce2a7cd91ff0a47c4f153b60f7fb7984de406ce9`는
-[PR #25](https://github.com/jihoon22-lee/toy-projects/pull/25)에서
-[workflow `33351033448`](https://github.com/jihoon22-lee/toy-projects/actions/runs/33351033448)의
-모든 checks를 통과했고 merge commit은
-`69db15966ca0c032026aeb7b742c4eed6335910d`다. [sticky comment](https://github.com/jihoon22-lee/toy-projects/pull/25#issuecomment-5472960253)는
-두 프로젝트 PASS와 HTML 링크를 담았고, Pages `diskmap/pr/25/`와 `loglens/pr/25/`는 각각
-HTTP 200·`text/html`·external refs 0개(180160/327074 bytes)였다. 이 원격 증거는
-background/Tail N 변경에 대한 것이며, 1 GiB benchmark는 PR26 병합과 main workflow
-검증까지 완료됐다. L2 이후의 parser/filter와 release 조건은 별도 stream으로 유지한다.
