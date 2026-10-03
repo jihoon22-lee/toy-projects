@@ -7,21 +7,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-# Use whichever supported Qt major is installed. Keeping the package discovery
-# versioned makes the same source build on a Qt 6 desktop and a Qt 5.15 host.
-# CMake treats a disabled package as a hard error when it appears in a REQUIRED
-# NAMES list, so remove either explicitly disabled name before discovery. This
-# lets CI prove both directions without relying on search-path ordering.
-set(_qt_package_names Qt6 Qt5)
-if(CMAKE_DISABLE_FIND_PACKAGE_Qt6)
-    list(REMOVE_ITEM _qt_package_names Qt6)
-endif()
-if(CMAKE_DISABLE_FIND_PACKAGE_Qt5)
-    list(REMOVE_ITEM _qt_package_names Qt5)
-endif()
-find_package(QT NAMES ${_qt_package_names} REQUIRED COMPONENTS Widgets Test)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Test)
-message(STATUS "loglens: using Qt${QT_VERSION_MAJOR} ${QT_VERSION}")
+# Qt6 only. The GUI links Widgets; tests link Test.
+find_package(Qt6 REQUIRED COMPONENTS Widgets Test)
+message(STATUS "loglens: using Qt6 ${Qt6_VERSION}")
 
 # The core is Qt-free so it links anywhere; the GUI adds Qt on top.
 add_library(loglens_core STATIC
@@ -109,7 +97,7 @@ foreach(name IN ITEMS
         filter_expr highlight_rules initial_load log_parser log_record log_source log_stats
         persistence ring_buffer triage window_analysis)
     add_executable(test_${name} tests/test_${name}.cpp)
-    target_link_libraries(test_${name} PRIVATE loglens_core)
+    target_link_libraries(test_${name} PRIVATE loglens_core Qt6::Test)
     target_include_directories(test_${name} PRIVATE tests)
     # Always the project root. The tests read fixtures by project-relative
     # path.
@@ -119,7 +107,7 @@ endforeach()
 # The Qt model test links the widget library and Qt Test. moc must run for
 # LogModel's vtable to resolve, so this test guards the link honestly.
 add_executable(test_log_model tests/test_log_model.cpp)
-target_link_libraries(test_log_model PRIVATE loglens_gui Qt${QT_VERSION_MAJOR}::Test)
+target_link_libraries(test_log_model PRIVATE loglens_gui Qt6::Test)
 target_include_directories(test_log_model PRIVATE tests)
 register_qt_test(test_log_model __full__)
 
@@ -127,7 +115,7 @@ register_qt_test(test_log_model __full__)
 # the real queued signal/ack protocol, rather than substituting a synchronous
 # fake that could hide queued-batch or stale-job races.
 add_executable(test_log_load_worker tests/test_log_load_worker.cpp)
-target_link_libraries(test_log_load_worker PRIVATE loglens_gui Qt${QT_VERSION_MAJOR}::Test)
+target_link_libraries(test_log_load_worker PRIVATE loglens_gui Qt6::Test)
 target_include_directories(test_log_load_worker PRIVATE tests)
 register_qt_test(test_log_load_worker
     batchesAreBoundedAndWaitForAcknowledgement
@@ -152,7 +140,7 @@ add_test(NAME test_log_worker_atomic COMMAND test_log_worker_atomic
 # links the same GUI library as the application so moc, widget ownership and
 # timer connections are exercised rather than replaced with a test double.
 add_executable(test_main_window tests/test_main_window.cpp)
-target_link_libraries(test_main_window PRIVATE loglens_gui Qt${QT_VERSION_MAJOR}::Test)
+target_link_libraries(test_main_window PRIVATE loglens_gui Qt6::Test)
 target_include_directories(test_main_window PRIVATE tests)
 register_qt_test(test_main_window
     openingAFileFillsTheTable
@@ -176,7 +164,7 @@ register_qt_test(test_main_window
 # Persistence controls are kept in a focused Qt test so the store contract is
 # exercised through the same widgets and worker request as the application.
 add_executable(test_gui_persistence tests/test_gui_persistence.cpp)
-target_link_libraries(test_gui_persistence PRIVATE loglens_gui Qt${QT_VERSION_MAJOR}::Test)
+target_link_libraries(test_gui_persistence PRIVATE loglens_gui Qt6::Test)
 target_include_directories(test_gui_persistence PRIVATE tests)
 register_qt_test(test_gui_persistence
     loadsProfilesAndQueriesAndAppliesTheirSemantics
@@ -186,7 +174,7 @@ register_qt_test(test_gui_persistence
 # bookmark/annotation persistence, lossless selection export, timeline range
 # filtering and evidence navigation all use the production widgets.
 add_executable(test_gui_triage tests/test_gui_triage.cpp)
-target_link_libraries(test_gui_triage PRIVATE loglens_gui Qt${QT_VERSION_MAJOR}::Test)
+target_link_libraries(test_gui_triage PRIVATE loglens_gui Qt6::Test)
 target_include_directories(test_gui_triage PRIVATE tests)
 register_qt_test(test_gui_triage
     timelinePublishesAndClearsHalfOpenRanges

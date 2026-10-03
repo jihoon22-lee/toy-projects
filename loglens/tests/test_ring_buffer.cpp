@@ -4,12 +4,39 @@
 #include <stdexcept>
 
 #include "loglens/ring_buffer.hpp"
+#include <QtTest>
+
+namespace impl {
+void testBasics();
+void testWrapAround();
+void testExactlyFullThenOneMore();
+void testZeroCapacity();
+void testCapacityLimit();
+void testFindAndReplace();
+void testClear();
+} // namespace impl
+
+class TestRingBuffer : public QObject {
+    Q_OBJECT
+private slots:
+    void testBasics() { impl::testBasics(); }
+    void testWrapAround() { impl::testWrapAround(); }
+    void testExactlyFullThenOneMore() { impl::testExactlyFullThenOneMore(); }
+    void testZeroCapacity() { impl::testZeroCapacity(); }
+    void testCapacityLimit() { impl::testCapacityLimit(); }
+    void testFindAndReplace() { impl::testFindAndReplace(); }
+    void testClear() { impl::testClear(); }
+};
+
+QTEST_GUILESS_MAIN(TestRingBuffer)
+
+#include "test_ring_buffer.moc"
 
 using loglens::Level;
 using loglens::LogRecord;
 using loglens::RingBuffer;
 
-namespace {
+namespace impl {
 
 void testBasics() {
     RingBuffer buffer(3);
@@ -191,15 +218,4 @@ void testClear() {
     CHECK_EQ(buffer.at(0).message, std::string("fresh"));
 }
 
-} // namespace
-
-int main() {
-    testBasics();
-    testWrapAround();
-    testExactlyFullThenOneMore();
-    testZeroCapacity();
-    testCapacityLimit();
-    testFindAndReplace();
-    testClear();
-    return checkSummary();
-}
+} // namespace impl

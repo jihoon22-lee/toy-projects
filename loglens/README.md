@@ -9,13 +9,12 @@ comparison, and byte-preserving export.
 ## Build and test
 
 ```sh
-cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON
-cmake --build build/gui --parallel
+cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release
+cmake --build build/gui --parallel 2
 QT_QPA_PLATFORM=offscreen ctest --test-dir build/gui --output-on-failure
 ```
 
-Qt6 is the default leg; drop `CMAKE_DISABLE_FIND_PACKAGE_Qt5=ON` and pass
-`CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON` instead for the Qt 5.15 leg.
+LogLens targets Qt 6.
 
 ## Parser and GUI contract
 
@@ -76,7 +75,7 @@ validated before conversion.  Offset errors use the dedicated
 with a missing timestamp.
 
 The parser is dependency-free and compiled as part of `loglens_core`, so the
-same contract is exercised by the CLI, background loader, and Qt5/Qt6 GUI.
+same contract is exercised by the CLI, background loader, and Qt6 GUI.
 Epoch conversion uses checked integer civil-date arithmetic rather than
 platform-specific `timegm()`/`mktime()` behavior; pre-epoch and unrepresentable
 values are rejected explicitly.
@@ -171,7 +170,7 @@ mistake cannot blank a working investigation.
 
 The focused `test_gui_persistence` QtTest covers load/save/apply, parser
 settings reaching the background worker, malformed-store diagnostics, and
-the item limits on both Qt 5.15 and Qt 6.
+the item limits on Qt 6.
 
 ## Investigation workbench
 
@@ -372,8 +371,7 @@ benchmark target은 기본 빌드에 포함하지 않는다. Qt 6의 local 실�
 ```bash
 cd loglens
 cmake -S . -B build/benchmark-qt6 -DCMAKE_BUILD_TYPE=Release \
-  -DLOGLENS_BUILD_BENCHMARKS=ON \
-  -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON
+  -DLOGLENS_BUILD_BENCHMARKS=ON
 cmake --build build/benchmark-qt6 --parallel \
   --target loglens-bench-generate loglens-bench-core loglens-bench-gui
 QT_QPA_PLATFORM=offscreen python3.10 benchmarks/run_benchmark.py \
@@ -386,11 +384,10 @@ QT_QPA_PLATFORM=offscreen python3.10 benchmarks/run_benchmark.py \
   --repetitions 3 --timeout-seconds 180
 ```
 
-Qt 5는 `build/benchmark-qt5`를 사용하고 `CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON`,
-`--qt-major 5`로 바꾼다. runner는 generator 결과의 정확한 byte/record 수와 SHA-256을
+runner는 generator 결과의 정확한 byte/record 수와 SHA-256을
 검증한 뒤 core/GUI raw sample을 집계한다. `summary.json`, `summary.md`, `toolchain.json`,
 `toolchain.txt`, `samples/*.json`만 artifact로 남기며 1 GiB input과 process log는 scratch에
-둔다. `.github/workflows/loglens-benchmark.yml`의 Qt5/Qt6 matrix는 `workflow_dispatch`와
+둔다. `.github/workflows/loglens-benchmark.yml`은 `workflow_dispatch`와
 주간 schedule에서만 실행되고 일반 PR에는 포함하지 않는다.
 
 일반 PR에는 별도로 `.github/workflows/ci.yml`의 benchmark smoke가 포함된다. 이것은

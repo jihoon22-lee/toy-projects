@@ -4,13 +4,46 @@
 #include "loglens/filter_expr.hpp"
 
 #include <string>
+#include <QtTest>
+
+namespace impl {
+void testLevelPredicates();
+void testSourceAndMessage();
+void testEscapedAndUtf8Literals();
+void testCombinators();
+void testShortCircuit();
+void testRejections();
+void testDepthCap();
+void testDiagnosticRanges();
+void testQueryAndLiteralBounds();
+void testAstNodeBound();
+} // namespace impl
+
+class TestFilterExpr : public QObject {
+    Q_OBJECT
+private slots:
+    void testLevelPredicates() { impl::testLevelPredicates(); }
+    void testSourceAndMessage() { impl::testSourceAndMessage(); }
+    void testEscapedAndUtf8Literals() { impl::testEscapedAndUtf8Literals(); }
+    void testCombinators() { impl::testCombinators(); }
+    void testShortCircuit() { impl::testShortCircuit(); }
+    void testRejections() { impl::testRejections(); }
+    void testDepthCap() { impl::testDepthCap(); }
+    void testDiagnosticRanges() { impl::testDiagnosticRanges(); }
+    void testQueryAndLiteralBounds() { impl::testQueryAndLiteralBounds(); }
+    void testAstNodeBound() { impl::testAstNodeBound(); }
+};
+
+QTEST_GUILESS_MAIN(TestFilterExpr)
+
+#include "test_filter_expr.moc"
 
 using loglens::Filter;
 using loglens::Level;
 using loglens::LogRecord;
 using loglens::ParseError;
 
-namespace {
+namespace impl {
 
 const LogRecord& sample() {
     static const LogRecord record = makeRecord(Level::Warn, "api", "slow query took 200ms");
@@ -23,7 +56,7 @@ bool matches(const std::string& text, const LogRecord& record) {
     const auto filter = Filter::parse(text, error);
     if (!filter) {
         std::fprintf(stderr, "unexpected reject %s: %s\n", text.c_str(), error.message.c_str());
-        ++g_checkFailures;
+        QTest::qVerify(false, "unexpected reject", "", __FILE__, __LINE__);
         return false;
     }
     return filter->matches(record);
@@ -214,18 +247,4 @@ void testAstNodeBound() {
     CHECK(error.end <= oversized.size());
 }
 
-} // namespace
-
-int main() {
-    testLevelPredicates();
-    testSourceAndMessage();
-    testEscapedAndUtf8Literals();
-    testCombinators();
-    testShortCircuit();
-    testRejections();
-    testDepthCap();
-    testDiagnosticRanges();
-    testQueryAndLiteralBounds();
-    testAstNodeBound();
-    return checkSummary();
-}
+} // namespace impl

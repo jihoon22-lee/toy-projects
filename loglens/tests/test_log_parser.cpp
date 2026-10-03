@@ -4,6 +4,71 @@
 
 #include <stdexcept>
 #include <utility>
+#include <QtTest>
+
+namespace impl {
+void testDetection();
+void testPlainIso();
+void testSyslog();
+void testSyslogValidation();
+void testJsonLine();
+void testJsonValidationAndUnicode();
+void testTimestampOffsetsAreValidated();
+void testMalformedJsonCorpusNeverThrows();
+void testJsonStringBoundIsReported();
+void testJsonDiagnosticsRemainBounded();
+void testJsonFieldDiagnosticsRemainBoundedAfterReaderDiagnostics();
+void testUnparseableKeepsData();
+void testContinuation();
+void testAssemblerPreservesPollState();
+void testAssemblerExtendsPreviousRecordAcrossPolls();
+void testAssemblerDoesNotDropLeadingContinuation();
+void testAssemblerBuffersPartialBytesUntilNewline();
+void testAssemblerBoundsUnterminatedInputAcrossChunks();
+void testAssemblerBoundsOversizedNewlineTerminatedRoot();
+void testAssemblerBoundsRepeatedOversizedContinuations();
+void testAssemblerResetClearsPartialOmission();
+void testAssemblerRejectsInvalidRecordByteLimits();
+void testAssemblerResetDropsOldGenerationState();
+void testAssemblerMakesTheBytePreservingErrorPolicyExplicit();
+void testAssemblerResetPreservesTailWindowLineNumbers();
+void testAssemblerResetRejectsZeroLineNumber();
+} // namespace impl
+
+class TestLogParser : public QObject {
+    Q_OBJECT
+private slots:
+    void testDetection() { impl::testDetection(); }
+    void testPlainIso() { impl::testPlainIso(); }
+    void testSyslog() { impl::testSyslog(); }
+    void testSyslogValidation() { impl::testSyslogValidation(); }
+    void testJsonLine() { impl::testJsonLine(); }
+    void testJsonValidationAndUnicode() { impl::testJsonValidationAndUnicode(); }
+    void testTimestampOffsetsAreValidated() { impl::testTimestampOffsetsAreValidated(); }
+    void testMalformedJsonCorpusNeverThrows() { impl::testMalformedJsonCorpusNeverThrows(); }
+    void testJsonStringBoundIsReported() { impl::testJsonStringBoundIsReported(); }
+    void testJsonDiagnosticsRemainBounded() { impl::testJsonDiagnosticsRemainBounded(); }
+    void testJsonFieldDiagnosticsRemainBoundedAfterReaderDiagnostics() { impl::testJsonFieldDiagnosticsRemainBoundedAfterReaderDiagnostics(); }
+    void testUnparseableKeepsData() { impl::testUnparseableKeepsData(); }
+    void testContinuation() { impl::testContinuation(); }
+    void testAssemblerPreservesPollState() { impl::testAssemblerPreservesPollState(); }
+    void testAssemblerExtendsPreviousRecordAcrossPolls() { impl::testAssemblerExtendsPreviousRecordAcrossPolls(); }
+    void testAssemblerDoesNotDropLeadingContinuation() { impl::testAssemblerDoesNotDropLeadingContinuation(); }
+    void testAssemblerBuffersPartialBytesUntilNewline() { impl::testAssemblerBuffersPartialBytesUntilNewline(); }
+    void testAssemblerBoundsUnterminatedInputAcrossChunks() { impl::testAssemblerBoundsUnterminatedInputAcrossChunks(); }
+    void testAssemblerBoundsOversizedNewlineTerminatedRoot() { impl::testAssemblerBoundsOversizedNewlineTerminatedRoot(); }
+    void testAssemblerBoundsRepeatedOversizedContinuations() { impl::testAssemblerBoundsRepeatedOversizedContinuations(); }
+    void testAssemblerResetClearsPartialOmission() { impl::testAssemblerResetClearsPartialOmission(); }
+    void testAssemblerRejectsInvalidRecordByteLimits() { impl::testAssemblerRejectsInvalidRecordByteLimits(); }
+    void testAssemblerResetDropsOldGenerationState() { impl::testAssemblerResetDropsOldGenerationState(); }
+    void testAssemblerMakesTheBytePreservingErrorPolicyExplicit() { impl::testAssemblerMakesTheBytePreservingErrorPolicyExplicit(); }
+    void testAssemblerResetPreservesTailWindowLineNumbers() { impl::testAssemblerResetPreservesTailWindowLineNumbers(); }
+    void testAssemblerResetRejectsZeroLineNumber() { impl::testAssemblerResetRejectsZeroLineNumber(); }
+};
+
+QTEST_GUILESS_MAIN(TestLogParser)
+
+#include "test_log_parser.moc"
 
 using loglens::detectFormat;
 using loglens::EncodingErrorPolicy;
@@ -20,7 +85,7 @@ using loglens::parseStatusName;
 using loglens::RecordAssembler;
 using loglens::RecordDelta;
 
-namespace {
+namespace impl {
 
 bool hasDiagnostic(const LogRecord& record, ParseDiagnosticCode code) {
     for (const loglens::ParseDiagnostic& diagnostic : record.diagnostics) {
@@ -644,34 +709,4 @@ void testAssemblerResetRejectsZeroLineNumber() {
     CHECK(threw);
 }
 
-} // namespace
-
-int main() {
-    testDetection();
-    testPlainIso();
-    testSyslog();
-    testSyslogValidation();
-    testJsonLine();
-    testJsonValidationAndUnicode();
-    testTimestampOffsetsAreValidated();
-    testMalformedJsonCorpusNeverThrows();
-    testJsonStringBoundIsReported();
-    testJsonDiagnosticsRemainBounded();
-    testJsonFieldDiagnosticsRemainBoundedAfterReaderDiagnostics();
-    testUnparseableKeepsData();
-    testContinuation();
-    testAssemblerPreservesPollState();
-    testAssemblerExtendsPreviousRecordAcrossPolls();
-    testAssemblerDoesNotDropLeadingContinuation();
-    testAssemblerBuffersPartialBytesUntilNewline();
-    testAssemblerBoundsUnterminatedInputAcrossChunks();
-    testAssemblerBoundsOversizedNewlineTerminatedRoot();
-    testAssemblerBoundsRepeatedOversizedContinuations();
-    testAssemblerResetClearsPartialOmission();
-    testAssemblerRejectsInvalidRecordByteLimits();
-    testAssemblerResetDropsOldGenerationState();
-    testAssemblerMakesTheBytePreservingErrorPolicyExplicit();
-    testAssemblerResetPreservesTailWindowLineNumbers();
-    testAssemblerResetRejectsZeroLineNumber();
-    return checkSummary();
-}
+} // namespace impl
