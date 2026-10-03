@@ -2,8 +2,7 @@
 
 DiskMap is a disk usage explorer for Linux. A Qt-free core does the scanning and
 analysis, a small console tool exposes it, and a Qt Widgets shell adds the
-treemap and the review workflows. It is built with qmake and verified against
-both Qt 5.15 and Qt 6.
+treemap and the review workflows. It is built with CMake and targets Qt 6.
 
 The scan is deliberately conservative about what it will claim. Directory
 entries carry a `FileIdentity` of device and file id rather than a path, symlinked
@@ -26,14 +25,12 @@ behind an interface that shows what will be touched before anything moves.
 ## Build and test
 
 ```sh
-mkdir -p build/gui-qt6 && cd build/gui-qt6
-/usr/bin/qmake6 ../../diskmap.pro && make -j"$(nproc)"
-QT_QPA_PLATFORM=offscreen make check
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel 2
+QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
 ```
 
-Substitute `/usr/bin/qmake` for the Qt 5.15 leg. `make check` runs all 17 test
-targets; each test binary has its own `main()`, which is why `tests/tests.pro`
-lists one project per file.
+CTest runs all 18 Qt Test binaries — one per test file.
 
 ## CLI
 
@@ -112,22 +109,15 @@ when only harness correctness matters.
 
 ```sh
 cd diskmap
-repo_root="$(pwd)"
 benchmark_root="$(mktemp -d /tmp/diskmap-benchmark.XXXXXX)"
 artifact_dir="$benchmark_root/artifact"
-mkdir -p "$benchmark_root/src" "$benchmark_root/benchmarks" "$artifact_dir"
-(
-  cd "$benchmark_root/src"
-  /usr/bin/qmake6 "$repo_root/src/src.pro"
-  make -j"$(nproc)"
-)
-(
-  cd "$benchmark_root/benchmarks"
-  /usr/bin/qmake6 "$repo_root/benchmarks/scan_benchmark.pro"
-  make -j"$(nproc)"
-)
+mkdir -p "$artifact_dir"
+cmake -S . -B "$benchmark_root/build" -DCMAKE_BUILD_TYPE=Release \
+  -DDISKMAP_BUILD_BENCHMARKS=ON
+cmake --build "$benchmark_root/build" --parallel 2 \
+  --target diskmap-scan-benchmark
 python3.10 benchmarks/run_benchmark.py \
-  --binary "$benchmark_root/benchmarks/diskmap-scan-benchmark" \
+  --binary "$benchmark_root/build/benchmarks/diskmap-scan-benchmark" \
   --entries 1000000 --cancel-after 10000 --timeout-seconds 60 \
   --output-dir "$artifact_dir"
 ```
@@ -135,8 +125,8 @@ python3.10 benchmarks/run_benchmark.py \
 A local 1,000,000-entry run measured full-scan throughput at
 `~207k entries/s` with `~1.06 GiB` peak RSS, and 10,000-entry cancellation in
 `~2.7 ms`. Numbers vary with scheduler and host RSS. The scheduled CI
-benchmark workflow runs the same harness on a Qt5/Qt6 matrix; a typical run
-measured `~469k` (Qt5) and `~320k` (Qt6) entries/s.
+benchmark workflow runs the same harness on Qt6; a typical CI run measured
+`~320k` entries/s.
 
 ## Status
 

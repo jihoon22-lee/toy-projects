@@ -6,7 +6,7 @@
 // capability-gated so filesystems without hard-link or symlink support report
 // a skip instead of turning an environment limitation into a product failure.
 
-#include "assert.hpp"
+#include "check.hpp"
 #include "diskmap/fs_source.hpp"
 #include "diskmap/scanner.hpp"
 
@@ -186,27 +186,38 @@ void checkSymlinkBackEdge(const fs::path& root) {
     }
 }
 
-int runTests() {
+void runTests() {
 #if !defined(__unix__) && !defined(__APPLE__)
     std::printf("SKIP real scanner fixture: POSIX identity semantics are unavailable\n");
-    return 0;
+    return;
 #else
     ScopedTempDirectory temporary;
     if (!temporary.valid()) {
         std::printf("SKIP real scanner fixture: %s\n", temporary.error().c_str());
-        return 0;
+        return;
     }
 
     checkRootMetadata(diskmap::RealFsSource{}, temporary.path());
     checkHardLinks(temporary.path());
     checkSymlinkBackEdge(temporary.path());
-    return 0;
+    return;
 #endif
 }
 
 } // namespace
 
-int main() {
+class TestScannerRealSafety : public QObject
+{
+    Q_OBJECT
+
+private slots:
+    void run();
+};
+
+void TestScannerRealSafety::run() {
     runTests();
-    return testSummary();
 }
+
+QTEST_GUILESS_MAIN(TestScannerRealSafety)
+
+#include "test_scanner_real_safety.moc"

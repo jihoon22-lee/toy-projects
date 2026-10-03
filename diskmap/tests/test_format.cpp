@@ -1,7 +1,7 @@
 // Tests for diskmap::humanBytes / formatPercent / truncateMiddle
 // (src/core/format.hpp / format.cpp).
 
-#include "assert.hpp"
+#include "check.hpp"
 #include "diskmap/format.hpp"
 
 #include <cstdint>
@@ -12,7 +12,15 @@ using diskmap::formatPercent;
 using diskmap::humanBytes;
 using diskmap::truncateMiddle;
 
-int main() {
+class TestFormat : public QObject
+{
+    Q_OBJECT
+
+private slots:
+    void run();
+};
+
+void TestFormat::run() {
     // --- humanBytes: every unit threshold, base-1024 ---
     CHECK_EQ(humanBytes(0), std::string("0 B"));
     CHECK_EQ(humanBytes(1), std::string("1 B"));
@@ -68,5 +76,8 @@ int main() {
         CHECK(result.size() <= maxLen);
     }
 
-    return testSummary();
 }
+
+QTEST_GUILESS_MAIN(TestFormat)
+
+#include "test_format.moc"

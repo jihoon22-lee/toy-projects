@@ -1,6 +1,6 @@
 // Tests for the bounded diskmap.snapshot/v1 contract and its diff projection.
 
-#include "assert.hpp"
+#include "check.hpp"
 #include "diskmap/cleanup.hpp"
 #include "diskmap/snapshot.hpp"
 
@@ -386,7 +386,15 @@ void testSnapshotFileIo() {
 
 } // namespace
 
-int main() {
+class TestSnapshot : public QObject
+{
+    Q_OBJECT
+
+private slots:
+    void run();
+};
+
+void TestSnapshot::run() {
     // --- canonical round-trip retains FsNode facts but drops worker generation ---
     {
         FsNode root = directory("root", "/snapshot", {
@@ -924,5 +932,8 @@ int main() {
     }
 
     testSnapshotFileIo();
-    return testSummary();
 }
+
+QTEST_GUILESS_MAIN(TestSnapshot)
+
+#include "test_snapshot.moc"

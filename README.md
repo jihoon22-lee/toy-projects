@@ -7,7 +7,7 @@
 
 | 이름 | 설명 | 빌드 |
 |---|---|---|
-| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어와 cleanup·storage workbench | qmake · Qt5/Qt6 GUI |
+| [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어와 cleanup·storage workbench | CMake · Qt6 GUI |
 | [loglens](loglens/) | 로그 뷰어·분석기와 investigation workbench | CMake · Qt5/Qt6 GUI |
 | [buildscope](buildscope/) | compile database explorer (Python producer + C++/Qt consumer) | CMake · Python 3.10+ · Qt5/Qt6 |
 | [envlens](envlens/) | Python 환경 snapshot·diff·runtime inspection CLI/library | pure Python 3.10+ |
@@ -40,7 +40,7 @@ Qt를 쓰는 프로젝트는 아래 배치를 따른다. 공용 파서·모델�
 
 ```
 <project>/
-├── <빌드 정의>           loglens·buildscope 는 CMakeLists.txt, diskmap 은 diskmap.pro
+├── CMakeLists.txt        빌드 정의
 ├── include/<project>/    헤더는 전부 여기. 코어와 GUI 모두
 │   └── gui/              Qt5/Qt6 셸의 헤더
 ├── src/                  구현
@@ -56,22 +56,23 @@ Qt를 쓰는 프로젝트는 아래 배치를 따른다. 공용 파서·모델�
 모양이 된다.
 
 빌드 정의에는 **GUI 헤더를 명시적으로 나열해야 한다.** CMake 의 `AUTOMOC` 은 `.cpp` 와
-같은 디렉터리에 같은 이름의 헤더가 있을 때만 알아서 찾고, qmake 는 `HEADERS` 에 적힌
-것만 moc 에 넘긴다. 헤더가 `include/` 로 가면 둘 다 자동 탐지가 안 되므로, 적어두지
-않으면 `Q_OBJECT` 클래스가 조용히 vtable 미해결로 링크에 실패한다.
+같은 디렉터리에 같은 이름의 헤더가 있을 때만 알아서 찾는다. 헤더가 `include/` 로 가면
+자동 탐지가 안 되므로 타겟 소스에 적어두지 않으면 `Q_OBJECT` 클래스가 조용히 vtable
+미해결로 링크에 실패한다.
 
 GUI 프로젝트는 GUI를 **라이브러리와 실행 파일로 나눈다.** 실행 파일 하나뿐이면 테스트가
 링크할 대상이 없기 때문이다.
 
 ## Qt 환경
 
-개발 환경에는 Qt 5.15.18과 Qt 6.10.2가 함께 설치돼 있다.
+개발 환경의 기준 Qt는 6.10.2다.
 
 ```text
-$ qmake -v
-Using Qt version 5.15.18 in /usr/lib/x86_64-linux-gnu
-$ qmake6 -v
-Using Qt version 6.10.2 in /usr/lib/x86_64-linux-gnu
+$ pkg-config --modversion Qt6Core Qt6Widgets Qt6Concurrent Qt6Test
+6.10.2
+6.10.2
+6.10.2
+6.10.2
 ```
 
 GUI 테스트는 `QT_QPA_PLATFORM=offscreen`으로 헤드리스로 돌린다.
@@ -90,14 +91,11 @@ cmake -S . -B build/gui-qt5 -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACK
 cmake --build build/gui-qt5 --parallel
 QT_QPA_PLATFORM=offscreen ctest --test-dir build/gui-qt5 --output-on-failure
 
-# diskmap — qmake6와 Qt 5 leg
+# diskmap — CMake/Qt6
 cd ../diskmap
-mkdir -p build/gui-qt6 && cd build/gui-qt6
-/usr/bin/qmake6 ../../diskmap.pro && make -j"$(nproc)"
-QT_QPA_PLATFORM=offscreen make check
-mkdir -p ../gui-qt5 && cd ../gui-qt5
-/usr/bin/qmake ../../diskmap.pro && make -j"$(nproc)"
-QT_QPA_PLATFORM=offscreen make check
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel 2
+QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
 
 # buildscope — Python 테스트 + CMake/CTest
 cd ../buildscope
@@ -127,18 +125,11 @@ cmake --build build/gui --parallel
 cmake -S . -B build/qt5 -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_Qt6=ON
 cmake --build build/qt5 --parallel
 
-# diskmap (qmake)
+# diskmap (CMake/Qt6)
 cd diskmap
-mkdir -p build/gui && cd build/gui
-/usr/bin/qmake6 -query QT_VERSION
-/usr/bin/qmake6 ../../diskmap.pro && make -j
-./src/gui/diskmap-gui [경로]
-
-# diskmap (qmake, Qt 5.15)
-mkdir -p ../gui-qt5 && cd ../gui-qt5
-/usr/bin/qmake -query QT_VERSION
-/usr/bin/qmake ../../diskmap.pro && make -j
-./src/gui/diskmap-gui [경로]
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel 2
+./build/src/gui/diskmap-gui [경로]
 ```
 
 GUI에 경로를 주면 폴더 선택 대화상자를 건너뛰고 바로 스캔·로드하므로,

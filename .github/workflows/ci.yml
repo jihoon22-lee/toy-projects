@@ -39,7 +39,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            qt6-base-dev qmake6 pkg-config
+            qt6-base-dev pkg-config
 
       - name: Configure and build
         working-directory: loglens
@@ -55,7 +55,7 @@ jobs:
             echo "::error::CMake selected Qt $selected_major, expected Qt 6"
             exit 1
           fi
-          cmake --build build/gui --parallel
+          cmake --build build/gui --parallel 2
           if ! ldd build/gui/src/gui/loglens-gui | grep -Eq 'libQt6Widgets'; then
             echo "::error::loglens-gui is not linked to Qt6Widgets"
             ldd build/gui/src/gui/loglens-gui || true
@@ -103,7 +103,7 @@ jobs:
           cmake -S . -B "$build_dir" -DCMAKE_BUILD_TYPE=Release \
             -DLOGLENS_BUILD_BENCHMARKS=ON \
             -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON
-          cmake --build "$build_dir" --parallel \
+          cmake --build "$build_dir" --parallel 2 \
             --target loglens-bench-generate loglens-bench-core loglens-bench-gui
           python3 benchmarks/run_benchmark.py \
             --build-dir "$build_dir" \
@@ -165,20 +165,20 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            qt6-base-dev qmake6 pkg-config g++
+            qt6-base-dev pkg-config g++ cmake
 
       - name: Configure and build
         working-directory: diskmap
         run: |
           set -euo pipefail
-          qmake_version="$(qmake6 -query QT_VERSION)"
-          echo "qmake6 QT_VERSION=$qmake_version"
-          case "$qmake_version" in
-            6.*) ;;
-            *) echo "::error::qmake6 selected Qt $qmake_version, expected Qt 6"; exit 1 ;;
-          esac
-          mkdir -p build/gui
-          (cd build/gui && qmake6 ../../diskmap.pro && make -j"$(nproc)")
+          mkdir -p build
+          cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release \
+            2>&1 | tee build/configure.log
+          if ! grep -Eq 'diskmap: using Qt6 ' build/configure.log; then
+            echo "::error::CMake did not report Qt 6"
+            exit 1
+          fi
+          cmake --build build/gui --parallel 2
           if ! ldd build/gui/src/gui/diskmap-gui | grep -Eq 'libQt6Widgets'; then
             echo "::error::diskmap-gui is not linked to Qt6Widgets"
             ldd build/gui/src/gui/diskmap-gui || true
@@ -189,7 +189,7 @@ jobs:
         working-directory: diskmap
         env:
           QT_QPA_PLATFORM: offscreen
-        run: (cd build/gui && make check)
+        run: ctest --test-dir build/gui --output-on-failure
 
       # Runs the real binary headlessly against a known directory, so a GUI
       # that links but crashes on startup or on its first scan still fails.
@@ -219,17 +219,11 @@ jobs:
           benchmark_root="$RUNNER_TEMP/diskmap-benchmark"
           build_dir="$benchmark_root/build"
           artifact_dir="$benchmark_root/artifact"
-          mkdir -p "$build_dir/src" "$build_dir/benchmarks" "$artifact_dir"
-          (
-            cd "$build_dir/src"
-            qmake6 "$GITHUB_WORKSPACE/diskmap/src/src.pro"
-            make -j"$(nproc)"
-          )
-          (
-            cd "$build_dir/benchmarks"
-            qmake6 "$GITHUB_WORKSPACE/diskmap/benchmarks/scan_benchmark.pro"
-            make -j"$(nproc)"
-          )
+          mkdir -p "$build_dir" "$artifact_dir"
+          cmake -S . -B "$build_dir" -DCMAKE_BUILD_TYPE=Release \
+            -DDISKMAP_BUILD_BENCHMARKS=ON
+          cmake --build "$build_dir" --parallel 2 \
+            --target diskmap-scan-benchmark
           python3 benchmarks/run_benchmark.py \
             --binary "$build_dir/benchmarks/diskmap-scan-benchmark" \
             --entries 10000 \
@@ -278,7 +272,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            qt6-base-dev qmake6 pkg-config
+            qt6-base-dev pkg-config
 
       - name: Configure and build
         working-directory: buildscope
@@ -294,7 +288,7 @@ jobs:
             echo "::error::CMake selected Qt $selected_major, expected Qt 6"
             exit 1
           fi
-          cmake --build build/gui --parallel
+          cmake --build build/gui --parallel 2
           if ! ldd build/gui/src/gui/buildscope-gui | grep -Eq 'libQt6Widgets'; then
             echo "::error::buildscope-gui is not linked to Qt6Widgets"
             ldd build/gui/src/gui/buildscope-gui || true
@@ -339,7 +333,7 @@ jobs:
           cmake -S . -B "$build_dir" -DCMAKE_BUILD_TYPE=Release \
             -DBUILDSCOPE_BUILD_BENCHMARKS=ON \
             -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON
-          cmake --build "$build_dir" --parallel --target buildscope-model-benchmark
+          cmake --build "$build_dir" --parallel 2 --target buildscope-model-benchmark
           "$build_dir/buildscope-model-benchmark" 100000 10000 \
             | tee "$artifact_dir/summary.json"
           python3 - "$artifact_dir/summary.json" <<'PY'
@@ -736,7 +730,7 @@ jobs:
 
       - name: Build
         working-directory: abilens
-        run: make -j"$(nproc)" all
+        run: make -j2 all
 
       - name: Tests
         working-directory: abilens

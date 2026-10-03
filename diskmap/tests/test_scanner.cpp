@@ -2,7 +2,7 @@
 // FakeFsSource (tests/fake_fs.hpp) so the walk never touches a real
 // filesystem.
 
-#include "assert.hpp"
+#include "check.hpp"
 #include "fake_fs.hpp"
 #include "diskmap/scanner.hpp"
 
@@ -57,7 +57,15 @@ void checkGeneration(const FsNode& node, std::uint64_t generation) {
 
 } // namespace
 
-int main() {
+class TestScanner : public QObject
+{
+    Q_OBJECT
+
+private slots:
+    void run();
+};
+
+void TestScanner::run() {
     // --- basic walk: nested dirs, min_size filtering, error collection ---
     {
         FakeFsSource fs;
@@ -412,5 +420,8 @@ int main() {
         CHECK_EQ(result.root.size, static_cast<std::uint64_t>(1));
     }
 
-    return testSummary();
 }
+
+QTEST_GUILESS_MAIN(TestScanner)
+
+#include "test_scanner.moc"

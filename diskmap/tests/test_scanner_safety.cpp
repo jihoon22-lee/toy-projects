@@ -5,7 +5,7 @@
 // the host filesystem's allocation unit and symlink policy instead of testing
 // the scanner's semantics deterministically.
 
-#include "assert.hpp"
+#include "check.hpp"
 #include "fake_fs.hpp"
 #include "diskmap/scanner.hpp"
 
@@ -181,7 +181,15 @@ void checkGeneration(const FsNode& node, std::uint64_t generation) {
 
 } // namespace
 
-int main() {
+class TestScannerSafety : public QObject
+{
+    Q_OBJECT
+
+private slots:
+    void run();
+};
+
+void TestScannerSafety::run() {
     // --- filesystem paths remain the boundary for nested traversal ---
     // The entry path is deliberately left empty: scanner path construction
     // must use filesystem semantics rather than concatenating display text.
@@ -779,5 +787,8 @@ int main() {
         CHECK_EQ(result.dirs_scanned, static_cast<std::size_t>(1));
     }
 
-    return testSummary();
 }
+
+QTEST_GUILESS_MAIN(TestScannerSafety)
+
+#include "test_scanner_safety.moc"

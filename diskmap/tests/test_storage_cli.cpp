@@ -1,6 +1,6 @@
 // Coverage tests for the text and versioned JSON storage report writers.
 
-#include "assert.hpp"
+#include "check.hpp"
 #include "storage_cli.hpp"
 
 #include <cstdint>
@@ -258,9 +258,20 @@ void testDuplicateReports() {
 
 } // namespace
 
-int main() {
+class TestStorageCli : public QObject
+{
+    Q_OBJECT
+
+private slots:
+    void run();
+};
+
+void TestStorageCli::run() {
     testEmptyReports();
     testSnapshotReports();
     testDuplicateReports();
-    return testSummary();
 }
+
+QTEST_GUILESS_MAIN(TestStorageCli)
+
+#include "test_storage_cli.moc"
