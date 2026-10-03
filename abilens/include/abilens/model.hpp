@@ -7,7 +7,7 @@
 
 namespace abilens {
 
-inline constexpr const char* kAbiLensVersion = "0.1.0";
+inline constexpr const char* kAbiLensVersion = "0.1.0";  // x-release-please-version
 
 enum class InputStatus {
     Valid,
