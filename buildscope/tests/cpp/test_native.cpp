@@ -60,6 +60,7 @@ private slots:
     void protectedOutput();
     void rejections();
     void schemaProjections();
+    void delayedAnalysisSelection();
     void suppressions();
     void glob();
     void sanitization();
@@ -455,6 +456,69 @@ void NativeProducerTest::schemaProjections() {
                  .value(QStringLiteral("schema_version"))
                  .toString(),
              QStringLiteral("buildscope.snapshot/v3"));
+}
+
+void NativeProducerTest::delayedAnalysisSelection() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    for (const QString &name : {QStringLiteral("a.c"), QStringLiteral("b.c")}) {
+        QFile source(directory.path() + QLatin1Char('/') + name);
+        QVERIFY(source.open(QIODevice::WriteOnly));
+        source.write("int unit(void) { return 0; }\n");
+        source.close();
+    }
+    const QString path = directory.path() + QStringLiteral("/cc.json");
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write(QStringLiteral("[{\"directory\":\"%1\",\"file\":\"a.c\","
+                              "\"command\":\"cc -c a.c\"},"
+                              "{\"directory\":\"%1\",\"file\":\"b.c\","
+                              "\"command\":\"cc -c b.c\"}]")
+                   .arg(directory.path())
+                   .toUtf8());
+    file.close();
+    QJsonObject snapshot = loadCompilationDatabase(path, directory.path());
+    annotateSnapshot(snapshot, directory.path(), QStringLiteral("delayed"),
+                     kDefaultMaxAnalysisUnits, kDefaultAnalysisBudgetSeconds,
+                     {QStringLiteral("a.c")});
+    const QJsonArray entries = snapshot.value(QStringLiteral("entries")).toArray();
+    QCOMPARE(entries.size(), 2);
+    const QJsonObject first =
+        entries.at(0).toObject().value(QStringLiteral("include_analysis")).toObject();
+    const QJsonObject second =
+        entries.at(1).toObject().value(QStringLiteral("include_analysis")).toObject();
+    if (first.value(QStringLiteral("evidence")).toString()
+        == QLatin1String("compiler-measured")) {
+        // cc resolved to a real driver: only the selected unit replays.
+        QCOMPARE(second.value(QStringLiteral("evidence")).toString(),
+                 QStringLiteral("estimated"));
+    } else {
+        // Without a usable compiler both keep honest labels: the selected unit
+        // stays estimated with a diagnostic, the rest are plain estimates.
+        QCOMPARE(first.value(QStringLiteral("evidence")).toString(),
+                 QStringLiteral("estimated"));
+        QVERIFY(!first.value(QStringLiteral("diagnostics")).toArray().isEmpty());
+        QCOMPARE(second.value(QStringLiteral("evidence")).toString(),
+                 QStringLiteral("estimated"));
+        QVERIFY(second.value(QStringLiteral("diagnostics")).toArray().isEmpty());
+    }
+
+    // Without a glob nothing is replayed; delayed degenerates to estimates.
+    QJsonObject plain = loadCompilationDatabase(path, directory.path());
+    annotateSnapshot(plain, directory.path(), QStringLiteral("delayed"),
+                     kDefaultMaxAnalysisUnits, kDefaultAnalysisBudgetSeconds, {});
+    for (const QJsonValue &value : plain.value(QStringLiteral("entries")).toArray()) {
+        QCOMPARE(value.toObject()
+                     .value(QStringLiteral("include_analysis"))
+                     .toObject()
+                     .value(QStringLiteral("evidence"))
+                     .toString(),
+                 QStringLiteral("estimated"));
+    }
+    QVERIFY_THROWS_EXCEPTION(
+        std::exception,
+        annotateSnapshot(plain, directory.path(), QStringLiteral("bogus"),
+                         kDefaultMaxAnalysisUnits, kDefaultAnalysisBudgetSeconds, {}));
 }
 
 void NativeProducerTest::suppressions() {

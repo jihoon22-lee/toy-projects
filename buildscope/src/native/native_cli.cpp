@@ -106,8 +106,9 @@ int integerValue(const ParsedArguments &arguments, const QString &name, int fall
 void snapshotUsage(QTextStream &error) {
     error << "usage: buildscope [-h] [--version] [--project-root PROJECT_ROOT] [-o OUTPUT]\n"
           << "                  [--schema-version {v1,v2,v3}]\n"
-          << "                  [--include-analysis {estimate,compiler}]\n"
-          << "                  [--analysis-max-units N] [--analysis-time-budget N]\n"
+          << "                  [--include-analysis {estimate,compiler,delayed}]\n"
+          << "                  [--analysis-unit GLOB] [--analysis-max-units N]\n"
+          << "                  [--analysis-time-budget N]\n"
           << "                  [--pretty] database\n"
           << "       buildscope diff ...\n";
 }
@@ -126,6 +127,7 @@ int snapshotMain(const QStringList &arguments) {
         {QStringLiteral("--output"), true},
         {QStringLiteral("--schema-version"), true},
         {QStringLiteral("--include-analysis"), true},
+        {QStringLiteral("--analysis-unit"), true},
         {QStringLiteral("--analysis-max-units"), true},
         {QStringLiteral("--analysis-time-budget"), true},
         {QStringLiteral("--pretty"), false},
@@ -161,10 +163,18 @@ int snapshotMain(const QStringList &arguments) {
     const QString includeMode =
         optionValue(parsed, QStringLiteral("--include-analysis"));
     if (!includeMode.isEmpty() && includeMode != QLatin1String("estimate") &&
-        includeMode != QLatin1String("compiler")) {
+        includeMode != QLatin1String("compiler") &&
+        includeMode != QLatin1String("delayed")) {
         return fail(error, QStringLiteral("buildscope: error: "),
                     QStringLiteral("argument --include-analysis: invalid choice: '%1'")
                         .arg(includeMode));
+    }
+    const auto unitGlobs =
+        parsed.options.value(QStringLiteral("--analysis-unit"));
+    if (!unitGlobs.isEmpty() && includeMode != QLatin1String("delayed")) {
+        return fail(error, QStringLiteral("buildscope: error: "),
+                    QStringLiteral("--analysis-unit requires "
+                                   "--include-analysis delayed"));
     }
     try {
         const QString database =
@@ -197,7 +207,7 @@ int snapshotMain(const QStringList &arguments) {
             buildscope::native::loadCompilationDatabase(database, projectRoot);
         if (!mode.isEmpty()) {
             buildscope::native::annotateSnapshot(snapshot, projectRoot, mode, maxUnits,
-                                                 budget);
+                                                 budget, unitGlobs);
         }
         const QString rendered = buildscope::native::dumpsSnapshot(
             buildscope::native::snapshotForSchema(snapshot, schemaName),
