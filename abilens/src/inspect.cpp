@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <map>
 #include <optional>
 #include <set>
 #include <string>
@@ -32,12 +33,16 @@ constexpr std::uint64_t kDtRpath = 15;
 constexpr std::uint64_t kDtRunpath = 29;
 constexpr std::uint64_t kDtVerneed = 0x6ffffffeU;
 constexpr std::uint64_t kDtVerneednum = 0x6fffffffU;
+constexpr std::uint64_t kDtVersym = 0x6ffffff0U;
+constexpr std::uint64_t kDtVerdef = 0x6ffffffcU;
+constexpr std::uint64_t kDtVerdefnum = 0x6ffffffdU;
 constexpr std::uint64_t kDtHash = 4;
 constexpr std::uint64_t kDtSymtab = 6;
 constexpr std::uint64_t kDtGnuHash = 0x6ffffef5U;
 constexpr std::uint64_t kMaxDynamicEntries = 4096;
 constexpr std::uint64_t kMaxVerneedRecords = 4096;
 constexpr std::uint64_t kMaxVernauxRecords = 16384;
+constexpr std::uint64_t kMaxVerdefRecords = 4096;
 constexpr std::uint64_t kMaxStringTable = 64U * 1024U * 1024U;
 constexpr std::uint64_t kMaxDynamicSymbols = 262144;
 
@@ -219,6 +224,9 @@ struct DynamicInfo {
     std::uint64_t strsz = 0;
     std::uint64_t verneed = 0;
     std::uint64_t verneednum = 0;
+    std::uint64_t versym = 0;
+    std::uint64_t verdef = 0;
+    std::uint64_t verdefnum = 0;
     std::uint64_t symtab = 0;
     std::uint64_t hash = 0;
     std::uint64_t gnu_hash = 0;
@@ -263,6 +271,9 @@ bool read_dynamic(ElfView& view,
                 case kDtStrsz: info.strsz = value; break;
                 case kDtVerneed: info.verneed = value; break;
                 case kDtVerneednum: info.verneednum = value; break;
+                case kDtVersym: info.versym = value; break;
+                case kDtVerdef: info.verdef = value; break;
+                case kDtVerdefnum: info.verdefnum = value; break;
                 case kDtSymtab: info.symtab = value; break;
                 case kDtHash: info.hash = value; break;
                 case kDtGnuHash: info.gnu_hash = value; break;
@@ -398,8 +409,58 @@ std::optional<std::uint64_t> dynamic_symbol_count(ElfView& view,
     return std::nullopt;
 }
 
+// Maps DT_VERDEF index values to their version names so defined dynamic
+// symbols can carry `name@version` identities. The verdef/verdaux layout is
+// identical for ELF32 and ELF64.
+bool read_verdef(ElfView& view,
+                 const std::vector<LoadSegment>& segments,
+                 const DynamicInfo& info,
+                 std::uint64_t strtab_offset,
+                 std::uint64_t strtab_size,
+                 std::map<std::uint16_t, std::string>& names) {
+    names.clear();
+    if (info.verdef == 0 || info.verdefnum == 0) return true;
+    if (info.verdefnum > kMaxVerdefRecords) {
+        return corrupt(view, "version definition count exceeds the inspection bound");
+    }
+    const auto table = vaddr_offset(segments, info.verdef, 1U);
+    if (!table.has_value()) {
+        return corrupt(view, "version definition table is not mapped by PT_LOAD");
+    }
+    std::uint64_t record = *table;
+    std::uint64_t seen = 0;
+    while (record != 0 && seen < info.verdefnum) {
+        if (!range_inside(record, 1U, 20U, view.bytes.size())) {
+            return corrupt(view, "version definition record is outside the file");
+        }
+        const std::uint64_t aux = record + view.u32(record + 12U);
+        if (!range_inside(aux, 1U, 8U, view.bytes.size())) {
+            return corrupt(view, "version definition aux record is outside the file");
+        }
+        const auto name =
+            bounded_string(view, strtab_offset, strtab_size, view.u32(aux));
+        // Version definition names are identifiers (e.g. `ZLIB_1.2.0`,
+        // `GLIBCXX_3.4.21`), not the digit/dotted verneed suffix form.
+        if (name.has_value() && !name->empty()
+            && std::all_of(name->begin(), name->end(), [](char c) {
+                   return c > ' ' && c != 0x7f;
+               })) {
+            names[view.u16(record + 4U)] = *name;
+        }
+        const std::uint64_t next = view.u32(record + 16U);
+        record = next == 0 ? 0 : record + next;
+        ++seen;
+    }
+    if (record != 0) {
+        return corrupt(view, "version definition chain exceeds the inspection bound");
+    }
+    return true;
+}
+
 // Collects defined dynamic symbol names from DT_SYMTAB. Entries without a
 // resolvable name are skipped; the table itself must be mapped and bounded.
+// A defined symbol whose DT_VERSYM entry names a DT_VERDEF version is
+// reported as name@version — versioned symbols are distinct ABI identities.
 bool read_symbols(ElfView& view,
                   const std::vector<LoadSegment>& segments,
                   const DynamicInfo& info,
@@ -424,13 +485,42 @@ bool read_symbols(ElfView& view,
         !range_inside(*symtab, *count, entry_size, view.bytes.size())) {
         return corrupt(view, "DT_SYMTAB is outside the file or unreasonably large");
     }
+    std::map<std::uint16_t, std::string> version_names;
+    if (!read_verdef(view, segments, info, strtab_offset, strtab_size,
+                     version_names)) {
+        return false;
+    }
+    std::optional<std::uint64_t> versym;
+    if (info.versym != 0) {
+        versym = vaddr_offset(segments, info.versym, 1U);
+        if (!versym.has_value()
+            || !range_inside(*versym, *count, 2U, view.bytes.size())) {
+            return corrupt(view, "DT_VERSYM is outside the file or unreasonably large");
+        }
+    }
     std::set<std::string> unique;
     for (std::uint64_t index = 1; index < *count; ++index) {
         const std::uint64_t entry = *symtab + index * entry_size;
         if (view.u16(entry + shndx_offset) == 0U) continue;
         const auto name =
             bounded_string(view, strtab_offset, strtab_size, view.u32(entry));
-        if (name.has_value() && !name->empty()) unique.insert(*name);
+        if (!name.has_value() || name->empty()) continue;
+        std::string qualified = *name;
+        if (versym.has_value()) {
+            // Indices 0/1 (VER_NDX_LOCAL/VER_NDX_GLOBAL, including a BASE
+            // verdef node) mean "unversioned"; the high bit is the hidden
+            // flag defined for undefined references.
+            const std::uint16_t versym_value =
+                static_cast<std::uint16_t>(view.u16(*versym + index * 2U) & 0x7fffU);
+            if (versym_value >= 2U) {
+                const auto version = version_names.find(versym_value);
+                if (version != version_names.end()) {
+                    qualified += '@';
+                    qualified += version->second;
+                }
+            }
+        }
+        unique.insert(std::move(qualified));
     }
     report.symbols.assign(unique.begin(), unique.end());
     return true;
