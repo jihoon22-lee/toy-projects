@@ -56,7 +56,7 @@ jobs:
         id: source
         run: |
           set -euo pipefail
-          tag_sha="$(gh api --method GET "repos/$GH_REPO/commits" -f sha="$RELEASE_TAG" -f per_page=1 --jq '.[0].sha' 2>/dev/null || true)"
+          tag_sha="$(gh api --method GET "repos/$GH_REPO/commits" -f sha="$RELEASE_TAG" -f per_page=1 --jq '.[0].sha' 2>/dev/null)" || tag_sha=""
           sha="$REQUESTED_SHA"
           if [ -z "$sha" ]; then
             sha="$tag_sha"
@@ -184,7 +184,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/upload-verification"
           gh release download "$RELEASE_TAG" --dir "$RUNNER_TEMP/upload-verification"
           (cd "$RUNNER_TEMP/upload-verification" && sha256sum -c SHA256SUMS.txt)
-          tag_sha="$(gh api --method GET "repos/$GH_REPO/commits" -f sha="$RELEASE_TAG" -f per_page=1 --jq '.[0].sha' 2>/dev/null || true)"
+          tag_sha="$(gh api --method GET "repos/$GH_REPO/commits" -f sha="$RELEASE_TAG" -f per_page=1 --jq '.[0].sha' 2>/dev/null)" || tag_sha=""
           if [ -z "$tag_sha" ]; then
             gh api --method POST "repos/$GH_REPO/git/refs" -f ref="refs/tags/$RELEASE_TAG" -f sha="$SOURCE_SHA" >/dev/null
             tag_sha="$(gh api --method GET "repos/$GH_REPO/commits" -f sha="$RELEASE_TAG" -f per_page=1 --jq '.[0].sha')"
