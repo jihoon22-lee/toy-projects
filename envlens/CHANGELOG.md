@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/jihoon22-lee/toy-projects/compare/envlens/v0.1.1...envlens/v0.1.2) (2026-10-03)
+
+
+### Bug Fixes
+
+* **envlens:** keep standing external requirements from failing diff and check ([02ed1e7](https://github.com/jihoon22-lee/toy-projects/commit/02ed1e709fea7b861be3135d4e238332bb3056ae))
+
 ## [0.1.1](https://github.com/jihoon22-lee/toy-projects/compare/envlens/v0.1.0...envlens/v0.1.1) (2026-10-03)
 
 

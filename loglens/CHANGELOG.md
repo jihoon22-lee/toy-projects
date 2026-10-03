@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.2](https://github.com/jihoon22-lee/toy-projects/compare/loglens/v0.1.1...loglens/v0.1.2) (2026-10-03)
+
+
+### Bug Fixes
+
+* **loglens:** keep GUI sessions faithful to the saved filter and the open log ([660c99b](https://github.com/jihoon22-lee/toy-projects/commit/660c99b4d704034d3665fd69ad5e739713e2477a))
+* **loglens:** make format plugins safe on long lines and persist them in sessions ([2521146](https://github.com/jihoon22-lee/toy-projects/commit/2521146c95442fe1b7afa5be1140aa35b672be52))
+
 ## [0.1.1](https://github.com/jihoon22-lee/toy-projects/compare/loglens/v0.1.0...loglens/v0.1.1) (2026-10-03)
 
 

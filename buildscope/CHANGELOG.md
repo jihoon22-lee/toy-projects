@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/jihoon22-lee/toy-projects/compare/buildscope/v0.1.1...buildscope/v0.1.2) (2026-10-03)
+
+
+### Bug Fixes
+
+* **buildscope:** accept a UTF-8 BOM in streamed compile databases ([8930062](https://github.com/jihoon22-lee/toy-projects/commit/8930062707c24ab4a80af96e7ba6505db01cebf4))
+
 ## [0.1.1](https://github.com/jihoon22-lee/toy-projects/compare/buildscope/v0.1.0...buildscope/v0.1.1) (2026-10-03)
 
 
