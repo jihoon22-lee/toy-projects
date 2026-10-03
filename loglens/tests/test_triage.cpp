@@ -8,8 +8,35 @@
 #include <string>
 #include <vector>
 #include <unistd.h>
+#include <QtTest>
 
-namespace {
+namespace impl {
+void testCrudRoundTrip();
+void testMigrationAndMalformedInput();
+void testMissingAndWrongFieldShapes();
+void testNumericAndValueValidation();
+void testCrudEdgeCasesAndEscaping();
+void testDuplicateFieldsAndIdentitiesAreRejected();
+void testSerializedSizeLimitIsEnforced();
+} // namespace impl
+
+class TestTriage : public QObject {
+    Q_OBJECT
+private slots:
+    void testCrudRoundTrip() { impl::testCrudRoundTrip(); }
+    void testMigrationAndMalformedInput() { impl::testMigrationAndMalformedInput(); }
+    void testMissingAndWrongFieldShapes() { impl::testMissingAndWrongFieldShapes(); }
+    void testNumericAndValueValidation() { impl::testNumericAndValueValidation(); }
+    void testCrudEdgeCasesAndEscaping() { impl::testCrudEdgeCasesAndEscaping(); }
+    void testDuplicateFieldsAndIdentitiesAreRejected() { impl::testDuplicateFieldsAndIdentitiesAreRejected(); }
+    void testSerializedSizeLimitIsEnforced() { impl::testSerializedSizeLimitIsEnforced(); }
+};
+
+QTEST_GUILESS_MAIN(TestTriage)
+
+#include "test_triage.moc"
+
+namespace impl {
 
 class ScopedTempDirectory {
 public:
@@ -355,15 +382,4 @@ void testSerializedSizeLimitIsEnforced() {
     CHECK_EQ(error.code, loglens::PersistenceErrorCode::LimitExceeded);
 }
 
-} // namespace
-
-int main() {
-    testCrudRoundTrip();
-    testMigrationAndMalformedInput();
-    testMissingAndWrongFieldShapes();
-    testNumericAndValueValidation();
-    testCrudEdgeCasesAndEscaping();
-    testDuplicateFieldsAndIdentitiesAreRejected();
-    testSerializedSizeLimitIsEnforced();
-    return checkSummary();
-}
+} // namespace impl

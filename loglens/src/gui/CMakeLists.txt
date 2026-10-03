@@ -23,7 +23,7 @@ add_library(loglens_gui STATIC
     ${CMAKE_SOURCE_DIR}/include/loglens/gui/timeline_widget.hpp
 )
 # Include paths come from loglens_core, which exports include/ publicly.
-target_link_libraries(loglens_gui PUBLIC loglens_core Qt${QT_VERSION_MAJOR}::Widgets)
+target_link_libraries(loglens_gui PUBLIC loglens_core Qt6::Widgets)
 
 add_executable(loglens-gui gui_main.cpp)
 target_link_libraries(loglens-gui PRIVATE loglens_gui)

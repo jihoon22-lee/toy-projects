@@ -4,13 +4,32 @@
 #include "loglens/log_stats.hpp"
 
 #include <string>
+#include <QtTest>
+
+namespace impl {
+void testNormalize();
+void testGrouping();
+void testBuckets();
+} // namespace impl
+
+class TestLogStats : public QObject {
+    Q_OBJECT
+private slots:
+    void testNormalize() { impl::testNormalize(); }
+    void testGrouping() { impl::testGrouping(); }
+    void testBuckets() { impl::testBuckets(); }
+};
+
+QTEST_GUILESS_MAIN(TestLogStats)
+
+#include "test_log_stats.moc"
 
 using loglens::Bucket;
 using loglens::Level;
 using loglens::normalizeMessage;
 using loglens::Stats;
 
-namespace {
+namespace impl {
 
 void testNormalize() {
     CHECK_EQ(normalizeMessage("user 123 failed"), std::string("user <N> failed"));
@@ -79,11 +98,4 @@ void testBuckets() {
     CHECK(Stats().buckets(1000).empty());
 }
 
-} // namespace
-
-int main() {
-    testNormalize();
-    testGrouping();
-    testBuckets();
-    return checkSummary();
-}
+} // namespace impl

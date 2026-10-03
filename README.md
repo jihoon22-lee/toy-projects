@@ -8,7 +8,7 @@
 | 이름 | 설명 | 빌드 |
 |---|---|---|
 | [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어와 cleanup·storage workbench | CMake · Qt6 GUI |
-| [loglens](loglens/) | 로그 뷰어·분석기와 investigation workbench | CMake · Qt5/Qt6 GUI |
+| [loglens](loglens/) | 로그 뷰어·분석기와 investigation workbench | CMake · Qt6 GUI |
 | [buildscope](buildscope/) | compile database explorer (Python producer + C++/Qt consumer) | CMake · Python 3.10+ · Qt5/Qt6 |
 | [envlens](envlens/) | Python 환경 snapshot·diff·runtime inspection CLI/library | pure Python 3.10+ |
 | [abilens](abilens/) | Linux ELF/ABI artifact inspector | 손으로 쓴 Make · C++20 |
@@ -82,14 +82,11 @@ GUI 테스트는 `QT_QPA_PLATFORM=offscreen`으로 헤드리스로 돌린다.
 각 제품은 자체 빌드·테스트 명령을 가진다. CI는 같은 명령을 그대로 실행한다.
 
 ```bash
-# loglens — Qt 6와 Qt 5 CMake leg
+# loglens — CMake/Qt6
 cd loglens
-cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON
-cmake --build build/gui --parallel
+cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release
+cmake --build build/gui --parallel 2
 QT_QPA_PLATFORM=offscreen ctest --test-dir build/gui --output-on-failure
-cmake -S . -B build/gui-qt5 -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_Qt6=ON
-cmake --build build/gui-qt5 --parallel
-QT_QPA_PLATFORM=offscreen ctest --test-dir build/gui-qt5 --output-on-failure
 
 # diskmap — CMake/Qt6
 cd ../diskmap

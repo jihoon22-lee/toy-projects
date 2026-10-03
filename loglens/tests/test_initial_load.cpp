@@ -10,8 +10,41 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <QtTest>
 
-namespace {
+namespace impl {
+void testSelectsCompleteLogicalRecordsAcrossTinyChunks();
+void testEmptyFileProducesAnEmptySuccessfulWindow();
+void testPartialOnlyFileProducesNoCompleteRecords();
+void testTailCountIsExactAcrossContinuationCrLfAndEveryChunkBoundary();
+void testLeadingContinuationIsARecordAndLargeWindowStartsAtZero();
+void testCancellationStopsBeforeOpeningTheSource();
+void testCancellationDuringScanIsReportedWithoutSourceError();
+void testMissingAndUnsupportedSourcesExposeDeterministicErrors();
+void testReplacementDuringScanIsRejected();
+void testRejectsZeroTailSize();
+} // namespace impl
+
+class TestInitialLoad : public QObject {
+    Q_OBJECT
+private slots:
+    void testSelectsCompleteLogicalRecordsAcrossTinyChunks() { impl::testSelectsCompleteLogicalRecordsAcrossTinyChunks(); }
+    void testEmptyFileProducesAnEmptySuccessfulWindow() { impl::testEmptyFileProducesAnEmptySuccessfulWindow(); }
+    void testPartialOnlyFileProducesNoCompleteRecords() { impl::testPartialOnlyFileProducesNoCompleteRecords(); }
+    void testTailCountIsExactAcrossContinuationCrLfAndEveryChunkBoundary() { impl::testTailCountIsExactAcrossContinuationCrLfAndEveryChunkBoundary(); }
+    void testLeadingContinuationIsARecordAndLargeWindowStartsAtZero() { impl::testLeadingContinuationIsARecordAndLargeWindowStartsAtZero(); }
+    void testCancellationStopsBeforeOpeningTheSource() { impl::testCancellationStopsBeforeOpeningTheSource(); }
+    void testCancellationDuringScanIsReportedWithoutSourceError() { impl::testCancellationDuringScanIsReportedWithoutSourceError(); }
+    void testMissingAndUnsupportedSourcesExposeDeterministicErrors() { impl::testMissingAndUnsupportedSourcesExposeDeterministicErrors(); }
+    void testReplacementDuringScanIsRejected() { impl::testReplacementDuringScanIsRejected(); }
+    void testRejectsZeroTailSize() { impl::testRejectsZeroTailSize(); }
+};
+
+QTEST_GUILESS_MAIN(TestInitialLoad)
+
+#include "test_initial_load.moc"
+
+namespace impl {
 
 namespace fs = std::filesystem;
 
@@ -235,18 +268,4 @@ void testRejectsZeroTailSize() {
     CHECK(threw);
 }
 
-} // namespace
-
-int main() {
-    testSelectsCompleteLogicalRecordsAcrossTinyChunks();
-    testEmptyFileProducesAnEmptySuccessfulWindow();
-    testPartialOnlyFileProducesNoCompleteRecords();
-    testTailCountIsExactAcrossContinuationCrLfAndEveryChunkBoundary();
-    testLeadingContinuationIsARecordAndLargeWindowStartsAtZero();
-    testCancellationStopsBeforeOpeningTheSource();
-    testCancellationDuringScanIsReportedWithoutSourceError();
-    testMissingAndUnsupportedSourcesExposeDeterministicErrors();
-    testReplacementDuringScanIsRejected();
-    testRejectsZeroTailSize();
-    return checkSummary();
-}
+} // namespace impl

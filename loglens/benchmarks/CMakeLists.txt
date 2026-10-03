@@ -15,5 +15,5 @@ target_compile_options(loglens-bench-core PRIVATE ${_benchmark_warnings})
 
 add_executable(loglens-bench-gui EXCLUDE_FROM_ALL gui_benchmark.cpp)
 target_link_libraries(loglens-bench-gui PRIVATE loglens_gui loglens_benchmark_common
-                                                   Qt${QT_VERSION_MAJOR}::Widgets)
+                                                   Qt6::Widgets)
 target_compile_options(loglens-bench-gui PRIVATE ${_benchmark_warnings})

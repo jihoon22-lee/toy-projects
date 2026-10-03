@@ -5,8 +5,27 @@
 
 #include <string>
 #include <vector>
+#include <QtTest>
 
-namespace {
+namespace impl {
+void testDeterministicWindowSignals();
+void testRateSpikeAndInvalidWindows();
+void testOverlappingWindowsCountSharedEvidenceInBothSides();
+} // namespace impl
+
+class TestWindowAnalysis : public QObject {
+    Q_OBJECT
+private slots:
+    void testDeterministicWindowSignals() { impl::testDeterministicWindowSignals(); }
+    void testRateSpikeAndInvalidWindows() { impl::testRateSpikeAndInvalidWindows(); }
+    void testOverlappingWindowsCountSharedEvidenceInBothSides() { impl::testOverlappingWindowsCountSharedEvidenceInBothSides(); }
+};
+
+QTEST_GUILESS_MAIN(TestWindowAnalysis)
+
+#include "test_window_analysis.moc"
+
+namespace impl {
 
 loglens::LogRecord record(std::uint64_t timestamp, loglens::Level level,
                           std::string source, std::string message,
@@ -85,11 +104,4 @@ void testOverlappingWindowsCountSharedEvidenceInBothSides() {
     CHECK_EQ(analysis.correlations.size(), static_cast<std::size_t>(1));
 }
 
-} // namespace
-
-int main() {
-    testDeterministicWindowSignals();
-    testRateSpikeAndInvalidWindows();
-    testOverlappingWindowsCountSharedEvidenceInBothSides();
-    return checkSummary();
-}
+} // namespace impl
