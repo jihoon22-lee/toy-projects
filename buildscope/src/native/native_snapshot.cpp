@@ -97,6 +97,139 @@ QString projectRootPath(const QString &path, const QString &projectRoot) {
     return QString::fromStdString(resolved.generic_string());
 }
 
+// QJsonValue rejects the Python-legal constants NaN/Infinity/-Infinity
+// with a generic parse error; mirror the producer's explicit rejection.
+void rejectNonstandardConstants(const QByteArray &bytes) {
+    bool inString = false;
+    bool escaped = false;
+    for (qsizetype index = 0; index < bytes.size(); ++index) {
+        const char character = bytes.at(index);
+        if (inString) {
+            if (escaped) {
+                escaped = false;
+            } else if (character == '\\') {
+                escaped = true;
+            } else if (character == '"') {
+                inString = false;
+            }
+            continue;
+        }
+        if (character == '"') {
+            inString = true;
+            continue;
+        }
+        for (const char *constant : {"NaN", "Infinity", "-Infinity"}) {
+            const qsizetype length = static_cast<qsizetype>(std::strlen(constant));
+            if (bytes.mid(index, length) == constant &&
+                (index == 0 || bytes.at(index - 1) != '"')) {
+                throw SnapshotError(
+                    QStringLiteral("non-standard JSON constant is forbidden: %1")
+                        .arg(QLatin1String(constant)));
+            }
+        }
+    }
+}
+
+// Splits the top-level JSON array into element byte ranges without building
+// a document. Strings, escapes, and bracket depth are tracked exactly, so a
+// `,`/`]` inside an element never splits it. Each range is handed to `visit`;
+// malformed structure fails closed with a SnapshotError.
+template <typename Visit>
+void forEachDatabaseElement(const QByteArray &raw, Visit &&visit) {
+    auto isSpace = [](char character) {
+        return character == ' ' || character == '\t' || character == '\n' ||
+               character == '\r';
+    };
+    qsizetype cursor = 0;
+    while (cursor < raw.size() && isSpace(raw.at(cursor))) {
+        ++cursor;
+    }
+    if (cursor >= raw.size() || raw.at(cursor) != '[') {
+        throw SnapshotError(
+            QStringLiteral("compilation database root must be an array"));
+    }
+    ++cursor;
+    bool afterComma = false;
+    for (;;) {
+        while (cursor < raw.size() && isSpace(raw.at(cursor))) {
+            ++cursor;
+        }
+        if (cursor >= raw.size()) {
+            throw SnapshotError(QStringLiteral(
+                "cannot read compilation database: unexpected end of input"));
+        }
+        if (raw.at(cursor) == ']') {
+            if (afterComma) {
+                throw SnapshotError(QStringLiteral(
+                    "cannot read compilation database: trailing comma in entry array"));
+            }
+            ++cursor;
+            break;
+        }
+        const qsizetype begin = cursor;
+        int depth = 0;
+        bool inString = false;
+        bool escaped = false;
+        bool closed = false;
+        for (; cursor < raw.size(); ++cursor) {
+            const char character = raw.at(cursor);
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                } else if (character == '\\') {
+                    escaped = true;
+                } else if (character == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+            if (character == '"') {
+                inString = true;
+                continue;
+            }
+            if (character == '{' || character == '[') {
+                ++depth;
+                continue;
+            }
+            if (character == ']' && depth == 0) {
+                closed = true;
+                break;
+            }
+            if (character == '}' || character == ']') {
+                if (depth == 0) {
+                    throw SnapshotError(QStringLiteral(
+                        "cannot read compilation database: unbalanced brackets"));
+                }
+                --depth;
+                continue;
+            }
+            if (character == ',' && depth == 0) {
+                closed = true;
+                break;
+            }
+        }
+        if (!closed) {
+            throw SnapshotError(QStringLiteral(
+                "cannot read compilation database: unexpected end of input"));
+        }
+        visit(raw.mid(begin, cursor - begin));
+        if (raw.at(cursor) == ',') {
+            ++cursor;
+            afterComma = true;
+        } else {
+            ++cursor;  // closing ']'
+            break;
+        }
+    }
+    while (cursor < raw.size() && isSpace(raw.at(cursor))) {
+        ++cursor;
+    }
+    if (cursor != raw.size()) {
+        throw SnapshotError(QStringLiteral(
+            "cannot read compilation database: trailing data after entry array"));
+    }
+}
+
 }  // namespace
 
 QJsonObject loadCompilationDatabase(const QString &path, const QString &projectRoot) {
@@ -116,60 +249,36 @@ QJsonObject loadCompilationDatabase(const QString &path, const QString &projectR
         throw SnapshotError(QStringLiteral("cannot resolve compilation database paths: %1")
                                 .arg(QString::fromStdString(error.what())));
     }
-    try {
-        detail::rejectDuplicateJsonKeys(raw);
-    } catch (const std::exception &error) {
-        throw SnapshotError(QString::fromUtf8(error.what()));
-    }
-    // QJsonDocument rejects the Python-legal constants NaN/Infinity/-Infinity
-    // with a generic parse error; mirror the producer's explicit rejection.
-    bool inString = false;
-    bool escaped = false;
-    for (qsizetype index = 0; index < raw.size(); ++index) {
-        const char character = raw.at(index);
-        if (inString) {
-            if (escaped) {
-                escaped = false;
-            } else if (character == '\\') {
-                escaped = true;
-            } else if (character == '"') {
-                inString = false;
-            }
-            continue;
-        }
-        if (character == '"') {
-            inString = true;
-            continue;
-        }
-        for (const char *constant : {"NaN", "Infinity", "-Infinity"}) {
-            const qsizetype length = static_cast<qsizetype>(std::strlen(constant));
-            if (raw.mid(index, length) == constant &&
-                (index == 0 || raw.at(index - 1) != '"')) {
-                throw SnapshotError(
-                    QStringLiteral("non-standard JSON constant is forbidden: %1")
-                        .arg(QLatin1String(constant)));
-            }
-        }
-    }
-    QJsonParseError parseError{};
-    const QJsonDocument document = QJsonDocument::fromJson(raw, &parseError);
-    if (parseError.error != QJsonParseError::NoError) {
-        throw SnapshotError(QStringLiteral("cannot read compilation database: %1")
-                                .arg(parseError.errorString()));
-    }
-    if (!document.isArray()) {
-        throw SnapshotError(QStringLiteral("compilation database root must be an array"));
-    }
-    const QJsonArray payload = document.array();
-    if (payload.size() > kMaxEntries) {
-        throw SnapshotError(QStringLiteral("compilation database exceeds %1 entry limit")
-                                .arg(kMaxEntries));
-    }
     const QString databaseParent = QFileInfo(resolvedPath).absolutePath();
     QJsonArray entries;
-    for (qsizetype index = 0; index < payload.size(); ++index) {
-        entries.append(snapshotEntry(payload.at(index), index, root, databaseParent));
-    }
+    qsizetype index = 0;
+    // Walks the top-level array element by element so a large compilation
+    // database never materializes one giant DOM: each element is validated
+    // (duplicate keys, non-standard constants) and parsed inside its own
+    // byte range, bounded by the largest single entry instead of the file.
+    forEachDatabaseElement(raw, [&](const QByteArray &element) {
+        if (index >= kMaxEntries) {
+            throw SnapshotError(
+                QStringLiteral("compilation database exceeds %1 entry limit")
+                    .arg(kMaxEntries));
+        }
+        try {
+            detail::rejectDuplicateJsonKeys(element);
+        } catch (const std::exception &error) {
+            throw SnapshotError(QString::fromUtf8(error.what()));
+        }
+        rejectNonstandardConstants(element);
+        QJsonParseError parseError{};
+        const QJsonValue value = QJsonValue::fromJson(element, &parseError);
+        if (parseError.error != QJsonParseError::NoError) {
+            throw SnapshotError(
+                QStringLiteral("cannot read compilation database entry %1: %2")
+                    .arg(index)
+                    .arg(parseError.errorString()));
+        }
+        entries.append(snapshotEntry(value, index, root, databaseParent));
+        ++index;
+    });
     annotateEntrySets(entries);
     QList<QJsonObject> sorted;
     sorted.reserve(entries.size());
