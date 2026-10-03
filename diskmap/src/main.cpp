@@ -541,15 +541,6 @@ int main(int argc, char** argv) {
         printUsage(std::cerr);
         return 1;
     }
-    // --load-snapshot A --compare-snapshot B compares two saved snapshots
-    // offline: B is the baseline and A is the current state.
-    if (!hasLoadedSnapshot && !options.compare_snapshot.empty()
-        && options.path.empty()) {
-        std::cerr << "error: --compare-snapshot requires a live scan path or "
-                     "--load-snapshot\n";
-        printUsage(std::cerr);
-        return 1;
-    }
     const bool hasDiffFilter = !options.diff_kinds.empty() ||
                                options.diff_min_delta > 0 || options.diff_certain_only;
     if (hasDiffFilter && options.compare_snapshot.empty()) {
