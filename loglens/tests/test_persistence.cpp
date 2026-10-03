@@ -31,6 +31,7 @@ void testPersistenceSyntaxAndShapeFailures();
 void testBoundsAndUnsafePaths();
 void testPersistencePathSafetyFailures();
 void testPredictableTemporaryPathAttackCannotOverwriteFiles();
+void testSessionRoundTripAndValidation();
 } // namespace impl
 
 class TestPersistence : public QObject {
@@ -53,6 +54,7 @@ private slots:
         impl::testPredictableTemporaryPathAttackCannotOverwriteFiles();
 #endif
     }
+    void testSessionRoundTripAndValidation() { impl::testSessionRoundTripAndValidation(); }
 };
 
 QTEST_GUILESS_MAIN(TestPersistence)
@@ -377,6 +379,110 @@ void expectQueryReject(const fs::path& path, const std::string& content,
     CHECK(!result.ok());
     CHECK(result.error.code == code);
     CHECK(result.queries.empty());
+}
+
+void expectSessionReject(const fs::path& path, const std::string& content,
+                         loglens::PersistenceErrorCode code) {
+    writeFile(path, content);
+    const loglens::SessionLoadResult result = loglens::loadSession(path.string());
+    CHECK(!result.ok());
+    CHECK(result.error.code == code);
+}
+
+void testSessionRoundTripAndValidation() {
+    TempDirectory directory;
+    const fs::path path = directory.path() / "incident.session.json";
+
+    loglens::SessionState state;
+    state.name = "billing outage";
+    state.source_path = "/var/log/app.log";
+    state.format = loglens::Format::Syslog;
+    state.multiline = loglens::MultilinePolicy::SeparateLines;
+    state.max_record_bytes = 4096;
+    state.filter = "level>=WARN AND message~timeout";
+    state.level = "warn";
+    loglens::PersistenceError error;
+    CHECK(loglens::saveSession(path.string(), state, error));
+    CHECK(error.ok());
+    const std::string expected =
+        "{\"schema\":\"loglens.session/v1\",\"name\":\"billing outage\","
+        "\"source\":{\"path\":\"/var/log/app.log\",\"format\":\"syslog\","
+        "\"multiline\":\"separate-lines\",\"max_record_bytes\":4096},"
+        "\"filter\":\"level>=WARN AND message~timeout\",\"level\":\"warn\"}\n";
+    CHECK_EQ(readFile(path), expected);
+
+    const loglens::SessionLoadResult loaded = loglens::loadSession(path.string());
+    CHECK(loaded.ok());
+    CHECK(loaded.found);
+    CHECK_EQ(loaded.state.name, state.name);
+    CHECK_EQ(loaded.state.source_path, state.source_path);
+    CHECK(loaded.state.format == loglens::Format::Syslog);
+    CHECK(loaded.state.multiline == loglens::MultilinePolicy::SeparateLines);
+    CHECK_EQ(loaded.state.max_record_bytes, static_cast<std::size_t>(4096));
+    CHECK_EQ(loaded.state.filter, state.filter);
+    CHECK_EQ(loaded.state.level, state.level);
+
+    // A minimal session needs only schema and source.path; the rest default.
+    const fs::path minimal = directory.path() / "minimal.session.json";
+    writeFile(minimal,
+              "{\"schema\":\"loglens.session/v1\","
+              "\"source\":{\"path\":\"./app.log\"}}");
+    const loglens::SessionLoadResult minimalLoad =
+        loglens::loadSession(minimal.string());
+    CHECK(minimalLoad.ok());
+    CHECK(minimalLoad.found);
+    CHECK(minimalLoad.state.format == loglens::Format::Auto);
+    CHECK(minimalLoad.state.multiline
+          == loglens::MultilinePolicy::FoldContinuations);
+    CHECK_EQ(minimalLoad.state.max_record_bytes,
+             loglens::kDefaultMaxRecordBytes);
+    CHECK(minimalLoad.state.filter.empty());
+
+    // A missing session store is a successful empty load; the CLI reports it.
+    const loglens::SessionLoadResult missing =
+        loglens::loadSession((directory.path() / "absent.json").string());
+    CHECK(missing.ok());
+    CHECK(!missing.found);
+
+    const fs::path bad = directory.path() / "bad.session.json";
+    expectSessionReject(bad,
+                        "{\"schema\":\"loglens.session/v0\",\"source\":{"
+                        "\"path\":\"x\"}}",
+                        loglens::PersistenceErrorCode::UnsupportedVersion);
+    expectSessionReject(bad,
+                        "{\"schema\":\"loglens.session/v1\",\"source\":{"
+                        "\"path\":\"x\"},\"future\":true}",
+                        loglens::PersistenceErrorCode::Malformed);
+    expectSessionReject(bad, "{\"schema\":\"loglens.session/v1\"}",
+                        loglens::PersistenceErrorCode::Malformed);
+    expectSessionReject(bad,
+                        "{\"schema\":\"loglens.session/v1\",\"source\":{"
+                        "\"path\":\"x\",\"format\":\"yaml\"}}",
+                        loglens::PersistenceErrorCode::InvalidValue);
+    expectSessionReject(bad,
+                        "{\"schema\":\"loglens.session/v1\",\"source\":{"
+                        "\"path\":\"x\"},\"filter\":\"level>=WARN extra\"}",
+                        loglens::PersistenceErrorCode::InvalidQuery);
+    expectSessionReject(bad,
+                        "{\"schema\":\"loglens.session/v1\",\"source\":{"
+                        "\"path\":\"x\"},\"level\":\"bogus\"}",
+                        loglens::PersistenceErrorCode::InvalidValue);
+    expectSessionReject(bad,
+                        "{\"schema\":\"loglens.session/v1\",\"source\":{"
+                        "\"path\":\"x\",\"max_record_bytes\":0}}",
+                        loglens::PersistenceErrorCode::LimitExceeded);
+    expectSessionReject(bad,
+                        "{\"schema\":\"loglens.session/v1\",\"source\":{"
+                        "\"path\":\"x\\u0001\"}}",
+                        loglens::PersistenceErrorCode::InvalidValue);
+
+    // An invalid save must not touch an existing store.
+    loglens::SessionState invalid;
+    invalid.source_path = "/var/log/app.log";
+    invalid.filter = "level>=";
+    CHECK(!loglens::saveSession(path.string(), invalid, error));
+    CHECK(error.code == loglens::PersistenceErrorCode::InvalidQuery);
+    CHECK_EQ(readFile(path), expected);
 }
 
 void testSchemaIsStrictAndMigrationFailsClosed() {

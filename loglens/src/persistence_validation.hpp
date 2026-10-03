@@ -9,6 +9,7 @@ void setPersistenceError(PersistenceError& error, PersistenceErrorCode code,
 
 bool validSourceProfile(const SourceProfile& profile, PersistenceError& error);
 bool validSavedQuery(const SavedQuery& query, PersistenceError& error);
+bool validSession(const SessionState& state, PersistenceError& error);
 
 bool validateAndSortProfiles(std::vector<SourceProfile>& profiles,
                              PersistenceError& error);
