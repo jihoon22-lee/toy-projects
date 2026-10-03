@@ -71,7 +71,13 @@ never deletes anything.
 ./build/gui/src/diskmap path/to/tree --duplicates --json
 ./build/gui/src/diskmap --load-snapshot before.json --json
 ./build/gui/src/diskmap --load-snapshot before.json --duplicates
+./build/gui/src/diskmap --load-snapshot after.json --compare-snapshot before.json
 ```
+
+`--load-snapshot` combined with `--compare-snapshot` diffs two saved
+snapshots without scanning: the compare file is the baseline and the loaded
+snapshot is the current state. The `--diff-*` report filters apply to both
+online and offline comparisons.
 
 `--load-snapshot` does not require a scan path. Its JSON output is the
 versioned snapshot document; `--compare-snapshot` and `--duplicates` emit

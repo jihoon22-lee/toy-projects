@@ -18,7 +18,7 @@
 namespace {
 
 // The version --version prints. diskmap's single version surface.
-constexpr const char* kVersion = "0.2.0";  // x-release-please-version
+constexpr const char* kVersion = "0.1.0";  // x-release-please-version
 
 struct CliOptions {
     std::string path;
@@ -56,7 +56,7 @@ void printUsage(std::ostream& out) {
         << "  --json              emit the tree as JSON instead of text\n"
         << "  --save-snapshot FILE save the scan as a bounded snapshot\n"
         << "  --load-snapshot FILE inspect a saved snapshot without scanning\n"
-        << "  --compare-snapshot FILE compare the scan with a saved snapshot\n"
+        << "  --compare-snapshot FILE compare against a saved snapshot\n"
         << "  --diff-kind KIND    print only these change kinds (repeatable:\n"
         << "                      added removed grown shrunk moved uncertain)\n"
         << "  --diff-min-delta BYTES print only changes of at least BYTES\n"
@@ -361,12 +361,39 @@ void printSnapshotTree(diskmap::Snapshot snapshot,
     }
 }
 
+diskmap_cli::SnapshotDiffFilter diffFilter(const CliOptions& options) {
+    diskmap_cli::SnapshotDiffFilter filter;
+    for (const std::string& name : options.diff_kinds) {
+        if (name == "added") filter.kinds.insert(diskmap::SnapshotChangeKind::Added);
+        if (name == "removed") filter.kinds.insert(diskmap::SnapshotChangeKind::Removed);
+        if (name == "grown") filter.kinds.insert(diskmap::SnapshotChangeKind::Grown);
+        if (name == "shrunk") filter.kinds.insert(diskmap::SnapshotChangeKind::Shrunk);
+        if (name == "moved") filter.kinds.insert(diskmap::SnapshotChangeKind::Moved);
+        if (name == "uncertain") filter.kinds.insert(diskmap::SnapshotChangeKind::Uncertain);
+    }
+    filter.min_delta_bytes = options.diff_min_delta;
+    filter.certain_only = options.diff_certain_only;
+    return filter;
+}
+
 int runLoadedSnapshot(const CliOptions& options) {
     try {
         diskmap::Snapshot snapshot =
             diskmap::readSnapshotFile(options.load_snapshot);
         if (!options.save_snapshot.empty()) {
             diskmap::writeSnapshotAtomically(snapshot, options.save_snapshot);
+        }
+        if (!options.compare_snapshot.empty()) {
+            // Offline comparison: the compare file is the baseline and the
+            // loaded snapshot is the current state, matching the live-scan
+            // direction.
+            const diskmap::Snapshot before =
+                diskmap::readSnapshotFile(options.compare_snapshot);
+            const diskmap::SnapshotDiff diff =
+                diskmap::diffSnapshots(before, snapshot, {});
+            diskmap_cli::printSnapshotDiff(diff, options.json, std::cout,
+                                           diffFilter(options));
+            return 0;
         }
         if (options.duplicates) {
             const diskmap::ScanResult result =
@@ -385,21 +412,6 @@ int runLoadedSnapshot(const CliOptions& options) {
         std::cerr << "snapshot: unknown error\n";
         return 1;
     }
-}
-
-diskmap_cli::SnapshotDiffFilter diffFilter(const CliOptions& options) {
-    diskmap_cli::SnapshotDiffFilter filter;
-    for (const std::string& name : options.diff_kinds) {
-        if (name == "added") filter.kinds.insert(diskmap::SnapshotChangeKind::Added);
-        if (name == "removed") filter.kinds.insert(diskmap::SnapshotChangeKind::Removed);
-        if (name == "grown") filter.kinds.insert(diskmap::SnapshotChangeKind::Grown);
-        if (name == "shrunk") filter.kinds.insert(diskmap::SnapshotChangeKind::Shrunk);
-        if (name == "moved") filter.kinds.insert(diskmap::SnapshotChangeKind::Moved);
-        if (name == "uncertain") filter.kinds.insert(diskmap::SnapshotChangeKind::Uncertain);
-    }
-    filter.min_delta_bytes = options.diff_min_delta;
-    filter.certain_only = options.diff_certain_only;
-    return filter;
 }
 
 int runDiskmap(const CliOptions& options) {
@@ -503,8 +515,12 @@ int main(int argc, char** argv) {
         printUsage(std::cerr);
         return 1;
     }
-    if (hasLoadedSnapshot && !options.compare_snapshot.empty()) {
-        std::cerr << "error: --compare-snapshot requires a live scan path\n";
+    // --load-snapshot A --compare-snapshot B compares two saved snapshots
+    // offline: B is the baseline and A is the current state.
+    if (!hasLoadedSnapshot && !options.compare_snapshot.empty()
+        && options.path.empty()) {
+        std::cerr << "error: --compare-snapshot requires a live scan path or "
+                     "--load-snapshot\n";
         printUsage(std::cerr);
         return 1;
     }

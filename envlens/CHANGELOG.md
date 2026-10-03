@@ -1,21 +1,8 @@
 # Changelog
 
-## [0.2.0](https://github.com/jihoon22-lee/toy-projects/compare/v0.1.0...v0.2.0) (2026-10-03)
+## 0.1.0 (unreleased)
 
-
-### Features
-
-* **envlens:** add deterministic Python environment snapshots ([#50](https://github.com/jihoon22-lee/toy-projects/issues/50)) ([c307ac1](https://github.com/jihoon22-lee/toy-projects/commit/c307ac1ab01e12e4ac81a34623eb669da0e43641))
-* **envlens:** measure wheel purity with ici instead of asserting it ([#68](https://github.com/jihoon22-lee/toy-projects/issues/68)) ([fc3342f](https://github.com/jihoon22-lee/toy-projects/commit/fc3342ffd4650cdf9436d186f63854ed005597ff))
-* **tools:** make runtime, log, and storage evidence trustworthy ([#57](https://github.com/jihoon22-lee/toy-projects/issues/57)) ([6376bfc](https://github.com/jihoon22-lee/toy-projects/commit/6376bfc6c18e5dd74fc17387d4373b3688377d9b))
-
-
-### Bug Fixes
-
-* derive asserted versions from a single source of truth ([#93](https://github.com/jihoon22-lee/toy-projects/issues/93)) ([6c9517d](https://github.com/jihoon22-lee/toy-projects/commit/6c9517d3cd1179fd4f4f4bd53cae214dcbfb130f))
-
-
-### Documentation
-
-* **envlens:** record merged validation evidence ([#51](https://github.com/jihoon22-lee/toy-projects/issues/51)) ([371ebe4](https://github.com/jihoon22-lee/toy-projects/commit/371ebe499e628a6dbb786666b0943ddbdd369012))
-* reset documentation around each product's own purpose ([#81](https://github.com/jihoon22-lee/toy-projects/issues/81)) ([e5de21a](https://github.com/jihoon22-lee/toy-projects/commit/e5de21a908a037a24fa98dc609e609c7519cad36))
+Baseline: native build, test, and release pipeline established for envlens.
+The `envlens/v0.1.0` tag name is permanently unavailable after an earlier
+immutable-release deletion, so the first publishable envlens release will be
+0.1.1 or later.
