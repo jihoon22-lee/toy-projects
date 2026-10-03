@@ -2,6 +2,7 @@
 #include "loglens/log_parser.hpp"
 #include "loglens/log_record.hpp"
 #include "loglens/log_source.hpp"
+#include "loglens/persistence.hpp"
 #include "loglens/log_stats.hpp"
 #include "loglens/ring_buffer.hpp"
 
@@ -23,6 +24,11 @@ struct CliOptions {
     std::string filter;
     std::string level;
     std::string format = "auto";
+    std::string session_load;
+    std::string session_save;
+    bool filter_set = false;
+    bool level_set = false;
+    bool format_set = false;
     bool stats = false;
     bool help = false;
     bool version = false;
@@ -30,6 +36,8 @@ struct CliOptions {
     std::uint64_t bucket_ms = 60000;
     std::size_t top = 10;
     std::size_t capacity = loglens::kDefaultRecordCapacity;
+    loglens::MultilinePolicy multiline = loglens::MultilinePolicy::FoldContinuations;
+    std::size_t max_record_bytes = loglens::kDefaultMaxRecordBytes;
 };
 
 struct ActiveFilters {
@@ -58,6 +66,8 @@ void printUsage(std::ostream& out) {
         << "  --bucket MS     histogram bucket size (default 60000)\n"
         << "  --top N         number of patterns to show (default 10)\n"
         << "  --capacity N    retained record limit (default 8192)\n"
+        << "  --session FILE  load an investigation session document\n"
+        << "  --save-session FILE save the effective options as a session\n"
         << "  --help          show this message\n"
         << "  --version       print the version and exit\n";
 }
@@ -94,10 +104,17 @@ bool applyStringOption(const std::vector<std::string>& args, std::size_t& index,
     std::string* target = nullptr;
     if (arg == "--filter") {
         target = &options.filter;
+        options.filter_set = true;
     } else if (arg == "--level") {
         target = &options.level;
+        options.level_set = true;
     } else if (arg == "--format") {
         target = &options.format;
+        options.format_set = true;
+    } else if (arg == "--session") {
+        target = &options.session_load;
+    } else if (arg == "--save-session") {
+        target = &options.session_save;
     }
     if (target == nullptr) {
         return false;
@@ -285,14 +302,78 @@ void printStats(const loglens::RingBuffer& records,
     printRetentionSummary(records, out);
 }
 
+const char* formatCliName(loglens::Format format) {
+    switch (format) {
+        case loglens::Format::PlainIso: return "plain";
+        case loglens::Format::Syslog: return "syslog";
+        case loglens::Format::JsonLine: return "json";
+        case loglens::Format::Raw: return "raw";
+        default: return "auto";
+    }
+}
+
+// Session values fill in only what the command line did not set explicitly.
+bool applySessionFile(CliOptions& options) {
+    if (options.session_load.empty()) {
+        return true;
+    }
+    const loglens::SessionLoadResult session =
+        loglens::loadSession(options.session_load);
+    if (!session.ok() || !session.found) {
+        std::cerr << "fatal: cannot load session '" << options.session_load << "': "
+                  << (session.ok() ? "file not found" : session.error.message) << "\n";
+        return false;
+    }
+    const loglens::SessionState& state = session.state;
+    if (options.path.empty()) {
+        options.path = state.source_path;
+    }
+    if (!options.filter_set) {
+        options.filter = state.filter;
+    }
+    if (!options.level_set) {
+        options.level = state.level;
+    }
+    if (!options.format_set) {
+        options.format = formatCliName(state.format);
+    }
+    options.multiline = state.multiline;
+    options.max_record_bytes = state.max_record_bytes;
+    return true;
+}
+
+bool saveSessionFile(const CliOptions& options) {
+    if (options.session_save.empty()) {
+        return true;
+    }
+    loglens::SessionState state;
+    state.source_path = options.path;
+    state.format = resolveFormat(options.format);
+    state.multiline = options.multiline;
+    state.max_record_bytes = options.max_record_bytes;
+    state.filter = options.filter;
+    state.level = options.level;
+    loglens::PersistenceError error;
+    if (!loglens::saveSession(options.session_save, state, error)) {
+        std::cerr << "fatal: cannot save session '" << options.session_save << "': "
+                  << error.message << "\n";
+        return false;
+    }
+    return true;
+}
+
 int run(const CliOptions& options) {
     ActiveFilters filters;
     if (!initializeFilters(options, filters)) {
         return 1;
     }
+    if (!saveSessionFile(options)) {
+        return 1;
+    }
 
     const loglens::Format format = resolveFormat(options.format);
-    loglens::RecordAssembler assembler(format);
+    loglens::RecordAssembler assembler(format, loglens::EncodingErrorPolicy::PreserveBytes,
+                                       options.max_record_bytes, options.multiline);
     loglens::RingBuffer records(options.capacity);
     loglens::FileTailer tailer(options.path);
     std::optional<std::uint64_t> snapshotEnd;
@@ -331,7 +412,7 @@ int run(const CliOptions& options) {
 } // namespace
 
 int main(int argc, char** argv) {
-    const CliOptions options = parseArgs(argc, argv);
+    CliOptions options = parseArgs(argc, argv);
     if (options.version) {
         std::cout << "loglens " << kVersion << '\n';
         return 0;
@@ -340,7 +421,14 @@ int main(int argc, char** argv) {
         printUsage(std::cout);
         return 0;
     }
-    if (!options.valid || options.path.empty()) {
+    if (!options.valid) {
+        printUsage(std::cerr);
+        return 1;
+    }
+    if (!applySessionFile(options)) {
+        return 1;
+    }
+    if (options.path.empty()) {
         printUsage(std::cerr);
         return 1;
     }

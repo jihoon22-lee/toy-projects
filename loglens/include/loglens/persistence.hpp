@@ -27,6 +27,21 @@ struct SavedQuery {
     std::string expression;
 };
 
+// An investigation session captures the source and the active query of one
+// investigation, so a CLI or GUI run can be reproduced from a single
+// document. Unlike the named stores it is a single object, not a collection.
+constexpr std::size_t kMaxSessionPathBytes = 4096;
+
+struct SessionState {
+    std::string name;
+    std::string source_path;
+    Format format = Format::Auto;
+    MultilinePolicy multiline = MultilinePolicy::FoldContinuations;
+    std::size_t max_record_bytes = kDefaultMaxRecordBytes;
+    std::string filter;
+    std::string level;
+};
+
 enum class PersistenceErrorCode {
     None,
     Io,
@@ -64,9 +79,18 @@ struct SavedQueryLoadResult {
     bool ok() const { return error.ok(); }
 };
 
+struct SessionLoadResult {
+    bool found = false;
+    SessionState state;
+    PersistenceError error;
+
+    bool ok() const { return error.ok(); }
+};
+
 const char* persistenceErrorCodeName(PersistenceErrorCode code);
 const char* sourceProfileSchemaName();
 const char* savedQuerySchemaName();
+const char* sessionSchemaName();
 
 // Missing optional stores are successful empty loads (found == false).  Any
 // present file must be a complete supported schema; unknown versions, unknown
@@ -74,6 +98,7 @@ const char* savedQuerySchemaName();
 // rejected without exposing partial results.
 SourceProfileLoadResult loadSourceProfiles(const std::string& path);
 SavedQueryLoadResult loadSavedQueries(const std::string& path);
+SessionLoadResult loadSession(const std::string& path);
 
 // Saves use a same-directory temporary file followed by atomic replacement on
 // POSIX filesystems.  The destination is never truncated before serialization
@@ -84,5 +109,7 @@ bool saveSourceProfiles(const std::string& path,
 bool saveSavedQueries(const std::string& path,
                       const std::vector<SavedQuery>& queries,
                       PersistenceError& error);
+bool saveSession(const std::string& path, const SessionState& state,
+                 PersistenceError& error);
 
 } // namespace loglens

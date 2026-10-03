@@ -81,4 +81,32 @@ std::string serializeSavedQueries(const std::vector<SavedQuery>& queries) {
     return output;
 }
 
+std::string serializeSession(const SessionState& state) {
+    std::string output = "{\"schema\":";
+    appendJsonString(output, sessionSchemaName());
+    if (!state.name.empty()) {
+        output += ",\"name\":";
+        appendJsonString(output, state.name);
+    }
+    output += ",\"source\":{\"path\":";
+    appendJsonString(output, state.source_path);
+    output += ",\"format\":";
+    appendJsonString(output, formatName(state.format));
+    output += ",\"multiline\":";
+    appendJsonString(output, multilinePolicyName(state.multiline));
+    output += ",\"max_record_bytes\":";
+    output += std::to_string(state.max_record_bytes);
+    output += "}";
+    if (!state.filter.empty()) {
+        output += ",\"filter\":";
+        appendJsonString(output, state.filter);
+    }
+    if (!state.level.empty()) {
+        output += ",\"level\":";
+        appendJsonString(output, state.level);
+    }
+    output += "}\n";
+    return output;
+}
+
 } // namespace loglens::detail
