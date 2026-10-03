@@ -115,7 +115,15 @@ with the raw bytes preserved — plugin records and unparseable lines can be
 filtered, exported, and diffed side by side.  Documents are bounded to 4 MiB
 and validated strictly: an unreadable file, malformed JSON, an unknown
 `kind`, a bad expression, or a field mapping outside the pattern's capture
-groups is a load error, never a partial plugin.
+groups is a load error, never a partial plugin.  Capture-group numbers must
+be whole integers (`2.9` or `1e1` are rejected rather than truncated).
+
+Patterns run on a non-backtracking matcher, so a long line costs time
+proportional to its length instead of exhausting the stack; back-references
+(`\1`) are therefore not supported and are rejected when the plugin loads.
+`--format-plugin` replaces the built-in format — combining it with `--format`
+is an error — and `--save-session` records the plugin path, so `--session`
+reparses the log with the same plugin.
 
 ## Persistent profiles and saved queries
 
@@ -151,8 +159,10 @@ active query of one investigation into a single document, so a run can be
 saved and reproduced later.  Only `source.path` is required; `format`,
 `multiline`, `max_record_bytes`, `name`, `filter`, and `level` default the
 same way as the console flags.  `level` accepts the same spellings as
-`--level`, and `filter` reuses `Filter::parse()` validation.  Source paths
-are bounded to 4096 UTF-8 bytes.
+`--level`, and `filter` reuses `Filter::parse()` validation.  An optional
+`source.format_plugin` path records a `--format-plugin` document and is
+written only when one was used.  Source and plugin paths are bounded to 4096
+UTF-8 bytes.
 
 ```json
 {"schema":"loglens.session/v1","name":"billing outage",
@@ -174,9 +184,14 @@ loglens --session errors.session.json --level INFO   # flag overrides session
 
 The GUI reads and writes the same session document.  The source bar offers
 **Open session…**, which restores the source, format, multiline, and record
-limit controls, applies any saved `filter`/`level` as the filter expression,
-and reopens the file; **Save session** writes the current source and filter
-as a session document.
+limit controls, applies the saved `filter`/`level` as one filter expression
+(`level>=LEVEL AND (filter)`, the same meaning as the console's separate
+flags), clears any filter left from the previous view when the session has
+none, and reopens the file.  **Save session** writes the current source and
+filter as a session document; it suggests `<log>.session.json` next to the
+log and refuses to write over the open log itself.  The GUI parses with the
+built-in formats only, so a session's `format_plugin` applies to the console
+tool.
 
 Object fields and JSON keys are strict: unknown or duplicate fields, duplicate
 names, malformed JSON, invalid enum/number values, invalid filter expressions,

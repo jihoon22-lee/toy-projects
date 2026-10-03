@@ -301,16 +301,36 @@ void MainWindow::saveSavedQuery() {
     updateStatus(tr("Saved query '%1'").arg(utf8String(candidate.name)));
 }
 
+QString MainWindow::suggestedSessionPath() const {
+    // Never the log itself: a confirmed overwrite would replace the evidence
+    // under investigation with session JSON.
+    const QFileInfo log(currentPath_);
+    return log.absoluteDir().filePath(log.completeBaseName() +
+                                      QStringLiteral(".session.json"));
+}
+
 void MainWindow::saveSessionToFile() {
     if (currentPath_.isEmpty()) {
         updateStatus(tr("Open a log before saving a session"));
         return;
     }
     const QString path = QFileDialog::getSaveFileName(
-        this, tr("Save session"), currentPath_,
+        this, tr("Save session"), suggestedSessionPath(),
         tr("LogLens sessions (*.session.json);;All files (*)"));
     if (path.isEmpty()) {
         return;
+    }
+    saveSessionTo(path);
+}
+
+bool MainWindow::saveSessionTo(const QString& path) {
+    if (currentPath_.isEmpty()) {
+        updateStatus(tr("Open a log before saving a session"));
+        return false;
+    }
+    if (QFileInfo(path).absoluteFilePath() == QFileInfo(currentPath_).absoluteFilePath()) {
+        updateStatus(tr("Refusing to save the session over the open log"));
+        return false;
     }
     loglens::SessionState state;
     const QByteArray nameBytes = QFileInfo(path).completeBaseName().toUtf8();
@@ -325,12 +345,16 @@ void MainWindow::saveSessionToFile() {
     const QByteArray filterBytes = filterEdit_->text().toUtf8();
     state.filter = std::string(filterBytes.constData(),
                                static_cast<std::size_t>(filterBytes.size()));
+    const QByteArray targetBytes = path.toUtf8();
     loglens::PersistenceError error;
-    if (!loglens::saveSession(path.toStdString(), state, error)) {
+    if (!loglens::saveSession(
+            std::string(targetBytes.constData(), static_cast<std::size_t>(targetBytes.size())),
+            state, error)) {
         showPersistenceError(tr("save session"), error);
-        return;
+        return false;
     }
     updateStatus(tr("Session saved to %1").arg(QFileInfo(path).fileName()));
+    return true;
 }
 
 void MainWindow::openSessionFile() {
@@ -340,33 +364,44 @@ void MainWindow::openSessionFile() {
     if (path.isEmpty()) {
         return;
     }
-    const loglens::SessionLoadResult result = loglens::loadSession(path.toStdString());
+    openSession(path);
+}
+
+bool MainWindow::openSession(const QString& path) {
+    const QByteArray pathBytes = path.toUtf8();
+    const loglens::SessionLoadResult result = loglens::loadSession(
+        std::string(pathBytes.constData(), static_cast<std::size_t>(pathBytes.size())));
     if (!result.ok()) {
         showPersistenceError(tr("load session"), result.error);
-        return;
+        return false;
     }
     if (!result.found) {
         updateStatus(tr("Session file not found"));
-        return;
+        return false;
     }
     const loglens::SessionState& state = result.state;
     setProfileControls(loglens::SourceProfile{state.name, state.format, state.multiline,
                                             state.max_record_bytes});
+    // The CLI applies --level and --filter as two expressions that must both
+    // hold. AND binds tighter than OR, so the saved filter is parenthesised
+    // to keep that meaning once the two are joined into one expression.
     QString filter = utf8String(state.filter);
     if (!state.level.empty()) {
         const QString levelExpr =
             QStringLiteral("level>=") + utf8String(state.level);
-        filter = filter.isEmpty() ? levelExpr
-                                  : levelExpr + QStringLiteral(" AND ") + filter;
+        filter = filter.isEmpty()
+                     ? levelExpr
+                     : levelExpr + QStringLiteral(" AND (") + filter + QStringLiteral(")");
     }
-    if (!filter.isEmpty()) {
-        filterEdit_->setText(filter);
-        applyFilterText(filter);
-    }
+    // Applied even when empty: a session without a filter clears the one
+    // left over from the previous investigation.
+    filterEdit_->setText(filter);
+    applyFilterText(filter);
     if (state.source_path.empty()) {
         updateStatus(tr("Session '%1' loaded without a source path")
                          .arg(utf8String(state.name)));
-        return;
+        return true;
     }
     openPath(utf8String(state.source_path));
+    return true;
 }

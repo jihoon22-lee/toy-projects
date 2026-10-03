@@ -55,6 +55,11 @@ public:
                   std::size_t tailRecords);
     // Deterministic, lossless JSON export seam used by the button and tests.
     bool exportSelectedRows(const QString& path);
+    // Session file I/O behind the Open/Save session buttons; the buttons only
+    // add a file dialog on top of these.
+    bool saveSessionTo(const QString& path);
+    bool openSession(const QString& path);
+    QString suggestedSessionPath() const;
 
 signals:
     void startLoadRequested(loglens::LoadRequest request);
