@@ -4,7 +4,13 @@
 #include "buildscope/contract.hpp"
 #include "buildscope/diff.hpp"
 #include "buildscope/diff_model.hpp"
+#include "native_io.hpp"
+#include "native_relocation.hpp"
 #include "ui_main_window.h"
+#include "workflow.hpp"
+#include <QJsonDocument>
+#include <QMessageBox>
+#include <QProcess>
 
 #include <QDesktopServices>
 #include <QDir>
@@ -21,16 +27,13 @@
 
 #include <utility>
 
-static void initializeBuildScopeResources() {
-    Q_INIT_RESOURCE(buildscope);
-}
+static void initializeBuildScopeResources() { Q_INIT_RESOURCE(buildscope); }
 
 namespace buildscope {
 
 class StatusFilterProxyModel final : public QSortFilterProxyModel {
-public:
-    explicit StatusFilterProxyModel(QObject *parent = nullptr)
-        : QSortFilterProxyModel(parent) {
+  public:
+    explicit StatusFilterProxyModel(QObject *parent = nullptr) : QSortFilterProxyModel(parent) {
         setFilterCaseSensitivity(Qt::CaseInsensitive);
         setFilterKeyColumn(-1);
         setFilterRole(SearchTextRole);
@@ -38,9 +41,7 @@ public:
         setDynamicSortFilter(true);
     }
 
-    void setStatusDecorationsEnabled(bool enabled) {
-        statusDecorationsEnabled_ = enabled;
-    }
+    void setStatusDecorationsEnabled(bool enabled) { statusDecorationsEnabled_ = enabled; }
 
     QVariant data(const QModelIndex &index, int role) const override {
         if (!statusDecorationsEnabled_ || role != Qt::DecorationRole ||
@@ -63,7 +64,7 @@ public:
         return QIcon(QStringLiteral(":/icons/status-unknown.svg"));
     }
 
-private:
+  private:
     bool statusDecorationsEnabled_ = true;
 };
 
@@ -107,8 +108,7 @@ QString includeEdgeDetails(const SnapshotIncludeEdge &edge) {
         lines.append(QObject::tr("  %1. [%2] %3 — %4%5")
                          .arg(candidate.order)
                          .arg(candidate.kind, candidate.candidate,
-                              candidate.exists ? QObject::tr("exists")
-                                               : QObject::tr("missing"),
+                              candidate.exists ? QObject::tr("exists") : QObject::tr("missing"),
                               candidate.selected ? QObject::tr(" (selected)") : QString()));
     }
     return lines.join(QLatin1Char('\n'));
@@ -122,15 +122,14 @@ void addDiagnostic(QTreeWidget *tree, const SnapshotDiagnostic &diagnostic) {
 }
 
 QTreeWidgetItem *includeSearchItem(const SnapshotIncludeSearch &candidate,
-                                   const SnapshotIncludeEdge &edge,
-                                   const QString &details) {
-    auto *item = new QTreeWidgetItem(
-        {QObject::tr("%1. %2").arg(candidate.order).arg(candidate.kind), QString(),
-         candidate.candidate,
-         candidate.selected
-             ? QObject::tr("selected")
-             : (candidate.exists ? QObject::tr("candidate") : QObject::tr("missing")),
-         edge.parent});
+                                   const SnapshotIncludeEdge &edge, const QString &details) {
+    auto *item =
+        new QTreeWidgetItem({QObject::tr("%1. %2").arg(candidate.order).arg(candidate.kind),
+                             QString(), candidate.candidate,
+                             candidate.selected ? QObject::tr("selected")
+                                                : (candidate.exists ? QObject::tr("candidate")
+                                                                    : QObject::tr("missing")),
+                             edge.parent});
     item->setData(0, Qt::UserRole, edge.parent);
     item->setData(0, Qt::UserRole + 1, edge.line);
     item->setData(0, Qt::UserRole + 2, details);
@@ -168,7 +167,8 @@ void populateDefinitions(Ui::MainWindow &ui, const SnapshotEntry &entry) {
 }
 
 void populateSearchPaths(Ui::MainWindow &ui, const SnapshotEntry &entry) {
-    ui.includeTable->setRowCount(entry.hasNormalized ? entry.normalized.includePaths.size() : 0);
+    ui.includeTable->setRowCount(entry.hasNormalized ? entry.normalized.includePaths.size()
+                                                     : 0);
     if (!entry.hasNormalized) {
         return;
     }
@@ -197,12 +197,23 @@ void populateIncludeAnalysis(Ui::MainWindow &ui, const SnapshotEntry &entry) {
     for (const auto &edge : analysis.edges) {
         ui.includeEdgeTree->addTopLevelItem(includeEdgeItem(edge));
     }
-    for (const auto &diagnostic : analysis.diagnostics) {
+    for (const auto &diagnostic : analysis.diagnostics)
         addDiagnostic(ui.diagnosticTree, diagnostic);
+    if (!analysis.complete)
+        ui.includeEvidenceLabel->setText(
+            ui.includeEvidenceLabel->text() +
+            QObject::tr(" · PARTIAL: %1").arg(analysis.stopReason));
+    if (analysis.fallback) {
+        auto *group = new QTreeWidgetItem({QObject::tr("Estimated fallback (separate graph)")});
+        for (const auto &edge : analysis.fallback->edges)
+            group->addChild(includeEdgeItem(edge));
+        ui.includeEdgeTree->addTopLevelItem(group);
+        for (const auto &diagnostic : analysis.fallback->diagnostics)
+            addDiagnostic(ui.diagnosticTree, diagnostic);
     }
 }
 
-}  // namespace
+} // namespace
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), ui_(new Ui::MainWindow),
@@ -211,6 +222,7 @@ MainWindow::MainWindow(QWidget *parent)
       proxy_(std::make_unique<StatusFilterProxyModel>()) {
     initializeBuildScopeResources();
     ui_->setupUi(this);
+    setupWorkflow();
     proxy_->setSourceModel(model_.get());
     ui_->sourceTree->setModel(proxy_.get());
     ui_->sourceTree->header()->setSectionResizeMode(CompilationTreeModel::SourceColumn,
@@ -226,11 +238,10 @@ MainWindow::MainWindow(QWidget *parent)
     ui_->includeEdgeTree->header()->setStretchLastSection(true);
     connect(ui_->openButton, &QPushButton::clicked, this, &MainWindow::chooseSnapshot);
     connect(ui_->openDiffButton, &QPushButton::clicked, this, &MainWindow::chooseDiff);
-    connect(ui_->filterEdit, &QLineEdit::textChanged, this, &MainWindow::applyFilter);
-    connect(ui_->sourceTree->selectionModel(), &QItemSelectionModel::currentChanged, this,
-            [this](const QModelIndex &current, const QModelIndex &) {
-                showSelection(current);
-            });
+    connect(ui_->filterEdit, &QLineEdit::textChanged, this, &MainWindow::scheduleFilter);
+    connect(
+        ui_->sourceTree->selectionModel(), &QItemSelectionModel::currentChanged, this,
+        [this](const QModelIndex &current, const QModelIndex &) { showSelection(current); });
     connect(ui_->includeEdgeTree, &QTreeWidget::itemClicked, this,
             &MainWindow::showIncludeEdge);
     connect(ui_->includeEdgeTree, &QTreeWidget::itemDoubleClicked, this,
@@ -246,34 +257,37 @@ MainWindow::MainWindow(QWidget *parent)
     setDiffMode(false);
 }
 
-MainWindow::~MainWindow() = default;
+MainWindow::~MainWindow() { cancelWork(); }
+
+void MainWindow::applySnapshot(Snapshot snapshot, const QString &path) {
+    const auto schemaVersion = snapshot.schemaVersion;
+    const auto producerVersion = snapshot.producerVersion;
+    model_->setSnapshot(std::move(snapshot));
+    diffModel_->clear();
+    setDiffMode(false);
+    proxy_->setSourceModel(model_.get());
+    proxy_->setFilterRole(SearchTextRole);
+    proxy_->setStatusDecorationsEnabled(true);
+    ui_->pathEdit->setText(path);
+    ui_->filterEdit->clear();
+    ui_->statusLabel->setText(tr("Sources: %1 · configurations: %2 · contract %3 · producer %4")
+                                  .arg(model_->sourceCount())
+                                  .arg(model_->entryCount())
+                                  .arg(schemaVersion, producerVersion));
+    clearDetails(tr("Select a source or configuration"));
+    if (proxy_->rowCount() > 0) {
+        const auto sourceIndex = proxy_->index(0, 0);
+        ui_->sourceTree->setCurrentIndex(sourceIndex);
+        if (proxy_->rowCount(sourceIndex) > 1) {
+            ui_->sourceTree->expand(sourceIndex);
+        }
+    }
+}
 
 bool MainWindow::loadSnapshot(const QString &path) {
     try {
         auto snapshot = loadSnapshotFile(path);
-        const auto schemaVersion = snapshot.schemaVersion;
-        const auto producerVersion = snapshot.producerVersion;
-        model_->setSnapshot(std::move(snapshot));
-        diffModel_->clear();
-        setDiffMode(false);
-        proxy_->setSourceModel(model_.get());
-        proxy_->setFilterRole(SearchTextRole);
-        proxy_->setStatusDecorationsEnabled(true);
-        ui_->pathEdit->setText(path);
-        ui_->filterEdit->clear();
-        ui_->statusLabel->setText(
-            tr("Sources: %1 · configurations: %2 · contract %3 · producer %4")
-                .arg(model_->sourceCount())
-                .arg(model_->entryCount())
-                .arg(schemaVersion, producerVersion));
-        clearDetails(tr("Select a source or configuration"));
-        if (proxy_->rowCount() > 0) {
-            const auto sourceIndex = proxy_->index(0, 0);
-            ui_->sourceTree->setCurrentIndex(sourceIndex);
-            if (proxy_->rowCount(sourceIndex) > 1) {
-                ui_->sourceTree->expand(sourceIndex);
-            }
-        }
+        applySnapshot(std::move(snapshot), path);
         return true;
     } catch (const ContractError &error) {
         model_->clear();
@@ -290,40 +304,42 @@ bool MainWindow::loadSnapshot(const QString &path) {
     }
 }
 
+void MainWindow::applyDiffReport(DiffReport report, const QString &path) {
+    const auto schemaVersion = report.schemaVersion;
+    const auto producerVersion = report.producerVersion;
+    const auto summary = report.summary;
+    model_->clear();
+    diffModel_->setReport(std::move(report));
+    setDiffMode(true);
+    proxy_->setSourceModel(diffModel_.get());
+    proxy_->setFilterRole(DiffSearchTextRole);
+    proxy_->setStatusDecorationsEnabled(false);
+    ui_->pathEdit->setText(path);
+    ui_->filterEdit->clear();
+    ui_->statusLabel->setText(
+        tr("Changes: %1 visible · %2 suppressed · %3 unchanged · contract %4 · producer %5")
+            .arg(summary.visibleUnits)
+            .arg(summary.suppressedUnits)
+            .arg(summary.unchanged)
+            .arg(schemaVersion, producerVersion));
+    clearDetails(tr("Select a changed configuration"));
+    for (const auto &diagnostic : diffModel_->report().diagnostics) {
+        const auto message = diagnostic.source.isEmpty()
+                                 ? diagnostic.message
+                                 : tr("%1: %2").arg(diagnostic.source, diagnostic.message);
+        addDiagnostic(ui_->diagnosticTree, {diagnostic.code, message, diagnostic.severity});
+    }
+    if (proxy_->rowCount() > 0) {
+        const auto unitIndex = proxy_->index(0, 0);
+        ui_->sourceTree->setCurrentIndex(unitIndex);
+        ui_->sourceTree->expand(unitIndex);
+    }
+}
+
 bool MainWindow::loadDiff(const QString &path) {
     try {
         auto report = loadDiffFile(path);
-        const auto schemaVersion = report.schemaVersion;
-        const auto producerVersion = report.producerVersion;
-        const auto summary = report.summary;
-        model_->clear();
-        diffModel_->setReport(std::move(report));
-        setDiffMode(true);
-        proxy_->setSourceModel(diffModel_.get());
-        proxy_->setFilterRole(DiffSearchTextRole);
-        proxy_->setStatusDecorationsEnabled(false);
-        ui_->pathEdit->setText(path);
-        ui_->filterEdit->clear();
-        ui_->statusLabel->setText(
-            tr("Changes: %1 visible · %2 suppressed · %3 unchanged · contract %4 · producer %5")
-                .arg(summary.visibleUnits)
-                .arg(summary.suppressedUnits)
-                .arg(summary.unchanged)
-                .arg(schemaVersion, producerVersion));
-        clearDetails(tr("Select a changed configuration"));
-        for (const auto &diagnostic : diffModel_->report().diagnostics) {
-            const auto message = diagnostic.source.isEmpty()
-                                     ? diagnostic.message
-                                     : tr("%1: %2").arg(diagnostic.source,
-                                                        diagnostic.message);
-            addDiagnostic(ui_->diagnosticTree,
-                          {diagnostic.code, message, diagnostic.severity});
-        }
-        if (proxy_->rowCount() > 0) {
-            const auto unitIndex = proxy_->index(0, 0);
-            ui_->sourceTree->setCurrentIndex(unitIndex);
-            ui_->sourceTree->expand(unitIndex);
-        }
+        applyDiffReport(std::move(report), path);
         return true;
     } catch (const ContractError &error) {
         diffModel_->clear();
@@ -343,23 +359,21 @@ int MainWindow::entryCount() const {
     return diffMode_ ? diffModel_->unitCount() : model_->entryCount();
 }
 
-QString MainWindow::statusText() const {
-    return ui_->statusLabel->text();
-}
+QString MainWindow::statusText() const { return ui_->statusLabel->text(); }
 
 void MainWindow::chooseSnapshot() {
-    const auto path = QFileDialog::getOpenFileName(
-        this, tr("Open BuildScope snapshot"), {}, tr("JSON files (*.json);;All files (*)"));
+    const auto path = QFileDialog::getOpenFileName(this, tr("Open BuildScope snapshot"), {},
+                                                   tr("JSON files (*.json);;All files (*)"));
     if (!path.isEmpty()) {
-        loadSnapshot(path);
+        openInputAsync(path);
     }
 }
 
 void MainWindow::chooseDiff() {
-    const auto path = QFileDialog::getOpenFileName(
-        this, tr("Open BuildScope diff report"), {}, tr("JSON files (*.json);;All files (*)"));
+    const auto path = QFileDialog::getOpenFileName(this, tr("Open BuildScope diff report"), {},
+                                                   tr("JSON files (*.json);;All files (*)"));
     if (!path.isEmpty()) {
-        loadDiff(path);
+        openDiffAsync(path);
     }
 }
 
@@ -400,9 +414,9 @@ void MainWindow::applyFilter(const QString &text) {
 
 void MainWindow::clearDetails(const QString &message) {
     ui_->selectionLabel->setText(message);
-    for (auto *label : {ui_->sourceValue, ui_->directoryValue, ui_->sourceStatusValue,
-                        ui_->targetValue, ui_->compilerValue, ui_->standardValue,
-                        ui_->configurationValue}) {
+    for (auto *label :
+         {ui_->sourceValue, ui_->directoryValue, ui_->sourceStatusValue, ui_->targetValue,
+          ui_->compilerValue, ui_->standardValue, ui_->configurationValue}) {
         label->setText(QStringLiteral("—"));
     }
     ui_->invocationSourceValue->setText(tr("Invocation source: —"));
@@ -435,12 +449,16 @@ void MainWindow::showEntry(const CompilationEntryView &view) {
     ui_->targetValue->setText(visibleValue(view.targetLabel()));
     ui_->compilerValue->setText(visibleValue(view.compilerLabel()));
     ui_->standardValue->setText(visibleValue(view.standard()));
-    ui_->configurationValue->setText(visibleValue(view.configurationId()));
+    auto digest = view.configurationId();
+    ui_->configurationValue->setText(digest.startsWith("sha256:")
+                                         ? digest.mid(7, 12) + QChar(0x2026)
+                                         : visibleValue(digest));
+    ui_->configurationValue->setToolTip(digest);
     ui_->invocationSourceValue->setText(
         tr("Invocation source: %1").arg(visibleValue(view.invocationSource())));
     ui_->argumentsEdit->setPlainText(view.structuredArguments());
-    ui_->rawCommandEdit->setPlainText(
-        view.rawCommand().isEmpty() ? tr("<not provided>") : view.rawCommand());
+    ui_->rawCommandEdit->setPlainText(view.rawCommand().isEmpty() ? tr("<not provided>")
+                                                                  : view.rawCommand());
     ui_->diagnosticTree->clear();
     for (const auto &diagnostic : entry->diagnostics) {
         addDiagnostic(ui_->diagnosticTree, diagnostic);
@@ -475,13 +493,19 @@ void MainWindow::openIncludeLocation() {
     if (!QFileInfo(path).isAbsolute() && !model_->snapshot().projectRoot.isEmpty()) {
         path = QDir(model_->snapshot().projectRoot).filePath(path);
     }
+    path = native::relocatePath(path, workflow_->mappings);
     ui_->statusLabel->setText(
-        tr("Opening include location %1:%2").arg(selectedIncludePath_).arg(selectedIncludeLine_));
-    QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+        tr("Opening include location %1:%2").arg(path).arg(selectedIncludeLine_));
+    if (!workflow_->editorArgv.isEmpty()) {
+        const auto argv = editorArgumentsFor(path, selectedIncludeLine_);
+        if (!QProcess::startDetached(argv.first(), argv.mid(1)))
+            ui_->statusLabel->setText(tr("Could not start configured editor"));
+    } else
+        QDesktopServices::openUrl(QUrl::fromLocalFile(path));
 }
 
 void MainWindow::showCompilationCommand() {
     ui_->detailTabs->setCurrentWidget(ui_->commandTab);
 }
 
-}  // namespace buildscope
+} // namespace buildscope

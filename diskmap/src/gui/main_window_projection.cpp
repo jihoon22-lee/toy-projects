@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "diskmap/fs_node.hpp"
+#include "diskmap/format.hpp"
 #include "explorer_text.hpp"
 #include "main_window_filter_data.hpp"
 #include "diskmap/gui/treemap_widget.hpp"
@@ -40,10 +41,9 @@ std::optional<std::uint64_t> unsignedValue(const QLineEdit& edit, bool& valid) {
         valid = true;
         return std::nullopt;
     }
-    bool converted = false;
-    const qulonglong value = text.toULongLong(&converted);
-    valid = converted;
-    return converted ? std::optional<std::uint64_t>(value) : std::nullopt;
+    const auto value = diskmap::parseHumanBytes(text.toStdString());
+    valid = value.has_value();
+    return value;
 }
 
 diskmap::SizeMetric metricForColumn(int column,
@@ -163,6 +163,7 @@ void MainWindow::onTableCurrentChanged(const QModelIndex& current,
                                        const QModelIndex&) {
     if (!refreshingProjection_ && !modelResetInProgress_ && !activeCancellation_) {
         selectedKey_ = tableModel_->keyAt(current.row());
+        treemap_->setSelectedKey(selectedKey_);
     }
 }
 
@@ -329,6 +330,7 @@ void MainWindow::refreshProjection() {
 }
 
 void MainWindow::restoreSelection() {
+    treemap_->setSelectedKey(selectedKey_);
     if (!selectedKey_.has_value()) {
         table_->clearSelection();
         return;

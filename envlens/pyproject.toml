@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "envlens"
-version = "0.1.2"
+version = "0.2.0"
 description = "Offline, deterministic Python environment snapshots"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [{name = "envlens contributors"}]
-dependencies = []
+dependencies = ["packaging>=24.2,<27"]
 
 [project.scripts]
 envlens = "envlens.__main__:main"
@@ -21,6 +21,7 @@ packages = ["src/envlens"]
 [tool.hatch.build.targets.wheel.force-include]
 "schemas/envlens-snapshot-v1.schema.json" = "envlens/schemas/envlens-snapshot-v1.schema.json"
 "schemas/envlens-snapshot-v2.schema.json" = "envlens/schemas/envlens-snapshot-v2.schema.json"
+"schemas/envlens-snapshot-v3.schema.json" = "envlens/schemas/envlens-snapshot-v3.schema.json"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

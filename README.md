@@ -11,13 +11,17 @@
 | [loglens](loglens/) | 로그 뷰어·분석기와 investigation workbench | CMake · Qt6 GUI |
 | [buildscope](buildscope/) | compile database explorer (네이티브 producer + Qt consumer) | CMake · C++20 · Qt6 |
 | [envlens](envlens/) | Python 환경 snapshot·diff·runtime inspection CLI/library | pure Python 3.10+ |
-| [abilens](abilens/) | Linux ELF/ABI artifact inspector | 손으로 쓴 Make · C++20 |
+| [abilens](abilens/) | Linux ELF/ABI·심볼·선택적 DWARF 분석 | Make · C++20 · 선택적 libdw |
+| [tracelens](tracelens/) | 저장된 strace 분석·근거 탐색·비교 | CMake · C++20 · Qt6 |
+| [testlens](testlens/) | JUnit/CTest 결과 수집·비교·이력·오프라인 HTML | Python 3.10+ |
+| [servicelens](servicelens/) | rootfs의 systemd unit·drop-in·설정 근거 분석 | Python 3.10+ |
 
 각 프로젝트의 사용법·빌드·테스트는 제품 디렉터리의 README에 있다.
 
 - [abilens](abilens/README.md) · [buildscope](buildscope/README.md) ·
   [diskmap](diskmap/README.md) · [envlens](envlens/README.md) ·
-  [loglens](loglens/README.md)
+  [loglens](loglens/README.md) · [tracelens](tracelens/README.md) ·
+  [testlens](testlens/README.md) · [servicelens](servicelens/README.md)
 - [CHANGELOG.md](CHANGELOG.md) — 제품별 버전과 변경 내역
 - [ROADMAP.md](ROADMAP.md) — 제품별 방향
 
@@ -42,7 +46,7 @@ Qt를 쓰는 프로젝트는 아래 배치를 따른다. 공용 파서·모델�
 <project>/
 ├── CMakeLists.txt        빌드 정의
 ├── include/<project>/    헤더는 전부 여기. 코어와 GUI 모두
-│   └── gui/              Qt5/Qt6 셸의 헤더
+│   └── gui/              Qt6 셸의 헤더
 ├── src/                  구현
 │   ├── main.cpp          CLI 드라이버
 │   └── gui/              Qt 셸의 .cpp. 라이브러리 + 실행 파일로 나뉜다
@@ -113,13 +117,9 @@ make -j"$(nproc)" && make check
 ```bash
 # loglens (CMake)
 cd loglens
-cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON
+cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release
 cmake --build build/gui --parallel
 ./build/gui/src/gui/loglens-gui [경로]
-
-# Qt5를 명시적으로 검증할 때
-cmake -S . -B build/qt5 -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_Qt6=ON
-cmake --build build/qt5 --parallel
 
 # diskmap (CMake/Qt6)
 cd diskmap
@@ -130,3 +130,21 @@ cmake --build build --parallel 2
 
 GUI에 경로를 주면 폴더 선택 대화상자를 건너뛰고 바로 스캔·로드하므로,
 `QT_QPA_PLATFORM=offscreen` 헤드리스 스모크 실행이 가능하다.
+
+## 신규 제품 검증
+
+```bash
+cmake -S tracelens -B tracelens/build/verify -DCMAKE_BUILD_TYPE=Release
+cmake --build tracelens/build/verify --parallel 2
+QT_QPA_PLATFORM=offscreen ctest --test-dir tracelens/build/verify --output-on-failure
+
+(cd testlens && uv sync --locked && uv run pytest && uv build)
+(cd servicelens && uv sync --locked --group dev && uv run pytest && uv build)
+```
+
+CI의 Merge Gate는 8개 독립 제품 게이트를 모두 요구한다. native 릴리스는
+설치 디렉터리 전체를 패키징하며, Python 제품은 wheel/sdist와 깨끗한 환경의
+설치를 검증한다. release-please가 만든 PR은 CI를 명시적으로 시작하고, 릴리스 출력의 정확한 SHA로
+artifact workflow를 직접 호출한다. 태그가 아직 없는 draft도 빌드할 수 있으며,
+체크섬·provenance·업로드 검증이 끝난 draft만 게시한다. 이미 게시된 릴리스의
+재실행은 기존 파일 체크섬을 확인하며 자산을 교체하지 않는다.

@@ -120,12 +120,12 @@ def test_load_snapshot_path_errors_encoding_and_post_read_limit(tmp_path: Path) 
         snapshot_input.load_snapshot(small)
 
     with (
-        patch.object(snapshot_input.Path, "read_bytes", side_effect=OSError("read failed")),
+        patch.object(snapshot_input.Path, "open", side_effect=OSError("read failed")),
         pytest.raises(snapshot_input.DiffError, match="read failed"),
     ):
         snapshot_input.load_snapshot(small)
     with (
-        patch.object(snapshot_input.Path, "read_bytes", return_value=b"xx"),
+        patch.object(snapshot_input.Path, "open", return_value=__import__("io").BytesIO(b"xx")),
         patch.object(snapshot_input, "MAX_INPUT_BYTES", 1),
         pytest.raises(snapshot_input.DiffError, match="snapshot exceeds 16 MiB"),
     ):

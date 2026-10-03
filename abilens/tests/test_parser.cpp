@@ -149,12 +149,14 @@ std::vector<unsigned char> synthetic_elf(bool with_symtab, bool with_sections) {
     put32(file, phoff, 1);
     put64(file, phoff + 8, 0);
     put64(file, phoff + 16, 0);
+    put64(file, phoff + 32, file.size());
     put64(file, phoff + 40, file.size());
 
     // PT_DYNAMIC at dynoff, size for the written entries.
     put32(file, phoff + 56, 2);
     put64(file, phoff + 56 + 8, dynoff);
     put64(file, phoff + 56 + 16, dynoff);
+    put64(file, phoff + 56 + 32, 11U * 16U);
     put64(file, phoff + 56 + 40, 11U * 16U);
 
     // Dynamic entries (tag, value) x11 + terminator slot left zero.
@@ -187,8 +189,10 @@ std::vector<unsigned char> synthetic_elf(bool with_symtab, bool with_sections) {
     put32(file, symoff + 24, static_cast<std::uint32_t>(s_import));   // st_name
     put16(file, symoff + 24 + 6, 0);                                  // SHN_UNDEF
     put32(file, symoff + 48, static_cast<std::uint32_t>(s_export_a));
+    file[symoff + 48 + 4] = 0x12;
     put16(file, symoff + 48 + 6, 1);                                  // defined
     put32(file, symoff + 72, static_cast<std::uint32_t>(s_export_b));
+    file[symoff + 72 + 4] = 0x12;
     put16(file, symoff + 72 + 6, 1);                                  // defined
 
     // Verneed record 1: libc.so.6 → GLIBC_2.34.
@@ -229,8 +233,8 @@ abilens::ElfReport test_native_inspector() {
            "the internal analyzer is recorded");
     expect(parsed.needed.size() == 2U && parsed.needed.front() == "libc.so.6",
            "DT_NEEDED entries are parsed and sorted");
-    expect(parsed.rpath.size() == 2U && parsed.rpath.front() == "$ORIGIN/lib",
-           "RPATH entries are split and sorted");
+    expect(parsed.rpath.size() == 2U && parsed.rpath.front() == "/opt/abi",
+           "RPATH entries retain loader search order");
     expect(parsed.runpath.size() == 1U && parsed.runpath.front() == "$ORIGIN/plugins",
            "RUNPATH is parsed");
     expect(parsed.versions.size() == 3U, "typed ABI requirements are parsed");
@@ -262,7 +266,7 @@ abilens::ElfReport test_native_inspector() {
     // DT_VERDEF pointing at a record that runs past EOF: version names are
     // decoration, so the binary stays Valid with unqualified symbols.
     std::vector<unsigned char> bad_verdef = synthetic_elf(true, true);
-    put64(bad_verdef, 0x40 + 56 + 40, 13U * 16U);        // PT_DYNAMIC grows by two
+    put64(bad_verdef, 0x40 + 56 + 32, 13U * 16U);        // PT_DYNAMIC grows by two
     put64(bad_verdef, 0x100 + 10U * 16U, 0x6ffffffcU);    // DT_VERDEF
     put64(bad_verdef, 0x100 + 10U * 16U + 8U, 0x4f0U);    // 20-byte record crosses EOF
     put64(bad_verdef, 0x100 + 11U * 16U, 0x6ffffffdU);    // DT_VERDEFNUM
@@ -446,6 +450,8 @@ void test_diff_contract(const abilens::ElfReport& parsed) {
                        "abilens_export_b@LIB_1"};
     current.vtables = {"_ZTV3Foo@LIB_1"};
     abilens::ElfReport legacy_base = parsed;
+    legacy_base.attributes_known = false;
+    legacy_base.symbol_evidence.clear();
     legacy_base.symbols.push_back("_ZTV3Foo");
     std::sort(legacy_base.symbols.begin(), legacy_base.symbols.end());
     const std::string legacy_json =
@@ -492,6 +498,29 @@ std::vector<std::filesystem::path> test_input_classification() {
     return {non_elf, corrupt};
 }
 
+void test_conservative_evidence(const abilens::ElfReport& parsed) {
+    auto file = synthetic_elf(true, true);
+    put64(file, 0x100 + 9U * 16U, 0U); // Remove DT_HASH, keep DT_SYMTAB.
+    auto unknown = abilens::inspect_elf_buffer(file, synthetic_header());
+    expect(!unknown.symbols_known && !unknown.attributes_known,
+           "no hash table leaves symbol evidence unknown");
+    abilens::Policy policy;
+    policy.forbidden_symbols = {"unsafe"};
+    expect(!abilens::evaluate_policy(unknown, policy).passed,
+           "forbidden-symbol policy cannot pass without symbol evidence");
+    expect(abilens::diff_reports(unknown, parsed).compatibility == "unknown",
+           "unknown symbols never imply compatible");
+    auto removed = parsed;
+    removed.symbols.pop_back();
+    expect(abilens::diff_reports(parsed, removed).compatibility == "incompatible",
+           "removing an exported symbol is incompatible");
+    auto reordered = parsed;
+    std::reverse(reordered.rpath.begin(), reordered.rpath.end());
+    auto diff = abilens::diff_reports(parsed, reordered);
+    expect(diff.changed && diff.compatibility == "unknown",
+           "loader order changes are observable and require target resolution");
+}
+
 void remove_path(const std::filesystem::path& path) {
     std::error_code error;
     std::filesystem::remove(path, error);
@@ -504,6 +533,7 @@ int main() {
     const std::filesystem::path invalid_policy = test_policy(parsed);
     test_json_contract(parsed);
     test_diff_contract(parsed);
+    test_conservative_evidence(parsed);
     const std::vector<std::filesystem::path> inputs = test_input_classification();
 
     remove_path(inputs[0]);

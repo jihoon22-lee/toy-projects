@@ -7,11 +7,85 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  id-token: write
+  attestations: write
 
 jobs:
   release-please:
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
     runs-on: ubuntu-latest
+    outputs:
+      created: ${{ steps.release.outputs.releases_created }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4.4.0
+        id: release
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Start CI for created or updated release PRs
+        if: steps.release.outputs.prs_created == 'true'
+        env:
+          RELEASE_PRS: ${{ steps.release.outputs.prs || '[]' }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          repository = os.environ['GH_REPO']
+          for created in json.loads(os.environ['RELEASE_PRS']):
+              number = created.get('number')
+              if type(number) is not int or number <= 0:
+                  raise SystemExit('release output has an invalid PR number')
+              pull = json.loads(subprocess.check_output([
+                  'gh', 'api', f'repos/{repository}/pulls/{number}'
+              ], text=True))
+              if pull['head']['repo']['full_name'] != repository:
+                  raise SystemExit('release PR must belong to this repository')
+              subprocess.run([
+                  'gh', 'workflow', 'run', 'ci.yml', '--repo', repository,
+                  '--ref', pull['head']['ref']
+              ], check=True)
+          PY
+      - name: Resolve created product tags
+        id: matrix
+        env:
+          RELEASE_OUTPUTS: ${{ toJSON(steps.release.outputs) }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          outputs = json.loads(os.environ['RELEASE_OUTPUTS'])
+          paths = json.loads(outputs.get('paths_released', '[]'))
+          allowed = {'loglens', 'diskmap', 'buildscope', 'envlens', 'abilens', 'tracelens', 'testlens', 'servicelens'}
+          releases = []
+          for path in paths:
+              tag = outputs.get(path + '--tag_name', '')
+              if path not in allowed or not re.fullmatch(re.escape(path) + r'/v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?', tag):
+                  raise SystemExit('unexpected release path or tag')
+              sha = outputs.get(path + '--sha', '')
+              if not re.fullmatch(r'[0-9a-fA-F]{40}', sha):
+                  raise SystemExit('release output is missing an exact commit SHA')
+              releases.append({'tag': tag, 'sha': sha})
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('matrix=' + json.dumps({'include': releases}) + '\n')
+          PY
+
+  # GITHUB_TOKEN-created tag events do not start another workflow. Call the
+  # artifact workflow directly, once for every release output.
+  artifacts:
+    needs: release-please
+    if: needs.release-please.outputs.created == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.release-please.outputs.matrix) }}
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ matrix.tag }}
+      sha: ${{ matrix.sha }}
+    secrets: inherit

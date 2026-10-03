@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0 (development)
+
+- Add snapshot v4 with explicit completeness, bounded analysis-run metadata and separate lexical fallback for partial compiler traces; retain v1–v3 readers and legacy projections.
+- Add monotonic per-unit/global time, byte, file, edge and unit budgets, cancellable compiler process groups, and partial-evidence retention.
+- Add reverse include/translation-unit impact queries, explicit relocation roots, direct compilation-database GUI import, background jobs, debounced filtering and token-preserving editor line navigation.
+- Fix growing-source reads, response-file arguments used as option values, normalized unit selection and incorrect include-location matching; accept safe optimization flags.
+- Add source-mutation, cancellation, compiler-failure, relocation, schema and offscreen GUI regressions; install desktop/icon assets and sanitizer support.
+
+This development checkpoint has not been published.
+
 ## [0.1.2](https://github.com/jihoon22-lee/toy-projects/compare/buildscope/v0.1.1...buildscope/v0.1.2) (2026-10-03)
 
 

@@ -35,6 +35,7 @@ execute_process(
         "${WORK}/build/compile_commands.json"
         --project-root "${WORK}"
         --include-analysis compiler
+        --schema-version v3
         --pretty
         --output "${_snapshot}"
     RESULT_VARIABLE _producer_result

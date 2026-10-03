@@ -38,6 +38,8 @@ public:
     // A timeline selection further narrows the same record set shown by the
     // table. nullopt restores the complete filter/search result.
     void setTimeWindow(std::optional<loglens::TimeWindow> window);
+    void setSourceIdentity(const std::string &identity);
+    const std::string &sourceIdentity() const { return source_identity_; }
     void setTriageState(const loglens::TriageState& state, const QString& sourcePath);
 
     // Appends records that arrived after the last poll. Rows that pass the
@@ -91,6 +93,7 @@ private:
     loglens::HighlightRules highlight_rules_;
     std::vector<loglens::TriageEntry> triage_entries_;
     std::string source_path_;
+    std::string source_identity_;
     std::uint64_t generation_ = 0;
 
     void rebuildVisible();

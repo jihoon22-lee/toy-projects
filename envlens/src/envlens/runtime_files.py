@@ -111,7 +111,7 @@ def collect_python_files(
         elif path.is_dir():
             candidates = _directory_python_files(path, state, max_entries)
         else:
-            continue
+            raise RuntimeCheckError("source-read-failed", f"compile path does not exist: {path}")
         for candidate in candidates:
             _record_python_file(candidate, state, max_files, max_bytes)
     state.files.sort(key=str)

@@ -65,6 +65,8 @@ private slots:
     void suppressions();
     void glob();
     void sanitization();
+    void replayBoundaries();
+    void includeEvidence();
 };
 
 void NativeProducerTest::posixSplit() {
@@ -603,6 +605,47 @@ void NativeProducerTest::sanitization() {
     QVERIFY(!sanitized.contains(QStringLiteral("src.c")));
     QVERIFY(sanitized.contains(QStringLiteral("-Iinc")));
     QVERIFY(sanitized.contains(QStringLiteral("-DXX")));
+}
+
+void NativeProducerTest::replayBoundaries() {
+    for (const QString &option : {QStringLiteral("-I"), QStringLiteral("-D"), QStringLiteral("-include"), QStringLiteral("-o")}) {
+        QVERIFY_THROWS_EXCEPTION(std::exception, sanitizedArguments(
+            {"cc", option, "@hidden.rsp", "-c", "src.c"}, "/p", "/p/src.c"));
+    }
+    const auto kept = sanitizedArguments({"cc", "-O2", "-c", "src.c"}, "/p", "/p/src.c");
+    QVERIFY(kept.contains("-O2"));
+}
+
+void NativeProducerTest::includeEvidence() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QDir root(directory.path());
+    QVERIFY(root.mkdir("build"));
+    QFile source(root.filePath("a.c"));
+    QVERIFY(source.open(QIODevice::WriteOnly));
+    source.write("#if 0\n#include \"inactive.h\"\n#endif\n#include \"active.h\"\nint x;\n");
+    source.close();
+    QFile header(root.filePath("active.h"));
+    QVERIFY(header.open(QIODevice::WriteOnly));
+    header.write("/* active */\n");
+    header.close();
+    const auto entry = normalizeEntry(entryObject(".", "../a.c", "cc -O2 -c ../a.c"),
+                                      0, directory.path(), root.filePath("build"));
+    const auto paths = nativeEntryPaths(entry, directory.path());
+    QCOMPARE(std::get<0>(paths), root.filePath("build"));
+    QCOMPARE(std::get<1>(paths), root.filePath("a.c"));
+    const auto measured = analyzeEntry(entry, directory.path());
+    const auto edges = measured.value("edges").toArray();
+    QVERIFY(!edges.isEmpty());
+    const auto edge = edges.last().toObject();
+    QCOMPARE(edge.value("requested").toString(), QString("active.h"));
+    QCOMPARE(edge.value("line").toInt(), 4);
+
+    auto absolute = normalizeEntry(entryObject(directory.path(), root.filePath("a.c"), "cc -c a.c"),
+                                    0, directory.path(), directory.path());
+    QJsonObject snapshot{{"entries", QJsonArray{absolute}}};
+    annotateSnapshot(snapshot, directory.path(), "delayed", 1, 10, {"a.c"});
+    QCOMPARE(snapshot.value("entries").toArray().first().toObject().value("include_analysis").toObject().value("evidence").toString(), QString("compiler-measured"));
 }
 
 QTEST_MAIN(NativeProducerTest)

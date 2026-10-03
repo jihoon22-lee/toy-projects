@@ -41,6 +41,8 @@ struct FsMetadata {
     // that are not portable still use their corresponding *_known flag.
     bool complete = false;
     std::string error;
+    std::int64_t changed_ns = 0;
+    bool changed_time_known = false;
 };
 
 } // namespace diskmap

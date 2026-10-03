@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<title>__TITLE__</title><style>
+:root{color-scheme:light dark;--bg:#f5f7fb;--panel:#fff;--text:#172033;--muted:#526078;--line:#ccd3df;--accent:#2456a6;--bad:#aa2635;--good:#126949}
+@media(prefers-color-scheme:dark){:root{--bg:#111723;--panel:#1b2433;--text:#edf2fa;--muted:#b5c2d7;--line:#41516b;--accent:#9bbdff;--bad:#ffacb5;--good:#8cdbb7}}
+*{box-sizing:border-box}body{font:16px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--text);margin:0}main{max-width:1280px;margin:auto;padding:24px}h1{margin:0}p{color:var(--muted)}header{margin-bottom:24px}.cards{display:flex;flex-wrap:wrap;gap:12px}.card{padding:16px;background:var(--panel);border:1px solid var(--line);border-radius:10px;min-width:140px}.card strong{font-size:1.6rem;display:block}nav{display:flex;flex-wrap:wrap;gap:8px;margin:24px 0}button,input,select{font:inherit;padding:9px;border:1px solid var(--line);border-radius:6px;color:var(--text);background:var(--panel)}button{cursor:pointer}button[aria-pressed=true]{background:var(--accent);color:var(--bg)}:focus-visible{outline:3px solid var(--accent);outline-offset:3px}.controls{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px}input{flex:1;min-width:200px}table{border-collapse:collapse;width:100%;background:var(--panel)}th,td{text-align:left;padding:12px;border-bottom:1px solid var(--line);vertical-align:top}th{position:sticky;top:0;background:var(--panel)}.table-wrap{overflow:auto}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.85rem}.bad{color:var(--bad)}.good{color:var(--good)}details{margin:8px 0}summary{cursor:pointer}small{color:var(--muted)}.hidden{display:none}#live{min-height:1.5em}code{overflow-wrap:anywhere}@media(max-width:650px){main{padding:12px}th,td{padding:8px}.card{min-width:100px}}
+</style></head><body><main><header><h1>TestLens</h1><p id="subtitle"></p><div id="cards" class="cards"></div></header>
+<nav aria-label="Report sections" id="tabs"></nav><div class="controls"><input id="search" type="search" aria-label="Search test, suite or identity" placeholder="Search tests or suites"><select id="status" aria-label="Result filter"><option value="">All results</option><option>passed</option><option>failed</option><option>error</option><option>skipped</option><option>not-run</option><option>unknown</option></select><select id="change" aria-label="Change filter"><option value="">All changes</option><option>new-failure</option><option>new-test-failure</option><option>recovered</option><option>missing</option><option>slowdown</option></select></div>
+<p id="live" role="status" aria-live="polite"></p><section id="content" aria-label="Report content"></section><footer><p>Observed failure frequency is not a flaky-test diagnosis. Missing results do not prove a test was deleted. All durations use the originating runner's measurement scope.</p></footer></main>
+<script id="data" type="application/json">__DATA__</script><script>
+'use strict';
+const data = JSON.parse(document.getElementById('data').textContent);
+const run = data.run;
+const pageSize = 100;
+const sourceMap = new Map([...data.baseline_sources, ...data.sources].map(s => [s.id, s]));
+const changes = new Map((data.diff?.changes || []).map(c => [c.id, c]));
+let active = 'Results';
+let page = 0;
+
+function el(tag, text, cls) {
+  const node = document.createElement(tag);
+  if (text !== undefined) node.textContent = String(text);
+  if (cls) node.className = cls;
+  return node;
+}
+function details(title, object) {
+  const container = el('details');
+  container.append(el('summary', title));
+  container.addEventListener('toggle', () => {
+    if (container.open && container.childElementCount === 1) {
+      container.append(el('pre', typeof object === 'string' ? object : JSON.stringify(object, null, 2)));
+    }
+  });
+  return container;
+}
+function duration(value) { return value === null ? 'unknown' : value.toFixed(3) + ' s'; }
+function evidence(attempts) {
+  const box = el('div');
+  for (const attempt of attempts) {
+    const source = sourceMap.get(attempt.source_id);
+    const detail = el('details');
+    const shortPath = (source?.path || 'Source unavailable').split(/[\\/]/).pop();
+    detail.append(el('summary', attempt.status + ' · ' + shortPath + ' · ' + attempt.locator));
+    detail.addEventListener('toggle', () => {
+      if (!detail.open || detail.childElementCount > 1) return;
+      detail.append(el('strong', attempt.name));
+      detail.append(el('p', 'Source: ' + (source?.path || attempt.source_id)
+        + ' (' + (source?.verification || 'unavailable') + ')'));
+      for (const message of attempt.messages) {
+        detail.append(el('p', message.kind + ': ' + message.message));
+        detail.append(el('pre', message.text || '(No additional message)'));
+        if (message.truncated) detail.append(el('small', 'Message truncated by the collection limit.'));
+      }
+      if (attempt.output.text) {
+        detail.append(el('p', 'Captured output'), el('pre', attempt.output.text));
+        if (attempt.output.truncated) detail.append(el('small', 'Output truncated by the collection limit.'));
+      }
+      detail.append(details('Observation metadata', attempt));
+    });
+    box.append(detail);
+  }
+  return box;
+}
+function cellsFor(item) {
+  if (active === 'Results') return [
+    el('span', item.suite + ' :: ' + item.name),
+    el('strong', item.status, ['failed', 'error'].includes(item.status) ? 'bad' : item.status === 'passed' ? 'good' : ''),
+    el('span', duration(item.duration_seconds)), evidence(item.attempts),
+  ];
+  if (active === 'Changes') return [
+    el('span', item.name),
+    el('span', item.kind + (item.slowdown ? ' · slowdown' : '') + ' (' + item.before + ' → ' + item.after + ')'),
+    el('span', item.delta_seconds === null ? 'unknown' : item.delta_seconds.toFixed(3) + ' s'),
+    evidence([...item.before_evidence, ...item.after_evidence]),
+  ];
+  return [
+    el('span', item.name), el('span', item.failure_count + ' / ' + item.executed_count),
+    el('span', item.any_failure_count + ' / ' + item.executed_count),
+    details(item.excluded_count + ' excluded · ' + item.missing_count + ' absent', item.observations),
+  ];
+}
+function render() {
+  for (const button of document.querySelectorAll('#tabs button')) {
+    button.setAttribute('aria-pressed', String(button.textContent === active));
+  }
+  const content = document.getElementById('content');
+  const live = document.getElementById('live');
+  const changeFilter = document.getElementById('change');
+  changeFilter.disabled = !['Results', 'Changes'].includes(active);
+  content.replaceChildren();
+  live.textContent = '';
+  const query = document.getElementById('search').value.toLowerCase();
+  const status = document.getElementById('status').value;
+  const kind = changeFilter.value;
+  if (active === 'Input quality') {
+    content.append(el('h2', 'Input quality and evidence'));
+    for (const source of [...data.sources, ...data.baseline_sources]) {
+      content.append(details(source.verification.toUpperCase() + ' · ' + source.path, source));
+    }
+    for (const diagnostic of run.diagnostics) content.append(details(diagnostic.code, diagnostic));
+    content.append(details('Collection metadata', {
+      complete: run.complete, declared_complete: run.declared_complete,
+      metadata: run.metadata, scope: run.scope, expected_shards: run.expected_shards,
+      observed_shards: run.observed_shards,
+    }));
+    live.textContent = run.diagnostics.length + ' diagnostics';
+    return;
+  }
+  let items = [], headings = [];
+  if (active === 'Results') {
+    headings = ['Test', 'Result', 'Duration', 'Evidence'];
+    items = run.tests.filter(item => {
+      const change = changes.get(item.id);
+      return (!status || item.status === status)
+        && [item.name, item.suite, item.classname, item.id].join(' ').toLowerCase().includes(query)
+        && (!kind || (kind === 'slowdown' ? change?.slowdown : change?.kind === kind));
+    });
+  } else if (active === 'Changes') {
+    if (!data.diff) { content.append(el('p', 'No baseline supplied. Use report --baseline baseline.json.')); return; }
+    headings = ['Test', 'Change', 'Duration delta', 'Evidence'];
+    const priority = ['new-failure', 'new-test-failure', 'persistent-failure', 'recovered', 'missing', 'status-changed', 'added', 'unchanged'];
+    items = data.diff.changes.filter(item => item.name.toLowerCase().includes(query)
+      && (!status || item.after === status)
+      && (!kind || (kind === 'slowdown' ? item.slowdown : item.kind === kind)))
+      .sort((a, b) => priority.indexOf(a.kind) - priority.indexOf(b.kind));
+  } else {
+    if (!data.history) { content.append(el('p', 'No history supplied. Use report --history runs/.')); return; }
+    headings = ['Test', 'Final failures / executed', 'Any-attempt failures', 'Observations'];
+    items = data.history.tests.filter(item => item.name.toLowerCase().includes(query)
+      && (!status || item.observations.some(observation => observation.status === status)))
+      .sort((a, b) => (b.failure_rate || 0) - (a.failure_rate || 0));
+    content.append(el('p', data.history.period.start + ' → ' + data.history.period.end
+      + ' · ' + data.history.run_ids.length + ' runs'));
+  }
+  const table = el('table'), head = el('thead'), headingRow = el('tr'), body = el('tbody');
+  for (const heading of headings) {
+    const th = el('th', heading); th.scope = 'col'; headingRow.append(th);
+  }
+  head.append(headingRow); table.append(head);
+  // Construct nodes and evidence details only for the visible page.
+  for (const item of items.slice(page * pageSize, (page + 1) * pageSize)) {
+    const row = el('tr');
+    for (const cell of cellsFor(item)) { const td = el('td'); td.append(cell); row.append(td); }
+    body.append(row);
+  }
+  table.append(body);
+  const wrap = el('div', undefined, 'table-wrap'); wrap.append(table); content.append(wrap);
+  const previous = el('button', 'Previous'), next = el('button', 'Next');
+  previous.disabled = page === 0; next.disabled = (page + 1) * pageSize >= items.length;
+  previous.onclick = () => { page--; render(); };
+  next.onclick = () => { page++; render(); };
+  content.append(previous, el('span', ' Page ' + (page + 1) + ' '), next);
+  live.textContent = items.length + ' matching rows';
+}
+document.getElementById('subtitle').textContent = run.project + ' · ' + run.run_id + ' · '
+  + run.scope + ' · ' + (run.complete ? 'Declared complete' : 'Partial or unconfirmed coverage');
+for (const [label, count] of Object.entries(run.summary)) {
+  const card = el('div', undefined, 'card'); card.append(el('strong', count), el('span', label));
+  document.getElementById('cards').append(card);
+}
+for (const name of ['Results', 'Changes', 'History', 'Input quality']) {
+  const button = el('button', name); button.setAttribute('aria-pressed', 'false');
+  button.onclick = () => { active = name; page = 0; render(); };
+  document.getElementById('tabs').append(button);
+}
+for (const id of ['search', 'status', 'change']) {
+  document.getElementById(id).addEventListener('input', () => { page = 0; render(); });
+}
+render();
+</script></body></html>

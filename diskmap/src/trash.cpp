@@ -19,6 +19,7 @@ const char* trashStatusName(TrashStatus status) {
     case TrashStatus::DestinationExists: return "destination-exists";
     case TrashStatus::MissingToken: return "missing-token";
     case TrashStatus::IoError: return "io-error";
+    case TrashStatus::Cancelled: return "cancelled";
     }
     return "unknown";
 }

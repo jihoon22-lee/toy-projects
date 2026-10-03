@@ -131,7 +131,12 @@ std::string extractField(std::string_view text, std::string_view field) {
 void addCorrelation(std::map<std::pair<std::string, std::string>, CountRange>& groups,
                     const std::string& field,
                     const LogRecord& record) {
-    const std::string value = extractField(record.raw, field);
+    const auto structured = record.fields.find(field);
+    const std::string value =
+        structured != record.fields.end()
+            ? structured->second
+            : (!record.raw.empty() && record.raw.front() == '{' ? std::string()
+                                                                : extractField(record.raw, field));
     if (!value.empty()) {
         CountRange& range = groups[{field, value}];
         ++range.count;
@@ -181,6 +186,8 @@ WindowAnalysis compareWindows(const std::vector<LogRecord>& records,
             addCount(comparison_patterns, normalizeMessage(record.message), record.line_number);
             addCorrelation(correlations, "correlation_id", record);
             addCorrelation(correlations, "request_id", record);
+            addCorrelation(correlations, "trace_id", record);
+            addCorrelation(correlations, "span_id", record);
             addCorrelation(correlations, "thread_id", record);
             addCorrelation(correlations, "thread", record);
         }

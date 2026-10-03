@@ -6,6 +6,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -88,11 +89,21 @@ try:
 except BaseException as error:
     print("ENVLENS_ENTRY_POINT_ERROR=" + type(error).__name__ + ": " + str(error), file=sys.stderr)
     raise
-if result is None:
-    raise SystemExit(0)
-if isinstance(result, int):
-    raise SystemExit(result)
-raise SystemExit(0)
+raise SystemExit(result)
+"""
+
+COMPILE_SCRIPT = r"""
+import compileall
+import os
+import sys
+ok = True
+for path in sys.argv[1:]:
+    if not os.path.isfile(path):
+        print("Source is missing: " + path, file=sys.stderr)
+        ok = False
+    elif not compileall.compile_file(path, quiet=1, force=True):
+        ok = False
+raise SystemExit(0 if ok else 1)
 """
 
 
@@ -109,7 +120,7 @@ def _classify_process(
     stdout: bytes,
     stderr: bytes,
     return_code: int,
-    timeout_seconds: int,
+    timeout_seconds: float,
     kind: str,
     name: str,
 ) -> dict[str, Any]:
@@ -129,7 +140,7 @@ def _classify_process(
 def _run_check(
     command: list[str],
     *,
-    timeout_seconds: int,
+    timeout_seconds: float,
     cwd: Path,
     env: dict[str, str],
     kind: str,
@@ -242,7 +253,7 @@ def _entry_check(
 
 
 def _compile_command(interpreter: Path, source_files: Sequence[Path]) -> list[str]:
-    command = [str(interpreter), "-m", "compileall", "-q", "-f"]
+    command = [str(interpreter), "-c", COMPILE_SCRIPT]
     command.extend(str(path) for path in source_files)
     command_bytes = sum(
         len(argument.encode("utf-8", errors="surrogatepass")) + 1 for argument in command
@@ -305,7 +316,7 @@ def _prepare_runtime(
     pyproject: str | Path | None,
     timeout_seconds: int,
 ) -> _PreparedRuntime:
-    root = Path(project_root)
+    root = Path(project_root).absolute()
     if not root.is_dir():
         raise RuntimeCheckError("project-root-failed", "project root must be a directory")
     project_info = load_project_info(root, pyproject)
@@ -379,15 +390,53 @@ def _compile_check(
             "files": 0,
             "reason": "no Python source files were found",
         }
-    result = _run_check(
-        _compile_command(resolved, prepared.source_files),
-        timeout_seconds=timeout_seconds,
-        cwd=prepared.root,
-        env=env,
-        kind="compileall",
-        name=str(prepared.root),
-    )
+    batches: list[list[Path]] = []
+    batch: list[Path] = []
+    base_size = sum(len(arg.encode("utf-8")) + 1 for arg in _compile_command(resolved, []))
+    size = base_size
+    for path in prepared.source_files:
+        addition = len(str(path).encode("utf-8", errors="surrogatepass")) + 1
+        if base_size + addition > MAX_COMPILE_COMMAND_CHARS:
+            raise RuntimeCheckError(
+                "runtime-input-too-large", "source path exceeds the compile command limit"
+            )
+        if batch and size + addition > MAX_COMPILE_COMMAND_CHARS:
+            batches.append(batch)
+            batch, size = [], base_size
+        batch.append(path)
+        size += addition
+    if batch:
+        batches.append(batch)
+    deadline = time.monotonic() + timeout_seconds
+    results: list[dict[str, Any]] = []
+    for batch in batches:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            results.append(
+                {
+                    "kind": "compileall",
+                    "name": str(prepared.root),
+                    "status": "timeout",
+                    "reason": "compile batches exhausted the time budget",
+                }
+            )
+            break
+        results.append(
+            _run_check(
+                _compile_command(resolved, batch),
+                timeout_seconds=remaining,
+                cwd=prepared.root,
+                env=env,
+                kind="compileall",
+                name=str(prepared.root),
+            )
+        )
+    failures = [result for result in results if result.get("status") != "passed"]
+    result = dict((failures or results)[0])
     result["files"] = len(prepared.source_files)
+    result["batch_count"] = len(results)
+    if len(results) > 1:
+        result["batches"] = results
     return result
 
 
@@ -398,7 +447,7 @@ def _ready_record(
     timeout_seconds: int,
     execute_entry_points: bool,
 ) -> dict[str, Any]:
-    record = _interpreter_record(requested, status="ready", resolved=resolved)
+    record = _interpreter_record(requested, status="ready", resolved=resolved.resolve())
     with tempfile.TemporaryDirectory(prefix="envlens-runtime-") as cache_directory:
         env = _runtime_env(prepared.root, Path(cache_directory))
         record["checks"].append(_compile_check(resolved, prepared, env, timeout_seconds))

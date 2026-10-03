@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Add report/diff v2 with tri-state compatibility, rich symbol evidence, ordered
+  loader paths, SONAME/interpreter/build ID, root-confined sysroot candidates and
+  optional bounded libdw aggregate layout analysis.
+- Fix unknown symbol policies, removed exports and ELF32 symbol offsets.
+- Add CI failure policies and complete install layout.
+
 ## [0.1.2](https://github.com/jihoon22-lee/toy-projects/compare/abilens/v0.1.1...abilens/v0.1.2) (2026-10-03)
 
 

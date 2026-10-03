@@ -43,7 +43,7 @@ def classify_process(
     stdout: bytes,
     stderr: bytes,
     return_code: int,
-    timeout_seconds: int,
+    timeout_seconds: float,
     kind: str,
     name: str,
     max_output_chars: int,

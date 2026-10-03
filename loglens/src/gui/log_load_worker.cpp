@@ -51,6 +51,7 @@ void LogLoadWorker::clearState() {
     tailer_.reset();
     initial_snapshot_end_.reset();
     initial_identity_ = FileIdentity{};
+    source_identity_ = FileIdentity{};
     pending_deltas_.clear();
     pending_cursor_ = 0;
     next_sequence_ = 0;
@@ -85,6 +86,7 @@ void LogLoadWorker::startLoad(loglens::LoadRequest request) {
         // keep these settings because reset() only clears stream state.
         assembler_ = RecordAssembler(request_.format, EncodingErrorPolicy::PreserveBytes,
                                       request_.max_record_bytes, request_.multiline);
+        assembler_.setFormatPlugin(request_.format_plugin.get());
         if (request_.mode == InitialLoadMode::TailRecords) {
             const InitialLoadWindow window = locateTailWindow(
                 request_.path.toStdString(), request_.tail_records,
@@ -218,6 +220,7 @@ void LogLoadWorker::processFollowChunk() {
 }
 
 void LogLoadWorker::acceptChunk(const SourceChunk& chunk, bool initialPhase) {
+    source_identity_ = chunk.identity;
     if (cancelled()) {
         return;
     }
@@ -264,6 +267,7 @@ void LogLoadWorker::publishBatch(bool initialComplete) {
     batch.job_id = request_.job_id;
     batch.sequence = next_sequence_++;
     batch.generation = assembler_.generation();
+    batch.identity = source_identity_;
     batch.reset_model = reset_pending_;
     reset_pending_ = false;
     batch.initial_phase = !initial_completion_announced_;
@@ -301,6 +305,7 @@ void LogLoadWorker::publishError(const SourceError& error, bool initialPhase) {
     batch.job_id = request_.job_id;
     batch.sequence = next_sequence_++;
     batch.generation = assembler_.generation();
+    batch.identity = source_identity_;
     batch.initial_phase = initialPhase;
     batch.retryable = error.retryable;
     batch.error = QString::fromStdString(error.message);

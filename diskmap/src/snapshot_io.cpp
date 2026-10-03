@@ -58,11 +58,12 @@ std::size_t checkedInputSize(int descriptor,
     return static_cast<std::size_t>(initial.st_size);
 }
 
-std::string readSnapshotDescriptor(int descriptor, std::size_t expected) {
+std::string readSnapshotDescriptor(int descriptor, std::size_t expected, const SnapshotLimits& limits) {
     std::string output;
     output.reserve(expected);
     char buffer[64 * 1024];
     while (output.size() < expected) {
+        detail::checkSnapshotCancellation(limits);
         const std::size_t request = std::min<std::size_t>(
             sizeof(buffer), expected - output.size());
         const ssize_t count = ::read(descriptor, buffer, request);
@@ -104,7 +105,7 @@ std::string readRegularFile(const fs::path& path,
     try {
         struct stat initial{};
         const std::size_t expected = checkedInputSize(descriptor, limits, initial);
-        const std::string output = readSnapshotDescriptor(descriptor, expected);
+        const std::string output = readSnapshotDescriptor(descriptor, expected, limits);
         if (!stableInputDescriptor(descriptor, initial)) {
             throw SnapshotError("snapshot input changed while being read");
         }
@@ -142,6 +143,7 @@ std::string readRegularFile(const fs::path& path,
     output.reserve(static_cast<std::size_t>(size));
     char buffer[64 * 1024];
     while (input) {
+        detail::checkSnapshotCancellation(limits);
         input.read(buffer, sizeof(buffer));
         const std::streamsize count = input.gcount();
         if (count > 0) {

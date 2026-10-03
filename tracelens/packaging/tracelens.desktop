@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=TraceLens
+Comment=Inspect saved Linux strace evidence
+Exec=tracelens-gui %F
+Icon=tracelens
+Terminal=false
+Categories=Development;Profiling;
+Keywords=strace;syscall;trace;performance;

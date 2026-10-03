@@ -7,6 +7,12 @@
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QGridLayout>
+#include <QSettings>
+#include <QCoreApplication>
+#include <QDockWidget>
+#include <QTreeWidget>
+#include <QPlainTextEdit>
 #include <QItemSelectionModel>
 #include <QLabel>
 #include <QLineEdit>
@@ -24,6 +30,7 @@
 #include <vector>
 
 #include "loglens/gui/log_model.hpp"
+#include "loglens/evidence.hpp"
 #include "loglens/gui/highlight_delegate.hpp"
 #include "loglens/gui/log_load_worker.hpp"
 #include "loglens/log_stats.hpp"
@@ -49,6 +56,7 @@ MainWindow::MainWindow(QWidget* parent, MainWindowOptions options)
     auto* layout = new QVBoxLayout(central);
 
     auto* bar = new QHBoxLayout();
+    auto *filterBar = new QHBoxLayout();
     auto* openButton = new QPushButton(tr("Open log…"), central);
     openButton->setObjectName(QStringLiteral("openButton"));
     openButton->setAccessibleName(tr("Open log file"));
@@ -73,19 +81,22 @@ MainWindow::MainWindow(QWidget* parent, MainWindowOptions options)
     tailRecords_->setRange(1, static_cast<int>(record_capacity_));
     tailRecords_->setValue(static_cast<int>(record_capacity_));
     bar->addWidget(tailRecords_);
-    bar->addWidget(filterEdit_, 1);
-    bar->addWidget(applyButton);
+    filterBar->addWidget(filterEdit_, 1);
+    filterBar->addWidget(applyButton);
     searchEdit_ = new QLineEdit(central);
     searchEdit_->setObjectName(QStringLiteral("searchEdit"));
     searchEdit_->setAccessibleName(tr("Search loaded log text"));
     searchEdit_->setPlaceholderText(tr("Search text"));
-    bar->addWidget(searchEdit_);
+    filterBar->addWidget(searchEdit_, 1);
+    searchEdit_->setMaxLength(static_cast<int>(loglens::kMaxFilterQueryBytes));
+    searchEdit_->setPlaceholderText(tr("Search retained records"));
     followBox_ = new QCheckBox(tr("Follow"), central);
     followBox_->setObjectName(QStringLiteral("followCheckBox"));
     followBox_->setAccessibleName(tr("Follow log file"));
     followBox_->setChecked(true);
     bar->addWidget(followBox_);
     layout->addLayout(bar);
+    layout->addLayout(filterBar);
 
     auto* profileBar = new QHBoxLayout();
     auto* profileLabel = new QLabel(tr("Source profile"), central);
@@ -154,7 +165,50 @@ MainWindow::MainWindow(QWidget* parent, MainWindowOptions options)
     saveSessionButton->setObjectName(QStringLiteral("saveSessionButton"));
     saveSessionButton->setAccessibleName(tr("Save investigation session"));
     profileBar->addWidget(saveSessionButton);
-    layout->addLayout(profileBar);
+    auto *settingsPanel = new QWidget(central);
+    settingsPanel->setObjectName(QStringLiteral("sourceSettingsPanel"));
+    auto *settingsLayout = new QVBoxLayout(settingsPanel);
+    auto *profileGrid = new QGridLayout();
+    int profileCell = 0;
+    while (auto *item = profileBar->takeAt(0)) {
+        if (item->widget())
+            profileGrid->addWidget(item->widget(), profileCell / 4, profileCell % 4);
+        ++profileCell;
+        delete item;
+    }
+    delete profileBar;
+    settingsLayout->addLayout(profileGrid);
+    auto *settingsButton = new QPushButton(tr("Source / session settings"), central);
+    settingsButton->setObjectName(QStringLiteral("sourceSettingsButton"));
+    settingsButton->setCheckable(true);
+    bar->addWidget(settingsButton);
+    bar->addStretch();
+    connect(settingsButton, &QPushButton::toggled, settingsPanel, &QWidget::setVisible);
+    settingsPanel->setVisible(false);
+    layout->addWidget(settingsPanel);
+    auto *pluginBar = new QHBoxLayout();
+    pluginLabel_ = new QLabel(tr("Built-in parser"), settingsPanel);
+    pluginLabel_->setObjectName(QStringLiteral("formatPluginLabel"));
+    pluginLabel_->setWordWrap(true);
+    auto *pluginButton = new QPushButton(tr("Choose parser plugin…"), settingsPanel);
+    pluginButton->setObjectName(QStringLiteral("chooseFormatPluginButton"));
+    auto *clearPlugin = new QPushButton(tr("Use built-in"), settingsPanel);
+    clearPlugin->setObjectName(QStringLiteral("clearFormatPluginButton"));
+    pluginBar->addWidget(pluginLabel_, 1);
+    pluginBar->addWidget(pluginButton);
+    pluginBar->addWidget(clearPlugin);
+    settingsLayout->addLayout(pluginBar);
+    connect(pluginButton, &QPushButton::clicked, this, [this] {
+        const auto path = QFileDialog::getOpenFileName(this, tr("Open declarative parser plugin"),
+                                                       QString(), tr("JSON files (*.json)"));
+        if (!path.isEmpty() && setFormatPluginPath(path) && !currentPath_.isEmpty())
+            applySourceProfile();
+    });
+    connect(clearPlugin, &QPushButton::clicked, this, [this] {
+        setFormatPluginPath(QString());
+        if (!currentPath_.isEmpty())
+            applySourceProfile();
+    });
 
     auto* queryBar = new QHBoxLayout();
     auto* queryLabel = new QLabel(tr("Saved query"), central);
@@ -177,7 +231,7 @@ MainWindow::MainWindow(QWidget* parent, MainWindowOptions options)
     saveQueryButton->setObjectName(QStringLiteral("saveSavedQueryButton"));
     saveQueryButton->setAccessibleName(tr("Save saved query"));
     queryBar->addWidget(saveQueryButton);
-    layout->addLayout(queryBar);
+    settingsLayout->addLayout(queryBar);
 
     timeline_ = new TimelineWidget(central);
     timeline_->setObjectName(QStringLiteral("timelineWidget"));
@@ -201,10 +255,16 @@ MainWindow::MainWindow(QWidget* parent, MainWindowOptions options)
 
     setCentralWidget(central);
     setupInvestigationDock();
+    setupWholeFileSearch();
     status_ = new QLabel(tr("Ready"), this);
     status_->setObjectName(QStringLiteral("statusLabel"));
     status_->setAccessibleName(tr("Log status"));
-    statusBar()->addWidget(status_);
+    status_->setWordWrap(false);
+    status_->setMaximumHeight(28);
+    statusBar()->setMaximumHeight(32);
+    status_->setMinimumWidth(0);
+    status_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+    statusBar()->addWidget(status_, 1);
 
     pollTimer_ = new QTimer(this);
     pollTimer_->setObjectName(QStringLiteral("followPollTimer"));
@@ -297,9 +357,31 @@ MainWindow::MainWindow(QWidget* parent, MainWindowOptions options)
     sourceProfile_->setEditText(QStringLiteral("Default"));
     loadPersistenceState();
     loadTriageWorkflow();
+    persistLayout_ = QCoreApplication::applicationName() == QStringLiteral("loglens") &&
+                     options.sourceProfilesPath.isEmpty() && options.savedQueriesPath.isEmpty() &&
+                     options.triagePath.isEmpty();
+    if (persistLayout_) {
+        QSettings settings(QDir(QFileInfo(sourceProfilesPath_).absolutePath()).filePath(
+                               QStringLiteral("window-layout.ini")), QSettings::IniFormat);
+        restoreGeometry(settings.value(QStringLiteral("window/geometry")).toByteArray());
+        restoreState(settings.value(QStringLiteral("window/layout")).toByteArray(), 2);
+        table_->horizontalHeader()->restoreState(
+            settings.value(QStringLiteral("window/tableHeader")).toByteArray());
+    }
 }
 
 MainWindow::~MainWindow() {
+    cancelWholeFileSearch();
+    if (searchThread_)
+        searchThread_->wait();
+    if (persistLayout_) {
+        QSettings settings(QDir(QFileInfo(sourceProfilesPath_).absolutePath()).filePath(
+                               QStringLiteral("window-layout.ini")), QSettings::IniFormat);
+        settings.setValue(QStringLiteral("window/geometry"), saveGeometry());
+        settings.setValue(QStringLiteral("window/layout"), saveState(2));
+        settings.setValue(QStringLiteral("window/tableHeader"),
+                          table_->horizontalHeader()->saveState());
+    }
     ++active_job_;
     loader_->selectJob(active_job_);
     loaderThread_->quit();
@@ -352,7 +434,19 @@ void MainWindow::openPath(const QString& path) {
 
 void MainWindow::openPath(const QString& path, loglens::InitialLoadMode mode,
                           std::size_t tailRecords) {
+    cancelWholeFileSearch();
+    pendingSession_.reset();
+    sessionEvidenceNotice_.clear();
+    baselineWindow_.reset();
+    comparisonWindow_.reset();
+    baselineWindowLabel_->setText(tr("Baseline: not set"));
+    comparisonWindowLabel_->setText(tr("Comparison: not set"));
+    searchResults_->clear();
+    searchEvidence_->clear();
+    searchResult_ = {};
+    searchStatus_->setText(tr("Source changed. Start a new whole-file search."));
     currentPath_ = QFileInfo(path).absoluteFilePath();
+    model_->setSourceIdentity({});
     ++active_job_;
     loader_->selectJob(active_job_);
     expected_sequence_ = 0;
@@ -378,6 +472,7 @@ void MainWindow::openPath(const QString& path, loglens::InitialLoadMode mode,
     request.format = profile.format;
     request.multiline = profile.multiline;
     request.max_record_bytes = profile.max_record_bytes;
+    request.format_plugin = formatPlugin_;
     emit startLoadRequested(std::move(request));
 }
 
@@ -436,13 +531,34 @@ void MainWindow::handleLoadBatch(const loglens::LoadBatch& batch) {
         return;
     }
     retryAttempts_ = 0;
+    model_->setSourceIdentity(loglens::sourceIdentity(batch.identity));
     if (batch.reset_model) {
         timeline_->clearSelection();
         model_->resetRecords(batch.generation);
     }
     applyDeltas(batch.deltas);
+    if (batch.initial_complete && pendingSession_) {
+        const auto state = *pendingSession_;
+        pendingSession_.reset();
+        baselineWindow_ = state.baseline_window;
+        comparisonWindow_ = state.comparison_window;
+        baselineWindowLabel_->setText(state.baseline_window
+                                          ? tr("Baseline: %1–%2 ms")
+                                                .arg(state.baseline_window->begin_ms)
+                                                .arg(state.baseline_window->end_ms)
+                                          : tr("Baseline: not set"));
+        comparisonWindowLabel_->setText(state.comparison_window
+                                            ? tr("Comparison: %1–%2 ms")
+                                                  .arg(state.comparison_window->begin_ms)
+                                                  .arg(state.comparison_window->end_ms)
+                                            : tr("Comparison: not set"));
+        if (state.selected_window)
+            timeline_->setSelection(state.selected_window->begin_ms, state.selected_window->end_ms);
+    }
+    if (batch.initial_complete || batch.reset_model)
+        refreshArchivedTriage();
     scheduleTimelineRefresh();
-    updateStatus(backlog_pending_ ? tr("loading…") : QString());
+    updateStatus(backlog_pending_ ? tr("loading…") : sessionEvidenceNotice_);
     if (autoScroll_ && !batch.deltas.empty()) {
         table_->scrollToBottom();
     }
@@ -534,4 +650,5 @@ void MainWindow::updateStatus(const QString& extra) {
         message += QStringLiteral("  —  ") + extra;
     }
     status_->setText(message);
+    status_->setToolTip(message);
 }

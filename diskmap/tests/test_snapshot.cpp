@@ -64,7 +64,11 @@ FsNode directory(std::string name,
     return node;
 }
 
-Snapshot snapshot(FsNode root) { return diskmap::snapshotFromNode(root); }
+Snapshot snapshot(FsNode root) {
+    auto result = diskmap::snapshotFromNode(root);
+    result.schema_version = diskmap::kSnapshotSchemaV1; // legacy canonical reader/writer coverage
+    return result;
+}
 
 bool throwsSnapshotError(const std::function<void()>& operation) {
     try {

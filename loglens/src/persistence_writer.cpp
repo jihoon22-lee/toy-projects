@@ -1,4 +1,5 @@
 #include "persistence_writer.hpp"
+#include "loglens/triage.hpp"
 
 #include <string_view>
 
@@ -100,7 +101,49 @@ std::string serializeSession(const SessionState& state) {
         output += ",\"format_plugin\":";
         appendJsonString(output, state.format_plugin);
     }
+    output += ",\"identity\":";
+    appendJsonString(output, state.source_identity);
+    output += ",\"modified\":";
+    appendJsonString(output, state.source_modified);
+    output += ",\"fingerprint\":";
+    appendJsonString(output, state.source_fingerprint);
+    output += ",\"plugin_fingerprint\":";
+    appendJsonString(output, state.plugin_fingerprint);
+    output += ",\"fingerprint_bytes\":" + std::to_string(state.fingerprint_bytes);
+    output += ",\"size\":" + std::to_string(state.source_size);
+    output += ",\"generation\":" + std::to_string(state.source_generation);
     output += "}";
+    output += ",\"view\":{\"search\":";
+    appendJsonString(output, state.search);
+    output += ",\"whole_file_search\":";
+    appendJsonString(output, state.whole_file_search);
+    output += ",\"investigation_tab\":" + std::to_string(state.investigation_tab);
+    output += ",\"settings_open\":";
+    output += state.settings_open ? "true" : "false";
+    output += ",\"follow\":";
+    output += state.follow ? "true" : "false";
+    output += ",\"tail_mode\":";
+    output += state.tail_mode ? "true" : "false";
+    output += ",\"tail_records\":" + std::to_string(state.tail_records);
+    for (const auto &property : {std::make_pair("selected", state.selected_window),
+                                 std::make_pair("baseline", state.baseline_window),
+                                 std::make_pair("comparison", state.comparison_window)}) {
+        output += ",";
+        appendJsonString(output, property.first);
+        output += ":";
+        if (!property.second)
+            output += "null";
+        else
+            output += "{\"begin_ms\":" + std::to_string(property.second->begin_ms) +
+                      ",\"end_ms\":" + std::to_string(property.second->end_ms) + "}";
+    }
+    output += ",\"layout\":";
+    appendJsonString(output, state.layout);
+    output += ",\"geometry\":";
+    appendJsonString(output, state.geometry);
+    output += ",\"table_header\":";
+    appendJsonString(output, state.table_header);
+    output += "},\"triage\":" + serializeTriageState(state.triage);
     if (!state.filter.empty()) {
         output += ",\"filter\":";
         appendJsonString(output, state.filter);

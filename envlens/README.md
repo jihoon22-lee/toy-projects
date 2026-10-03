@@ -4,9 +4,9 @@ envlens is a pure-Python library and CLI for making deterministic, offline
 inventories of explicitly selected Python interpreters, comparing those
 inventories, and checking a project against configured runtimes.
 
-The package metadata and `--version` output are currently `0.1.0`. This is an
-unreleased development identity: no envlens tag, GitHub Release, or stable
-artifact has been published.
+The package metadata and `--version` output identify the `0.2.0` development
+checkpoint. Releases are published separately using independent `envlens/vX.Y.Z`
+tags; building this checkout does not publish a release.
 
 ## Capture a snapshot
 
@@ -42,12 +42,14 @@ One malformed distribution does not discard healthy distributions. Its error
 records are retained in that distribution and the overall collection is marked
 `partial` while the command still succeeds.
 
-## The `envlens.snapshot/v2` contract
+## The `envlens.snapshot/v3` contract
 
 The checked-in strict schema is
-[`schemas/envlens-snapshot-v2.schema.json`](schemas/envlens-snapshot-v2.schema.json).
+[`schemas/envlens-snapshot-v3.schema.json`](schemas/envlens-snapshot-v3.schema.json).
 The earlier [`v1`](schemas/envlens-snapshot-v1.schema.json) schema stays
-readable: snapshot inputs on the diff path accept both versions. The v2 change
+readable along with v2: snapshot inputs accept all three versions. V3 records
+redacted installation origins (including editable/VCS details), libc, macOS and
+free-threaded interpreter evidence. The v2 change
 is additive — `source.identity.environment_kind` reports whether the selected
 interpreter is a `conda` environment (`conda-meta` present), a `virtualenv`
 (`pyvenv.cfg` or a `prefix`/`base_prefix` split), or the `system` interpreter.
@@ -245,3 +247,31 @@ snapshot schema against a real capture, builds the wheel and sdist twice under
 envlens compares captured evidence and performs explicit runtime checks; it
 does not resolve dependencies, build or install wheels, or claim compatibility
 when metadata is incomplete.
+
+## Standards, evidence and CI policies
+
+Version ordering, Requires-Python, PEP 508 requirements/markers and compressed
+wheel tags use `packaging`. Marker evaluation uses the recorded target values;
+missing target evidence remains unknown. Platform checks use recorded libc or
+macOS evidence rather than the machine running the comparison. Transitive extras
+activate dependency checks, with bounded explanation paths. Direct URL
+requirements require matching, unredacted installation origin evidence.
+Duplicate distributions and overlapping import names are reported separately;
+import overlap may be legitimate namespace sharing and remains unknown until
+verified. Reports include opt-in runtime command arguments without executing them.
+
+Text and Markdown focus on issues; `--verbose` includes successful compatibility
+checks. JSON retains all evidence. `--fail-on default` preserves existing exit
+behavior; `never` always returns zero for a valid report, `incompatible` fails
+only definite incompatibility/failure, `unknown` also fails unknown evidence, and
+`changed` fails every non-success status. Invalid inputs always exit 2.
+
+```bash
+envlens check snapshot.json --project pyproject.toml --fail-on incompatible
+envlens diff --before before.json --after after.json --format json --fail-on unknown
+```
+
+Runtime checks preserve a virtual environment's executable path, use absolute
+source paths, batch compilation within one timeout, and honor console entry-point
+return values through `SystemExit`. Snapshot/report output cannot replace an input
+snapshot or project file, including symlink/hardlink aliases.

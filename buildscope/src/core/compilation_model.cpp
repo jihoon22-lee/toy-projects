@@ -39,7 +39,7 @@ QString shortConfiguration(const QString &configuration) {
     constexpr qsizetype kVisibleDigestCharacters = 12;
     if (configuration.startsWith(QLatin1String("sha256:")) &&
         configuration.size() > kDigestPrefixLength + kVisibleDigestCharacters) {
-        return configuration.left(kDigestPrefixLength + kVisibleDigestCharacters) +
+        return configuration.mid(kDigestPrefixLength, kVisibleDigestCharacters) +
                QChar(0x2026);
     }
     return configuration;
@@ -77,6 +77,10 @@ void appendIncludeAnalysisSearchFields(QStringList &fields, const SnapshotEntry 
     fields.append(entry.includeAnalysis.command);
     for (const auto &edge : entry.includeAnalysis.edges) {
         appendIncludeEdgeSearchFields(fields, edge);
+    }
+    if(entry.includeAnalysis.fallback) {
+        fields.append(QStringLiteral("estimated fallback"));
+        for(const auto &edge:entry.includeAnalysis.fallback->edges)appendIncludeEdgeSearchFields(fields,edge);
     }
     for (const auto &diagnostic : entry.includeAnalysis.diagnostics) {
         fields.append({diagnostic.code, diagnostic.message, diagnostic.severity});

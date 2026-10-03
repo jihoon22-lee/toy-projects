@@ -21,6 +21,7 @@ enum class TrashStatus {
     DestinationExists,
     MissingToken,
     IoError,
+    Cancelled,
 };
 
 const char* trashStatusName(TrashStatus status);
@@ -30,6 +31,7 @@ struct TrashOptions {
     // provide an isolated data home without changing process environment.
     std::filesystem::path data_home;
     std::size_t max_targets = 10'000;
+    CancellationCheck cancelled;
 };
 
 struct TrashCapability {
@@ -51,6 +53,9 @@ struct TrashReceipt {
         return status == TrashStatus::Moved || status == TrashStatus::Restored;
     }
 };
+
+// Reads durable audit records and reconciles recoverable metadata after restart.
+std::vector<TrashReceipt> listTrashHistory(const TrashOptions& options, std::string& error);
 
 // Read-only capability probe. It deliberately supports only a same-filesystem
 // home Trash; volume-specific trash policy remains unavailable rather than

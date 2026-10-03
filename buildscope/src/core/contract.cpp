@@ -9,6 +9,7 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonParseError>
+#include <algorithm>
 
 #if defined(Q_OS_UNIX)
 #include <cerrno>
@@ -24,7 +25,7 @@ namespace {
 struct OpenedContract {
     qint64 size = 0;
 #if defined(Q_OS_UNIX)
-    struct stat identity {};
+    struct stat identity{};
 #else
     QString canonicalPath;
     QDateTime modified;
@@ -42,8 +43,7 @@ bool sameFileIdentity(const struct stat &left, const struct stat &right) {
 
 bool sameFileState(const struct stat &left, const struct stat &right) {
 #if defined(Q_OS_DARWIN)
-    const auto modificationUnchanged =
-        sameTimestamp(left.st_mtimespec, right.st_mtimespec);
+    const auto modificationUnchanged = sameTimestamp(left.st_mtimespec, right.st_mtimespec);
     const auto changeUnchanged = sameTimestamp(left.st_ctimespec, right.st_ctimespec);
 #else
     const auto modificationUnchanged = sameTimestamp(left.st_mtim, right.st_mtim);
@@ -81,7 +81,7 @@ OpenedContract openContract(const QString &path, const QString &kind, QFile &fil
         throw ContractError("cannot open " + kind + ": " +
                             QString::fromLocal8Bit(std::strerror(errno)));
     }
-    struct stat metadata {};
+    struct stat metadata{};
     if (::fstat(descriptor, &metadata) != 0) {
         const auto message = QString::fromLocal8Bit(std::strerror(errno));
         ::close(descriptor);
@@ -117,12 +117,12 @@ OpenedContract openContract(const QString &path, const QString &kind, QFile &fil
 void verifyContractUnchanged(const QString &path, const QString &kind, QFile &file,
                              const OpenedContract &opened) {
 #if defined(Q_OS_UNIX)
-    struct stat descriptorMetadata {};
+    struct stat descriptorMetadata{};
     if (::fstat(file.handle(), &descriptorMetadata) != 0) {
         throw ContractError("cannot re-inspect open " + kind + ": " +
                             QString::fromLocal8Bit(std::strerror(errno)));
     }
-    struct stat pathMetadata {};
+    struct stat pathMetadata{};
     const auto encodedPath = QFile::encodeName(path);
     if (::lstat(encodedPath.constData(), &pathMetadata) != 0) {
         throw ContractError(kind + " path changed while reading: " +
@@ -150,19 +150,30 @@ void verifyContractUnchanged(const QString &path, const QString &kind, QFile &fi
 #endif
 }
 
-}  // namespace
+} // namespace
 
-ContractError::ContractError(const QString &message) : std::runtime_error(message.toStdString()) {}
+ContractError::ContractError(const QString &message)
+    : std::runtime_error(message.toStdString()) {}
 
-QJsonDocument detail::loadJsonContractFile(
-    const QString &path, const QString &kind, const SnapshotPostReadHook &postReadHook) {
+QJsonDocument detail::loadJsonContractFile(const QString &path, const QString &kind,
+                                           const SnapshotPostReadHook &postReadHook,
+                                           std::atomic_bool *cancel) {
     constexpr qint64 kMaxContractBytes = 256LL * 1024LL * 1024LL;
     QFile file;
     const auto opened = openContract(path, kind, file);
     if (opened.size > kMaxContractBytes) {
         throw ContractError(kind + " exceeds 268435456 byte limit");
     }
-    const auto payload = file.read(kMaxContractBytes + 1);
+    QByteArray payload;
+    while (payload.size() <= kMaxContractBytes && !file.atEnd()) {
+        if (cancel && cancel->load())
+            throw ContractError(kind + " loading cancelled");
+        const auto chunk =
+            file.read(std::min(qint64(65536), kMaxContractBytes + 1 - payload.size()));
+        if (chunk.isEmpty())
+            break;
+        payload.append(chunk);
+    }
     if (file.error() != QFileDevice::NoError) {
         throw ContractError("cannot read " + kind + ": " + file.errorString());
     }
@@ -176,21 +187,26 @@ QJsonDocument detail::loadJsonContractFile(
     QJsonParseError parseError;
     const auto document = QJsonDocument::fromJson(payload, &parseError);
     if (parseError.error != QJsonParseError::NoError) {
-        throw ContractError("invalid JSON at byte " + QString::number(parseError.offset) + ": " +
-                            parseError.errorString());
+        throw ContractError("invalid JSON at byte " + QString::number(parseError.offset) +
+                            ": " + parseError.errorString());
     }
     detail::rejectDuplicateJsonKeys(payload);
     return document;
 }
 
-Snapshot detail::loadSnapshotFileWithPostReadHook(
-    const QString &path, const SnapshotPostReadHook &postReadHook) {
+Snapshot detail::loadSnapshotFileWithPostReadHook(const QString &path,
+                                                  const SnapshotPostReadHook &postReadHook) {
     return detail::parseSnapshotDocument(
         loadJsonContractFile(path, QStringLiteral("snapshot"), postReadHook));
 }
 
-Snapshot loadSnapshotFile(const QString &path) {
-    return detail::loadSnapshotFileWithPostReadHook(path, {});
+Snapshot loadSnapshotFile(const QString &path,std::atomic_bool *cancel) {
+    if(!cancel)return detail::loadSnapshotFileWithPostReadHook(path, {});
+    return detail::parseSnapshotDocument(detail::loadJsonContractFile(path,QStringLiteral("snapshot"),{},cancel),cancel);
+}
+
+Snapshot parseSnapshot(const QJsonDocument &document, std::atomic_bool *cancel) {
+    return detail::parseSnapshotDocument(document, cancel);
 }
 
 QString invocationText(const SnapshotEntry &entry) {
@@ -200,4 +216,4 @@ QString invocationText(const SnapshotEntry &entry) {
     return entry.command;
 }
 
-}  // namespace buildscope
+} // namespace buildscope

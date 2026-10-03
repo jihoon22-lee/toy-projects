@@ -7,7 +7,7 @@
 
 namespace abilens {
 
-inline constexpr const char* kAbiLensVersion = "0.1.2";  // x-release-please-version
+inline constexpr const char* kAbiLensVersion = "0.2.0";  // x-release-please-version
 
 enum class InputStatus {
     Valid,
@@ -71,8 +71,33 @@ struct PolicyEvaluation {
     std::vector<std::string> violations;
 };
 
+struct SymbolEvidence {
+    std::string identity;
+    std::uint64_t size = 0;
+    unsigned binding = 0;
+    unsigned visibility = 0;
+    unsigned type = 0;
+    bool default_version = false;
+    bool operator==(const SymbolEvidence&) const = default;
+};
+
+struct LoaderResolution {
+    std::string needed;
+    std::string status;
+    std::string path;
+    std::vector<std::string> searched;
+};
+
+struct InspectOptions {
+    std::filesystem::path sysroot;
+    std::string origin;
+    std::vector<std::string> library_paths;
+    bool dwarf = false;
+    std::size_t dwarf_die_budget = 100000;
+};
+
 struct ElfReport {
-    static constexpr const char* schema = "abilens.report/v1";
+    static constexpr const char* schema = "abilens.report/v2";
 
     std::string input;
     InputStatus status = InputStatus::Unreadable;
@@ -92,6 +117,15 @@ struct ElfReport {
     // without "vtables" also predates name@version symbol identities.
     bool symbols_known = true;
     bool vtables_known = true;
+    bool attributes_known = false;
+    std::vector<SymbolEvidence> symbol_evidence;
+    std::string soname;
+    std::string interpreter;
+    std::string build_id;
+    bool loader_metadata_known = false;
+    std::string dwarf_status = "not-requested";
+    std::vector<std::string> type_layouts;
+    std::vector<LoaderResolution> resolutions;
     std::vector<std::string> diagnostics;
     PolicyEvaluation policy;
 };
@@ -102,12 +136,15 @@ struct SetDiff {
 };
 
 struct DiffReport {
-    static constexpr const char* schema = "abilens.diff/v1";
+    static constexpr const char* schema = "abilens.diff/v2";
 
     std::string left;
     std::string right;
     bool changed = false;
-    bool compatible = true;
+    bool compatible = false;
+    std::string compatibility = "unknown";
+    std::vector<std::string> symbol_changes;
+    SetDiff types;
     std::string left_status;
     std::string right_status;
     SetDiff needed;

@@ -85,8 +85,8 @@ QVector<Record> parseObjectArray(const QJsonValue &value, const QString &locatio
     records.reserve(values.size());
     for (qsizetype index = 0; index < values.size(); ++index) {
         const auto itemLocation = location + "[" + QString::number(index) + "]";
-        records.append(parser(requiredObject(values.at(index), itemLocation), itemLocation,
-                              index));
+        records.append(
+            parser(requiredObject(values.at(index), itemLocation), itemLocation, index));
     }
     return records;
 }
@@ -99,9 +99,9 @@ SnapshotPath parsePathRecord(const QJsonValue &value, const QString &location) {
                       location);
     SnapshotPath path;
     path.path = requiredString(object, QStringLiteral("path"), location);
-    path.scope = requiredEnumString(object, QStringLiteral("scope"), location,
-                                    {QStringLiteral("project"), QStringLiteral("vendor"),
-                                     QStringLiteral("system")});
+    path.scope = requiredEnumString(
+        object, QStringLiteral("scope"), location,
+        {QStringLiteral("project"), QStringLiteral("vendor"), QStringLiteral("system")});
     path.style = requiredEnumString(object, QStringLiteral("style"), location,
                                     {QStringLiteral("posix"), QStringLiteral("windows")});
     path.exists = requiredNullableBool(object, QStringLiteral("exists"), location);
@@ -111,17 +111,18 @@ SnapshotPath parsePathRecord(const QJsonValue &value, const QString &location) {
 SnapshotCompiler parseCompiler(const QJsonValue &value, const QString &location) {
     const auto object = requiredObject(value, location);
     rejectUnknownKeys(object,
-                      {QStringLiteral("family"), QStringLiteral("name"),
-                       QStringLiteral("path"), QStringLiteral("wrappers")},
+                      {QStringLiteral("family"), QStringLiteral("name"), QStringLiteral("path"),
+                       QStringLiteral("wrappers")},
                       location);
     SnapshotCompiler compiler;
-    compiler.family = requiredEnumString(
-        object, QStringLiteral("family"), location,
-        {QStringLiteral("clang"), QStringLiteral("clang-cl"), QStringLiteral("emscripten"),
-         QStringLiteral("gcc"), QStringLiteral("msvc"), QStringLiteral("unknown")});
+    compiler.family = requiredEnumString(object, QStringLiteral("family"), location,
+                                         {QStringLiteral("clang"), QStringLiteral("clang-cl"),
+                                          QStringLiteral("emscripten"), QStringLiteral("gcc"),
+                                          QStringLiteral("msvc"), QStringLiteral("unknown")});
     compiler.name = requiredString(object, QStringLiteral("name"), location);
     compiler.path = requiredString(object, QStringLiteral("path"), location);
-    compiler.wrappers = requiredStringArray(object, QStringLiteral("wrappers"), location, false);
+    compiler.wrappers =
+        requiredStringArray(object, QStringLiteral("wrappers"), location, false);
     return compiler;
 }
 
@@ -129,14 +130,14 @@ QVector<SnapshotDefine> parseDefines(const QJsonValue &value, const QString &loc
     return parseObjectArray<SnapshotDefine>(
         value, location, kMaxArguments,
         [](const QJsonObject &object, const QString &itemLocation, qsizetype) {
-            rejectUnknownKeys(object,
-                              {QStringLiteral("action"), QStringLiteral("name"),
-                               QStringLiteral("value")},
-                              itemLocation);
+            rejectUnknownKeys(
+                object,
+                {QStringLiteral("action"), QStringLiteral("name"), QStringLiteral("value")},
+                itemLocation);
             SnapshotDefine define;
-            define.action = requiredEnumString(
-                object, QStringLiteral("action"), itemLocation,
-                {QStringLiteral("define"), QStringLiteral("undefine")});
+            define.action =
+                requiredEnumString(object, QStringLiteral("action"), itemLocation,
+                                   {QStringLiteral("define"), QStringLiteral("undefine")});
             define.name = requiredString(object, QStringLiteral("name"), itemLocation);
             if (!isDefineName(define.name)) {
                 throw ContractError(itemLocation + ".name is not a valid definition name");
@@ -156,7 +157,8 @@ QVector<SnapshotDefine> parseDefines(const QJsonValue &value, const QString &loc
         });
 }
 
-QVector<SnapshotIncludePath> parseIncludePaths(const QJsonValue &value, const QString &location) {
+QVector<SnapshotIncludePath> parseIncludePaths(const QJsonValue &value,
+                                               const QString &location) {
     return parseObjectArray<SnapshotIncludePath>(
         value, location, kMaxArguments,
         [](const QJsonObject &object, const QString &itemLocation, qsizetype index) {
@@ -167,19 +169,19 @@ QVector<SnapshotIncludePath> parseIncludePaths(const QJsonValue &value, const QS
                               itemLocation);
             SnapshotIncludePath include;
             include.path = requiredString(object, QStringLiteral("path"), itemLocation);
-            include.scope = requiredEnumString(
-                object, QStringLiteral("scope"), itemLocation,
-                {QStringLiteral("project"), QStringLiteral("vendor"),
-                 QStringLiteral("system")});
-            include.style = requiredEnumString(
-                object, QStringLiteral("style"), itemLocation,
-                {QStringLiteral("posix"), QStringLiteral("windows")});
-            include.exists = requiredNullableBool(object, QStringLiteral("exists"), itemLocation);
+            include.scope =
+                requiredEnumString(object, QStringLiteral("scope"), itemLocation,
+                                   {QStringLiteral("project"), QStringLiteral("vendor"),
+                                    QStringLiteral("system")});
+            include.style =
+                requiredEnumString(object, QStringLiteral("style"), itemLocation,
+                                   {QStringLiteral("posix"), QStringLiteral("windows")});
+            include.exists =
+                requiredNullableBool(object, QStringLiteral("exists"), itemLocation);
             include.kind = requiredEnumString(
                 object, QStringLiteral("kind"), itemLocation,
                 {QStringLiteral("after"), QStringLiteral("framework"),
-                 QStringLiteral("include"), QStringLiteral("quote"),
-                 QStringLiteral("system")});
+                 QStringLiteral("include"), QStringLiteral("quote"), QStringLiteral("system")});
             include.order = requiredInteger(object, QStringLiteral("order"), itemLocation);
             if (include.order != index) {
                 throw ContractError(itemLocation + ".order must match include path order");
@@ -190,7 +192,8 @@ QVector<SnapshotIncludePath> parseIncludePaths(const QJsonValue &value, const QS
 
 SnapshotTarget parseTarget(const QJsonValue &value, const QString &location) {
     const auto object = requiredObject(value, location);
-    rejectUnknownKeys(object, {QStringLiteral("build_target"), QStringLiteral("triple")}, location);
+    rejectUnknownKeys(object, {QStringLiteral("build_target"), QStringLiteral("triple")},
+                      location);
     SnapshotTarget target;
     target.buildTarget = stringValue(object, QStringLiteral("build_target"), location);
     target.triple = stringValue(object, QStringLiteral("triple"), location);
@@ -210,24 +213,25 @@ SnapshotNormalized parseNormalized(const QJsonValue &value, const QString &locat
                       location);
     SnapshotNormalized normalized;
     normalized.argv = requiredStringArray(object, QStringLiteral("argv"), location, true, true);
-    normalized.commandStyle = requiredEnumString(object, QStringLiteral("command_style"), location,
-                                                 {QStringLiteral("posix"),
-                                                  QStringLiteral("windows")});
+    normalized.commandStyle =
+        requiredEnumString(object, QStringLiteral("command_style"), location,
+                           {QStringLiteral("posix"), QStringLiteral("windows")});
     normalized.invocationSource =
         requiredEnumString(object, QStringLiteral("invocation_source"), location,
                            {QStringLiteral("arguments"), QStringLiteral("command")});
-    normalized.compiler = parseCompiler(object.value(QStringLiteral("compiler")),
-                                        location + ".compiler");
-    normalized.configuration = requiredString(object, QStringLiteral("configuration"), location);
+    normalized.compiler =
+        parseCompiler(object.value(QStringLiteral("compiler")), location + ".compiler");
+    normalized.configuration =
+        requiredString(object, QStringLiteral("configuration"), location);
     if (!isConfigurationDigest(normalized.configuration)) {
         throw ContractError(location + ".configuration must be a sha256 digest");
     }
-    normalized.defines = parseDefines(object.value(QStringLiteral("defines")),
-                                      location + ".defines");
-    normalized.directory = parsePathRecord(object.value(QStringLiteral("directory")),
-                                           location + ".directory");
+    normalized.defines =
+        parseDefines(object.value(QStringLiteral("defines")), location + ".defines");
+    normalized.directory =
+        parsePathRecord(object.value(QStringLiteral("directory")), location + ".directory");
     normalized.includePaths = parseIncludePaths(object.value(QStringLiteral("include_paths")),
-                                               location + ".include_paths");
+                                                location + ".include_paths");
     normalized.language = stringValue(object, QStringLiteral("language"), location);
     if (!QStringList{QStringLiteral(""), QStringLiteral("c"), QStringLiteral("c++"),
                      QStringLiteral("objective-c"), QStringLiteral("objective-c++")}
@@ -241,8 +245,8 @@ SnapshotNormalized parseNormalized(const QJsonValue &value, const QString &locat
     if (output.isObject()) {
         normalized.output = parsePathRecord(output, location + ".output");
     }
-    normalized.source = parsePathRecord(object.value(QStringLiteral("source")),
-                                        location + ".source");
+    normalized.source =
+        parsePathRecord(object.value(QStringLiteral("source")), location + ".source");
     normalized.standard = stringValue(object, QStringLiteral("standard"), location);
     const auto sysroot = object.value(QStringLiteral("sysroot"));
     if (sysroot.isUndefined() || (!sysroot.isNull() && !sysroot.isObject())) {
@@ -251,8 +255,8 @@ SnapshotNormalized parseNormalized(const QJsonValue &value, const QString &locat
     if (sysroot.isObject()) {
         normalized.sysroot = parsePathRecord(sysroot, location + ".sysroot");
     }
-    normalized.target = parseTarget(object.value(QStringLiteral("target")),
-                                    location + ".target");
+    normalized.target =
+        parseTarget(object.value(QStringLiteral("target")), location + ".target");
     return normalized;
 }
 
@@ -271,10 +275,10 @@ SnapshotState parseState(const QJsonValue &value, const QString &location) {
     if (state.sourceConfigurationCount == 0) {
         throw ContractError(location + ".source_configuration_count must be positive");
     }
-    state.sourceStatus = requiredEnumString(
-        object, QStringLiteral("source_status"), location,
-        {QStringLiteral("missing"), QStringLiteral("present"), QStringLiteral("stale"),
-         QStringLiteral("unknown")});
+    state.sourceStatus =
+        requiredEnumString(object, QStringLiteral("source_status"), location,
+                           {QStringLiteral("missing"), QStringLiteral("present"),
+                            QStringLiteral("stale"), QStringLiteral("unknown")});
     return state;
 }
 
@@ -282,13 +286,14 @@ QVector<SnapshotDiagnostic> parseDiagnostics(const QJsonValue &value, const QStr
     return parseObjectArray<SnapshotDiagnostic>(
         value, location, kMaxDiagnostics,
         [](const QJsonObject &object, const QString &itemLocation, qsizetype) {
-            rejectUnknownKeys(object,
-                              {QStringLiteral("code"), QStringLiteral("message"),
-                               QStringLiteral("severity")},
-                              itemLocation);
+            rejectUnknownKeys(
+                object,
+                {QStringLiteral("code"), QStringLiteral("message"), QStringLiteral("severity")},
+                itemLocation);
             SnapshotDiagnostic diagnostic;
             diagnostic.code = requiredString(object, QStringLiteral("code"), itemLocation);
-            diagnostic.message = requiredString(object, QStringLiteral("message"), itemLocation);
+            diagnostic.message =
+                requiredString(object, QStringLiteral("message"), itemLocation);
             diagnostic.severity = requiredEnumString(
                 object, QStringLiteral("severity"), itemLocation,
                 {QStringLiteral("info"), QStringLiteral("warning"), QStringLiteral("error")});
@@ -312,9 +317,8 @@ QVector<SnapshotIncludeSearch> parseIncludeSearch(const QJsonValue &value,
             search.exists = requiredBool(object, QStringLiteral("exists"), itemLocation);
             search.kind = requiredEnumString(
                 object, QStringLiteral("kind"), itemLocation,
-                {QStringLiteral("current"), QStringLiteral("quote"),
-                 QStringLiteral("include"), QStringLiteral("framework"),
-                 QStringLiteral("system"), QStringLiteral("after"),
+                {QStringLiteral("current"), QStringLiteral("quote"), QStringLiteral("include"),
+                 QStringLiteral("framework"), QStringLiteral("system"), QStringLiteral("after"),
                  QStringLiteral("compiler")});
             search.order = requiredInteger(object, QStringLiteral("order"), itemLocation);
             search.selected = requiredBool(object, QStringLiteral("selected"), itemLocation);
@@ -365,8 +369,8 @@ void validateIncludeEdge(const SnapshotIncludeEdge &edge, const QString &locatio
     actualAlternatives.removeDuplicates();
     if (actualAlternatives.size() != edge.alternatives.size() ||
         actualAlternatives != summary.expectedAlternatives) {
-        throw ContractError(
-            location + ".alternatives must match distinct existing unselected candidates");
+        throw ContractError(location +
+                            ".alternatives must match distinct existing unselected candidates");
     }
     const bool unresolved = edge.classification == QStringLiteral("missing") ||
                             edge.classification == QStringLiteral("unresolved");
@@ -393,9 +397,9 @@ SnapshotIncludeEdge parseIncludeEdge(const QJsonObject &object, const QString &l
     edge.delimiter = requiredEnumString(
         object, QStringLiteral("delimiter"), location,
         {QStringLiteral("quote"), QStringLiteral("angle"), QStringLiteral("unknown")});
-    edge.evidence = requiredEnumString(
-        object, QStringLiteral("evidence"), location,
-        {QStringLiteral("estimated"), QStringLiteral("compiler-measured")});
+    edge.evidence =
+        requiredEnumString(object, QStringLiteral("evidence"), location,
+                           {QStringLiteral("estimated"), QStringLiteral("compiler-measured")});
     edge.line = requiredInteger(object, QStringLiteral("line"), location);
     edge.locationEvidence = requiredEnumString(
         object, QStringLiteral("location_evidence"), location,
@@ -412,7 +416,8 @@ SnapshotIncludeEdge parseIncludeEdge(const QJsonObject &object, const QString &l
     } else if (!resolved.isNull()) {
         throw ContractError(location + ".resolved must be a non-empty string or null");
     }
-    edge.search = parseIncludeSearch(object.value(QStringLiteral("search")), location + ".search");
+    edge.search =
+        parseIncludeSearch(object.value(QStringLiteral("search")), location + ".search");
     validateIncludeEdge(edge, location);
     return edge;
 }
@@ -427,8 +432,7 @@ QVector<SnapshotIncludeEdge> parseIncludeEdges(const QJsonValue &value,
         });
 }
 
-SnapshotIncludeAnalysis parseIncludeAnalysis(const QJsonValue &value,
-                                             const QString &location) {
+SnapshotIncludeAnalysis parseIncludeAnalysis(const QJsonValue &value, const QString &location) {
     const auto object = requiredObject(value, location);
     rejectUnknownKeys(object,
                       {QStringLiteral("command"), QStringLiteral("diagnostics"),
@@ -436,17 +440,16 @@ SnapshotIncludeAnalysis parseIncludeAnalysis(const QJsonValue &value,
                        QStringLiteral("evidence")},
                       location);
     SnapshotIncludeAnalysis analysis;
-    analysis.command =
-        requiredStringArray(object, QStringLiteral("command"), location, false);
+    analysis.command = requiredStringArray(object, QStringLiteral("command"), location, false);
     analysis.diagnostics = parseDiagnostics(object.value(QStringLiteral("diagnostics")),
                                             location + ".diagnostics");
     analysis.durationMs = requiredInteger(object, QStringLiteral("duration_ms"), location);
-    analysis.edges = parseIncludeEdges(object.value(QStringLiteral("edges")),
-                                       location + ".edges");
-    analysis.evidence = requiredEnumString(
-        object, QStringLiteral("evidence"), location,
-        {QStringLiteral("unavailable"), QStringLiteral("estimated"),
-         QStringLiteral("compiler-measured")});
+    analysis.edges =
+        parseIncludeEdges(object.value(QStringLiteral("edges")), location + ".edges");
+    analysis.evidence =
+        requiredEnumString(object, QStringLiteral("evidence"), location,
+                           {QStringLiteral("unavailable"), QStringLiteral("estimated"),
+                            QStringLiteral("compiler-measured")});
     if (analysis.evidence == QStringLiteral("unavailable") &&
         (!analysis.command.isEmpty() || !analysis.edges.isEmpty())) {
         throw ContractError(location +
@@ -467,7 +470,7 @@ SnapshotIncludeAnalysis parseIncludeAnalysis(const QJsonValue &value,
     return analysis;
 }
 
-}  // namespace
+} // namespace
 
 SnapshotEntry parseNormalizedEntry(const QJsonValue &value, qsizetype index, bool v3) {
     const auto raw = parseRawEntry(value, index, true, v3);
@@ -478,25 +481,26 @@ SnapshotEntry parseNormalizedEntry(const QJsonValue &value, qsizetype index, boo
     entry.arguments = raw.arguments;
     entry.command = raw.command;
     entry.output = raw.output;
-    entry.normalized = parseNormalized(object.value(QStringLiteral("normalized")),
-                                       QStringLiteral("entries[") + QString::number(index) +
-                                           "].normalized");
+    entry.normalized =
+        parseNormalized(object.value(QStringLiteral("normalized")),
+                        QStringLiteral("entries[") + QString::number(index) + "].normalized");
     entry.state = parseState(object.value(QStringLiteral("state")),
                              QStringLiteral("entries[") + QString::number(index) + "].state");
-    entry.diagnostics = parseDiagnostics(
-        object.value(QStringLiteral("diagnostics")),
-        QStringLiteral("entries[") + QString::number(index) + "].diagnostics");
+    entry.diagnostics =
+        parseDiagnostics(object.value(QStringLiteral("diagnostics")),
+                         QStringLiteral("entries[") + QString::number(index) + "].diagnostics");
     if (v3) {
         entry.includeAnalysis = parseIncludeAnalysis(
             object.value(QStringLiteral("include_analysis")),
             QStringLiteral("entries[") + QString::number(index) + "].include_analysis");
         entry.hasIncludeAnalysis = true;
     }
-    const auto expectedSource = raw.hasArguments ? QStringLiteral("arguments")
-                                                 : QStringLiteral("command");
+    const auto expectedSource =
+        raw.hasArguments ? QStringLiteral("arguments") : QStringLiteral("command");
     if (entry.normalized.invocationSource != expectedSource) {
-        throw ContractError(QStringLiteral("entries[") + QString::number(index) +
-                            "].normalized.invocation_source does not match the raw invocation form");
+        throw ContractError(
+            QStringLiteral("entries[") + QString::number(index) +
+            "].normalized.invocation_source does not match the raw invocation form");
     }
     if (raw.hasArguments && entry.normalized.argv != raw.arguments) {
         throw ContractError(QStringLiteral("entries[") + QString::number(index) +
@@ -515,4 +519,46 @@ SnapshotEntry parseV3Entry(const QJsonValue &value, qsizetype index) {
     return parseNormalizedEntry(value, index, true);
 }
 
-}  // namespace buildscope::detail
+SnapshotEntry parseV4Entry(const QJsonValue &value, qsizetype index) {
+    auto object = value.toObject();
+    auto extended = object.value("include_analysis").toObject();
+    const auto location = QStringLiteral("entries[%1].include_analysis").arg(index);
+    rejectUnknownKeys(extended,
+                      {"command", "diagnostics", "duration_ms", "edges", "evidence", "complete",
+                       "stop_reason", "fallback"},
+                      location);
+    const bool complete = requiredBool(extended, "complete", location);
+    if (!extended.value("stop_reason").isString())
+        throw ContractError(location + ".stop_reason must be a string");
+    const auto stopReason = extended.value("stop_reason").toString();
+    if (complete && !stopReason.isEmpty())
+        throw ContractError(location + " complete evidence cannot have a stop reason");
+    if(!complete && stopReason.isEmpty())throw ContractError(location+" incomplete evidence requires a stop reason");
+    auto fallback = extended.value("fallback");
+    if (!fallback.isNull() && !fallback.isObject())
+        throw ContractError(location + ".fallback must be null or an estimated analysis");
+    extended.remove("complete");
+    extended.remove("stop_reason");
+    extended.remove("fallback");
+    object.insert("include_analysis", extended);
+    auto entry = parseV3Entry(object, index);
+    entry.includeAnalysis.complete = complete;
+    entry.includeAnalysis.stopReason = stopReason;
+    if (fallback.isObject()) {
+        auto f = fallback.toObject();
+        if (f.value("evidence") != "estimated" || !f.value("fallback").isNull())
+            throw ContractError(location + ".fallback must be a non-recursive estimate");
+        auto wrapper = object;
+        wrapper.insert("include_analysis", f);
+        auto parsed = parseV4Entry(wrapper, index);
+        entry.includeAnalysis.fallback =
+            std::make_shared<SnapshotIncludeAnalysis>(parsed.includeAnalysis);
+    }
+    if (entry.includeAnalysis.evidence == "unavailable" && complete)
+        throw ContractError(location + " unavailable evidence cannot be complete");
+    if (entry.includeAnalysis.fallback && complete)
+        throw ContractError(location + " complete analysis cannot have a fallback");
+    return entry;
+}
+
+} // namespace buildscope::detail

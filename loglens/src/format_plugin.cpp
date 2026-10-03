@@ -1,4 +1,5 @@
 #include "loglens/format_plugin.hpp"
+#include "loglens/evidence.hpp"
 
 #include "persistence_io.hpp"
 #include "storage_json.hpp"
@@ -158,6 +159,7 @@ FormatPluginError loadFormatPlugin(const std::string& path, FormatPlugin& plugin
         }
     }
     plugin.fields = map;
+    plugin.document_fingerprint = sha256Hex(bytes);
     return FormatPluginError::None;
 }
 

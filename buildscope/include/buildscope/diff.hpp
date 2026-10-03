@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 
 #include <QJsonObject>
 #include <QJsonValue>
@@ -91,7 +92,7 @@ struct DiffReport {
     QVector<DiffUnit> units;
 };
 
-DiffReport loadDiffFile(const QString &path);
+DiffReport loadDiffFile(const QString &path, std::atomic_bool *cancel = nullptr);
 QString renderDiffValue(const QJsonValue &value);
 
 }  // namespace buildscope

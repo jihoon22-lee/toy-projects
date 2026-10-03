@@ -17,9 +17,10 @@ struct EntryRef {
     NodeKey key;
 };
 
-void collectEntries(const FsNode& root, std::vector<EntryRef>& entries) {
+void collectEntries(const FsNode& root, std::vector<EntryRef>& entries, const SnapshotDiffOptions& options) {
     std::vector<const FsNode*> stack{&root};
     while (!stack.empty()) {
+        if (options.cancelled && options.cancelled()) throw SnapshotError("operation cancelled");
         const FsNode* node = stack.back();
         stack.pop_back();
         entries.push_back(EntryRef{node, nodeKey(*node)});
@@ -141,11 +142,12 @@ SnapshotChange makeChange(SnapshotChangeKind kind,
     return change;
 }
 
-void validateDiffSnapshot(const Snapshot& snapshot) {
-    if (snapshot.schema_version != kSnapshotSchemaV1) {
+void validateDiffSnapshot(const Snapshot& snapshot, const SnapshotDiffOptions& options) {
+    if (snapshot.schema_version != kSnapshotSchemaV1 && snapshot.schema_version != kSnapshotSchemaV2) {
         throw SnapshotError("unsupported diskmap snapshot schema");
     }
     SnapshotLimits limits;
+    limits.cancelled = options.cancelled;
     const detail::SnapshotTreeValidation validation =
         detail::validateSnapshotTree(snapshot.root, detail::checkedSnapshotLimits(limits));
     if (snapshot.complete && snapshot.truncated) {
@@ -213,6 +215,7 @@ void matchSamePaths(const Snapshot& before,
         allPaths.insert(item.first);
     }
     for (const std::string& path : allPaths) {
+        if (options.cancelled && options.cancelled()) throw SnapshotError("operation cancelled");
         const auto beforeIt = beforePaths.find(path);
         const auto afterIt = afterPaths.find(path);
         const std::vector<std::size_t> empty;
@@ -362,12 +365,12 @@ SnapshotDiff diffSnapshots(const Snapshot& before,
     // The file APIs reject duplicate paths and inconsistent complete flags.
     // Apply the same invariant to hand-built values passed directly to diff so
     // indexByPath() can never silently pair an ambiguous entry.
-    validateDiffSnapshot(before);
-    validateDiffSnapshot(after);
+    validateDiffSnapshot(before, options);
+    validateDiffSnapshot(after, options);
     std::vector<EntryRef> beforeEntries;
     std::vector<EntryRef> afterEntries;
-    collectEntries(before.root, beforeEntries);
-    collectEntries(after.root, afterEntries);
+    collectEntries(before.root, beforeEntries, options);
+    collectEntries(after.root, afterEntries, options);
     const EntryIndices beforePaths = indexByPath(beforeEntries);
     const EntryIndices afterPaths = indexByPath(afterEntries);
     std::vector<bool> beforeUsed(beforeEntries.size(), false);
@@ -389,6 +392,7 @@ SnapshotDiff diffSnapshots(const Snapshot& before,
     recordRemoved(before, after, beforeEntries, beforeUsed, options, diff);
     recordAdded(before, after, afterEntries, afterUsed, options, diff);
 
+    if (options.cancelled && options.cancelled()) throw SnapshotError("operation cancelled");
     std::stable_sort(diff.changes.begin(), diff.changes.end(), pathLess);
     return diff;
 }

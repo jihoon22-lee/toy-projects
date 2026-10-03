@@ -2,6 +2,7 @@
 
 #include "elf_internal.hpp"
 #include "input_internal.hpp"
+#include "report_internal.hpp"
 
 #include <algorithm>
 #include <array>
@@ -58,23 +59,7 @@ bool starts_with(const std::string& value, const std::string& prefix) {
 }
 
 bool valid_version(const std::string& value) {
-    if (value.empty()) {
-        return false;
-    }
-    bool digit = false;
-    for (const char character : value) {
-        if (character == '.') {
-            if (!digit) {
-                return false;
-            }
-            digit = false;
-        } else if (std::isdigit(static_cast<unsigned char>(character)) != 0) {
-            digit = true;
-        } else {
-            return false;
-        }
-    }
-    return digit;
+    return detail::version_parts(value).size() >= 2U;
 }
 
 void append_version(std::vector<VersionRequirement>& values,
@@ -110,7 +95,7 @@ void append_colon_separated(const std::string& value,
         const std::size_t colon = value.find(':', begin);
         const std::string item = value.substr(
             begin, colon == std::string::npos ? std::string::npos : colon - begin);
-        append_unique(destination, item);
+        destination.push_back(item);
         if (colon == std::string::npos) break;
         begin = colon + 1U;
     }
@@ -169,7 +154,7 @@ std::vector<LoadSegment> load_segments(const ElfView& view,
         if (view.is_64) {
             segment.offset = view.u64(entry + 8U);
             segment.vaddr = view.u64(entry + 16U);
-            segment.filesz = view.u64(entry + 40U);
+            segment.filesz = view.u64(entry + 32U);
         } else {
             segment.offset = view.u32(entry + 4U);
             segment.vaddr = view.u32(entry + 8U);
@@ -206,8 +191,9 @@ std::optional<std::string> bounded_string(const ElfView& view,
     }
     const std::size_t begin = static_cast<std::size_t>(table_offset + index);
     const std::size_t limit = static_cast<std::size_t>(
-        std::min<std::uint64_t>(table_offset + table_size,
-                                static_cast<std::uint64_t>(view.bytes.size())));
+        std::min<std::uint64_t>({table_offset + table_size,
+                                static_cast<std::uint64_t>(view.bytes.size()),
+                                static_cast<std::uint64_t>(begin) + 65536U}));
     const auto it = std::find(view.bytes.begin() + static_cast<std::ptrdiff_t>(begin),
                               view.bytes.begin() + static_cast<std::ptrdiff_t>(limit),
                               static_cast<unsigned char>(0));
@@ -221,6 +207,7 @@ struct DynamicInfo {
     std::vector<std::uint64_t> needed;
     std::vector<std::uint64_t> rpath;
     std::vector<std::uint64_t> runpath;
+    std::optional<std::uint64_t> soname;
     std::uint64_t strtab = 0;
     std::uint64_t strsz = 0;
     std::uint64_t verneed = 0;
@@ -247,7 +234,7 @@ bool read_dynamic(ElfView& view,
         std::uint64_t filesz = 0;
         if (view.is_64) {
             offset = view.u64(entry + 8U);
-            filesz = view.u64(entry + 40U);
+            filesz = view.u64(entry + 32U);
         } else {
             offset = view.u32(entry + 4U);
             filesz = view.u32(entry + 16U);
@@ -265,6 +252,7 @@ bool read_dynamic(ElfView& view,
             const std::uint64_t value = view.xword(dyn + (view.is_64 ? 8U : 4U));
             if (tag == kDtNull) break;
             switch (tag) {
+                case 14: info.soname = value; break;
                 case kDtNeeded: info.needed.push_back(value); break;
                 case kDtRpath: info.rpath.push_back(value); break;
                 case kDtRunpath: info.runpath.push_back(value); break;
@@ -303,6 +291,7 @@ bool read_verneed(ElfView& view,
     }
     std::uint64_t record = *table;
     std::uint64_t seen = 0;
+    std::uint64_t total_aux_seen = 0;
     while (record != 0 && seen < info.verneednum) {
         if (!range_inside(record, 1U, 16U, view.bytes.size())) {
             return corrupt(view,
@@ -318,6 +307,7 @@ bool read_verneed(ElfView& view,
         std::uint64_t aux = record + vn_aux;
         std::uint64_t aux_seen = 0;
         while (aux != 0 && aux_seen < vn_cnt && aux_seen < kMaxVernauxRecords) {
+            if (++total_aux_seen > kMaxVernauxRecords) return corrupt(view, "version evidence exceeds total record budget");
             if (!range_inside(aux, 1U, 16U, view.bytes.size())) {
                 return corrupt(view,
                                "version requirement aux record is outside the file");
@@ -372,12 +362,13 @@ std::optional<std::uint64_t> dynamic_symbol_count(ElfView& view,
             return std::nullopt;
         }
         std::uint64_t count = 0;
+        std::uint64_t chain_steps = 0;
         for (std::uint64_t bucket = 0; bucket < nbuckets; ++bucket) {
             const std::uint64_t index = view.u32(buckets + bucket * 4U);
             if (index < symoffset) continue;
             std::uint64_t cursor = index;
             for (;;) {
-                if (cursor - symoffset > kMaxDynamicSymbols) {
+                if (++chain_steps > kMaxDynamicSymbols * 4U || cursor - symoffset > kMaxDynamicSymbols) {
                     corrupt(view, "DT_GNU_HASH chain exceeds the inspection bound");
                     return std::nullopt;
                 }
@@ -470,10 +461,12 @@ bool read_symbols(ElfView& view,
                   std::uint64_t strtab_offset,
                   std::uint64_t strtab_size,
                   ElfReport& report) {
-    if (info.symtab == 0) return true;
+    if (info.symtab == 0) { report.attributes_known = true; return true; }
     const auto count = dynamic_symbol_count(view, segments, info);
     if (!view.error.empty()) return false;
     if (!count.has_value()) {
+        report.symbols_known = false;
+        report.vtables_known = false;
         report.diagnostics.push_back(
             "dynamic symbols: unknown (no DT_HASH or DT_GNU_HASH section)");
         return true;
@@ -483,7 +476,7 @@ bool read_symbols(ElfView& view,
         return corrupt(view, "DT_SYMTAB is not mapped by PT_LOAD");
     }
     const std::uint64_t entry_size = view.is_64 ? 24U : 16U;
-    const std::uint64_t shndx_offset = view.is_64 ? 6U : 12U;
+    const std::uint64_t shndx_offset = view.is_64 ? 6U : 14U;
     if (*count > 0U &&
         !range_inside(*symtab, *count, entry_size, view.bytes.size())) {
         return corrupt(view, "DT_SYMTAB is outside the file or unreasonably large");
@@ -491,46 +484,71 @@ bool read_symbols(ElfView& view,
     std::map<std::uint16_t, std::string> version_names;
     std::optional<std::string> version_problem =
         read_verdef(view, segments, info, strtab_offset, strtab_size, version_names);
-    std::optional<std::uint64_t> versym;
+    std::uint64_t versym = 0;
+    bool have_versym = false;
     if (!version_problem.has_value() && info.versym != 0) {
-        versym = vaddr_offset(segments, info.versym, 1U);
-        if (!versym.has_value()
-            || !range_inside(*versym, *count, 2U, view.bytes.size())) {
-            versym.reset();
+        const auto mapped = vaddr_offset(segments, info.versym, 1U);
+        if (mapped.has_value() && range_inside(*mapped, *count, 2U, view.bytes.size())) {
+            versym = *mapped;
+            have_versym = true;
+        } else {
             version_problem = "DT_VERSYM is outside the file or unreasonably large";
         }
     }
     if (version_problem.has_value()) {
         version_names.clear();
+        report.vtables_known = false;
         report.diagnostics.push_back("symbol versions unavailable (" + *version_problem +
                                      "); exported symbols are reported unqualified");
     }
+    report.attributes_known = !version_problem.has_value();
     std::set<std::string> unique;
+    std::size_t name_bytes = 0;
     for (std::uint64_t index = 1; index < *count; ++index) {
         const std::uint64_t entry = *symtab + index * entry_size;
         if (view.u16(entry + shndx_offset) == 0U) continue;
         const auto name =
             bounded_string(view, strtab_offset, strtab_size, view.u32(entry));
-        if (!name.has_value() || name->empty()) continue;
+        if (!name.has_value() || name->empty()) {
+            report.attributes_known = false; report.symbols_known = false; report.vtables_known = false;
+            continue;
+        }
+        name_bytes += name->size();
+        if (name_bytes > 4U * 1024U * 1024U) return corrupt(view, "symbol names exceed the evidence byte budget");
+        const unsigned info_byte = view.bytes[static_cast<std::size_t>(entry + (view.is_64 ? 4U : 12U))];
+        const unsigned other = view.bytes[static_cast<std::size_t>(entry + (view.is_64 ? 5U : 13U))];
+        const unsigned binding = info_byte >> 4U;
+        const unsigned visibility = other & 3U;
+        if (binding == 0U || visibility == 1U || visibility == 2U) continue;
         std::string qualified = *name;
-        if (versym.has_value()) {
+        bool default_version = false;
+        if (have_versym) {
             // Indices 0/1 (VER_NDX_LOCAL/VER_NDX_GLOBAL, including a BASE
             // verdef node) mean "unversioned". The high bit (VERSYM_HIDDEN)
             // marks a non-default `name@V` definition as opposed to the
             // default `name@@V`; both are the same name@V ABI identity.
             const std::uint16_t versym_value =
-                static_cast<std::uint16_t>(view.u16(*versym + index * 2U) & 0x7fffU);
+                static_cast<std::uint16_t>(view.u16(versym + index * 2U) & 0x7fffU);
             if (versym_value >= 2U) {
                 const auto version = version_names.find(versym_value);
                 if (version != version_names.end()) {
                     qualified += '@';
                     qualified += version->second;
+                    default_version = (view.u16(versym + index * 2U) & 0x8000U) == 0U;
+                } else {
+                    report.attributes_known = false;
+                    report.vtables_known = false;
                 }
             }
         }
+        report.symbol_evidence.push_back({qualified,
+            view.is_64 ? view.u64(entry + 16U) : view.u32(entry + 8U),
+            binding, visibility, info_byte & 15U, default_version});
         unique.insert(std::move(qualified));
     }
     report.symbols.assign(unique.begin(), unique.end());
+    std::sort(report.symbol_evidence.begin(), report.symbol_evidence.end(),
+              [](const auto& a, const auto& b) { return a.identity < b.identity; });
     // Itanium-ABI vtables (_ZTV<name>) get their own report axis: removing
     // one breaks every downstream subclass, so they surface separately.
     std::copy_if(report.symbols.begin(), report.symbols.end(),
@@ -606,6 +624,44 @@ ElfReport inspect_elf_buffer(const std::vector<unsigned char>& file,
     report.header = header;
     report.tool.name = "abilens";
     report.tool.version = kAbiLensVersion;
+    report.loader_metadata_known = true;
+    report.attributes_known = !header.has_dynamic;
+    for (std::uint16_t i = 0; i < phnum; ++i) {
+        const auto entry = phoff + static_cast<std::uint64_t>(i) * phentsize;
+        const auto kind = view.u32(entry);
+        const auto offset = view.is_64 ? view.u64(entry + 8U) : view.u32(entry + 4U);
+        const auto size = view.is_64 ? view.u64(entry + 32U) : view.u32(entry + 16U);
+        if (!range_inside(offset, 1U, size, file.size())) continue;
+        if (kind == 3U) {
+            const auto value = bounded_string(view, offset, size, 0);
+            if (value) report.interpreter = *value;
+            else report.loader_metadata_known = false;
+        }
+        if (kind == 4U) {
+            auto cursor = offset;
+            const auto end = offset + size;
+            while (cursor <= end && end - cursor >= 12U) {
+                const auto namesz = view.u32(cursor);
+                const auto descsz = view.u32(cursor + 4U);
+                const auto type = view.u32(cursor + 8U);
+                const auto name = cursor + 12U;
+                const auto desc = name + ((static_cast<std::uint64_t>(namesz) + 3U) & ~3ULL);
+                const auto next = desc + ((static_cast<std::uint64_t>(descsz) + 3U) & ~3ULL);
+                if (next > end || namesz > end - name) break;
+                if (type == 3U && namesz == 4U && descsz <= 128U &&
+                    file[static_cast<std::size_t>(name)] == 'G' &&
+                    file[static_cast<std::size_t>(name + 1U)] == 'N' &&
+                    file[static_cast<std::size_t>(name + 2U)] == 'U') {
+                    constexpr char hex[] = "0123456789abcdef";
+                    for (auto j = desc; j < desc + descsz; ++j) {
+                        const auto byte = file[static_cast<std::size_t>(j)];
+                        report.build_id += hex[byte >> 4U]; report.build_id += hex[byte & 15U];
+                    }
+                }
+                cursor = next;
+            }
+        }
+    }
 
     const std::vector<LoadSegment> segments = load_segments(view, phoff, phentsize, phnum);
     DynamicInfo dynamic;
@@ -629,6 +685,11 @@ ElfReport inspect_elf_buffer(const std::vector<unsigned char>& file,
         }
         const std::uint64_t strtab_offset = strtab.value_or(0U);
         const std::uint64_t strtab_size = strtab.has_value() ? dynamic.strsz : 0U;
+        if (dynamic.soname) {
+            const auto name = bounded_string(view, strtab_offset, strtab_size, *dynamic.soname);
+            if (name) report.soname = *name;
+            else report.loader_metadata_known = false;
+        }
         for (const std::uint64_t index : dynamic.needed) {
             const auto name = bounded_string(view, strtab_offset, strtab_size, index);
             if (!name.has_value()) {
@@ -640,10 +701,12 @@ ElfReport inspect_elf_buffer(const std::vector<unsigned char>& file,
         for (const std::uint64_t index : dynamic.rpath) {
             const auto value = bounded_string(view, strtab_offset, strtab_size, index);
             if (value.has_value()) append_colon_separated(*value, report.rpath);
+            else report.loader_metadata_known = false;
         }
         for (const std::uint64_t index : dynamic.runpath) {
             const auto value = bounded_string(view, strtab_offset, strtab_size, index);
             if (value.has_value()) append_colon_separated(*value, report.runpath);
+            else report.loader_metadata_known = false;
         }
         if (!read_verneed(view, segments, dynamic, strtab_offset, strtab_size, report) ||
             !read_symbols(view, segments, dynamic, strtab_offset, strtab_size, report)) {
@@ -652,8 +715,6 @@ ElfReport inspect_elf_buffer(const std::vector<unsigned char>& file,
     }
 
     std::sort(report.needed.begin(), report.needed.end());
-    std::sort(report.rpath.begin(), report.rpath.end());
-    std::sort(report.runpath.begin(), report.runpath.end());
     std::sort(report.versions.begin(), report.versions.end(), version_requirement_less);
 
     if (!header.has_dynamic) {

@@ -211,7 +211,9 @@ TrashReceipt restoreFromTrashLinux(const std::string& token,
     if (!loadRestoreMetadata(directories, token, restore, metadataName, receipt)) {
         return receipt;
     }
-    return restoreOne(directories, token, restore, metadataName);
+    auto result = restoreOne(directories, token, restore, metadataName);
+    if (!recordTrashReceipt(directories, result, error)) result.message += "; audit persistence failed: " + error;
+    return result;
 }
 
 } // namespace detail

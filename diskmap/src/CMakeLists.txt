@@ -18,6 +18,7 @@ add_library(diskmap_core STATIC
     snapshot_json_parser.cpp
     snapshot_write.cpp
     trash.cpp
+    trash_history.cpp
     trash_info.cpp
     trash_linux_fs.cpp
     trash_linux_ops.cpp

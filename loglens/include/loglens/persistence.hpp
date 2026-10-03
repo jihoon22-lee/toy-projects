@@ -1,10 +1,14 @@
 #pragma once
 
 #include <cstddef>
+#include <optional>
+#include <cstdint>
 #include <string>
 #include <vector>
 
 #include "loglens/log_parser.hpp"
+#include "loglens/triage_types.hpp"
+#include "loglens/window_analysis.hpp"
 
 namespace loglens {
 
@@ -43,6 +47,28 @@ struct SessionState {
     // Optional path to a loglens.format/v1 plugin. When set it replaces
     // `format` for parsing, so a reloaded session parses the same way.
     std::string format_plugin;
+    std::string search;
+    std::string whole_file_search;
+    std::size_t investigation_tab = 0;
+    bool settings_open = false;
+    bool follow = false;
+    bool tail_mode = true;
+    std::size_t tail_records = 100000;
+    std::optional<TimeWindow> selected_window;
+    std::optional<TimeWindow> baseline_window;
+    std::optional<TimeWindow> comparison_window;
+    TriageState triage;
+    std::string source_identity;
+    std::string source_modified;
+    std::string source_fingerprint;
+    std::size_t fingerprint_bytes = 0;
+    std::size_t source_size = 0;
+    std::size_t source_generation = 0;
+    std::string plugin_fingerprint;
+    // Qt layout/geometry/header state are portable base64 strings, never executed.
+    std::string layout;
+    std::string geometry;
+    std::string table_header;
 };
 
 enum class PersistenceErrorCode {
@@ -85,6 +111,7 @@ struct SavedQueryLoadResult {
 struct SessionLoadResult {
     bool found = false;
     SessionState state;
+    bool migrated = false;
     PersistenceError error;
 
     bool ok() const { return error.ok(); }

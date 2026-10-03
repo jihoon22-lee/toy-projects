@@ -63,7 +63,27 @@ jobs:
         working-directory: loglens
         env:
           QT_QPA_PLATFORM: offscreen
-        run: ctest --test-dir build/gui --output-on-failure
+        run: ctest --test-dir build/gui --output-on-failure --output-junit "$PWD/build/gui/test-results.xml"
+
+      - name: Sanitizers and installed CLI
+        working-directory: loglens
+        env:
+          QT_QPA_PLATFORM: offscreen
+          ASAN_OPTIONS: detect_leaks=0
+        run: |
+          set -euo pipefail
+          cmake -S . -B build/asan -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -fPIC" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined -no-pie"
+          cmake --build build/asan --parallel 2
+          ctest --test-dir build/asan --output-on-failure
+          cmake --install build/gui --prefix "$RUNNER_TEMP/loglens-install"
+          "$RUNNER_TEMP/loglens-install/bin/loglens" --version
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: loglens-test-results
+          path: loglens/build/gui/test-results.xml
 
       # Runs the real binary headlessly against a known log, so a GUI that
       # links but crashes on startup or on its first load still fails.
@@ -185,7 +205,26 @@ jobs:
         working-directory: diskmap
         env:
           QT_QPA_PLATFORM: offscreen
-        run: ctest --test-dir build/gui --output-on-failure
+        run: ctest --test-dir build/gui --output-on-failure --output-junit "$PWD/build/gui/test-results.xml"
+
+      - name: Sanitizers and installed CLI
+        working-directory: diskmap
+        env:
+          QT_QPA_PLATFORM: offscreen
+          ASAN_OPTIONS: detect_leaks=0
+        run: |
+          set -euo pipefail
+          cmake -S . -B build/asan -DCMAKE_BUILD_TYPE=Debug -DDISKMAP_SANITIZE=ON
+          cmake --build build/asan --parallel 2
+          ctest --test-dir build/asan --output-on-failure
+          cmake --install build/gui --prefix "$RUNNER_TEMP/diskmap-install"
+          "$RUNNER_TEMP/diskmap-install/bin/diskmap" --version
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: diskmap-test-results
+          path: diskmap/build/gui/test-results.xml
 
       # Runs the real binary headlessly against a known directory, so a GUI
       # that links but crashes on startup or on its first scan still fails.
@@ -294,7 +333,26 @@ jobs:
         working-directory: buildscope
         env:
           QT_QPA_PLATFORM: offscreen
-        run: ctest --test-dir build/gui --output-on-failure
+        run: ctest --test-dir build/gui --output-on-failure --output-junit "$PWD/build/gui/test-results.xml"
+
+      - name: Sanitizers and installed CLI
+        working-directory: buildscope
+        env:
+          QT_QPA_PLATFORM: offscreen
+          ASAN_OPTIONS: detect_leaks=0
+        run: |
+          set -euo pipefail
+          cmake -S . -B build/asan -DCMAKE_BUILD_TYPE=Debug -DBUILDSCOPE_SANITIZE=ON
+          cmake --build build/asan --parallel 2
+          ctest --test-dir build/asan --output-on-failure
+          cmake --install build/gui --prefix "$RUNNER_TEMP/buildscope-install"
+          "$RUNNER_TEMP/buildscope-install/bin/buildscope" --version
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: buildscope-test-results
+          path: buildscope/build/gui/test-results.xml
 
       # Runs the real binary headlessly against a known snapshot, so a GUI
       # that links but crashes on startup or on its first load still fails.
@@ -396,8 +454,13 @@ jobs:
             ruff==0.16.5 \
             pytest==9.1.1 \
             mypy==2.3.1 \
-            jsonschema==4.25.1
+            jsonschema==4.25.1 \
+            'packaging>=24.2,<27' \
+            'pyyaml>=6,<7'
           echo "ENVLENS_PYTHON=$tool_env/bin/python" >> "$GITHUB_ENV"
+
+      - name: Release workflow state transitions
+        run: '"$ENVLENS_PYTHON" .github/scripts/test_release_flow.py'
 
       - name: Run envlens tests, lint, format, and types
         run: |
@@ -406,7 +469,7 @@ jobs:
           mkdir -p "$quality_root/artifacts"
           (
             cd envlens
-            PYTHONPATH=src "$ENVLENS_PYTHON" -m pytest tests
+            PYTHONPATH=src "$ENVLENS_PYTHON" -m pytest tests --junitxml="$quality_root/artifacts/test-results.xml"
             "$quality_root/tools/bin/ruff" check src tests
             "$quality_root/tools/bin/ruff" format --check src tests
             "$quality_root/tools/bin/mypy" --strict --python-version 3.10 src/envlens
@@ -428,7 +491,7 @@ jobs:
 
           from jsonschema import Draft202012Validator, FormatChecker
 
-          schema_path = Path("envlens/schemas/envlens-snapshot-v2.schema.json")
+          schema_path = Path("envlens/schemas/envlens-snapshot-v3.schema.json")
           schema = json.loads(schema_path.read_text(encoding="utf-8"))
           Draft202012Validator.check_schema(schema)
           snapshot = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
@@ -436,7 +499,7 @@ jobs:
               schema,
               format_checker=FormatChecker(),
           ).validate(snapshot)
-          if snapshot.get("schema_version") != "envlens.snapshot/v2":
+          if snapshot.get("schema_version") != "envlens.snapshot/v3":
               raise SystemExit("real snapshot schema version mismatch")
           print("envlens schema metaschema and real snapshot validation: PASS")
           PY
@@ -518,6 +581,7 @@ jobs:
                   "envlens/py.typed",
                   "envlens/schemas/envlens-snapshot-v1.schema.json",
                   "envlens/schemas/envlens-snapshot-v2.schema.json",
+                  "envlens/schemas/envlens-snapshot-v3.schema.json",
               )
               for required_member in required_members:
                   if required_member not in names:
@@ -541,8 +605,8 @@ jobs:
                       "Requires-Python": ">=3.10",
                   },
               )
-              if metadata.get_all("Requires-Dist", []) != []:
-                  raise SystemExit("envlens wheel unexpectedly declares dependencies")
+              if metadata.get_all("Requires-Dist", []) != ["packaging<27,>=24.2"]:
+                  raise SystemExit("envlens wheel dependency contract changed")
 
           with tarfile.open(sdist, "r:gz") as archive:
               archive_names = archive.getnames()
@@ -568,9 +632,9 @@ jobs:
                   for name in names
                   if "/schemas/envlens-snapshot-" in name and name.endswith(".schema.json")
               )
-              if len(schema_names) != 2:
+              if len(schema_names) != 3:
                   raise SystemExit(
-                      "envlens sdist must contain the v1 and v2 snapshot schemas"
+                      "envlens sdist must contain the v1, v2 and v3 snapshot schemas"
                   )
               pkg_info_names = sorted(
                   name for name in names if name.endswith("/PKG-INFO")
@@ -593,15 +657,15 @@ jobs:
                   )
                   if Parser().parsestr(pkg_info.decode("utf-8")).get_all(
                       "Requires-Dist", []
-                  ) != []:
+                  ) != ["packaging<27,>=24.2"]:
                       raise SystemExit(
-                          "envlens sdist unexpectedly declares dependencies"
+                          "envlens sdist dependency contract changed"
                       )
           print("envlens wheel/sdist pure-Python audit: PASS")
           PY
           consumer_env="$quality_root/wheel-consumer"
           uv venv --python "$ENVLENS_PYTHON" "$consumer_env"
-          uv pip install --python "$consumer_env/bin/python" --no-deps \
+          uv pip install --python "$consumer_env/bin/python" \
             "$first_build/envlens-$version-py3-none-any.whl"
           test "$("$consumer_env/bin/envlens" --version)" = "envlens $version"
           "$consumer_env/bin/envlens" snapshot \
@@ -614,10 +678,10 @@ jobs:
           from importlib.resources import files
           from pathlib import Path
 
-          schema = files("envlens") / "schemas" / "envlens-snapshot-v2.schema.json"
+          schema = files("envlens") / "schemas" / "envlens-snapshot-v3.schema.json"
           Path(sys.argv[1]).write_bytes(schema.read_bytes())
           PY
-          cmp "$wheel_schema" envlens/schemas/envlens-snapshot-v2.schema.json
+          cmp "$wheel_schema" envlens/schemas/envlens-snapshot-v3.schema.json
           "$ENVLENS_PYTHON" - "$wheel_schema" "$artifact_dir/wheel.snapshot.json" <<'PY'
           import json
           import sys
@@ -632,7 +696,7 @@ jobs:
               schema,
               format_checker=FormatChecker(),
           ).validate(snapshot)
-          if snapshot.get("schema_version") != "envlens.snapshot/v2":
+          if snapshot.get("schema_version") != "envlens.snapshot/v3":
               raise SystemExit("clean wheel snapshot schema version mismatch")
           print("clean installed wheel snapshot schema validation: PASS")
           PY
@@ -673,7 +737,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential
+          sudo apt-get install -y --no-install-recommends build-essential libdw-dev pkg-config binutils
 
       - name: Build
         working-directory: abilens
@@ -681,7 +745,120 @@ jobs:
 
       - name: Tests
         working-directory: abilens
-        run: make test
+        run: |
+          set -euo pipefail
+          make test 2>&1 | tee build/test-results.txt
+          make OUT=build/dwarf WITH_DWARF=1 -j2 check
+          make OUT=build/asan CXXFLAGS='-std=c++20 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer' LDFLAGS='-fsanitize=address,undefined' -j2 check
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: abilens-test-results
+          path: abilens/build/test-results.txt
+
+  tracelens:
+    name: TraceLens build, test, sanitize and install
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: sudo apt-get update && sudo apt-get install -y qt6-base-dev
+      - name: Build and verify
+        env:
+          QT_QPA_PLATFORM: offscreen
+          ASAN_OPTIONS: detect_leaks=0
+        run: |
+          cmake -S tracelens -B tracelens/build/ci -DCMAKE_BUILD_TYPE=Release
+          cmake --build tracelens/build/ci --parallel 2
+          ctest --test-dir tracelens/build/ci --output-on-failure --output-junit "$PWD/tracelens/build/ci/test-results.xml"
+          cmake --install tracelens/build/ci --prefix "$RUNNER_TEMP/tracelens-install"
+          "$RUNNER_TEMP/tracelens-install/bin/tracelens" --version
+          cmake -S tracelens -B tracelens/build/asan -DTRACELENS_SANITIZE=ON
+          cmake --build tracelens/build/asan --parallel 2
+          ctest --test-dir tracelens/build/asan --output-on-failure
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: tracelens-test-results
+          path: tracelens/build/ci/test-results.xml
+
+  testlens:
+    name: testlens Python quality and installed wheel
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        python: ["3.10", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install uv
+      - name: Verify
+        working-directory: testlens
+        run: |
+          uv sync --locked --group dev --python "${{ matrix.python }}"
+          uv run pytest --junitxml=.artifacts/test-results.xml
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run mypy src
+          uv build
+          uv venv "$RUNNER_TEMP/testlens-consumer" --python "${{ matrix.python }}"
+          uv pip install --python "$RUNNER_TEMP/testlens-consumer/bin/python" dist/*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/testlens-consumer/bin/testlens" --version
+      - name: Installed commands E2E
+        working-directory: testlens
+        run: uv run python scripts/clean_install_e2e.py
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: testlens-python-${{ matrix.python }}
+          path: |
+            testlens/.artifacts/test-results.xml
+            testlens/dist/*
+
+  servicelens:
+    name: servicelens Python quality and installed wheel
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        python: ["3.10", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install uv
+      - name: Verify
+        working-directory: servicelens
+        run: |
+          uv sync --locked --group dev --python "${{ matrix.python }}"
+          uv run pytest --junitxml=.artifacts/test-results.xml
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run mypy src
+          uv build
+          uv venv "$RUNNER_TEMP/servicelens-consumer" --python "${{ matrix.python }}"
+          uv pip install --python "$RUNNER_TEMP/servicelens-consumer/bin/python" dist/*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/servicelens-consumer/bin/servicelens" --version
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: servicelens-python-${{ matrix.python }}
+          path: |
+            servicelens/.artifacts/test-results.xml
+            servicelens/dist/*
 
   # Branch protection requires a single stable check named "Merge Gate".
   # Keeping the aggregate job means the ruleset does not need to change when
@@ -689,7 +866,7 @@ jobs:
   merge-gate:
     name: Merge Gate
     if: ${{ always() }}
-    needs: [loglens, diskmap, buildscope, envlens, abilens]
+    needs: [loglens, diskmap, buildscope, envlens, abilens, tracelens, testlens, servicelens]
     runs-on: ubuntu-latest
     permissions: {}
 
@@ -701,6 +878,9 @@ jobs:
           BUILDSCOPE: ${{ needs.buildscope.result }}
           ENVLENS: ${{ needs.envlens.result }}
           ABILENS: ${{ needs.abilens.result }}
+          TRACELENS: ${{ needs.tracelens.result }}
+          TESTLENS: ${{ needs.testlens.result }}
+          SERVICELENS: ${{ needs.servicelens.result }}
         run: |
           set -euo pipefail
           failed=0
@@ -709,7 +889,10 @@ jobs:
             "diskmap:$DISKMAP" \
             "buildscope:$BUILDSCOPE" \
             "envlens:$ENVLENS" \
-            "abilens:$ABILENS"; do
+            "abilens:$ABILENS" \
+            "tracelens:$TRACELENS" \
+            "testlens:$TESTLENS" \
+            "servicelens:$SERVICELENS"; do
             name="${pair%%:*}"
             result="${pair##*:}"
             if [ "$result" != success ]; then

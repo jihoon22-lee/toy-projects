@@ -1,4 +1,5 @@
 #include "diskmap/fs_source.hpp"
+#include <limits>
 
 #include <algorithm>
 #include <cerrno>
@@ -102,6 +103,14 @@ FsMetadata metadataFromStat(const struct stat& status) {
     metadata.ownership_known = true;
     metadata.modified_ns = modifiedNanoseconds(status);
     metadata.modified_time_known = true;
+    struct stat changed = status;
+#if defined(__APPLE__)
+    changed.st_mtimespec = status.st_ctimespec;
+#else
+    changed.st_mtim = status.st_ctim;
+#endif
+    metadata.changed_ns = modifiedNanoseconds(changed);
+    metadata.changed_time_known = true;
     metadata.complete = true;
     return metadata;
 }
@@ -191,11 +200,37 @@ FsMetadata RealFsSource::inspect(const std::filesystem::path& path, bool follow)
     return readMetadata(path, follow);
 }
 
+std::vector<DirEntry> FsSource::listBounded(const std::filesystem::path& path,
+    std::string& error, std::size_t maxEntries, std::size_t maxBytes,
+    const CancellationCheck& cancelled) const {
+    auto entries = list(path, error, cancelled);
+    std::size_t retained = 0;
+    std::size_t bytes = 0;
+    for (const auto& entry : entries) {
+        const auto cost = sizeof(DirEntry) * 3 + entry.name.size() * 3 + entry.path.native().size() * 3 + 256;
+        if (retained >= maxEntries || cost > maxBytes - bytes) {
+            error = "scan resource budget reached";
+            break;
+        }
+        bytes += cost;
+        ++retained;
+    }
+    entries.resize(retained);
+    return entries;
+}
+
 std::vector<DirEntry> RealFsSource::list(const std::filesystem::path& path,
-                                         std::string& error,
+    std::string& error, const CancellationCheck& cancelled) const {
+    return listBounded(path, error, std::numeric_limits<std::size_t>::max(),
+                       std::numeric_limits<std::size_t>::max(), cancelled);
+}
+
+std::vector<DirEntry> RealFsSource::listBounded(const std::filesystem::path& path,
+                                         std::string& error, std::size_t maxEntries, std::size_t maxBytes,
                                          const CancellationCheck& cancelled) const {
     error.clear();
     std::vector<DirEntry> entries;
+    std::size_t bytes = 0;
 
     std::error_code openError;
     fs::directory_iterator iterator(path, fs::directory_options::none, openError);
@@ -210,7 +245,14 @@ std::vector<DirEntry> RealFsSource::list(const std::filesystem::path& path,
             if (cancelled && cancelled()) {
                 break;
             }
-            entries.push_back(makeDirEntry(*iterator));
+            auto entry = makeDirEntry(*iterator);
+            const auto cost = sizeof(DirEntry) * 3 + entry.name.size() * 3 + entry.path.native().size() * 3 + 256;
+            if (entries.size() >= maxEntries || cost > maxBytes - bytes) {
+                error = "scan resource budget reached";
+                break;
+            }
+            bytes += cost;
+            entries.push_back(std::move(entry));
             std::error_code stepError;
             iterator.increment(stepError);
             if (stepError) {

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0 — development checkpoint (unreleased)
+
+- Preserve duplicate survivors with explicit keeper policies, ancestor protection and fresh content proofs.
+- Revalidate mtime/ctime before cleanup; persist Trash receipts and reconstruct recovery after restart.
+- Bound production scans by retained nodes and estimated memory, with partial-evidence reporting.
+- Add snapshot v2 with lossless filename bytes and ctime; retain strict v1 loading and comparison.
+- Move snapshot and Trash work off the GUI thread with safe cancellation boundaries.
+- Separate workbench tabs, link selection, add meaningful treemap colors, human size input and diff review filters.
+- Distinguish potential disposal savings from bytes moved to same-filesystem Trash.
+- Ship independent CMake install rules, schemas, desktop/icon and regression coverage.
+
 ## [0.1.1](https://github.com/jihoon22-lee/toy-projects/compare/diskmap/v0.1.0...diskmap/v0.1.1) (2026-10-03)
 
 

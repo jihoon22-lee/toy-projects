@@ -2,20 +2,21 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from typing import Any
 
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.utils import canonicalize_name
+from packaging.version import InvalidVersion, Version
+
+from envlens.dependency_graph import applicable_marker, dependency_context
 from envlens.diff_compat import (
+    _bounded_packaging_text,
     _marker_matches,
     _parse_requirement,
     _project_values,
-    _release_specifier_match,
-    _version_tuple,
 )
 from envlens.snapshot_input import MAX_REQUIREMENTS
-
-_SPECIFIER_RE = re.compile(r"^(==|!=|~=|>=|<=|>|<)\s*([0-9A-Za-z][^,\s]*)\s*$")
 
 
 def dependency_issue(
@@ -62,6 +63,31 @@ def dependency_issue(
             "reason": "no installed distribution with this normalized project name",
         }
     versions = [str(item.get("version", "")) for item in installed]
+    if specifier.startswith("@"):
+        url = specifier[1:]
+        for item in installed:
+            origin = item.get("origin")
+            if (
+                isinstance(origin, dict)
+                and origin.get("available")
+                and not origin.get("redacted")
+                and "<REDACTED>" not in url
+            ):
+                recorded = origin.get("url", "")
+                if recorded == url and "<REDACTED>" not in str(recorded):
+                    return None
+                base, separator, fragment = url.partition("#")
+                if separator and recorded == base and origin.get("hash") == fragment:
+                    return None
+        return {
+            "kind": "source-unverified",
+            "name": normalized,
+            "requirement": requirement,
+            "installed": versions,
+            "certainty": "unknown",
+            "source": source,
+            "reason": "installed origin does not verify the requested direct URL",
+        }
     if not specifier:
         return None
     checks = [_satisfies_specifier(version, specifier) for version in versions]
@@ -84,17 +110,12 @@ def dependency_issue(
 
 
 def _satisfies_specifier(version: str, specifier: str) -> bool | None:
-    current = _version_tuple(version)
-    if current is None:
+    if not _bounded_packaging_text(version) or not _bounded_packaging_text(specifier):
         return None
-    for part in specifier.split(","):
-        match = _SPECIFIER_RE.match(part.strip())
-        if match is None:
-            return None
-        result = _release_specifier_match(current, *match.groups())
-        if result is not True:
-            return result
-    return True
+    try:
+        return SpecifierSet(specifier).contains(Version(version))
+    except (InvalidSpecifier, InvalidVersion):
+        return None
 
 
 def _distribution_dependency_issues(
@@ -103,6 +124,7 @@ def _distribution_dependency_issues(
     grouped: Mapping[str, list[Mapping[str, Any]]],
     certainty: str,
     identity: Mapping[str, Any],
+    extras: set[str],
 ) -> list[dict[str, Any]]:
     metadata = distribution.get("metadata")
     if not isinstance(metadata, dict):
@@ -115,7 +137,9 @@ def _distribution_dependency_issues(
         requirement = str(requirement_value)
         parsed = _parse_requirement(requirement)
         marker_result = (
-            _marker_matches(parsed[2], identity) if parsed is not None and parsed[2] else True
+            applicable_marker(parsed[2], identity, extras)
+            if parsed is not None and parsed[2]
+            else True
         )
         issue = dependency_issue(
             name=normalized,
@@ -178,14 +202,50 @@ def dependency_issues(
     identity: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
     issues: list[dict[str, Any]] = []
+    extras, paths, limited = dependency_context(project, grouped, identity)
     for normalized, distributions in sorted(grouped.items()):
         for distribution in distributions:
             issues.extend(
                 _distribution_dependency_issues(
-                    normalized, distribution, grouped, certainty, identity
+                    normalized,
+                    distribution,
+                    grouped,
+                    certainty,
+                    identity,
+                    extras.get(normalized, set()),
                 )
             )
     issues.extend(_project_dependency_issues(project, grouped, certainty, identity))
+    for normalized, distributions in sorted(grouped.items()):
+        if len(distributions) > 1:
+            issues.append(
+                {
+                    "kind": "duplicate-distribution",
+                    "name": normalized,
+                    "requirement": "",
+                    "installed": [str(item.get("version", "")) for item in distributions],
+                    "source": normalized,
+                    "certainty": "unknown",
+                    "reason": "multiple installations share the same normalized project name",
+                }
+            )
+    if limited:
+        issues.append(
+            {
+                "kind": "graph-limit",
+                "name": "project",
+                "source": "project",
+                "requirement": "",
+                "installed": [],
+                "certainty": "unknown",
+                "reason": "dependency graph reached its evaluation budget",
+            }
+        )
+    for issue in issues:
+        source = str(canonicalize_name(str(issue.get("source", "project"))))
+        path = paths.get(source, [source])
+        name = str(issue.get("name", ""))
+        issue["dependency_path"] = path if path[-1] == name else [*path, name]
     issues.sort(
         key=lambda item: (
             str(item.get("kind", "")),

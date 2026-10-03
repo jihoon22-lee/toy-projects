@@ -1,5 +1,8 @@
 # LogLens
 
+Development checkpoint: **0.2.0** (not yet published). The CMake project version generates
+the shared CLI/GUI version header.
+
 LogLens is a log viewer, parser, and investigation workbench for Linux. A
 Qt-free core turns raw log bytes into structured records with honest
 diagnostics, a console tool exposes filtering and streaming, and a Qt Widgets
@@ -132,7 +135,7 @@ profiles, filter queries, and investigation sessions without depending on the
 GUI.  A missing optional file is a successful empty load (`found == false`);
 a present file must match its complete versioned schema.  The current schemas
 are `loglens.source-profiles/v1`, `loglens.saved-queries/v1`, and
-`loglens.session/v1`.
+`loglens.session/v2` (v1 remains readable).
 
 Source profiles use the exact shape below.  `format` is one of the canonical
 values `auto`, `iso`, `syslog`, `jsonl`, or `raw`; `multiline` is either
@@ -154,7 +157,7 @@ semantics as a CLI or GUI query.
 ]}
 ```
 
-An investigation session (`loglens.session/v1`) bundles the source and the
+An investigation session (`loglens.session/v2`, with a v1 reader) bundles the source and the
 active query of one investigation into a single document, so a run can be
 saved and reproduced later.  Only `source.path` is required; `format`,
 `multiline`, `max_record_bytes`, `name`, `filter`, and `level` default the
@@ -173,8 +176,8 @@ UTF-8 bytes.
 
 The console tool consumes the same document: `--session FILE` loads a session
 and fills in any option the command line did not set explicitly, while
-`--save-session FILE` writes the effective options as a session before
-scanning.  A missing `--session` file or an invalid session fails the run.
+`--save-session FILE` writes the effective options only after option validation,
+plugin loading, and source scanning succeed.  A missing `--session` file or an invalid session fails the run.
 
 ```sh
 loglens app.log --level ERROR --save-session errors.session.json
@@ -189,9 +192,12 @@ limit controls, applies the saved `filter`/`level` as one filter expression
 flags), clears any filter left from the previous view when the session has
 none, and reopens the file.  **Save session** writes the current source and
 filter as a session document; it suggests `<log>.session.json` next to the
-log and refuses to write over the open log itself.  The GUI parses with the
-built-in formats only, so a session's `format_plugin` applies to the console
-tool.
+log and refuses to write over the open log itself.  The GUI's collapsed **Source & session settings** panel also selects declarative parser
+plugins. The worker receives an immutable plugin snapshot, and sessions preserve both its
+path and SHA-256 digest. Session v2 also restores retained search, whole-file search text,
+selected/baseline/comparison time windows, follow/load mode, notes/highlights, dock layout,
+geometry, table columns and the active investigation tab. CLI round trips preserve GUI
+state; CLI output remains a one-shot snapshot and honors retained search/time restrictions.
 
 Object fields and JSON keys are strict: unknown or duplicate fields, duplicate
 names, malformed JSON, invalid enum/number values, invalid filter expressions,
@@ -212,8 +218,8 @@ with reparse-point no-follow flags and read with the same bounded-size check;
 the fallback uses exclusive CRT creation and `MoveFileExW()` replacement.
 Symlink/special-file destinations are refused; no fsync-level durability is
 claimed.  Schema versions are
-intentionally not migrated implicitly: callers must handle
-`UnsupportedVersion` and choose an explicit migration policy.
+strict. Supported v1 sessions and v0/v1 triage documents are upgraded in memory, without
+rewriting their source file. An explicit successful save writes v2; unknown versions fail.
 
 ## Qt GUI profile and query workflow
 
@@ -254,7 +260,7 @@ second, GUI-specific representation of a record.
 
 ### Triage state and highlighting
 
-Triage state is stored as the strict, versioned `loglens.triage/v1` document:
+Triage state is written as `loglens.triage/v2`; this older v1 example remains readable:
 
 ```json
 {"schema":"loglens.triage/v1","rules":[
@@ -270,7 +276,8 @@ The **Highlights** tab supports literal byte-ranged spans or whole-row
 highlighting, priority ordering, safe named/hex colour values, create/update,
 delete, and reorder.  `loglens.triage/v0` rule-only files are accepted as an
 explicit legacy input and are marked as migrated; the next successful save
-writes v1.  Empty or malformed stores never replace the last valid in-memory
+writes v2. v1 notes lack record evidence and remain archived until explicitly replaced
+with a note on a verified record. Empty or malformed stores never replace the last valid in-memory
 state.
 
 The state is bounded before it is parsed or written: at most 128 rules and
@@ -467,3 +474,73 @@ runner는 generator 결과의 정확한 byte/record 수와 SHA-256을
 1 MiB/1,000 records, capacity `64,256`, 1회, 30초 timeout의 Qt6 harness correctness run이며
 budget을 건너뛰고 결과 artifact만 업로드한다. 비용이 큰 1 GiB budget sweep은
 opt-in/nightly workflow에 남긴다.
+
+
+## Evidence binding, correlation and full-file search (0.2.0)
+
+A v2 note binds to opened-file identity (device/inode on POSIX), source generation,
+physical line and SHA-256 of the complete retained raw record. File replacement,
+truncation/generation changes, or changed record bytes cannot transfer a note to an
+unrelated line. Records with omitted bytes or unavailable file identity cannot acquire
+verified notes. **All notes** keeps unmatched/legacy notes visible; an archived status
+may also mean the record is outside the current retained/filter view. Reopening an
+unchanged v2 session remaps its saved current generation to the new load generation
+only after source evidence matches. Content is verified again when a note is displayed.
+
+Source fingerprints explicitly cover a bounded prefix (normally 64 KiB), plus file
+identity, observed size and modification time. They are change evidence, not a whole-file
+cryptographic guarantee. Parser plugin digests cover the complete bounded document.
+A changed source/plugin produces an investigation notice; the original note evidence
+is retained. A session never writes over its source/plugin, including same-file aliases.
+
+JSON Lines retain up to 128 top-level non-null scalar fields (128-byte keys, 4096-byte values,
+64 KiB combined). Objects/arrays remain in raw evidence; duplicate keys are diagnosed
+and excluded from structured matching. Use `trace_id==abc`, `request_id==req-7`,
+`field.customer_id==42`, or `field.service~checkout`. Equality is exact; `~` is ASCII
+case-insensitive. The Record tab's **Show related** action filters by a selected correlation
+field. Window comparisons group trace_id/span_id/request_id/correlation_id/thread fields
+from parsed JSON, retaining the older text extraction fallback only for non-JSON records.
+
+The **Search file** investigation tab streams the entire fixed source snapshot separately
+from the retained ring. It uses the selected parser and active structured filter, exposes
+physical lines, source identity and record SHA-256, and supports cancellation. Defaults:
+1 GiB scanned, 30 seconds, 1000 matches, 8 MiB result payload. A limit/cancellation is
+reported as partial, and concurrent source mutation is reported as potentially stale.
+Only finalized logical records are returned; an incomplete record at a scan limit is
+not presented as a verified match. A final unterminated line is finalized only at the
+captured EOF. Search text is ASCII case-insensitive; retained GUI search uses Qt's Unicode
+case-insensitive matching. CLI session text matching is also ASCII case-insensitive. The two result sets are deliberately labeled separately.
+
+```sh
+loglens app.log --search-all timeout --max-search-results 1000 --max-scan-bytes 1073741824
+loglens app.jsonl --format json --filter 'trace_id==abc' --search-all timeout
+loglens-gui --session outage.session.json
+loglens-gui --format-plugin service.format.json service.log
+```
+
+Whole-file CLI search returns 0 for a completed snapshot, 2 for a partial budget-limited
+result, and 1 for invalid input or source errors. It includes evidence digests in output.
+The GUI never replaces retained rows with whole-file search results.
+
+The main view now uses two compact control rows and a collapsed settings panel. Body text
+follows the current palette, while severity uses the level cell. The timeline includes
+UTC axis labels, a level legend and per-bucket counts in tooltips; live refresh preserves
+absolute selected ranges. Window/dock/table layout persists in QSettings for normal
+application startup, while injected test/embedding stores do not write global settings.
+
+## Install and independent package smoke
+
+```sh
+cmake -S . -B build/release -DCMAKE_BUILD_TYPE=Release
+cmake --build build/release --parallel 2
+QT_QPA_PLATFORM=offscreen ctest --test-dir build/release --output-on-failure
+cmake --install build/release --prefix "$PWD/build/stage/loglens"
+./build/stage/loglens/bin/loglens --version
+QT_QPA_PLATFORM=offscreen ./build/stage/loglens/bin/loglens-gui --smoke-exit-ms 200 tests/data/sample.log
+```
+
+The prefix contains `bin/loglens`, `bin/loglens-gui`, schemas in `share/loglens/schemas`,
+product documentation, a desktop entry and a scalable icon. Qt6 Widgets is a runtime
+dependency for the GUI. The CLI links the Qt-free core and requires no Qt library.
+The `schemas/` JSON files document the contracts; the bounded C++ validators additionally
+check UTF-8 byte budgets, query syntax, time ordering and same-file protections.

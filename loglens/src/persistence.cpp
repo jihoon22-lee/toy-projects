@@ -1,4 +1,7 @@
 #include "loglens/persistence.hpp"
+#include "loglens/triage.hpp"
+
+#include <filesystem>
 
 #include "loglens/filter_expr.hpp"
 #include "persistence_validation.hpp"
@@ -21,7 +24,8 @@ namespace {
 
 constexpr char kSourceSchema[] = "loglens.source-profiles/v1";
 constexpr char kQuerySchema[] = "loglens.saved-queries/v1";
-constexpr char kSessionSchema[] = "loglens.session/v1";
+constexpr char kSessionSchema[] = "loglens.session/v2";
+constexpr char kSessionV1[] = "loglens.session/v1";
 constexpr std::size_t kStorageJsonDepth = 16;
 constexpr std::size_t kStorageJsonNodes = 2048;
 constexpr std::size_t kStorageJsonMembers = 8;
@@ -264,20 +268,27 @@ SourceProfileLoadResult loadProfilesImpl(const std::string& path) {
 
 bool parseSessionSource(const detail::StorageJsonNode& object,
                         SessionState& state, PersistenceError& error) {
-    if (!hasOnlyFields(object, {"path", "format", "multiline", "max_record_bytes",
-                                "format_plugin"})) {
+    if (!hasOnlyFields(object, {"path", "format", "multiline", "max_record_bytes", "format_plugin",
+                                "identity", "fingerprint", "fingerprint_bytes", "size", "modified",
+                                "generation", "plugin_fingerprint"})) {
         detail::setPersistenceError(error, PersistenceErrorCode::Malformed,
                  "session source contains an unknown or duplicate field");
         return false;
     }
     std::string format;
     std::string multiline;
-    if (!requireString(object, "path", state.source_path, error)
-        || !optionalString(object, "format", format, error)
-        || !optionalString(object, "multiline", multiline, error)
-        || !optionalString(object, "format_plugin", state.format_plugin, error)
-        || !optionalUnsigned(object, "max_record_bytes",
-                             state.max_record_bytes, error)) {
+    if (!requireString(object, "path", state.source_path, error) ||
+        !optionalString(object, "format", format, error) ||
+        !optionalString(object, "multiline", multiline, error) ||
+        !optionalString(object, "format_plugin", state.format_plugin, error) ||
+        !optionalString(object, "identity", state.source_identity, error) ||
+        !optionalString(object, "modified", state.source_modified, error) ||
+        !optionalString(object, "fingerprint", state.source_fingerprint, error) ||
+        !optionalString(object, "plugin_fingerprint", state.plugin_fingerprint, error) ||
+        !optionalUnsigned(object, "fingerprint_bytes", state.fingerprint_bytes, error) ||
+        !optionalUnsigned(object, "size", state.source_size, error) ||
+        !optionalUnsigned(object, "generation", state.source_generation, error) ||
+        !optionalUnsigned(object, "max_record_bytes", state.max_record_bytes, error)) {
         return false;
     }
     if (!format.empty()) {
@@ -302,9 +313,75 @@ bool parseSessionSource(const detail::StorageJsonNode& object,
     return true;
 }
 
+bool parseSessionWindow(const detail::StorageJsonNode &object, const char *name,
+                        std::optional<TimeWindow> &value, PersistenceError &error) {
+    const auto *node = detail::findStorageJsonField(object, name);
+    if (node == nullptr || node->kind == detail::StorageJsonKind::Null)
+        return true;
+    std::size_t begin = 0, end = 0;
+    if (!hasOnlyFields(*node, {"begin_ms", "end_ms"}) ||
+        !parseUnsigned(*node, "begin_ms", begin, error) ||
+        !parseUnsigned(*node, "end_ms", end, error) || begin >= end) {
+        detail::setPersistenceError(error, PersistenceErrorCode::InvalidValue,
+                                    "invalid session time window");
+        return false;
+    }
+    value = TimeWindow{begin, end};
+    return true;
+}
+
+bool parseSessionView(const detail::StorageJsonNode &root, SessionState &state,
+                      PersistenceError &error) {
+    const auto *view = detail::findStorageJsonField(root, "view");
+    if (view != nullptr) {
+        if (!hasOnlyFields(*view,
+                           {"search", "whole_file_search", "investigation_tab", "settings_open",
+                            "follow", "tail_mode", "tail_records", "selected", "baseline",
+                            "comparison", "layout", "geometry", "table_header"})) {
+            detail::setPersistenceError(error, PersistenceErrorCode::Malformed,
+                                        "unknown session view field");
+            return false;
+        }
+        for (const auto &property : {std::make_pair("follow", &state.follow),
+                                     std::make_pair("tail_mode", &state.tail_mode),
+                                     std::make_pair("settings_open", &state.settings_open)}) {
+            const auto *value = detail::findStorageJsonField(*view, property.first);
+            if (!value)
+                continue;
+            if (value->kind != detail::StorageJsonKind::Boolean) {
+                detail::setPersistenceError(error, PersistenceErrorCode::InvalidValue,
+                                            "session view boolean is invalid");
+                return false;
+            }
+            *property.second = value->text == "true";
+        }
+        if (!optionalString(*view, "search", state.search, error) ||
+            !optionalString(*view, "whole_file_search", state.whole_file_search, error) ||
+            !optionalUnsigned(*view, "investigation_tab", state.investigation_tab, error) ||
+            !optionalString(*view, "layout", state.layout, error) ||
+            !optionalString(*view, "geometry", state.geometry, error) ||
+            !optionalString(*view, "table_header", state.table_header, error) ||
+            !optionalUnsigned(*view, "tail_records", state.tail_records, error) ||
+            !parseSessionWindow(*view, "selected", state.selected_window, error) ||
+            !parseSessionWindow(*view, "baseline", state.baseline_window, error) ||
+            !parseSessionWindow(*view, "comparison", state.comparison_window, error))
+            return false;
+    }
+    const auto *triage = detail::findStorageJsonField(root, "triage");
+    if (triage) {
+        const auto loaded = parseTriageState(detail::serializeStorageJson(*triage));
+        if (!loaded.ok()) {
+            error = loaded.error;
+            return false;
+        }
+        state.triage = loaded.state;
+    }
+    return true;
+}
+
 bool parseSession(const detail::StorageJsonNode& root, SessionState& state,
                   PersistenceError& error) {
-    if (!hasOnlyFields(root, {"schema", "name", "source", "filter", "level"})) {
+    if (!hasOnlyFields(root, {"schema", "name", "source", "filter", "level", "view", "triage"})) {
         detail::setPersistenceError(error, PersistenceErrorCode::Malformed,
                  "session document contains an unknown or duplicate field");
         return false;
@@ -323,7 +400,7 @@ bool parseSession(const detail::StorageJsonNode& root, SessionState& state,
                  "session 'source' must be an object");
         return false;
     }
-    return parseSessionSource(*source, state, error);
+    return parseSessionSource(*source, state, error) && parseSessionView(root, state, error);
 }
 
 SessionLoadResult loadSessionImpl(const std::string& path) {
@@ -335,18 +412,42 @@ SessionLoadResult loadSessionImpl(const std::string& path) {
     }
     detail::StorageJsonNode root;
     detail::StorageJsonError jsonError;
-    if (!detail::parseStorageJson(bytes, persistenceJsonLimits(), root, jsonError)) {
+    auto limits = persistenceJsonLimits();
+    limits.max_nodes = 20000 + kMaxTriageEntries * 12;
+    limits.max_object_members = 24;
+    limits.max_array_items = kMaxTriageEntries;
+    limits.max_string_bytes = 64 * 1024;
+    if (!detail::parseStorageJson(bytes, limits, root, jsonError)) {
         detail::setPersistenceError(result.error, storageErrorCode(jsonError.message),
                  "malformed session JSON: " + jsonError.message, jsonError.offset);
         return result;
     }
-    if (root.kind != detail::StorageJsonKind::Object
-        || !expectedSchema(root, kSessionSchema, "loglens.session/", result.error)) {
+    std::string version;
+    if (!requireString(root, "schema", version, result.error))
+        return result;
+    result.migrated = version == kSessionV1;
+    if (root.kind != detail::StorageJsonKind::Object ||
+        (!result.migrated &&
+         !expectedSchema(root, kSessionSchema, "loglens.session/", result.error))) {
         if (result.error.ok()) {
             detail::setPersistenceError(result.error, PersistenceErrorCode::Malformed,
                      "session document is not an object");
         }
         return result;
+    }
+    if (result.migrated && !hasOnlyFields(root, {"schema", "name", "source", "filter", "level"})) {
+        detail::setPersistenceError(result.error, PersistenceErrorCode::Malformed,
+                                    "v1 session has unsupported fields");
+        return result;
+    }
+    if (result.migrated) {
+        const auto *source = detail::findStorageJsonField(root, "source");
+        if (source && !hasOnlyFields(*source, {"path", "format", "multiline", "max_record_bytes",
+                                               "format_plugin"})) {
+            detail::setPersistenceError(result.error, PersistenceErrorCode::Malformed,
+                                        "v1 source has unsupported fields");
+            return result;
+        }
     }
     if (!parseSession(root, result.state, result.error)) {
         return result;
@@ -503,6 +604,20 @@ bool saveSession(const std::string& path, const SessionState& state,
     try {
         if (!detail::validSession(state, error)) {
             return false;
+        }
+        for (const std::string &input : {state.source_path, state.format_plugin}) {
+            if (input.empty())
+                continue;
+            std::error_code ec;
+            const bool equivalent = std::filesystem::equivalent(path, input, ec);
+            const auto destination = std::filesystem::weakly_canonical(path);
+            const auto source = std::filesystem::weakly_canonical(input);
+            if (equivalent || destination == source) {
+                detail::setPersistenceError(
+                    error, PersistenceErrorCode::UnsafePath,
+                    "session output must not replace a source log or format plugin");
+                return false;
+            }
         }
         const std::string bytes = detail::serializeSession(state);
         return detail::atomicWritePersistenceFile(path, bytes, error);

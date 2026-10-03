@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
 
+from envlens.shadowing import local_imports
 from envlens.snapshot import normalize_project_name
 
 MAX_PYPROJECT_BYTES = 2 * 1024 * 1024
@@ -530,6 +531,7 @@ def inspect_pyproject(path: str | Path = "pyproject.toml") -> dict[str, Any]:
     }
     if configuration:
         result["configuration"] = configuration
+    result["local_imports"], result["local_imports_limited"] = local_imports(project_path.parent)
     return result
 
 

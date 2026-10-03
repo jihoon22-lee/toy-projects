@@ -6,6 +6,7 @@
 #include <array>
 #include <cctype>
 #include <sstream>
+#include <map>
 
 namespace abilens {
 namespace {
@@ -29,22 +30,7 @@ SetDiff make_set_diff(const std::vector<std::string>& left,
 }
 
 bool version_less(const std::string& left, const std::string& right) {
-    std::istringstream left_stream(left);
-    std::istringstream right_stream(right);
-    std::string left_part;
-    std::string right_part;
-    for (;;) {
-        const bool has_left = static_cast<bool>(std::getline(left_stream, left_part, '.'));
-        const bool has_right = static_cast<bool>(std::getline(right_stream, right_part, '.'));
-        if (!has_left && !has_right) {
-            return false;
-        }
-        const unsigned long long left_value = has_left ? std::stoull(left_part) : 0U;
-        const unsigned long long right_value = has_right ? std::stoull(right_part) : 0U;
-        if (left_value != right_value) {
-            return left_value < right_value;
-        }
-    }
+    return detail::version_less(left, right);
 }
 
 std::string max_version(const ElfReport& report, const std::string& namespace_name) {
@@ -188,10 +174,67 @@ DiffReport diff_reports(const ElfReport& left, const ElfReport& right) {
         result.compatible = false;
     } else {
         append_elf_header_changes(left, right, result.header_changes);
+        if (left.rpath != right.rpath) result.header_changes.push_back("RPATH search order changed");
+        if (left.runpath != right.runpath) result.header_changes.push_back("RUNPATH search order changed");
         const bool abi_compatible = append_abi_changes(left, right, result.header_changes);
-        result.compatible = same_elf_header(left, right) && abi_compatible;
+        result.compatible = same_elf_header(left, right) && abi_compatible
+                            && left.symbols_known && right.symbols_known
+                            && result.symbols.removed.empty() && result.vtables.removed.empty();
     }
-    result.changed = !result.header_changes.empty() || set_changed(result.needed) ||
+    bool definite_break = both_valid && (!same_elf_header(left, right) ||
+        !result.symbols.removed.empty() || !result.vtables.removed.empty());
+    bool uncertain = !both_valid || !left.symbols_known || !right.symbols_known ||
+        !left.vtables_known || !right.vtables_known || !left.attributes_known ||
+        !right.attributes_known || !left.loader_metadata_known || !right.loader_metadata_known;
+    if (both_valid && !append_abi_changes(left, right, result.diagnostics)) definite_break = true;
+    if (left.loader_metadata_known && right.loader_metadata_known) {
+        append_header_change(result.header_changes, "SONAME", left.soname, right.soname);
+        append_header_change(result.header_changes, "interpreter", left.interpreter, right.interpreter);
+        if (left.soname != right.soname) definite_break = true;
+        if (left.interpreter != right.interpreter) uncertain = true;
+        if (left.build_id != right.build_id) result.diagnostics.push_back("build ID changed (identity evidence, not an ABI break)");
+    }
+    if (left.attributes_known && right.attributes_known) {
+        std::map<std::string, SymbolEvidence> old;
+        for (const auto& symbol : left.symbol_evidence) old.emplace(symbol.identity, symbol);
+        for (const auto& symbol : right.symbol_evidence) {
+            const auto found = old.find(symbol.identity);
+            if (found == old.end()) continue;
+            const auto& previous = found->second;
+            if (previous == symbol) continue;
+            std::string fields;
+            if (previous.type != symbol.type) fields += " type";
+            if (previous.binding != symbol.binding) fields += " binding";
+            if (previous.visibility != symbol.visibility) fields += " visibility";
+            if (previous.default_version != symbol.default_version) fields += " default-version";
+            // Function code size is not a calling-convention/layout change.
+            if (previous.size != symbol.size && symbol.type != 2U && symbol.type != 10U) fields += " size";
+            if (fields.empty()) continue;
+            result.symbol_changes.push_back(symbol.identity + ":" + fields);
+            if (previous.type != symbol.type ||
+                (previous.default_version && !symbol.default_version) ||
+                (previous.size != symbol.size && (symbol.type == 1U || symbol.type == 6U))) {
+                definite_break = true;
+            } else {
+                uncertain = true;
+            }
+        }
+    }
+    if (left.dwarf_status == "complete" && right.dwarf_status == "complete") {
+        result.types = make_set_diff(left.type_layouts, right.type_layouts);
+        if (set_changed(result.types)) {
+            uncertain = true;
+            result.diagnostics.push_back("observed type layouts changed; exported API reachability is unknown");
+        }
+    } else if (left.dwarf_status != "not-requested" || right.dwarf_status != "not-requested") {
+        uncertain = true;
+        result.diagnostics.push_back("type layout comparison is unknown: complete DWARF evidence is required on both sides");
+    }
+    if (left.rpath != right.rpath || left.runpath != right.runpath || set_changed(result.needed)) uncertain = true;
+    result.compatibility = definite_break ? "incompatible" : uncertain ? "unknown" : "compatible";
+    result.compatible = result.compatibility == "compatible";
+    result.changed = !result.symbol_changes.empty() || set_changed(result.types) ||
+                     left.build_id != right.build_id || !result.header_changes.empty() || set_changed(result.needed) ||
                      set_changed(result.rpath) || set_changed(result.runpath) ||
                      set_changed(result.abi) || set_changed(result.symbols) ||
                      set_changed(result.vtables);
@@ -209,6 +252,8 @@ std::string serialize_diff(const DiffReport& diff) {
            << ",\"right\":" << detail::json_escape(diff.right)
            << ",\"changed\":" << (diff.changed ? "true" : "false")
            << ",\"compatible\":" << (diff.compatible ? "true" : "false")
+           << ",\"compatibility\":" << detail::json_escape(diff.compatibility)
+           << ",\"symbol_changes\":" << detail::json_string_array(diff.symbol_changes)
            << ",\"left_status\":" << detail::json_escape(diff.left_status)
            << ",\"right_status\":" << detail::json_escape(diff.right_status)
            << ",\"header_changes\":[";
@@ -230,6 +275,8 @@ std::string serialize_diff(const DiffReport& diff) {
     append_set_json(output, diff.symbols);
     output << ",\"vtables\":";
     append_set_json(output, diff.vtables);
+    output << ",\"types\":";
+    append_set_json(output, diff.types);
     output << ",\"diagnostics\":[";
     for (std::size_t index = 0; index < diff.diagnostics.size(); ++index) {
         if (index != 0U) {
@@ -247,7 +294,10 @@ std::string render_diff_text(const DiffReport& diff) {
            << "  left: " << diff.left << " (" << diff.left_status << ")\n"
            << "  right: " << diff.right << " (" << diff.right_status << ")\n"
            << "  result: " << (diff.changed ? "CHANGED" : "IDENTICAL")
-           << ", compatibility: " << (diff.compatible ? "compatible" : "incompatible") << "\n";
+           << ", compatibility: " << diff.compatibility << "\n";
+    for (const auto& change : diff.symbol_changes) output << "  symbol: " << change << "\n";
+    for (const auto& change : diff.types.removed) output << "  - TYPE: " << change << "\n";
+    for (const auto& change : diff.types.added) output << "  + TYPE: " << change << "\n";
     for (const std::string& change : diff.header_changes) {
         output << "  header: " << change << "\n";
     }

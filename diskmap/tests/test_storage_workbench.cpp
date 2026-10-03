@@ -191,7 +191,8 @@ void TestStorageWorkbench::snapshotControlsSaveLoadReadOnlyEvidence() {
     QVERIFY(table(window, QStringLiteral("duplicateEvidenceTable")) != nullptr);
 
     window.saveSnapshotPath(snapshotPath);
-    QVERIFY(QFileInfo::exists(snapshotPath));
+    QTRY_VERIFY(QFileInfo::exists(snapshotPath));
+    QTRY_VERIFY(button(window, QStringLiteral("saveSnapshotButton"))->isEnabled());
     window.loadSnapshotPath(snapshotPath);
 
     QLabel* status = label(window, QStringLiteral("status"));
@@ -216,6 +217,7 @@ void TestStorageWorkbench::snapshotComparisonUsesVisibleEvidence() {
     window.scanPath(rootPath);
     waitForRootRows(window, 1);
     window.saveSnapshotPath(snapshotPath);
+    QTRY_VERIFY(button(window, QStringLiteral("saveSnapshotButton"))->isEnabled());
 
     window.scanPath(rootPath);
     waitForRootSize(window, 8);
@@ -225,7 +227,7 @@ void TestStorageWorkbench::snapshotComparisonUsesVisibleEvidence() {
     QLabel* summary = label(window, QStringLiteral("snapshotSummary"));
     QVERIFY(changes != nullptr);
     QVERIFY(summary != nullptr);
-    QVERIFY(changes->rowCount() >= 1);
+    QTRY_VERIFY(changes->rowCount() >= 1);
     QVERIFY(summary->text().contains(QStringLiteral("change")));
     bool sawGrown = false;
     for (int row = 0; row < changes->rowCount(); ++row) {
@@ -263,7 +265,9 @@ void TestStorageWorkbench::duplicateEvidenceStagesOnlyThroughCleanupReview() {
     QVERIFY(summary->text().contains(QStringLiteral("nothing has moved")));
 
     window.saveSnapshotPath(snapshotPath);
+    QTRY_VERIFY(button(window, QStringLiteral("saveSnapshotButton"))->isEnabled());
     window.loadSnapshotPath(snapshotPath);
+    QTRY_VERIFY(label(window, QStringLiteral("status"))->text().contains(QStringLiteral("read-only snapshot")));
     QVERIFY(!button(window, QStringLiteral("stageDuplicatesButton"))->isEnabled());
     QVERIFY(!button(window, QStringLiteral("executeCleanupButton"))->isEnabled());
 }

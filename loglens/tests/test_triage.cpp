@@ -68,7 +68,7 @@ void writeFile(const std::filesystem::path& path, const std::string& value) {
 
 void testCrudRoundTrip() {
     ScopedTempDirectory temporary;
-    CHECK_EQ(std::string(loglens::triageSchemaName()), std::string("loglens.triage/v1"));
+    CHECK_EQ(std::string(loglens::triageSchemaName()), std::string("loglens.triage/v2"));
     loglens::TriageState state;
     loglens::PersistenceError error;
     CHECK(loglens::upsertHighlightRule(

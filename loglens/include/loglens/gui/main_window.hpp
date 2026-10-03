@@ -15,6 +15,9 @@
 #include "loglens/ring_buffer.hpp"
 #include "loglens/triage.hpp"
 #include "loglens/window_analysis.hpp"
+#include "loglens/format_plugin.hpp"
+#include "loglens/file_search.hpp"
+#include <atomic>
 
 class LogModel;
 class QCheckBox;
@@ -60,6 +63,9 @@ public:
     bool saveSessionTo(const QString& path);
     bool openSession(const QString& path);
     QString suggestedSessionPath() const;
+    bool setFormatPluginPath(const QString &path);
+    void startWholeFileSearch();
+    void cancelWholeFileSearch();
 
 signals:
     void startLoadRequested(loglens::LoadRequest request);
@@ -121,6 +127,13 @@ private:
     bool savedQueriesPathIsDefault_ = false;
     bool triagePathIsDefault_ = false;
     QString currentPath_;
+    QString pluginPath_;
+    std::shared_ptr<const loglens::FormatPlugin> formatPlugin_;
+    QLabel *pluginLabel_ = nullptr;
+    std::optional<loglens::SessionState> pendingSession_;
+    QString sessionEvidenceNotice_;
+    bool persistLayout_ = false;
+
     QThread* loaderThread_ = nullptr;
     loglens::LogLoadWorker* loader_ = nullptr;
     QTimer* pollTimer_ = nullptr;
@@ -145,10 +158,21 @@ private:
     QPlainTextEdit* recordDetail_ = nullptr;
     QCheckBox* bookmarkBox_ = nullptr;
     QLineEdit* annotationEdit_ = nullptr;
+    QComboBox *correlationField_ = nullptr;
     QLabel* selectedWindowLabel_ = nullptr;
     QLabel* baselineWindowLabel_ = nullptr;
     QLabel* comparisonWindowLabel_ = nullptr;
     QTreeWidget* analysisTree_ = nullptr;
+    QTreeWidget *searchResults_ = nullptr;
+    QTreeWidget *archivedTriage_ = nullptr;
+    QLineEdit *wholeSearchEdit_ = nullptr;
+    QPlainTextEdit *searchEvidence_ = nullptr;
+    QLabel *searchStatus_ = nullptr;
+    QThread *searchThread_ = nullptr;
+    quint64 search_job_ = 0;
+    std::shared_ptr<std::atomic<bool>> searchCancelled_;
+    loglens::FileSearchResult searchResult_;
+
     std::optional<loglens::TimeWindow> selectedWindow_;
     std::optional<loglens::TimeWindow> baselineWindow_;
     std::optional<loglens::TimeWindow> comparisonWindow_;
@@ -174,6 +198,8 @@ private:
     bool prepareDefaultStoreDirectory(bool profiles);
     QString storePath(bool profiles) const;
     void setupInvestigationDock();
+    void setupWholeFileSearch();
+    void refreshArchivedTriage();
     void loadTriageWorkflow();
     void rebuildHighlightRules(const QString& selectedName = QString());
     bool writeTriageWorkflow(const loglens::TriageState& state,

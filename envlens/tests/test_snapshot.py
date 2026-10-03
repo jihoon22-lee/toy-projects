@@ -286,12 +286,12 @@ def test_snapshot_has_schema_required_keys_and_consistent_counts() -> None:
     )
     result = _collect(raw)
     schema_path = (
-        Path(__file__).resolve().parents[1] / "schemas" / "envlens-snapshot-v2.schema.json"
+        Path(__file__).resolve().parents[1] / "schemas" / "envlens-snapshot-v3.schema.json"
     )
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
 
     assert set(result) == set(schema["required"])
-    assert result["schema_version"] == "envlens.snapshot/v2"
+    assert result["schema_version"] == "envlens.snapshot/v3"
     assert result["redaction"] == {"policy": "envlens-redaction/v1", "enabled": True}
     assert set(result["source"]) == set(schema["properties"]["source"]["required"])
     distribution_schema = schema["properties"]["distributions"]["items"]
@@ -405,7 +405,7 @@ def test_real_current_interpreter_smoke_is_structural() -> None:
         captured_at=FIXED_CAPTURED_AT,
     )
 
-    assert result["schema_version"] == "envlens.snapshot/v2"
+    assert result["schema_version"] == "envlens.snapshot/v3"
     assert result["producer"] == {"name": "envlens", "version": __version__}
     assert result["captured_at"] == "2024-02-03T04:05:06Z"
     assert isinstance(result["source"]["identity"], dict)

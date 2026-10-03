@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <map>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -60,6 +61,8 @@ struct LogRecord {
     std::size_t omitted_bytes = 0;
     ParseStatus parse_status = ParseStatus::Unstructured;
     std::vector<ParseDiagnostic> diagnostics;
+    // Bounded, top-level JSON scalar fields; nested structures stay in raw evidence.
+    std::map<std::string, std::string> fields;
 };
 
 // Case-insensitive. Accepts the common spellings: WARN/WARNING, ERR/ERROR,

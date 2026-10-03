@@ -215,6 +215,8 @@ int main(int argc, char** argv) {
     GeneratedFsSource source(options.entries, options.cancel_after, &cancellation);
     diskmap::ScanOptions scanOptions;
     scanOptions.generation = options.generation;
+    scanOptions.max_nodes = static_cast<std::size_t>(options.entries) + 1;
+    scanOptions.max_memory_bytes = std::numeric_limits<std::size_t>::max();
 
     const auto started = std::chrono::steady_clock::now();
     diskmap::ScanResult result =

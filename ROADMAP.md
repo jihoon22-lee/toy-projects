@@ -1,58 +1,18 @@
 # ROADMAP
 
-각 제품을 어느 방향으로, 왜 그 순서로 키울지 적는다. 제품 소개와 구조 규칙은
-[README.md](README.md)에 있다.
+각 제품은 자신의 사용자 문제에 맞는 독립적인 스택·버전·테스트를 유지한다.
+현재 사용법과 지원 경계는 [README](README.md)와 각 제품 문서를 기준으로 한다.
 
-원칙은 하나다: **각 제품의 본질과 기능만 기준으로 기술 스택과 우선순위를 정한다.**
-공용 도구·공용 규격에 맞추기 위해 제품이 자기 스택을 억지로 선택하지 않는다.
+| 제품 | 구현한 방향 | 이후 검토할 범위 |
+|---|---|---|
+| [DiskMap](diskmap/README.md) | Qt6 탐색·중복 정리, raw-byte snapshot, 취소 가능한 작업, Trash 기록 | 정확성을 보존하는 증분 재스캔 |
+| [LogLens](loglens/README.md) | Qt6 조사, 근거에 묶인 triage/session, 전체 파일 검색, JSON 상관 분석 | 다중 소스 시계 보정과 대규모 이력 |
+| [BuildScope](buildscope/README.md) | C++ producer, 제한·취소 가능한 include 분석, impact·relocation·GUI import | 빌드 시스템별 추가 근거 adapter |
+| [EnvLens](envlens/README.md) | Python 표준 메타데이터, origin/extras/shadowing, runtime·CI 정책 | 더 다양한 인터프리터 ABI 증거 |
+| [AbiLens](abilens/README.md) | 네이티브 ELF, 심볼 속성, 3상태 diff, sysroot 후보, 선택적 DWARF | 공개 API 도달성과 더 넓은 타입 그래프 |
+| [TraceLens](tracelens/README.md) | 저장된 strace·분할 trace 분석, 근거 탐색·GUI·diff | 측정된 대규모 스트림 탐색 확대 |
+| [TestLens](testlens/README.md) | JUnit/CTest, 명시적 retry/shard, diff/history·오프라인 HTML | 추가 runner 형식과 압축 CTest 출력 |
+| [ServiceLens](servicelens/README.md) | rootfs unit/drop-in·설정 출처·graph·diff/check | 지원 systemd 의미론의 단계적 확대 |
 
-## 공통 방향
-
-- **스택 현대화**: 레거시 빌드·테스트 기반을 각 제품의 표준 스택으로 옮긴다.
-- **독립 릴리스**: 제품마다 자체 버전, 자체 태그(`{product}/vX.Y.Z`), 자체
-  아티팩트를 가진다.
-- **기능 강화**: 견고성과 실사용 기능을 넓히는 것이 최우선이다.
-
-## 제품별 방향
-
-### diskmap — 디스크 사용량 탐색과 정리 workbench
-
-- **qmake → CMake + Qt6 단일화**: qmake는 Qt6 시대의 레거시이며, CTest/Qt Test 표준
-  경로로 옮긴다. 수제 `check` 하니스는 Qt Test로 대체한다.
-- 스캔·스냅샷·중복 증거의 보수적 계약(identity revalidation, read-only load,
-  advisory flock)은 그대로 유지한다.
-- 완료: 스냅샷 diff 필터, 오프라인 스냅샷 비교, cleanup 드라이런 플랜.
-- 이후: 대용량 트리의 증분 재스캔 — 디렉터리 mtime이 파일 내용 변경에
-  전파되지 않아 정확성 훼손 위험이 있으므로 신중한 설계가 필요하다.
-
-### loglens — 로그 조사 workbench
-
-- **Qt6 단일화**: Qt5/Qt6 듀얼 빌드를 Qt6만으로 좁혀 복잡도를 줄인다.
-- **수제 테스트 하니스 → Qt Test**: 표준 러너와 CI 친화적 출력으로 교체한다.
-- 완료: 선언적 정규식 파서 플러그인, `loglens.session/v1` 세션 저장/복원
-  (CLI + GUI).
-- 이후: 세션에 triage 상태(북마크·주석) 번들 — 별도 스키마 확장이 필요하다.
-
-### buildscope — compile database 탐색기
-
-- **Python 백엔드 → C++ 통합**: 현재 Python producer + C++ consumer의 하이브리드는
-  실행 시 Python 인터프리터 의존과 별도 패키징 부담을 만든다. `compile_commands.json`
-  파싱과 정규화는 QJsonDocument/C++로 충분히 표현되므로 단일 바이너리로 통합하고,
-  스냅샷 스키마 호환(v1/v2/v3 reader)은 유지한다.
-- 완료: 스트리밍 compile DB 파싱, `--include-analysis delayed` +
-  `--analysis-unit` 선택적 재생.
-
-### envlens — Python 환경 인스펙터
-
-- **순수 Python 유지**: Python 환경을 검사하는 도구이므로 언어 자체가 본질적이다.
-  Hatchling/uv, pytest, ruff, mypy strict 게이트를 유지한다.
-- 완료: venv/conda/system 감지(snapshot v2), 단일 스냅샷 `check`,
-  `Requires-External` unknown 증거, v1/v2 스키마 병행 지원.
-
-### abilens — ELF/ABI 아티팩트 인스펙터
-
-- **`readelf` 의존 제거**: 현재 binutils `readelf` 출력을 파싱하는 외부 프로세스
-  경계를, ELF header/section/symbol/dynamic을 직접 읽는 자체 파서로 대체한다.
-  외부 도구 버전·locale에 출력이 흔들리는 근본 원인을 없앤다.
-- 완료: `.dynsym` 네이티브 파싱, `name@version` 심볼 한정, vtable diff 축,
-  정책 DSL(심볼/버전/rpath/stripped 규칙).
+공통 릴리스는 설치 결과·체크섬·provenance를 검증한 뒤 draft를 게시한다.
+로컬 검증과 GitHub 호스팅 환경에서의 실행은 구분해서 기록한다.

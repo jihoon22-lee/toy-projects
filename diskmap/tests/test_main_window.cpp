@@ -1599,7 +1599,7 @@ void TestMainWindow::cleanupStagingIsReviewableAndUndoable() {
     QVERIFY(undo->isEnabled());
     undo->click();
     QCOMPARE(review->rowCount(), 0);
-    QCOMPARE(cleanupSummary(window)->text(), QStringLiteral("Dry run: 0 ready, 0 rejected · reclaimable 0 B · nothing has moved"));
+    QCOMPARE(cleanupSummary(window)->text(), QStringLiteral("Dry run: 0 ready, 0 rejected · potential after disposal 0 B · Trash does not free payload bytes · nothing has moved"));
 
     QVERIFY(redo != nullptr);
     QVERIFY(redo->isEnabled());
@@ -1617,12 +1617,13 @@ void TestMainWindow::cleanupAuditKeepsAllRealRestoreTokens() {
         return true;
     };
     services.move = [&movedTargets](const diskmap::CleanupPlan& plan) {
-        movedTargets = plan.targets.size();
+        const auto previousTargets = movedTargets;
+        movedTargets += plan.targets.size();
         std::vector<diskmap::TrashReceipt> receipts;
         for (std::size_t index = 0; index < plan.targets.size(); ++index) {
             diskmap::TrashReceipt receipt;
             receipt.original_path = plan.targets[index].path;
-            if (index == 0) {
+            if (previousTargets + index == 0) {
                 receipt.status = diskmap::TrashStatus::Moved;
                 receipt.restore_token = "opaque-token";
                 receipt.message = "moved safely";

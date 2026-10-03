@@ -5,9 +5,11 @@
 #include <filesystem>
 #include <string>
 #include <vector>
+#include <optional>
 
 #include "diskmap/scanner.hpp"
 #include "diskmap/view.hpp"
+#include "diskmap/duplicates.hpp"
 
 namespace diskmap {
 
@@ -33,6 +35,8 @@ enum class CleanupSkipReason {
     TypeChanged,
     SizeChanged,
     HardLinkChanged,
+    Modified,
+    MissingKeeper,
 };
 
 const char* cleanupSkipReasonName(CleanupSkipReason reason);
@@ -50,6 +54,14 @@ struct CleanupPolicy {
     std::size_t max_selected = 100'000;
 };
 
+struct DuplicateCleanupProof {
+    std::filesystem::path path;
+    FsMetadata expected;
+    std::filesystem::path keeper;
+    FsMetadata keeper_expected;
+    std::string content_hash;
+};
+
 struct CleanupTarget {
     NodeKey key;
     std::filesystem::path path;
@@ -62,6 +74,11 @@ struct CleanupTarget {
     bool hard_link_count_known = false;
     bool symlink = false;
     std::uint64_t scan_generation = 0;
+    std::int64_t modified_ns = 0;
+    bool modified_time_known = false;
+    std::int64_t changed_ns = 0;
+    bool changed_time_known = false;
+    std::vector<DuplicateCleanupProof> duplicate_proofs;
 };
 
 struct CleanupRejectedTarget {
@@ -84,7 +101,11 @@ struct CleanupPlan {
 // entries remain visible in `rejected` with a stable reason.
 CleanupPlan planCleanup(const ScanResult& scan,
                         const std::vector<NodeKey>& selected,
-                        const CleanupPolicy& policy = CleanupPolicy{});
+                        const CleanupPolicy& policy = CleanupPolicy{},
+                        const DuplicateAnalysis* duplicates = nullptr);
+
+// Rehash both the reviewed target and its surviving copy using no-follow reads.
+bool verifyCleanupProofs(const CleanupTarget& target, std::string& error);
 
 struct CleanupRevalidation {
     bool accepted = false;
@@ -101,3 +122,12 @@ CleanupRevalidation revalidateCleanupTarget(const CleanupTarget& target,
                                             const FsSource& source);
 
 } // namespace diskmap
+
+namespace diskmap {
+enum class DuplicateKeeperPolicy { FirstPath, Newest, Oldest, PreferredDirectory };
+// Returns a reviewed surviving copy; staged directories also exclude descendants.
+std::optional<NodeKey> chooseDuplicateKeeper(const DuplicateGroup& group,
+    const ScanResult& scan, DuplicateKeeperPolicy policy = DuplicateKeeperPolicy::FirstPath,
+    const std::filesystem::path& preferred_directory = {},
+    const std::vector<NodeKey>& staged = {});
+}

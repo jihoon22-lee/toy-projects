@@ -25,7 +25,7 @@ QString diffSourceLabel(const DiffSource &source) {
     return source.after.has_value() ? *source.after : source.before.value_or(QString());
 }
 
-}  // namespace
+} // namespace
 
 void MainWindow::setDiffMode(bool enabled) {
     diffMode_ = enabled;
@@ -35,8 +35,8 @@ void MainWindow::setDiffMode(bool enabled) {
     ui_->filterEdit->setPlaceholderText(
         enabled ? tr("Source, kind, category, before/after value, suppression…")
                 : tr("Source, target, compiler, define, include, status…"));
-    for (auto *tab : {ui_->overviewTab, ui_->commandTab, ui_->definesTab,
-                      ui_->includesTab, ui_->includeExplanationTab}) {
+    for (auto *tab : {ui_->overviewTab, ui_->commandTab, ui_->definesTab, ui_->includesTab,
+                      ui_->includeExplanationTab}) {
         ui_->detailTabs->setTabEnabled(ui_->detailTabs->indexOf(tab), !enabled);
     }
     ui_->detailTabs->setTabEnabled(ui_->detailTabs->indexOf(ui_->diagnosticsTab), true);
@@ -46,13 +46,18 @@ void MainWindow::setDiffMode(bool enabled) {
     const auto columns = enabled ? static_cast<int>(DiffTreeModel::ColumnCount)
                                  : static_cast<int>(CompilationTreeModel::ColumnCount);
     for (int column = 1; column < columns; ++column) {
-        ui_->sourceTree->header()->setSectionResizeMode(column,
-                                                        QHeaderView::ResizeToContents);
+        ui_->sourceTree->header()->setSectionResizeMode(column, QHeaderView::ResizeToContents);
+    }
+    for (int column = 0; column < columns; ++column)
+        ui_->sourceTree->setColumnHidden(column, false);
+    if (!enabled) {
+        ui_->sourceTree->setColumnHidden(CompilationTreeModel::TargetColumn, true);
+        ui_->sourceTree->setColumnHidden(CompilationTreeModel::CompilerColumn, true);
+        ui_->sourceTree->setColumnHidden(CompilationTreeModel::StandardColumn, true);
     }
 }
 
-void MainWindow::showDiffUnit(const DiffUnit &unit,
-                              std::optional<qsizetype> selectedChange) {
+void MainWindow::showDiffUnit(const DiffUnit &unit, std::optional<qsizetype> selectedChange) {
     const auto source = diffSourceLabel(unit.source);
     ui_->selectionLabel->setText(source);
     ui_->diffSummaryLabel->setText(
@@ -64,14 +69,12 @@ void MainWindow::showDiffUnit(const DiffUnit &unit,
     for (qsizetype row = 0; row < unit.changes.size(); ++row) {
         const auto &change = unit.changes.at(row);
         ui_->diffChangeTable->setItem(row, 0, diffTableItem(change.category));
-        ui_->diffChangeTable->setItem(row, 1,
-                                      diffTableItem(renderDiffValue(change.before)));
-        ui_->diffChangeTable->setItem(row, 2,
-                                      diffTableItem(renderDiffValue(change.after)));
-        ui_->diffChangeTable->setItem(
-            row, 3,
-            diffTableItem(change.suppression.has_value() ? *change.suppression
-                                                         : tr("visible")));
+        ui_->diffChangeTable->setItem(row, 1, diffTableItem(renderDiffValue(change.before)));
+        ui_->diffChangeTable->setItem(row, 2, diffTableItem(renderDiffValue(change.after)));
+        ui_->diffChangeTable->setItem(row, 3,
+                                      diffTableItem(change.suppression.has_value()
+                                                        ? *change.suppression
+                                                        : tr("visible")));
     }
     if (selectedChange.has_value() && *selectedChange < unit.changes.size()) {
         ui_->diffChangeTable->selectRow(*selectedChange);
@@ -81,4 +84,4 @@ void MainWindow::showDiffUnit(const DiffUnit &unit,
     ui_->detailTabs->setCurrentWidget(ui_->diffTab);
 }
 
-}  // namespace buildscope
+} // namespace buildscope

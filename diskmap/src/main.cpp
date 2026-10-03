@@ -1,4 +1,5 @@
 #include "diskmap/format.hpp"
+#include "diskmap/version.hpp"
 #include "diskmap/fs_node.hpp"
 #include "diskmap/fs_source.hpp"
 #include "diskmap/scanner.hpp"
@@ -18,7 +19,7 @@
 namespace {
 
 // The version --version prints. diskmap's single version surface.
-constexpr const char* kVersion = "0.1.1";  // x-release-please-version
+constexpr const char* kVersion = diskmap::kVersion;
 
 struct CliOptions {
     std::string path;
@@ -26,6 +27,10 @@ struct CliOptions {
     int max_depth = -1;
     std::size_t top = 10;
     std::uint64_t min_size = 0;
+    std::size_t max_nodes = 250'000;
+    std::size_t max_memory_bytes = 256U * 1024U * 1024U;
+    diskmap::DuplicateKeeperPolicy keeper_policy = diskmap::DuplicateKeeperPolicy::FirstPath;
+    std::string keeper_directory;
     bool json = false;
     bool follow_symlinks = false;
     bool one_file_system = false;
@@ -47,6 +52,11 @@ struct CliOptions {
 void printUsage(std::ostream& out) {
     out << "Usage: diskmap <path> [options]\n"
         << "   or: diskmap --load-snapshot FILE [options]\n"
+        << "  --max-nodes N       retained node budget (default 250000)\n"
+        << "  --max-memory SIZE   tree/listing memory estimate budget (default 256 MiB)\n"
+        << "  --exclude-preset build-caches  skip common build and dependency caches\n"
+        << "  --keep-policy first newest oldest preferred  duplicate keeper policy\n"
+        << "  --keep-under PATH   preferred keeper directory\n"
         << "  --max-depth N       limit scan traversal depth\n"
         << "  --follow-symlinks   follow symlinked directories\n"
         << "  --min-size BYTES    skip files smaller than BYTES\n"
@@ -169,6 +179,16 @@ bool applyValueOption(const std::vector<std::string>& args,
                       std::size_t& index,
                       const std::string& arg,
                       CliOptions& options) {
+    if (arg == "--max-nodes" || arg == "--max-memory") {
+        std::string value;
+        if (!takeStringOption(args, index, value)) { markInvalid(options, "missing resource budget"); return true; }
+        if (arg == "--max-nodes" && value.find_first_not_of("0123456789") != std::string::npos) { markInvalid(options, "--max-nodes expects an integer"); return true; }
+        const auto parsed = diskmap::parseHumanBytes(value);
+        if (!parsed || *parsed == 0 || *parsed > std::numeric_limits<std::size_t>::max()) { markInvalid(options, "invalid resource budget"); return true; }
+        if (arg == "--max-nodes") options.max_nodes = static_cast<std::size_t>(*parsed);
+        else options.max_memory_bytes = static_cast<std::size_t>(*parsed);
+        return true;
+    }
     if (arg == "--depth" || arg == "--max-depth") {
         int parsedValue = 0;
         if (!takeIntOption(args, index, parsedValue)) {
@@ -195,12 +215,11 @@ bool applyValueOption(const std::vector<std::string>& args,
     if (arg != "--min-size") {
         return false;
     }
-    std::uint64_t parsedValue = 0;
-    if (!takeUint64Option(args, index, parsedValue)) {
-        markInvalid(options, "--min-size expects a non-negative integer");
-        return true;
-    }
-    options.min_size = parsedValue;
+    std::string text;
+    if (!takeStringOption(args, index, text)) { markInvalid(options, "--min-size requires a size"); return true; }
+    const auto parsed = diskmap::parseHumanBytes(text);
+    if (!parsed) { markInvalid(options, "invalid size; use bytes, MB or MiB"); return true; }
+    options.min_size = *parsed;
     return true;
 }
 
@@ -208,6 +227,21 @@ bool applyStringOption(const std::vector<std::string>& args,
                        std::size_t& index,
                        const std::string& arg,
                        CliOptions& options) {
+    if (arg == "--keep-policy" || arg == "--keep-under" || arg == "--exclude-preset") {
+        std::string value;
+        if (!takeStringOption(args, index, value)) { markInvalid(options, "missing policy value"); return true; }
+        if (arg == "--keep-under") options.keeper_directory = value;
+        else if (arg == "--exclude-preset") {
+            if (value != "build-caches") markInvalid(options, "unknown exclusion preset");
+            else for (const auto* pattern : {".git", "node_modules", ".venv", "__pycache__", "build", ".cache"}) options.exclude_patterns.emplace_back(pattern);
+        } else {
+            const std::vector<std::string> names{"first", "newest", "oldest", "preferred"};
+            const auto found = std::find(names.begin(), names.end(), value);
+            if (found == names.end()) markInvalid(options, "unknown keeper policy");
+            else options.keeper_policy = static_cast<diskmap::DuplicateKeeperPolicy>(found - names.begin());
+        }
+        return true;
+    }
     std::string* destination = nullptr;
     if (arg == "--exclude") {
         std::string pattern;
@@ -336,7 +370,10 @@ void printJsonChildren(const diskmap::FsNode& node, int depth, int depthCap, std
 void printJson(const diskmap::FsNode& node, int depth, int depthCap, std::ostream& out) {
     out << "{\"name\":\"" << diskmap_cli::escapeJsonStringContent(node.name)
         << "\",\"is_dir\":"
-        << (node.is_dir ? "true" : "false") << ",\"size\":" << node.size;
+        << (node.is_dir ? "true" : "false") << ",\"size\":" << node.size
+        << ",\"complete\":" << (node.complete ? "true" : "false")
+        << ",\"logical_size_known\":" << (node.logical_size_known ? "true" : "false")
+        << ",\"error\":\"" << diskmap_cli::escapeJsonStringContent(node.error) << "\"";
     if (node.is_dir && !node.children.empty() && depth < depthCap) {
         printJsonChildren(node, depth, depthCap, out);
     }
@@ -440,6 +477,8 @@ int runDiskmap(const CliOptions& options) {
     // bounded traversal when they need to.
     diskmap::ScanOptions scanOptions;
     scanOptions.max_depth = options.max_depth;
+    scanOptions.max_nodes = options.max_nodes;
+    scanOptions.max_memory_bytes = options.max_memory_bytes;
     scanOptions.follow_symlinks = options.follow_symlinks;
     scanOptions.min_size = options.min_size;
     scanOptions.one_file_system = options.one_file_system;
@@ -485,11 +524,11 @@ int runDiskmap(const CliOptions& options) {
             if (!group.reclaimable || !group.certain || group.entries.size() < 2) {
                 continue;
             }
-            for (std::size_t index = 1; index < group.entries.size(); ++index) {
-                keys.push_back(group.entries[index].key);
-            }
+            const auto keeper = diskmap::chooseDuplicateKeeper(group, result, options.keeper_policy, options.keeper_directory);
+            if (!keeper) continue;
+            for (const auto& entry : group.entries) if (!(entry.key == *keeper)) keys.push_back(entry.key);
         }
-        const diskmap::CleanupPlan plan = diskmap::planCleanup(result, keys);
+        const diskmap::CleanupPlan plan = diskmap::planCleanup(result, keys, {}, &analysis);
         diskmap_cli::printCleanupPlan(plan, options.json, std::cout);
         return 0;
     }

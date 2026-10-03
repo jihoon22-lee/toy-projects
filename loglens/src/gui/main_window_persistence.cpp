@@ -2,6 +2,14 @@
 
 #include <QByteArray>
 #include <QComboBox>
+#include <QCheckBox>
+#include <QLabel>
+#include <QTableView>
+#include <QHeaderView>
+#include <QTabWidget>
+#include <QPushButton>
+#include "loglens/gui/log_model.hpp"
+#include "loglens/evidence.hpp"
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -342,6 +350,46 @@ bool MainWindow::saveSessionTo(const QString& path) {
     state.format = selectedFormat();
     state.multiline = selectedMultilinePolicy();
     state.max_record_bytes = static_cast<std::size_t>(maxRecordBytes_->value());
+    state.format_plugin = pluginPath_.toStdString();
+    state.search = searchEdit_->text().toStdString();
+    state.whole_file_search = wholeSearchEdit_->text().toStdString();
+    state.investigation_tab =
+        static_cast<std::size_t>(findChild<QTabWidget *>("investigationTabs")->currentIndex());
+    state.settings_open = findChild<QPushButton *>("sourceSettingsButton")->isChecked();
+    state.follow = followBox_->isChecked();
+    state.tail_mode = selectedLoadMode() == loglens::InitialLoadMode::TailRecords;
+    state.tail_records = static_cast<std::size_t>(tailRecords_->value());
+    state.selected_window = selectedWindow_;
+    state.baseline_window = baselineWindow_;
+    state.comparison_window = comparisonWindow_;
+    state.triage = triageState_;
+    state.layout = saveState(2).toBase64().toStdString();
+    state.geometry = saveGeometry().toBase64().toStdString();
+    state.table_header = table_->horizontalHeader()->saveState().toBase64().toStdString();
+    const auto evidence = loglens::captureSourceEvidence(state.source_path);
+    if (!evidence.ok()) {
+        updateStatus(tr("Cannot verify source before saving: %1")
+                         .arg(QString::fromStdString(evidence.error)));
+        return false;
+    }
+    state.source_identity = evidence.identity;
+    state.source_modified = evidence.modified;
+    state.source_fingerprint = evidence.fingerprint;
+    state.fingerprint_bytes = evidence.fingerprint_bytes;
+    state.source_size = evidence.size;
+    state.source_generation = model_->generation();
+    if (!pluginPath_.isEmpty()) {
+        const auto plugin = loglens::captureSourceEvidence(state.format_plugin, 4 * 1024 * 1024);
+        if (!plugin.ok() || plugin.fingerprint_bytes != plugin.size) {
+            updateStatus(tr("Cannot fingerprint parser plugin"));
+            return false;
+        }
+        if (!formatPlugin_ || plugin.fingerprint != formatPlugin_->document_fingerprint) {
+            updateStatus(tr("Parser plugin changed after loading; reload it before saving the investigation"));
+            return false;
+        }
+        state.plugin_fingerprint = formatPlugin_->document_fingerprint;
+    }
     const QByteArray filterBytes = filterEdit_->text().toUtf8();
     state.filter = std::string(filterBytes.constData(),
                                static_cast<std::size_t>(filterBytes.size()));
@@ -379,7 +427,36 @@ bool MainWindow::openSession(const QString& path) {
         updateStatus(tr("Session file not found"));
         return false;
     }
-    const loglens::SessionState& state = result.state;
+    loglens::SessionState state = result.state;
+    // Validate the parser before changing the active investigation.
+    if (!setFormatPluginPath(utf8String(state.format_plugin)))
+        return false;
+    QString evidenceNotice;
+    const auto evidence = loglens::captureSourceEvidence(state.source_path);
+    const bool sameSource = evidence.ok() && !state.source_fingerprint.empty() &&
+                            evidence.identity == state.source_identity &&
+                            evidence.size == state.source_size &&
+                            evidence.modified == state.source_modified &&
+                            evidence.fingerprint == state.source_fingerprint &&
+                            evidence.fingerprint_bytes == state.fingerprint_bytes;
+    if (!sameSource)
+        evidenceNotice =
+            tr("Source changed or lacks a saved fingerprint; unmatched notes remain archived");
+    if (!state.format_plugin.empty() && !state.plugin_fingerprint.empty()) {
+        const auto plugin = loglens::captureSourceEvidence(state.format_plugin, 4 * 1024 * 1024);
+        if (!plugin.ok() || plugin.fingerprint != state.plugin_fingerprint)
+            evidenceNotice += tr(" · Parser plugin changed");
+    }
+    if (sameSource) {
+        for (auto &entry : state.triage.entries) {
+            if (entry.source_identity == state.source_identity &&
+                entry.generation == state.source_generation)
+                entry.generation = 0;
+        }
+    }
+    // A session owns a complete investigation state; legacy files carry an empty triage state.
+    triageState_ = state.triage;
+    rebuildHighlightRules();
     setProfileControls(loglens::SourceProfile{state.name, state.format, state.multiline,
                                             state.max_record_bytes});
     // The CLI applies --level and --filter as two expressions that must both
@@ -402,6 +479,43 @@ bool MainWindow::openSession(const QString& path) {
                          .arg(utf8String(state.name)));
         return true;
     }
+    followBox_->setChecked(state.follow);
+    loadMode_->setCurrentIndex(state.tail_mode ? 0 : 1);
+    tailRecords_->setValue(static_cast<int>(std::min(state.tail_records, record_capacity_)));
+    searchEdit_->setText(utf8String(state.search));
+    wholeSearchEdit_->setText(utf8String(state.whole_file_search));
+    findChild<QTabWidget *>("investigationTabs")
+        ->setCurrentIndex(static_cast<int>(state.investigation_tab));
+    findChild<QPushButton *>("sourceSettingsButton")->setChecked(state.settings_open);
     openPath(utf8String(state.source_path));
+    pendingSession_ = state;
+    sessionEvidenceNotice_ = evidenceNotice;
+    if (!state.layout.empty())
+        restoreState(QByteArray::fromBase64(QByteArray::fromStdString(state.layout)), 2);
+    if (!state.geometry.empty())
+        restoreGeometry(QByteArray::fromBase64(QByteArray::fromStdString(state.geometry)));
+    if (!state.table_header.empty())
+        table_->horizontalHeader()->restoreState(
+            QByteArray::fromBase64(QByteArray::fromStdString(state.table_header)));
+    return true;
+}
+
+bool MainWindow::setFormatPluginPath(const QString &path) {
+    if (path.isEmpty()) {
+        formatPlugin_.reset();
+        pluginPath_.clear();
+        pluginLabel_->setText(tr("Built-in parser"));
+        return true;
+    }
+    auto plugin = std::make_shared<loglens::FormatPlugin>();
+    std::string error;
+    if (loglens::loadFormatPlugin(path.toStdString(), *plugin, error) !=
+        loglens::FormatPluginError::None) {
+        updateStatus(tr("Cannot load parser plugin: %1").arg(QString::fromStdString(error)));
+        return false;
+    }
+    pluginPath_ = QFileInfo(path).absoluteFilePath();
+    pluginLabel_->setText(tr("Plugin: %1").arg(QString::fromStdString(plugin->name)));
+    formatPlugin_ = std::move(plugin);
     return true;
 }

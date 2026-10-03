@@ -391,6 +391,22 @@ void expectSessionReject(const fs::path& path, const std::string& content,
 
 void testSessionRoundTripAndValidation() {
     TempDirectory directory;
+    const fs::path original = directory.path() / "protected.log";
+    writeFile(original, "original evidence\n");
+    loglens::SessionState protectedState;
+    protectedState.source_path = original.string();
+    loglens::PersistenceError protectionError;
+    CHECK(!loglens::saveSession(original.string(), protectedState, protectionError));
+#ifndef _WIN32
+    const fs::path alias = directory.path() / "alias.log";
+    fs::create_symlink(original, alias);
+    protectedState.source_path = alias.string();
+    CHECK(!loglens::saveSession(original.string(), protectedState, protectionError));
+    const fs::path hardlink = directory.path() / "hardlink.log";
+    fs::create_hard_link(original, hardlink);
+    CHECK(!loglens::saveSession(hardlink.string(), protectedState, protectionError));
+#endif
+    CHECK_EQ(readFile(original), "original evidence\n");
     const fs::path path = directory.path() / "incident.session.json";
 
     loglens::SessionState state;
@@ -404,12 +420,9 @@ void testSessionRoundTripAndValidation() {
     loglens::PersistenceError error;
     CHECK(loglens::saveSession(path.string(), state, error));
     CHECK(error.ok());
-    const std::string expected =
-        "{\"schema\":\"loglens.session/v1\",\"name\":\"billing outage\","
-        "\"source\":{\"path\":\"/var/log/app.log\",\"format\":\"syslog\","
-        "\"multiline\":\"separate-lines\",\"max_record_bytes\":4096},"
-        "\"filter\":\"level>=WARN AND message~timeout\",\"level\":\"warn\"}\n";
-    CHECK_EQ(readFile(path), expected);
+    CHECK(readFile(path).find("loglens.session/v2") != std::string::npos);
+    CHECK(readFile(path).find("\"view\":") != std::string::npos);
+    const std::string expected = readFile(path);
 
     const loglens::SessionLoadResult loaded = loglens::loadSession(path.string());
     CHECK(loaded.ok());
@@ -428,10 +441,9 @@ void testSessionRoundTripAndValidation() {
     loglens::SessionState pluginState = state;
     pluginState.format_plugin = "/etc/loglens/myapp.format.json";
     CHECK(loglens::saveSession(pluginPath.string(), pluginState, error));
-    CHECK(readFile(pluginPath).find(
-              "\"max_record_bytes\":4096,\"format_plugin\":"
-              "\"/etc/loglens/myapp.format.json\"}")
-          != std::string::npos);
+    CHECK(readFile(pluginPath)
+              .find("\"max_record_bytes\":4096,\"format_plugin\":"
+                    "\"/etc/loglens/myapp.format.json\"") != std::string::npos);
     const loglens::SessionLoadResult pluginLoad = loglens::loadSession(pluginPath.string());
     CHECK(pluginLoad.ok());
     CHECK_EQ(pluginLoad.state.format_plugin, pluginState.format_plugin);

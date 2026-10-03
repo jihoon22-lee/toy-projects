@@ -3,6 +3,12 @@
 #include <QAbstractItemView>
 #include <QAbstractItemModel>
 #include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QFormLayout>
+#include "diskmap/format.hpp"
+#include <QCheckBox>
+#include <QTabWidget>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -64,6 +70,35 @@ void MainWindow::buildNavigationBar(QWidget* central, QVBoxLayout* layout) {
     bar->addWidget(saveSnapshotButton_);
     bar->addWidget(loadSnapshotButton_);
     bar->addWidget(compareSnapshotButton_);
+    auto* limitsButton = new QPushButton(tr("Scan limits…"), central);
+    limitsButton->setObjectName("scanLimitsButton");
+    bar->addWidget(limitsButton);
+    connect(limitsButton, &QPushButton::clicked, this, [this]() {
+        QDialog dialog(this); dialog.setWindowTitle(tr("Scan budgets and exclusions"));
+        auto* form = new QFormLayout(&dialog);
+        auto* nodes = new QLineEdit(QString::number(scanOptions_.max_nodes), &dialog);
+        auto* memory = new QLineEdit(QString::number(scanOptions_.max_memory_bytes) + " B", &dialog);
+        auto* exclusions = new QComboBox(&dialog);
+        exclusions->addItems({tr("Keep current exclusions"), tr("Build and dependency caches"), tr("No exclusions")});
+        auto* error = new QLabel(&dialog); error->setWordWrap(true);
+        form->addRow(tr("Maximum retained nodes"), nodes);
+        form->addRow(tr("Memory estimate budget (e.g. 256 MiB)"), memory);
+        form->addRow(tr("Exclusion preset"), exclusions);
+        form->addRow(error);
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+        form->addRow(buttons);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, [&, this]() {
+            bool valid = false; const auto count = nodes->text().toULongLong(&valid);
+            const auto bytes = diskmap::parseHumanBytes(memory->text().toStdString());
+            if (!valid || !count || !bytes || !*bytes) { error->setText(tr("Enter positive node and byte budgets")); return; }
+            scanOptions_.max_nodes = count; scanOptions_.max_memory_bytes = *bytes;
+            if (exclusions->currentIndex() == 1) scanOptions_.exclude_patterns = {".git", "node_modules", ".venv", "__pycache__", "build", ".cache"};
+            else if (exclusions->currentIndex() == 2) scanOptions_.exclude_patterns.clear();
+            dialog.accept();
+        });
+        dialog.exec();
+    });
     bar->addWidget(breadcrumbBar_, 1);
     layout->addLayout(bar);
 }
@@ -110,12 +145,8 @@ void MainWindow::buildFilterPanel(QWidget* central, QVBoxLayout* layout) {
     maximumSizeEdit_->setObjectName(QStringLiteral("maximumSizeEdit"));
     maximumSizeEdit_->setAccessibleName(tr("Maximum size in bytes"));
     maximumSizeEdit_->setPlaceholderText(tr("none"));
-    auto* byteValidator =
-        new QRegularExpressionValidator(QRegularExpression(QStringLiteral("[0-9]{0,20}")),
-                                        central);
-    minimumSizeEdit_->setValidator(byteValidator);
-    maximumSizeEdit_->setValidator(byteValidator);
-
+    minimumSizeEdit_->setPlaceholderText(tr("e.g. 500 MB or 2 GiB"));
+    maximumSizeEdit_->setPlaceholderText(tr("e.g. 2 GiB"));
     issueCombo_ = new QComboBox(central);
     issueCombo_->setObjectName(QStringLiteral("issueCombo"));
     issueCombo_->setAccessibleName(tr("Scan state filter"));
@@ -153,9 +184,9 @@ void MainWindow::buildFilterPanel(QWidget* central, QVBoxLayout* layout) {
     panel->addWidget(typeCombo_, 0, 7);
     panel->addWidget(new QLabel(tr("Age"), central), 0, 8);
     panel->addWidget(ageCombo_, 0, 9);
-    panel->addWidget(new QLabel(tr("Min bytes"), central), 1, 0);
+    panel->addWidget(new QLabel(tr("Min size"), central), 1, 0);
     panel->addWidget(minimumSizeEdit_, 1, 1);
-    panel->addWidget(new QLabel(tr("Max bytes"), central), 1, 2);
+    panel->addWidget(new QLabel(tr("Max size"), central), 1, 2);
     panel->addWidget(maximumSizeEdit_, 1, 3);
     panel->addWidget(new QLabel(tr("State"), central), 1, 4);
     panel->addWidget(issueCombo_, 1, 5);
@@ -228,74 +259,94 @@ void MainWindow::buildExplorer(QWidget* central, QVBoxLayout* layout) {
     projectionSummary_->setObjectName(QStringLiteral("projectionSummary"));
     projectionSummary_->setAccessibleName(tr("Projection item count"));
     projectionSummary_->setTextFormat(Qt::PlainText);
+    colorCombo_ = new QComboBox(central);
+    colorCombo_->setObjectName("treemapColorCombo");
+    colorCombo_->setAccessibleName(tr("Treemap colors"));
+    colorCombo_->addItems({tr("Name colors"), tr("File type colors"), tr("Scan state colors"), tr("Snapshot change colors")});
+    colorCombo_->setCurrentIndex(1);
+    footer->addWidget(colorCombo_);
+    connect(colorCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int mode) {
+        treemap_->setColorMode(static_cast<TreemapWidget::ColorMode>(mode));
+        legend_->setText(mode == 3 ? tr("Orange: added/grown · blue: shrunk · purple: moved/uncertain · gray: no observation")
+            : mode == 2 ? tr("Green: exact · amber: incomplete/unknown") : tr("Color groups entries · hatching = uncertain · white border = selected"));
+    });
     footer->addWidget(legend_);
     footer->addStretch(1);
     footer->addWidget(projectionSummary_);
     layout->addLayout(footer);
 }
 
-void MainWindow::buildEvidencePanel(QWidget* central, QVBoxLayout* layout) {
-    auto* heading = new QLabel(
-        tr("Storage evidence — snapshots and duplicate candidates are review-only"), central);
-    heading->setObjectName(QStringLiteral("evidenceHeading"));
-    heading->setAccessibleName(tr("Storage evidence"));
-    layout->addWidget(heading);
-
-    auto* actions = new QHBoxLayout();
-    analyzeDuplicatesButton_ = new QPushButton(tr("Analyze duplicates"), central);
-    analyzeDuplicatesButton_->setObjectName(QStringLiteral("analyzeDuplicatesButton"));
-    analyzeDuplicatesButton_->setAccessibleName(tr("Analyze duplicate file evidence"));
-    stageDuplicatesButton_ = new QPushButton(tr("Stage safe duplicate copies"), central);
-    stageDuplicatesButton_->setObjectName(QStringLiteral("stageDuplicatesButton"));
-    stageDuplicatesButton_->setAccessibleName(
-        tr("Stage certain reclaimable duplicate copies for cleanup review"));
-    actions->addWidget(analyzeDuplicatesButton_);
-    actions->addWidget(stageDuplicatesButton_);
-    actions->addStretch(1);
-
-    snapshotSummary_ = new QLabel(tr("No snapshot comparison"), central);
-    snapshotSummary_->setObjectName(QStringLiteral("snapshotSummary"));
-    snapshotSummary_->setAccessibleName(tr("Snapshot comparison summary"));
-    snapshotSummary_->setTextFormat(Qt::PlainText);
-    actions->addWidget(snapshotSummary_);
-    layout->addLayout(actions);
-
-    duplicateSummary_ = new QLabel(tr("No duplicate analysis"), central);
-    duplicateSummary_->setObjectName(QStringLiteral("duplicateSummary"));
-    duplicateSummary_->setAccessibleName(tr("Duplicate analysis summary"));
-    duplicateSummary_->setTextFormat(Qt::PlainText);
-    duplicateSummary_->setWordWrap(true);
-    layout->addWidget(duplicateSummary_);
-
-    auto* splitter = new QSplitter(Qt::Horizontal, central);
-    splitter->setObjectName(QStringLiteral("evidenceSplitter"));
-    duplicateEvidenceTable_ = new QTableWidget(splitter);
-    duplicateEvidenceTable_->setObjectName(QStringLiteral("duplicateEvidenceTable"));
-    duplicateEvidenceTable_->setAccessibleName(tr("Duplicate evidence"));
+void MainWindow::buildEvidencePanel(QWidget*, QVBoxLayout*) {
+    auto* duplicates = new QWidget(workbenchTabs_);
+    auto* duplicateLayout = new QVBoxLayout(duplicates);
+    auto* actions = new QHBoxLayout;
+    analyzeDuplicatesButton_ = new QPushButton(tr("Analyze duplicates"), duplicates);
+    analyzeDuplicatesButton_->setObjectName("analyzeDuplicatesButton");
+    stageDuplicatesButton_ = new QPushButton(tr("Stage safe duplicate copies"), duplicates);
+    stageDuplicatesButton_->setObjectName("stageDuplicatesButton");
+    keepSelectedButton_ = new QPushButton(tr("Keep selected copy"), duplicates);
+    keepSelectedButton_->setObjectName("keepSelectedDuplicateButton");
+    keeperPolicyCombo_ = new QComboBox(duplicates);
+    keeperPolicyCombo_->setObjectName("keeperPolicyCombo");
+    keeperPolicyCombo_->setAccessibleName(tr("Duplicate copy to keep"));
+    keeperPolicyCombo_->addItems({tr("Keep first path"), tr("Keep newest"), tr("Keep oldest"), tr("Prefer folder")});
+    keeperDirectoryEdit_ = new QLineEdit(duplicates);
+    keeperDirectoryEdit_->setObjectName("keeperDirectoryEdit");
+    keeperDirectoryEdit_->setPlaceholderText(tr("Preferred absolute folder"));
+    actions->addWidget(analyzeDuplicatesButton_); actions->addWidget(stageDuplicatesButton_);
+    actions->addWidget(keepSelectedButton_); actions->addWidget(keeperPolicyCombo_);
+    duplicateLayout->addLayout(actions);
+    duplicateLayout->addWidget(keeperDirectoryEdit_);
+    duplicateSummary_ = new QLabel(tr("No duplicate analysis"), duplicates);
+    duplicateSummary_->setObjectName("duplicateSummary");
+    duplicateSummary_->setWordWrap(true); duplicateSummary_->setTextFormat(Qt::PlainText);
+    duplicateLayout->addWidget(duplicateSummary_);
+    duplicateEvidenceTable_ = new QTableWidget(duplicates);
+    duplicateEvidenceTable_->setObjectName("duplicateEvidenceTable");
     duplicateEvidenceTable_->setColumnCount(6);
-    duplicateEvidenceTable_->setHorizontalHeaderLabels(
-        {tr("Group"), tr("Confidence"), tr("Path"), tr("Size"), tr("Content hash"),
-         tr("Reclamation")});
+    duplicateEvidenceTable_->setHorizontalHeaderLabels({tr("Group"), tr("Confidence"), tr("Path"), tr("Size"), tr("Content hash"), tr("Keep / stage")});
     duplicateEvidenceTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
-    duplicateEvidenceTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
     duplicateEvidenceTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     duplicateEvidenceTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
     duplicateEvidenceTable_->setSelectionMode(QAbstractItemView::SingleSelection);
+    duplicateLayout->addWidget(duplicateEvidenceTable_, 1);
+    workbenchTabs_->addTab(duplicates, tr("Duplicates"));
 
-    snapshotChangesTable_ = new QTableWidget(splitter);
-    snapshotChangesTable_->setObjectName(QStringLiteral("snapshotChangesTable"));
-    snapshotChangesTable_->setAccessibleName(tr("Snapshot comparison changes"));
-    snapshotChangesTable_->setColumnCount(5);
-    snapshotChangesTable_->setHorizontalHeaderLabels(
-        {tr("Change"), tr("Confidence"), tr("Before"), tr("After"), tr("Reason")});
+    auto* changes = new QWidget(workbenchTabs_);
+    auto* changeLayout = new QVBoxLayout(changes);
+    auto* filters = new QHBoxLayout;
+    diffKindCombo_ = new QComboBox(changes); diffKindCombo_->setObjectName("diffKindCombo");
+    diffKindCombo_->addItem(tr("All changes"), -1);
+    const QStringList names{tr("Added"), tr("Removed"), tr("Grown"), tr("Shrunk"), tr("Moved"), tr("Uncertain")};
+    for (int i = 0; i < names.size(); ++i) diffKindCombo_->addItem(names[i], i);
+    diffCertainOnly_ = new QCheckBox(tr("Certain only"), changes); diffCertainOnly_->setObjectName("diffCertainOnly");
+    diffMinimumEdit_ = new QLineEdit(changes); diffMinimumEdit_->setObjectName("diffMinimumEdit");
+    diffMinimumEdit_->setPlaceholderText(tr("Minimum change, e.g. 500 MB"));
+    diffPathEdit_ = new QLineEdit(changes); diffPathEdit_->setObjectName("diffPathEdit");
+    diffPathEdit_->setPlaceholderText(tr("Filter path / folder"));
+    filters->addWidget(diffKindCombo_); filters->addWidget(diffCertainOnly_);
+    filters->addWidget(diffMinimumEdit_); filters->addWidget(diffPathEdit_);
+    changeLayout->addLayout(filters);
+    snapshotSummary_ = new QLabel(tr("No snapshot comparison"), changes);
+    snapshotSummary_->setObjectName("snapshotSummary"); snapshotSummary_->setWordWrap(true);
+    snapshotSummary_->setTextFormat(Qt::PlainText); changeLayout->addWidget(snapshotSummary_);
+    folderSummary_ = new QLabel(changes); folderSummary_->setObjectName("folderChangeSummary");
+    folderSummary_->setWordWrap(true); folderSummary_->setTextFormat(Qt::PlainText);
+    changeLayout->addWidget(folderSummary_);
+    snapshotChangesTable_ = new QTableWidget(changes); snapshotChangesTable_->setObjectName("snapshotChangesTable");
+    snapshotChangesTable_->setColumnCount(6);
+    snapshotChangesTable_->setHorizontalHeaderLabels({tr("Change"), tr("Confidence"), tr("Before"), tr("After"), tr("Reason"), tr("Change in bytes")});
     snapshotChangesTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
     snapshotChangesTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    snapshotChangesTable_->setSelectionMode(QAbstractItemView::NoSelection);
-    splitter->addWidget(duplicateEvidenceTable_);
-    splitter->addWidget(snapshotChangesTable_);
-    splitter->setStretchFactor(0, 1);
-    splitter->setStretchFactor(1, 1);
-    layout->addWidget(splitter);
+    changeLayout->addWidget(snapshotChangesTable_, 1);
+    workbenchTabs_->addTab(changes, tr("Snapshot changes"));
+    connect(keepSelectedButton_, &QPushButton::clicked, this, &MainWindow::keepSelectedDuplicate);
+    connect(keeperPolicyCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() { refreshDuplicateEvidence(); });
+    connect(keeperDirectoryEdit_, &QLineEdit::editingFinished, this, [this]() { refreshDuplicateEvidence(); });
+    connect(diffKindCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() { refreshSnapshotChanges(); });
+    connect(diffCertainOnly_, &QCheckBox::toggled, this, [this]() { refreshSnapshotChanges(); });
+    connect(diffMinimumEdit_, &QLineEdit::editingFinished, this, &MainWindow::refreshSnapshotChanges);
+    connect(diffPathEdit_, &QLineEdit::textChanged, this, [this]() { refreshSnapshotChanges(); });
 }
 
 void MainWindow::buildCleanupPanel(QWidget* central, QVBoxLayout* layout) {
@@ -335,6 +386,10 @@ void MainWindow::buildCleanupPanel(QWidget* central, QVBoxLayout* layout) {
     restoreTrashButton_->setAccessibleName(tr("Restore selected Trash item"));
     actions->addWidget(restoreTokenCombo_);
     actions->addWidget(restoreTrashButton_);
+    auto* history = new QPushButton(tr("Reload Trash history"), central);
+    history->setObjectName("reloadTrashHistoryButton");
+    actions->addWidget(history);
+    connect(history, &QPushButton::clicked, this, &MainWindow::recoverTrashHistory);
     layout->addLayout(actions);
 
     cleanupSummary_ = new QLabel(tr("No items staged"), central);
@@ -429,6 +484,14 @@ void MainWindow::connectUi() {
         restoreSelection();
         modelResetInProgress_ = false;
     });
+    connect(treemap_, &TreemapWidget::nodeSelected, this, [this](diskmap::NodeKey key) {
+        selectedKey_ = key;
+        const auto index = tableModel_->indexForKey(key);
+        if (index.isValid()) {
+            table_->selectionModel()->setCurrentIndex(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+            table_->scrollTo(index);
+        }
+    });
     connect(treemap_, &TreemapWidget::nodeActivated, this, &MainWindow::onNodeActivated);
     connect(treemap_, &TreemapWidget::nodeHovered, this, &MainWindow::onNodeHovered);
     connect(treemap_, &TreemapWidget::hoverCleared, this, &MainWindow::clearHover);
@@ -475,7 +538,8 @@ void MainWindow::updateMetricExplanation() {
 void MainWindow::updateControlState() {
     const bool scanning = activeCancellation_ != nullptr;
     const bool analyzing = activeDuplicateCancellation_ != nullptr;
-    const bool busy = scanning || analyzing;
+    const bool busy = scanning || analyzing || activeStorageCancellation_;
+    chooseButton_->setEnabled(!busy);
     updateActivityControls(scanning, analyzing);
     updateNavigationControls(busy);
     updateExplorerControls(busy);
@@ -488,7 +552,7 @@ void MainWindow::updateActivityControls(bool scanning, bool analyzing) {
     const bool scanCancellable = scanning && !activeCancellation_->isCancelled();
     const bool duplicateCancellable =
         analyzing && !activeDuplicateCancellation_->isCancelled();
-    cancelButton_->setEnabled(scanCancellable || duplicateCancellable);
+    cancelButton_->setEnabled(scanCancellable || duplicateCancellable || (activeStorageCancellation_ && !activeStorageCancellation_->isCancelled()));
 }
 
 void MainWindow::updateNavigationControls(bool busy) {
@@ -524,6 +588,8 @@ void MainWindow::updateCleanupControls(bool busy) {
 void MainWindow::updateEvidenceControls(bool busy) {
     const bool enabled = document_ != nullptr && !busy;
     analyzeDuplicatesButton_->setEnabled(enabled);
+    keepSelectedButton_->setEnabled(enabled && !duplicateAnalysis_.groups.empty());
+    keeperPolicyCombo_->setEnabled(enabled); keeperDirectoryEdit_->setEnabled(enabled);
     stageDuplicatesButton_->setEnabled(enabled && !documentIsSnapshot_
                                         && hasReclaimableDuplicateCandidates());
 }

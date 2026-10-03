@@ -1,5 +1,7 @@
 #pragma once
 
+#include "native_relocation.hpp"
+#include <atomic>
 #include <QJsonObject>
 #include <QString>
 
@@ -11,7 +13,8 @@ constexpr qint64 kMaxSnapshotBytes = 256 * 1024 * 1024;
 constexpr int kMaxEntries = 100000;
 constexpr qsizetype kMaxFieldChars = 1024 * 1024;
 
-QJsonObject loadCompilationDatabase(const QString &path, const QString &projectRoot);
+QJsonObject loadCompilationDatabase(const QString &path, const QString &projectRoot,
+                                    const QList<RootMapping> &mappings = {}, std::atomic_bool *cancel = nullptr);
 QString dumpsSnapshot(const QJsonObject &snapshot, bool pretty);
 QJsonObject snapshotForSchema(QJsonObject snapshot, const QString &schema);
 

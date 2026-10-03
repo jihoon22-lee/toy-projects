@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=BuildScope
+Comment=Inspect compilation databases and include impact
+Exec=buildscope-gui %f
+Icon=buildscope
+Terminal=false
+Categories=Development;IDE;
+Keywords=C++;compiler;includes;build;

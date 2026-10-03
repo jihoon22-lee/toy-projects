@@ -93,6 +93,8 @@ struct DuplicateEntry {
     std::string partial_fingerprint;
     std::string content_hash;
     bool certain = false;
+    std::int64_t modified_ns = 0;
+    bool modified_time_known = false;
 };
 
 struct DuplicateGroup {

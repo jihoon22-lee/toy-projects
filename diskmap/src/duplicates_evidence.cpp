@@ -150,7 +150,9 @@ bool prepareGroup(const std::vector<std::size_t>& indices,
                                                candidate.evidence.hard_link_count_known,
                                                candidate.partial,
                                                candidate.hash,
-                                               candidate.scan_certain});
+                                               candidate.scan_certain,
+                                               candidate.evidence.modified_ns,
+                                               candidate.evidence.modified_time_known});
     }
     std::sort(group.entries.begin(), group.entries.end(), [](const DuplicateEntry& left,
                                                               const DuplicateEntry& right) {

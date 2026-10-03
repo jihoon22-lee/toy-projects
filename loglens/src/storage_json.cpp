@@ -333,4 +333,48 @@ const StorageJsonNode* findStorageJsonField(const StorageJsonNode& object,
     return nullptr;
 }
 
+std::string serializeStorageJson(const StorageJsonNode &value) {
+    if (value.kind == StorageJsonKind::String) {
+        std::string output = "\"";
+        constexpr char digits[] = "0123456789abcdef";
+        for (unsigned char c : value.text) {
+            if (c == '\\' || c == '\"') {
+                output += '\\';
+                output += static_cast<char>(c);
+            } else if (c < 0x20) {
+                output += "\\u00";
+                output += digits[c >> 4];
+                output += digits[c & 15];
+            } else
+                output += static_cast<char>(c);
+        }
+        return output + "\"";
+    }
+    if (value.kind == StorageJsonKind::Null)
+        return "null";
+    if (value.kind == StorageJsonKind::Number || value.kind == StorageJsonKind::Boolean)
+        return value.text;
+    std::string output = value.kind == StorageJsonKind::Array ? "[" : "{";
+    bool first = true;
+    if (value.kind == StorageJsonKind::Array) {
+        for (const auto &item : value.array) {
+            if (!first)
+                output += ',';
+            first = false;
+            output += serializeStorageJson(item);
+        }
+        return output + "]";
+    }
+    for (const auto &item : value.object) {
+        if (!first)
+            output += ',';
+        first = false;
+        StorageJsonNode key;
+        key.kind = StorageJsonKind::String;
+        key.text = item.first;
+        output += serializeStorageJson(key) + ":" + serializeStorageJson(item.second);
+    }
+    return output + "}";
+}
+
 } // namespace loglens::detail

@@ -39,7 +39,8 @@ QStringList requiredStringArray(const QJsonObject &object, const QString &key,
 ParsedRawEntry parseRawEntry(const QJsonValue &value, qsizetype index, bool normalized,
                              bool v3 = false);
 SnapshotEntry parseV2Entry(const QJsonValue &value, qsizetype index);
+SnapshotEntry parseV4Entry(const QJsonValue &value, qsizetype index);
 SnapshotEntry parseV3Entry(const QJsonValue &value, qsizetype index);
-Snapshot parseSnapshotDocument(const QJsonDocument &document);
+Snapshot parseSnapshotDocument(const QJsonDocument &document, std::atomic_bool *cancel = nullptr);
 
 }  // namespace buildscope::detail

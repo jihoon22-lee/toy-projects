@@ -1,0 +1,582 @@
+{
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "testlens.diff/v1"
+    },
+    "producer": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "const": "testlens"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "additionalProperties": false
+    },
+    "baseline_run_id": {
+      "type": "string"
+    },
+    "current_run_id": {
+      "type": "string"
+    },
+    "complete": {
+      "type": "boolean"
+    },
+    "missing_interpretation": {
+      "const": "absent-from-observed-results"
+    },
+    "thresholds": {
+      "type": "object",
+      "properties": {
+        "relative": {
+          "type": "number",
+          "minimum": 0
+        },
+        "absolute_seconds": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "relative",
+        "absolute_seconds"
+      ],
+      "additionalProperties": false
+    },
+    "changes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "new-test-failure",
+              "added",
+              "missing",
+              "new-failure",
+              "recovered",
+              "persistent-failure",
+              "status-changed",
+              "unchanged"
+            ]
+          },
+          "before": {
+            "anyOf": [
+              {
+                "enum": [
+                  "passed",
+                  "failed",
+                  "error",
+                  "skipped",
+                  "not-run",
+                  "unknown"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "after": {
+            "anyOf": [
+              {
+                "enum": [
+                  "passed",
+                  "failed",
+                  "error",
+                  "skipped",
+                  "not-run",
+                  "unknown"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "before_duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "after_duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "delta_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "relative_change": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "slowdown": {
+            "type": "boolean"
+          },
+          "alias_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "before_evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "suite": {
+                  "type": "string"
+                },
+                "classname": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "passed",
+                    "failed",
+                    "error",
+                    "skipped",
+                    "not-run",
+                    "unknown"
+                  ]
+                },
+                "duration_seconds": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "granularity": {
+                  "enum": [
+                    "runner-target",
+                    "test-case"
+                  ]
+                },
+                "source_id": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "locator": {
+                  "type": "string"
+                },
+                "source_file": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "source_line": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "source_file_normalized": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "output": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "truncated"
+                  ],
+                  "additionalProperties": false
+                },
+                "messages": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "type": "string"
+                      },
+                      "message": {
+                        "type": "string"
+                      },
+                      "text": {
+                        "type": "string"
+                      },
+                      "truncated": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "type",
+                      "message",
+                      "text",
+                      "truncated"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "properties": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "attempt": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "shard": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "expected_outcome": {
+                  "enum": [
+                    null,
+                    "xfail",
+                    "xpass"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "suite",
+                "classname",
+                "status",
+                "duration_seconds",
+                "granularity",
+                "source_id",
+                "locator",
+                "source_file",
+                "source_line",
+                "source_file_normalized",
+                "output",
+                "messages",
+                "properties",
+                "attempt",
+                "shard",
+                "expected_outcome"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "after_evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "suite": {
+                  "type": "string"
+                },
+                "classname": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "passed",
+                    "failed",
+                    "error",
+                    "skipped",
+                    "not-run",
+                    "unknown"
+                  ]
+                },
+                "duration_seconds": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "granularity": {
+                  "enum": [
+                    "runner-target",
+                    "test-case"
+                  ]
+                },
+                "source_id": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "locator": {
+                  "type": "string"
+                },
+                "source_file": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "source_line": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "source_file_normalized": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "output": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "truncated"
+                  ],
+                  "additionalProperties": false
+                },
+                "messages": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "type": "string"
+                      },
+                      "message": {
+                        "type": "string"
+                      },
+                      "text": {
+                        "type": "string"
+                      },
+                      "truncated": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "type",
+                      "message",
+                      "text",
+                      "truncated"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "properties": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "attempt": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "shard": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "expected_outcome": {
+                  "enum": [
+                    null,
+                    "xfail",
+                    "xpass"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "suite",
+                "classname",
+                "status",
+                "duration_seconds",
+                "granularity",
+                "source_id",
+                "locator",
+                "source_file",
+                "source_line",
+                "source_file_normalized",
+                "output",
+                "messages",
+                "properties",
+                "attempt",
+                "shard",
+                "expected_outcome"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "before",
+          "after",
+          "before_duration_seconds",
+          "after_duration_seconds",
+          "delta_seconds",
+          "relative_change",
+          "slowdown",
+          "alias_from",
+          "before_evidence",
+          "after_evidence"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "producer",
+    "baseline_run_id",
+    "current_run_id",
+    "complete",
+    "missing_interpretation",
+    "thresholds",
+    "changes",
+    "summary"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "testlens.diff/v1"
+}

@@ -35,6 +35,11 @@ public:
     virtual std::vector<DirEntry> list(const std::filesystem::path& path,
                                        std::string& error,
                                        const CancellationCheck& cancelled = {}) const = 0;
+    // RealFsSource enforces this before retaining each directory entry. Custom
+    // sources should override it when they generate large listings themselves.
+    virtual std::vector<DirEntry> listBounded(const std::filesystem::path& path,
+        std::string& error, std::size_t max_entries, std::size_t max_bytes,
+        const CancellationCheck& cancelled = {}) const;
 
     // Reads metadata for the path itself or its target. The default keeps
     // scripted sources source-compatible; real filesystems override it so the
@@ -44,6 +49,9 @@ public:
 
 class RealFsSource : public FsSource {
 public:
+    std::vector<DirEntry> listBounded(const std::filesystem::path& path,
+        std::string& error, std::size_t max_entries, std::size_t max_bytes,
+        const CancellationCheck& cancelled = {}) const override;
     std::vector<DirEntry> list(const std::filesystem::path& path,
                                std::string& error,
                                const CancellationCheck& cancelled = {}) const override;

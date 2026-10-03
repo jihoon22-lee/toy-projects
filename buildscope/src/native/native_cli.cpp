@@ -1,8 +1,13 @@
+#include "buildscope/contract.hpp"
+#include "buildscope/impact.hpp"
 #include "native_diff.hpp"
 #include "native_error.hpp"
 #include "native_include.hpp"
 #include "native_io.hpp"
+#include "native_relocation.hpp"
 #include "native_snapshot.hpp"
+#include <atomic>
+#include <csignal>
 
 #include <QCoreApplication>
 #include <QDir>
@@ -11,6 +16,8 @@
 #include <QTextStream>
 
 namespace {
+std::atomic_bool analysisCancelled{false};
+void cancelAnalysis(int) { analysisCancelled.store(true); }
 
 using buildscope::native::IncludeAnalysisError;
 using buildscope::native::NativeError;
@@ -59,8 +66,7 @@ ParsedArguments parseArguments(const QStringList &arguments,
                 result.options[name].append(arguments.at(++index));
             } else {
                 ok = false;
-                errorMessage =
-                    QStringLiteral("argument %1: expected one argument").arg(name);
+                errorMessage = QStringLiteral("argument %1: expected one argument").arg(name);
                 return result;
             }
         } else {
@@ -105,10 +111,14 @@ int integerValue(const ParsedArguments &arguments, const QString &name, int fall
 
 void snapshotUsage(QTextStream &error) {
     error << "usage: buildscope [-h] [--version] [--project-root PROJECT_ROOT] [-o OUTPUT]\n"
-          << "                  [--schema-version {v1,v2,v3}]\n"
+          << "                  [--schema-version {v1,v2,v3,v4}]\n"
           << "                  [--include-analysis {estimate,compiler,delayed}]\n"
           << "                  [--analysis-unit GLOB] [--analysis-max-units N]\n"
-          << "                  [--analysis-time-budget N]\n"
+          << "                  [--analysis-time-budget N] [--analysis-unit-ms N]\n"
+          << "                  [--analysis-source-bytes N] [--analysis-unit-bytes N]\n"
+          << "                  [--analysis-max-files N] [--analysis-unit-files N]\n"
+          << "                  [--analysis-max-edges N] [--analysis-unit-edges N]\n"
+          << "                  [--analysis-trace-bytes N] [--map-root OLD=NEW]\n"
           << "                  [--pretty] database\n"
           << "       buildscope diff ...\n";
 }
@@ -131,6 +141,15 @@ int snapshotMain(const QStringList &arguments) {
         {QStringLiteral("--analysis-max-units"), true},
         {QStringLiteral("--analysis-time-budget"), true},
         {QStringLiteral("--pretty"), false},
+        {"--analysis-unit-ms", true},
+        {"--analysis-source-bytes", true},
+        {"--analysis-unit-bytes", true},
+        {"--analysis-max-files", true},
+        {"--analysis-unit-files", true},
+        {"--analysis-max-edges", true},
+        {"--analysis-unit-edges", true},
+        {"--analysis-trace-bytes", true},
+        {"--map-root", true},
     };
     bool ok = false;
     QString parseError;
@@ -154,60 +173,90 @@ int snapshotMain(const QStringList &arguments) {
                     QStringLiteral("the following arguments are required: database"));
     }
     const QString schema = optionValue(parsed, QStringLiteral("--schema-version"));
-    if (!schema.isEmpty() && schema != QLatin1String("v1") &&
-        schema != QLatin1String("v2") && schema != QLatin1String("v3")) {
-        return fail(error, QStringLiteral("buildscope: error: "),
-                    QStringLiteral("argument --schema-version: invalid choice: '%1'")
-                        .arg(schema));
+    if (!schema.isEmpty() && schema != QLatin1String("v1") && schema != QLatin1String("v2") &&
+        schema != QLatin1String("v3") && schema != QLatin1String("v4")) {
+        return fail(
+            error, QStringLiteral("buildscope: error: "),
+            QStringLiteral("argument --schema-version: invalid choice: '%1'").arg(schema));
     }
-    const QString includeMode =
-        optionValue(parsed, QStringLiteral("--include-analysis"));
+    const QString includeMode = optionValue(parsed, QStringLiteral("--include-analysis"));
     if (!includeMode.isEmpty() && includeMode != QLatin1String("estimate") &&
-        includeMode != QLatin1String("compiler") &&
-        includeMode != QLatin1String("delayed")) {
+        includeMode != QLatin1String("compiler") && includeMode != QLatin1String("delayed")) {
         return fail(error, QStringLiteral("buildscope: error: "),
                     QStringLiteral("argument --include-analysis: invalid choice: '%1'")
                         .arg(includeMode));
     }
-    const auto unitGlobs =
-        parsed.options.value(QStringLiteral("--analysis-unit"));
+    const auto unitGlobs = parsed.options.value(QStringLiteral("--analysis-unit"));
     if (!unitGlobs.isEmpty() && includeMode != QLatin1String("delayed")) {
         return fail(error, QStringLiteral("buildscope: error: "),
                     QStringLiteral("--analysis-unit requires "
                                    "--include-analysis delayed"));
     }
     try {
-        const QString database =
-            QFileInfo(parsed.positional.first()).absoluteFilePath();
+        const QString database = QFileInfo(parsed.positional.first()).absoluteFilePath();
         QString schemaName = schema;
         if (schemaName.isEmpty()) {
-            schemaName = includeMode.isEmpty() ? QStringLiteral("v2") : QStringLiteral("v3");
+            schemaName = includeMode.isEmpty() ? QStringLiteral("v2") : QStringLiteral("v4");
         }
-        if (!includeMode.isEmpty() && schemaName != QLatin1String("v3")) {
+        if (!includeMode.isEmpty() && schemaName != QLatin1String("v3") &&
+            schemaName != QLatin1String("v4")) {
             throw SnapshotError(
-                QStringLiteral("--include-analysis requires --schema-version v3"));
+                QStringLiteral("--include-analysis requires --schema-version v3 or v4"));
         }
         QString mode = includeMode;
-        if (schemaName == QLatin1String("v3") && mode.isEmpty()) {
+        if ((schemaName == QLatin1String("v3") || schemaName == QLatin1String("v4")) &&
+            mode.isEmpty()) {
             mode = QStringLiteral("estimate");
         }
-        const QString projectRoot = optionValue(parsed, QStringLiteral("--project-root"),
-                                                QDir::currentPath());
+        const QString projectRoot =
+            optionValue(parsed, QStringLiteral("--project-root"), QDir::currentPath());
         bool valid = true;
-        const int maxUnits =
-            integerValue(parsed, QStringLiteral("--analysis-max-units"),
-                         buildscope::native::kDefaultMaxAnalysisUnits, valid);
+        const int maxUnits = integerValue(parsed, QStringLiteral("--analysis-max-units"),
+                                          buildscope::native::kDefaultMaxAnalysisUnits, valid);
         const int budget =
             integerValue(parsed, QStringLiteral("--analysis-time-budget"),
                          buildscope::native::kDefaultAnalysisBudgetSeconds, valid);
         if (!valid) {
             throw SnapshotError(QStringLiteral("analysis limits must be integers"));
         }
-        QJsonObject snapshot =
-            buildscope::native::loadCompilationDatabase(database, projectRoot);
+        const auto mappings =
+            buildscope::native::parseRootMappings(parsed.options.value("--map-root"));
+        QJsonObject snapshot = buildscope::native::loadCompilationDatabase(
+            database, projectRoot, mappings, &analysisCancelled);
         if (!mode.isEmpty()) {
-            buildscope::native::annotateSnapshot(snapshot, projectRoot, mode, maxUnits,
-                                                 budget, unitGlobs);
+            buildscope::native::AnalysisLimits limits;
+            limits.maxUnits = maxUnits;
+            if (budget < 1 || budget > 600)
+                throw SnapshotError(
+                    QStringLiteral("analysis time budget must be 1..600 seconds"));
+            limits.totalMilliseconds = budget * 1000;
+            limits.unitMilliseconds =
+                integerValue(parsed, "--analysis-unit-ms", limits.unitMilliseconds, valid);
+            limits.totalFiles =
+                integerValue(parsed, "--analysis-max-files", limits.totalFiles, valid);
+            limits.unitFiles =
+                integerValue(parsed, "--analysis-unit-files", limits.unitFiles, valid);
+            limits.totalEdges =
+                integerValue(parsed, "--analysis-max-edges", limits.totalEdges, valid);
+            limits.unitEdges =
+                integerValue(parsed, "--analysis-unit-edges", limits.unitEdges, valid);
+            auto bytes = [&](const QString &name, qint64 fallback) {
+                if (!hasOption(parsed, name))
+                    return fallback;
+                bool ok;
+                const auto n = optionValue(parsed, name).toLongLong(&ok);
+                if (!ok || n < 1)
+                    throw SnapshotError(QStringLiteral("invalid byte budget: ") + name);
+                return n;
+            };
+            limits.totalSourceBytes = bytes("--analysis-source-bytes", limits.totalSourceBytes);
+            limits.unitSourceBytes = bytes("--analysis-unit-bytes", limits.unitSourceBytes);
+            limits.traceBytes = bytes("--analysis-trace-bytes", limits.traceBytes);
+            if (!valid)
+                throw SnapshotError(QStringLiteral("analysis limits must be integers"));
+            buildscope::native::AnalysisControl control(limits, &analysisCancelled);
+            buildscope::native::annotateSnapshotControlled(snapshot, projectRoot, mode, control,
+                                                           unitGlobs);
         }
         const QString rendered = buildscope::native::dumpsSnapshot(
             buildscope::native::snapshotForSchema(snapshot, schemaName),
@@ -221,13 +270,50 @@ int snapshotMain(const QStringList &arguments) {
             buildscope::native::writeAtomicText(target, rendered, {database});
         }
     } catch (const NativeError &nativeError) {
-        return fail(error, QStringLiteral("buildscope: "),
-                    QString::fromStdString(nativeError.what()));
+        fail(error, QStringLiteral("buildscope: "),QString::fromStdString(nativeError.what()));
+        return analysisCancelled.load()?130:2;
     } catch (const std::exception &genericError) {
-        return fail(error, QStringLiteral("buildscope: "),
-                    QString::fromUtf8(genericError.what()));
+        fail(error, QStringLiteral("buildscope: "),QString::fromUtf8(genericError.what()));
+        return analysisCancelled.load()?130:2;
     }
-    return 0;
+    return analysisCancelled.load() ? 130 : 0;
+}
+
+int impactMain(const QStringList &arguments) {
+    QTextStream output(stdout), error(stderr);
+    bool ok = false;
+    QString message;
+    const auto parsed = parseArguments(arguments,
+                                       {{"--header", true},
+                                        {"--pretty", false},
+                                        {"--output", true},
+                                        {"-o", true},
+                                        {"--help", false}},
+                                       ok, message);
+    if (hasOption(parsed, "--help")) {
+        output << "usage: buildscope impact SNAPSHOT --header PATH [--pretty] [-o FILE]\n";
+        return 0;
+    }
+    if (!ok || parsed.positional.size() != 1 || !hasOption(parsed, "--header"))
+        return fail(error, "buildscope impact: ",
+                    message.isEmpty() ? "snapshot and --header are required" : message);
+    try {
+        const auto path = parsed.positional.first();
+        const auto snapshot = buildscope::loadSnapshotFile(path,&analysisCancelled);
+        auto report = buildscope::includeImpact(snapshot, optionValue(parsed, "--header"),
+                                                &analysisCancelled);
+        const auto rendered =
+            buildscope::native::dumpsSnapshot(report, hasOption(parsed, "--pretty"));
+        const auto target = optionValue(parsed, "--output", optionValue(parsed, "-o"));
+        if (target.isEmpty())
+            output << rendered;
+        else
+            buildscope::native::writeAtomicText(target, rendered, {path});
+        return analysisCancelled.load() ? 130 : 0;
+    } catch (const std::exception &e) {
+        fail(error, "buildscope impact: ", QString::fromUtf8(e.what()));
+        return analysisCancelled.load()?130:2;
+    }
 }
 
 void diffUsage(QTextStream &error) {
@@ -280,8 +366,7 @@ int diffMain(const QStringList &arguments) {
             optionValue(parsed, QStringLiteral("--after-project-root"), shared);
         const QJsonObject report = buildscope::native::compareDatabases(
             before, after, beforeRoot, afterRoot,
-            optionValue(parsed, QStringLiteral("--before-label"),
-                        QStringLiteral("before")),
+            optionValue(parsed, QStringLiteral("--before-label"), QStringLiteral("before")),
             optionValue(parsed, QStringLiteral("--after-label"), QStringLiteral("after")),
             parsed.options.value(QStringLiteral("--suppress")));
         const QString rendered = buildscope::native::dumpsDiff(
@@ -295,9 +380,9 @@ int diffMain(const QStringList &arguments) {
             buildscope::native::writeAtomicText(target, rendered, {before, after});
         }
         return report.value(QStringLiteral("summary"))
-                   .toObject()
-                   .value(QStringLiteral("visible_units"))
-                   .toInt() != 0
+                           .toObject()
+                           .value(QStringLiteral("visible_units"))
+                           .toInt() != 0
                    ? 1
                    : 0;
     } catch (const NativeError &nativeError) {
@@ -309,13 +394,20 @@ int diffMain(const QStringList &arguments) {
     }
 }
 
-}  // namespace
+} // namespace
 
 int main(int argc, char *argv[]) {
     QCoreApplication app(argc, argv);
+    std::signal(SIGINT, cancelAnalysis);
+    std::signal(SIGTERM, cancelAnalysis);
     QStringList arguments = app.arguments();
     arguments.removeFirst();
+    if (!arguments.isEmpty() && arguments.first() == "impact") {
+        arguments.removeFirst();
+        return impactMain(arguments);
+    }
     if (!arguments.isEmpty() && arguments.first() == QLatin1String("diff")) {
+        std::signal(SIGINT,SIG_DFL);std::signal(SIGTERM,SIG_DFL);
         arguments.removeFirst();
         return diffMain(arguments);
     }

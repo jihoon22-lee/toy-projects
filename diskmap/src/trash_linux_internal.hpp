@@ -71,7 +71,8 @@ FsKind kindFromMode(mode_t mode);
 std::uint64_t allocatedBytes(const struct stat& status);
 TrashStatus validateStat(const CleanupTarget& target,
                          const struct stat& status,
-                         std::string& message);
+                         std::string& message,
+                         bool afterMove = false);
 bool sameDevice(const FileDescriptor& directory,
                 std::uint64_t expected,
                 std::string& error);
@@ -82,6 +83,8 @@ int renameNoReplace(int sourceDirectory,
                     const char* target);
 bool writeAll(int descriptor, const std::string& content, std::string& error);
 bool readBounded(int descriptor, std::string& content, std::string& error);
+bool recordTrashReceipt(const TrashDirectories& directories, const TrashReceipt& receipt, std::string& error);
+
 bool openTrashDirectories(const TrashOptions& options,
                           bool create,
                           TrashDirectories& directories,

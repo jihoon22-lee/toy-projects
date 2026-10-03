@@ -1,4 +1,6 @@
 #include "native_replay.hpp"
+#include "native_analysis.hpp"
+#include <QElapsedTimer>
 
 #include "native_command.hpp"
 #include "native_error.hpp"
@@ -19,108 +21,172 @@ namespace buildscope::native {
 namespace {
 
 const QRegularExpression kCompilerName(
-    QStringLiteral(
-        "^(?:(?:[A-Za-z0-9_+.]+-)+)?(?:gcc|g\\+\\+|clang|clang\\+\\+|cc|c\\+\\+)"
-        "(?:-[0-9][A-Za-z0-9_.-]*)?(?:\\.exe)?$"),
+    QStringLiteral("^(?:(?:[A-Za-z0-9_+.]+-)+)?(?:gcc|g\\+\\+|clang|clang\\+\\+|cc|c\\+\\+)"
+                   "(?:-[0-9][A-Za-z0-9_.-]*)?(?:\\.exe)?$"),
     QRegularExpression::CaseInsensitiveOption);
 
 const QSet<QString> kDropExact = {
-    QStringLiteral("-c"),    QStringLiteral("-S"),       QStringLiteral("-E"),
-    QStringLiteral("-fsyntax-only"), QStringLiteral("-M"),  QStringLiteral("-MM"),
-    QStringLiteral("-MD"),   QStringLiteral("-MMD"),     QStringLiteral("-MP"),
-    QStringLiteral("-MG"),   QStringLiteral("-H"),       QStringLiteral("-pipe"),
-    QStringLiteral("-v"),    QStringLiteral("--verbose"),
+    QStringLiteral("-c"),  QStringLiteral("-S"),
+    QStringLiteral("-E"),  QStringLiteral("-fsyntax-only"),
+    QStringLiteral("-M"),  QStringLiteral("-MM"),
+    QStringLiteral("-MD"), QStringLiteral("-MMD"),
+    QStringLiteral("-MP"), QStringLiteral("-MG"),
+    QStringLiteral("-H"),  QStringLiteral("-pipe"),
+    QStringLiteral("-v"),  QStringLiteral("--verbose"),
 };
 const QSet<QString> kDropValue = {
-    QStringLiteral("-o"),          QStringLiteral("--output"),
-    QStringLiteral("-MF"),         QStringLiteral("-MT"),
-    QStringLiteral("-MQ"),         QStringLiteral("-MJ"),
-    QStringLiteral("-dumpdir"),    QStringLiteral("-dumpbase"),
-    QStringLiteral("-serialize-diagnostics"), QStringLiteral("--serialize-diagnostics"),
-    QStringLiteral("-dependency-file"),       QStringLiteral("--dependency-file"),
+    QStringLiteral("-o"),
+    QStringLiteral("--output"),
+    QStringLiteral("-MF"),
+    QStringLiteral("-MT"),
+    QStringLiteral("-MQ"),
+    QStringLiteral("-MJ"),
+    QStringLiteral("-dumpdir"),
+    QStringLiteral("-dumpbase"),
+    QStringLiteral("-serialize-diagnostics"),
+    QStringLiteral("--serialize-diagnostics"),
+    QStringLiteral("-dependency-file"),
+    QStringLiteral("--dependency-file"),
 };
 const QStringList kDropJoined = {
-    QStringLiteral("--output="),        QStringLiteral("-MF"),
-    QStringLiteral("-MT"),              QStringLiteral("-MQ"),
-    QStringLiteral("-MJ"),              QStringLiteral("-save-temps="),
-    QStringLiteral("--save-temps="),    QStringLiteral("-ftime-trace="),
-    QStringLiteral("-fdiagnostics-color="), QStringLiteral("-dependency-file="),
+    QStringLiteral("--output="),
+    QStringLiteral("-MF"),
+    QStringLiteral("-MT"),
+    QStringLiteral("-MQ"),
+    QStringLiteral("-MJ"),
+    QStringLiteral("-save-temps="),
+    QStringLiteral("--save-temps="),
+    QStringLiteral("-ftime-trace="),
+    QStringLiteral("-fdiagnostics-color="),
+    QStringLiteral("-dependency-file="),
     QStringLiteral("--dependency-file="),
 };
 const QSet<QString> kPreserveValue = {
-    QStringLiteral("-D"),         QStringLiteral("-U"),        QStringLiteral("-I"),
-    QStringLiteral("-F"),         QStringLiteral("-x"),        QStringLiteral("--language"),
-    QStringLiteral("-std"),       QStringLiteral("-include"),  QStringLiteral("-imacros"),
-    QStringLiteral("-isystem"),   QStringLiteral("-iquote"),   QStringLiteral("-idirafter"),
-    QStringLiteral("-isysroot"),  QStringLiteral("--sysroot"), QStringLiteral("-target"),
-    QStringLiteral("--target"),   QStringLiteral("-arch"),     QStringLiteral("-march"),
-    QStringLiteral("-mcpu"),      QStringLiteral("-mtune"),    QStringLiteral("-mabi"),
-    QStringLiteral("-resource-dir"),
+    QStringLiteral("-D"),        QStringLiteral("-U"),
+    QStringLiteral("-I"),        QStringLiteral("-F"),
+    QStringLiteral("-x"),        QStringLiteral("--language"),
+    QStringLiteral("-std"),      QStringLiteral("-include"),
+    QStringLiteral("-imacros"),  QStringLiteral("-isystem"),
+    QStringLiteral("-iquote"),   QStringLiteral("-idirafter"),
+    QStringLiteral("-isysroot"), QStringLiteral("--sysroot"),
+    QStringLiteral("-target"),   QStringLiteral("--target"),
+    QStringLiteral("-arch"),     QStringLiteral("-march"),
+    QStringLiteral("-mcpu"),     QStringLiteral("-mtune"),
+    QStringLiteral("-mabi"),     QStringLiteral("-resource-dir"),
 };
 const QSet<QString> kSafeLanguages = {
-    QStringLiteral("c"),          QStringLiteral("c-header"),
-    QStringLiteral("c++"),        QStringLiteral("c++-header"),
+    QStringLiteral("c"),           QStringLiteral("c-header"),
+    QStringLiteral("c++"),         QStringLiteral("c++-header"),
     QStringLiteral("objective-c"), QStringLiteral("objective-c++"),
 };
 const QSet<QString> kSafeExact = {
-    QStringLiteral("-ansi"),          QStringLiteral("-pedantic"),
-    QStringLiteral("-pedantic-errors"), QStringLiteral("-pthread"),
-    QStringLiteral("-nostdinc"),      QStringLiteral("-nostdinc++"),
-    QStringLiteral("-undef"),         QStringLiteral("-trigraphs"),
-    QStringLiteral("-Qunused-arguments"), QStringLiteral("-fPIC"),
-    QStringLiteral("-fPIE"),          QStringLiteral("-fpic"),
-    QStringLiteral("-fpie"),          QStringLiteral("-fexceptions"),
-    QStringLiteral("-fno-exceptions"), QStringLiteral("-frtti"),
-    QStringLiteral("-fno-rtti"),      QStringLiteral("-fpermissive"),
-    QStringLiteral("-ffreestanding"), QStringLiteral("-fhosted"),
-    QStringLiteral("-fshort-enums"),  QStringLiteral("-fshort-wchar"),
-    QStringLiteral("-fsigned-char"),  QStringLiteral("-funsigned-char"),
+    QStringLiteral("-ansi"),
+    QStringLiteral("-pedantic"),
+    QStringLiteral("-pedantic-errors"),
+    QStringLiteral("-pthread"),
+    QStringLiteral("-nostdinc"),
+    QStringLiteral("-nostdinc++"),
+    QStringLiteral("-undef"),
+    QStringLiteral("-trigraphs"),
+    QStringLiteral("-Qunused-arguments"),
+    QStringLiteral("-fPIC"),
+    QStringLiteral("-fPIE"),
+    QStringLiteral("-fpic"),
+    QStringLiteral("-fpie"),
+    QStringLiteral("-fexceptions"),
+    QStringLiteral("-fno-exceptions"),
+    QStringLiteral("-frtti"),
+    QStringLiteral("-fno-rtti"),
+    QStringLiteral("-fpermissive"),
+    QStringLiteral("-ffreestanding"),
+    QStringLiteral("-fhosted"),
+    QStringLiteral("-fshort-enums"),
+    QStringLiteral("-fshort-wchar"),
+    QStringLiteral("-fsigned-char"),
+    QStringLiteral("-funsigned-char"),
     QStringLiteral("-fvisibility-inlines-hidden"),
     QStringLiteral("-fno-visibility-inlines-hidden"),
-    QStringLiteral("-fconcepts"),     QStringLiteral("-fconcepts-ts"),
-    QStringLiteral("-fcoroutines"),   QStringLiteral("-fcoroutines-ts"),
-    QStringLiteral("-fms-extensions"), QStringLiteral("-fstrict-aliasing"),
-    QStringLiteral("-fno-strict-aliasing"), QStringLiteral("-fcommon"),
+    QStringLiteral("-fconcepts"),
+    QStringLiteral("-fconcepts-ts"),
+    QStringLiteral("-fcoroutines"),
+    QStringLiteral("-fcoroutines-ts"),
+    QStringLiteral("-fms-extensions"),
+    QStringLiteral("-fstrict-aliasing"),
+    QStringLiteral("-fno-strict-aliasing"),
+    QStringLiteral("-fcommon"),
     QStringLiteral("-fno-common"),
 };
 const QStringList kSafePrefixes = {
-    QStringLiteral("-D"),         QStringLiteral("-U"),        QStringLiteral("-I"),
-    QStringLiteral("-F"),         QStringLiteral("-W"),        QStringLiteral("-std="),
-    QStringLiteral("--std="),     QStringLiteral("-isystem"),  QStringLiteral("-iquote"),
-    QStringLiteral("-idirafter"), QStringLiteral("-imacros"),  QStringLiteral("--sysroot="),
-    QStringLiteral("-isysroot="), QStringLiteral("-target="),  QStringLiteral("--target="),
-    QStringLiteral("-arch="),     QStringLiteral("-march="),   QStringLiteral("-mcpu="),
-    QStringLiteral("-mtune="),    QStringLiteral("-mabi="),    QStringLiteral("-resource-dir="),
-    QStringLiteral("-stdlib="),   QStringLiteral("-fabi-version="),
-    QStringLiteral("-fconstexpr-"), QStringLiteral("-fmacro-prefix-map="),
-    QStringLiteral("-ffile-prefix-map="), QStringLiteral("-fdebug-prefix-map="),
-    QStringLiteral("-fms-compatibility-version="), QStringLiteral("-fno-builtin-"),
+    QStringLiteral("-D"),
+    QStringLiteral("-U"),
+    QStringLiteral("-I"),
+    QStringLiteral("-F"),
+    QStringLiteral("-W"),
+    QStringLiteral("-std="),
+    QStringLiteral("--std="),
+    QStringLiteral("-isystem"),
+    QStringLiteral("-iquote"),
+    QStringLiteral("-idirafter"),
+    QStringLiteral("-imacros"),
+    QStringLiteral("--sysroot="),
+    QStringLiteral("-isysroot="),
+    QStringLiteral("-target="),
+    QStringLiteral("--target="),
+    QStringLiteral("-arch="),
+    QStringLiteral("-march="),
+    QStringLiteral("-mcpu="),
+    QStringLiteral("-mtune="),
+    QStringLiteral("-mabi="),
+    QStringLiteral("-resource-dir="),
+    QStringLiteral("-stdlib="),
+    QStringLiteral("-fabi-version="),
+    QStringLiteral("-fconstexpr-"),
+    QStringLiteral("-fmacro-prefix-map="),
+    QStringLiteral("-ffile-prefix-map="),
+    QStringLiteral("-fdebug-prefix-map="),
+    QStringLiteral("-fms-compatibility-version="),
+    QStringLiteral("-fno-builtin-"),
 };
 const QSet<QString> kRejectExact = {
-    QStringLiteral("-Xclang"),  QStringLiteral("-Xpreprocessor"),
-    QStringLiteral("-Xassembler"), QStringLiteral("-Xlinker"),
-    QStringLiteral("-mllvm"),   QStringLiteral("-load"),
+    QStringLiteral("-Xclang"),      QStringLiteral("-Xpreprocessor"),
+    QStringLiteral("-Xassembler"),  QStringLiteral("-Xlinker"),
+    QStringLiteral("-mllvm"),       QStringLiteral("-load"),
     QStringLiteral("-load-plugin"), QStringLiteral("-plugin"),
-    QStringLiteral("-cc1"),     QStringLiteral("-wrapper"),
-    QStringLiteral("--config"), QStringLiteral("-B"),
+    QStringLiteral("-cc1"),         QStringLiteral("-wrapper"),
+    QStringLiteral("--config"),     QStringLiteral("-B"),
     QStringLiteral("-specs"),
 };
 const QStringList kRejectPrefixes = {
-    QStringLiteral("-Xclang="),        QStringLiteral("-Xpreprocessor="),
-    QStringLiteral("-Xassembler="),    QStringLiteral("-Xlinker="),
-    QStringLiteral("-mllvm="),         QStringLiteral("-Wa,"),
-    QStringLiteral("-Wl,"),            QStringLiteral("-Wp,"),
-    QStringLiteral("-fplugin"),        QStringLiteral("-fpass-plugin"),
-    QStringLiteral("-fmodules"),       QStringLiteral("-fmodule-"),
-    QStringLiteral("-fdump-"),         QStringLiteral("-fopt-info"),
-    QStringLiteral("-fprofile-"),      QStringLiteral("-ftest-coverage"),
-    QStringLiteral("-fpath-coverage"), QStringLiteral("-fsanitize="),
-    QStringLiteral("-fno-sanitize="),  QStringLiteral("-save-temps"),
-    QStringLiteral("--save-temps"),    QStringLiteral("-ftime-"),
-    QStringLiteral("--config="),       QStringLiteral("--gcc-toolchain"),
-    QStringLiteral("--vfsoverlay"),    QStringLiteral("-vfsoverlay"),
-    QStringLiteral("--coverage"),      QStringLiteral("-coverage"),
-    QStringLiteral("-B"),              QStringLiteral("-specs="),
+    QStringLiteral("-Xclang="),
+    QStringLiteral("-Xpreprocessor="),
+    QStringLiteral("-Xassembler="),
+    QStringLiteral("-Xlinker="),
+    QStringLiteral("-mllvm="),
+    QStringLiteral("-Wa,"),
+    QStringLiteral("-Wl,"),
+    QStringLiteral("-Wp,"),
+    QStringLiteral("-fplugin"),
+    QStringLiteral("-fpass-plugin"),
+    QStringLiteral("-fmodules"),
+    QStringLiteral("-fmodule-"),
+    QStringLiteral("-fdump-"),
+    QStringLiteral("-fopt-info"),
+    QStringLiteral("-fprofile-"),
+    QStringLiteral("-ftest-coverage"),
+    QStringLiteral("-fpath-coverage"),
+    QStringLiteral("-fsanitize="),
+    QStringLiteral("-fno-sanitize="),
+    QStringLiteral("-save-temps"),
+    QStringLiteral("--save-temps"),
+    QStringLiteral("-ftime-"),
+    QStringLiteral("--config="),
+    QStringLiteral("--gcc-toolchain"),
+    QStringLiteral("--vfsoverlay"),
+    QStringLiteral("-vfsoverlay"),
+    QStringLiteral("--coverage"),
+    QStringLiteral("-coverage"),
+    QStringLiteral("-B"),
+    QStringLiteral("-specs="),
 };
 
 bool startsWithAny(const QString &token, const QStringList &prefixes) {
@@ -134,8 +200,7 @@ bool startsWithAny(const QString &token, const QStringList &prefixes) {
 
 bool shouldDrop(const QString &token) {
     return kDropExact.contains(token) || startsWithAny(token, kDropJoined) ||
-           (token.startsWith(QLatin1String("-g")) &&
-            token != QLatin1String("-Winvalid-pch"));
+           (token.startsWith(QLatin1String("-g")) && token != QLatin1String("-Winvalid-pch"));
 }
 
 bool isRejected(const QString &token) {
@@ -143,7 +208,12 @@ bool isRejected(const QString &token) {
 }
 
 bool isSafe(const QString &token) {
-    return kSafeExact.contains(token) || startsWithAny(token, kSafePrefixes);
+    static const QSet<QString> optimization = {
+        QStringLiteral("-O"),  QStringLiteral("-O0"), QStringLiteral("-O1"),
+        QStringLiteral("-O2"), QStringLiteral("-O3"), QStringLiteral("-Og"),
+        QStringLiteral("-Os"), QStringLiteral("-Oz"), QStringLiteral("-Ofast")};
+    return optimization.contains(token) || kSafeExact.contains(token) ||
+           startsWithAny(token, kSafePrefixes);
 }
 
 bool isWithin(const std::filesystem::path &path, const std::filesystem::path &root) {
@@ -152,7 +222,7 @@ bool isWithin(const std::filesystem::path &path, const std::filesystem::path &ro
 }
 
 bool regularExecutable(const std::filesystem::path &path) {
-    struct stat metadata {};
+    struct stat metadata{};
     if (::stat(path.c_str(), &metadata) != 0) {
         return false;
     }
@@ -167,8 +237,8 @@ QString resolveCompiler(const QString &value, const std::filesystem::path &proje
         throw IncludeAnalysisError(
             QStringLiteral("only a direct GCC/Clang driver name can be replayed"));
     }
-    const QString discovered =
-        QStandardPaths::findExecutable(name, {QStringLiteral("/bin"), QStringLiteral("/usr/bin")});
+    const QString discovered = QStandardPaths::findExecutable(
+        name, {QStringLiteral("/bin"), QStringLiteral("/usr/bin")});
     if (discovered.isEmpty()) {
         throw IncludeAnalysisError(
             QStringLiteral("the compiler driver is unavailable on the system PATH"));
@@ -177,8 +247,7 @@ QString resolveCompiler(const QString &value, const std::filesystem::path &proje
     const std::filesystem::path approved =
         std::filesystem::canonical(discovered.toStdString(), error);
     const std::filesystem::path compiler = std::filesystem::canonical(
-        lexical.is_absolute() ? lexical
-                              : std::filesystem::path(discovered.toStdString()),
+        lexical.is_absolute() ? lexical : std::filesystem::path(discovered.toStdString()),
         error);
     if (error || compiler != approved || !regularExecutable(compiler) ||
         isWithin(compiler, projectRoot)) {
@@ -196,9 +265,8 @@ std::optional<std::filesystem::path> resolvedOperand(const QString &value,
     }
     try {
         const std::filesystem::path candidate = value.toStdString();
-        return std::filesystem::weakly_canonical(candidate.is_absolute()
-                                                     ? candidate
-                                                     : cwd / candidate);
+        return std::filesystem::weakly_canonical(candidate.is_absolute() ? candidate
+                                                                         : cwd / candidate);
     } catch (...) {
         return std::nullopt;
     }
@@ -282,7 +350,7 @@ std::filesystem::path resolveStrict(const QString &value) {
     return resolved;
 }
 
-}  // namespace
+} // namespace
 
 QStringList sanitizedArguments(const QStringList &argv, const QString &cwd,
                                const QString &source) {
@@ -297,6 +365,11 @@ QStringList sanitizedArguments(const QStringList &argv, const QString &cwd,
         if (value.isEmpty() || value.contains(QLatin1Char('\0'))) {
             throw IncludeAnalysisError(
                 QStringLiteral("compiler argv contains an invalid argument"));
+        }
+        // Drivers expand response files before parsing option/value pairs.
+        if (value.startsWith(QLatin1Char('@'))) {
+            throw IncludeAnalysisError(
+                QStringLiteral("response files are not replayed, including option values"));
         }
     }
     const std::filesystem::path cwdPath = cwd.toStdString();
@@ -328,23 +401,30 @@ std::tuple<QString, QString> nativeEntryPaths(const QJsonObject &entry,
         throw IncludeAnalysisError(
             QStringLiteral("foreign-platform compiler commands cannot be replayed"));
     }
-    const QString sourceValue = entry.value(QStringLiteral("file")).toString();
-    const QString directoryValue = entry.value(QStringLiteral("directory")).toString();
+    const QString sourceValue = normalized.value(QStringLiteral("source"))
+                                    .toObject()
+                                    .value(QStringLiteral("path"))
+                                    .toString();
+    const QString directoryValue = normalized.value(QStringLiteral("directory"))
+                                       .toObject()
+                                       .value(QStringLiteral("path"))
+                                       .toString();
     const std::filesystem::path directory = directoryValue.toStdString();
     const std::filesystem::path cwdCandidate =
         directory.is_absolute() ? directory
                                 : std::filesystem::path(projectRoot.toStdString()) / directory;
-    const std::filesystem::path cwd = resolveStrict(
-        QString::fromStdString(cwdCandidate.string()));
+    const std::filesystem::path cwd =
+        resolveStrict(QString::fromStdString(cwdCandidate.string()));
     const std::filesystem::path sourceLexical = sourceValue.toStdString();
-    const std::filesystem::path source = resolveStrict(
-        QString::fromStdString(
-            (sourceLexical.is_absolute() ? sourceLexical : cwd / sourceLexical).string()));
+    const std::filesystem::path source = resolveStrict(QString::fromStdString(
+        (sourceLexical.is_absolute()
+             ? sourceLexical
+             : std::filesystem::path(projectRoot.toStdString()) / sourceLexical)
+            .string()));
     const std::filesystem::path root = resolveStrict(projectRoot);
     std::error_code error;
     if (!std::filesystem::is_directory(cwd, error) ||
-        !std::filesystem::is_regular_file(source, error) ||
-        !isWithin(source, root)) {
+        !std::filesystem::is_regular_file(source, error) || !isWithin(source, root)) {
         throw IncludeAnalysisError(
             QStringLiteral("the compilation source must be a regular project file"));
     }
@@ -384,7 +464,8 @@ std::tuple<QStringList, QString, QString> buildTraceCommand(const QJsonObject &e
     return {command, cwd, source};
 }
 
-std::tuple<int, QString, qint64> runTrace(const QStringList &command, const QString &cwd) {
+TraceResult runTraceControlled(const QStringList &command, const QString &cwd) {
+    analysisCheckpoint();
     QProcess process;
     process.setProgram(command.first());
     process.setArguments(command.mid(1));
@@ -392,7 +473,7 @@ std::tuple<int, QString, qint64> runTrace(const QStringList &command, const QStr
     QProcessEnvironment environment;
     environment.insert(QStringLiteral("LANG"), QStringLiteral("C"));
     environment.insert(QStringLiteral("LC_ALL"), QStringLiteral("C"));
-    environment.insert(QStringLiteral("PATH"), QStringLiteral(":/bin:/usr/bin"));
+    environment.insert(QStringLiteral("PATH"), QStringLiteral("/bin:/usr/bin"));
     environment.insert(QStringLiteral("TERM"), QStringLiteral("dumb"));
     process.setProcessEnvironment(environment);
     process.setStandardInputFile(QProcess::nullDevice());
@@ -401,40 +482,83 @@ std::tuple<int, QString, qint64> runTrace(const QStringList &command, const QStr
 #if defined(Q_OS_UNIX)
     process.setChildProcessModifier([] { ::setsid(); });
 #endif
+    auto *control = activeAnalysisControl();
+    const qint64 byteLimit = control ? control->limits.traceBytes : kMaxTraceBytes;
+    QElapsedTimer timer;
+    timer.start();
+    TraceResult result;
     QByteArray captured;
+    auto killGroup = [&] {
+        const auto pid = process.processId();
+        if (pid > 0)
+            ::kill(-pid, SIGKILL);
+        process.kill();
+        process.waitForFinished(1000);
+    };
     process.start();
-    if (!process.waitForStarted(5000)) {
-        throw IncludeAnalysisError(
-            QStringLiteral("compiler include trace could not start"));
-    }
-    const qint64 started = QDateTime::currentMSecsSinceEpoch();
-    const qint64 deadline = started + kTraceTimeoutSeconds * 1000;
-    bool finished = false;
-    while (!finished) {
-        if (process.waitForReadyRead(20)) {
-            captured += process.readAllStandardError();
+    while (process.state() == QProcess::Starting) {
+        process.waitForStarted(20);
+        try {
+            analysisCheckpoint();
+        } catch (const IncludeAnalysisError &error) {
+            result.stopReason = QString::fromUtf8(error.what());
+            killGroup();
+            break;
         }
-        if (captured.size() > kMaxTraceBytes) {
-            ::kill(-process.processId(), SIGKILL);
-            process.waitForFinished();
-            throw IncludeAnalysisError(
-                QStringLiteral("compiler include trace exceeds the output limit"));
-        }
-        finished = process.state() == QProcess::NotRunning;
-        if (!finished && QDateTime::currentMSecsSinceEpoch() >= deadline) {
-            ::kill(-process.processId(), SIGKILL);
-            process.waitForFinished();
-            throw IncludeAnalysisError(
-                QStringLiteral("compiler include trace timed out"));
+        if (timer.elapsed() >= 5000) {
+            result.stopReason = QStringLiteral("compiler start timeout");
+            killGroup();
+            break;
         }
     }
-    captured += process.readAllStandardError();
-    if (captured.size() > kMaxTraceBytes) {
-        throw IncludeAnalysisError(
-            QStringLiteral("compiler include trace exceeds the output limit"));
+    if (process.error() == QProcess::FailedToStart && result.stopReason.isEmpty())
+        result.stopReason = QStringLiteral("compiler include trace could not start");
+    auto drain = [&] {
+        const auto remaining = std::max(qint64(0), byteLimit - captured.size());
+        const auto available = process.bytesAvailable();
+        captured += process.read(std::min(remaining, available));
+        if (available > remaining) {
+            result.stopReason = QStringLiteral("compiler trace output budget exhausted");
+            killGroup();
+        }
+    };
+    process.setReadChannel(QProcess::StandardError);
+    while (process.state() != QProcess::NotRunning) {
+        process.waitForReadyRead(20);
+        drain();
+        if (!result.stopReason.isEmpty())
+            break;
+        try {
+            analysisCheckpoint();
+        } catch (const IncludeAnalysisError &error) {
+            result.stopReason = QString::fromUtf8(error.what());
+            killGroup();
+            break;
+        }
+        if (!control && timer.elapsed() >= kTraceTimeoutSeconds * 1000) {
+            result.stopReason = QStringLiteral("compiler include trace timed out");
+            killGroup();
+            break;
+        }
     }
-    const qint64 duration = QDateTime::currentMSecsSinceEpoch() - started;
-    return {process.exitCode(), QString::fromUtf8(captured), duration};
+    drain();
+    result.durationMs = timer.elapsed();
+    result.exitCode = process.exitStatus() == QProcess::NormalExit ? process.exitCode() : -1;
+    if (!result.stopReason.isEmpty()) {
+        // A capped stderr tail may contain half a path; only complete lines are evidence.
+        const auto newline = captured.lastIndexOf('\n');
+        captured.truncate(newline < 0 ? 0 : newline + 1);
+    }
+    result.text = QString::fromUtf8(captured);
+    result.complete = result.stopReason.isEmpty() && result.exitCode == 0;
+    return result;
 }
 
-}  // namespace buildscope::native
+std::tuple<int, QString, qint64> runTrace(const QStringList &command, const QString &cwd) {
+    auto result = runTraceControlled(command, cwd);
+    if (!result.stopReason.isEmpty())
+        throw IncludeAnalysisError(result.stopReason);
+    return {result.exitCode, result.text, result.durationMs};
+}
+
+} // namespace buildscope::native

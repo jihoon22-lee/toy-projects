@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "loglens/initial_load.hpp"
+#include "loglens/format_plugin.hpp"
 #include "loglens/log_parser.hpp"
 #include "loglens/log_source.hpp"
 
@@ -27,6 +28,7 @@ struct LoadRequest {
     Format format = Format::Auto;
     MultilinePolicy multiline = MultilinePolicy::FoldContinuations;
     std::size_t max_record_bytes = kDefaultMaxRecordBytes;
+    std::shared_ptr<const FormatPlugin> format_plugin;
 };
 
 struct LoadBatch {
@@ -42,6 +44,7 @@ struct LoadBatch {
     QString error;
     std::uint64_t selected_offset = 0;
     std::uint64_t snapshot_end = 0;
+    FileIdentity identity;
 };
 
 // All source I/O and parsing lives on one dedicated thread. At most one batch
@@ -76,6 +79,7 @@ private:
     RecordAssembler assembler_;
     std::optional<std::uint64_t> initial_snapshot_end_;
     FileIdentity initial_identity_;
+    FileIdentity source_identity_;
     std::vector<RecordDelta> pending_deltas_;
     std::size_t pending_cursor_ = 0;
     quint64 next_sequence_ = 0;

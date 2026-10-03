@@ -1,5 +1,6 @@
 #pragma once
 
+#include "native_analysis.hpp"
 #include <QJsonObject>
 #include <QString>
 
@@ -17,6 +18,11 @@ QJsonObject analyzeEntry(const QJsonObject &entry, const QString &projectRoot);
 void annotateSnapshot(QJsonObject &snapshot, const QString &projectRoot, const QString &mode,
                       int maxUnits, int budgetSeconds,
                       const QStringList &unitGlobs = {});
+
+// v4 keeps measured and estimated evidence in separate, explicitly labeled records.
+void annotateSnapshotControlled(QJsonObject &snapshot, const QString &projectRoot,
+                                const QString &mode, AnalysisControl &control,
+                                const QStringList &unitGlobs = {});
 
 constexpr int kMaxEdges = 100000;
 constexpr qint64 kMaxSourceBytes = 4 * 1024 * 1024;

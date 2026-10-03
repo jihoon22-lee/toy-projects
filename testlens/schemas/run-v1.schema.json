@@ -1,0 +1,447 @@
+{
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "testlens.run/v1"
+    },
+    "producer": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "const": "testlens"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "additionalProperties": false
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "project": {
+      "type": "string",
+      "minLength": 1
+    },
+    "collected_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "executed_at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "scope": {
+      "type": "string",
+      "minLength": 1
+    },
+    "complete": {
+      "type": "boolean"
+    },
+    "declared_complete": {
+      "type": "boolean"
+    },
+    "source_root": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "expected_shards": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "observed_shards": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "manifest_digest": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "dialect": {
+            "enum": [
+              "junit",
+              "pytest",
+              "qt",
+              "ctest",
+              "ctest-junit"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "path",
+          "sha256",
+          "bytes",
+          "dialect"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "tests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "suite": {
+            "type": "string"
+          },
+          "classname": {
+            "type": "string"
+          },
+          "granularity": {
+            "enum": [
+              "runner-target",
+              "test-case"
+            ]
+          },
+          "status": {
+            "enum": [
+              "passed",
+              "failed",
+              "error",
+              "skipped",
+              "not-run",
+              "unknown"
+            ]
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "any_failure": {
+            "type": "boolean"
+          },
+          "ambiguous": {
+            "type": "boolean"
+          },
+          "attempts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "suite": {
+                  "type": "string"
+                },
+                "classname": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "passed",
+                    "failed",
+                    "error",
+                    "skipped",
+                    "not-run",
+                    "unknown"
+                  ]
+                },
+                "duration_seconds": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "granularity": {
+                  "enum": [
+                    "runner-target",
+                    "test-case"
+                  ]
+                },
+                "source_id": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "locator": {
+                  "type": "string"
+                },
+                "source_file": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "source_line": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "source_file_normalized": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "output": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "truncated"
+                  ],
+                  "additionalProperties": false
+                },
+                "messages": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "type": "string"
+                      },
+                      "message": {
+                        "type": "string"
+                      },
+                      "text": {
+                        "type": "string"
+                      },
+                      "truncated": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "type",
+                      "message",
+                      "text",
+                      "truncated"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "properties": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "attempt": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "shard": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "expected_outcome": {
+                  "enum": [
+                    null,
+                    "xfail",
+                    "xpass"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "suite",
+                "classname",
+                "status",
+                "duration_seconds",
+                "granularity",
+                "source_id",
+                "locator",
+                "source_file",
+                "source_line",
+                "source_file_normalized",
+                "output",
+                "messages",
+                "properties",
+                "attempt",
+                "shard",
+                "expected_outcome"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "suite",
+          "classname",
+          "granularity",
+          "status",
+          "duration_seconds",
+          "any_failure",
+          "ambiguous",
+          "attempts"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "source_id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "suite": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "producer",
+    "run_id",
+    "project",
+    "collected_at",
+    "executed_at",
+    "metadata",
+    "scope",
+    "complete",
+    "declared_complete",
+    "source_root",
+    "expected_shards",
+    "observed_shards",
+    "manifest_digest",
+    "sources",
+    "tests",
+    "diagnostics",
+    "summary"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "testlens.run/v1"
+}

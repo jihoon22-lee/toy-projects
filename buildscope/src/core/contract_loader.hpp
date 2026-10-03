@@ -15,7 +15,7 @@ namespace buildscope::detail {
 using SnapshotPostReadHook = std::function<void(QFile &)>;
 
 QJsonDocument loadJsonContractFile(const QString &path, const QString &kind,
-                                   const SnapshotPostReadHook &postReadHook = {});
+                                   const SnapshotPostReadHook &postReadHook = {}, std::atomic_bool *cancel = nullptr);
 
 Snapshot loadSnapshotFileWithPostReadHook(
     const QString &path, const SnapshotPostReadHook &postReadHook);

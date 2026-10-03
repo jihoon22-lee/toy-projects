@@ -2,6 +2,9 @@
 
 #include "loglens/filter_expr.hpp"
 #include "loglens/log_record.hpp"
+#include "loglens/triage.hpp"
+#include "loglens/ring_buffer.hpp"
+#include "loglens/log_source.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -240,6 +243,38 @@ bool validSession(const SessionState& state, PersistenceError& error) {
         && !validFilterExpression(state.filter, "session filter", error)) {
         return false;
     }
+    if (state.search.size() > kMaxFilterQueryBytes || !validUtf8(state.search) ||
+        state.whole_file_search.size() > kMaxFilterQueryBytes ||
+        !validUtf8(state.whole_file_search) || state.investigation_tab > 4 ||
+        state.layout.size() > 64 * 1024 || state.geometry.size() > 64 * 1024 ||
+        state.table_header.size() > 64 * 1024 || state.tail_records == 0 ||
+        state.tail_records > kMaxRecordCapacity || state.source_identity.size() > 128 ||
+        state.source_modified.size() > 128 || state.fingerprint_bytes > kMaxSourceChunkBytes ||
+        state.fingerprint_bytes > state.source_size) {
+        setPersistenceError(error, PersistenceErrorCode::LimitExceeded,
+                            "session view/evidence outside supported bounds");
+        return false;
+    }
+    for (const auto &digest : {state.source_fingerprint, state.plugin_fingerprint}) {
+        if (!digest.empty() &&
+            (digest.size() != 64 || !std::all_of(digest.begin(), digest.end(), [](unsigned char c) {
+                 return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+             }))) {
+            setPersistenceError(error, PersistenceErrorCode::InvalidValue,
+                                "invalid session fingerprint");
+            return false;
+        }
+    }
+    for (const auto &window :
+         {state.selected_window, state.baseline_window, state.comparison_window}) {
+        if (window && window->begin_ms >= window->end_ms) {
+            setPersistenceError(error, PersistenceErrorCode::InvalidValue,
+                                "invalid session time range");
+            return false;
+        }
+    }
+    if (!validateTriageState(state.triage, error))
+        return false;
     if (!state.level.empty()) {
         if (!validLabel(state.level, "session level", error)) {
             return false;

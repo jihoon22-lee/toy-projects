@@ -50,8 +50,8 @@ QJsonObject requiredObject(const QJsonObject &object, const QString &key,
     return value.toObject();
 }
 
-QJsonArray boundedArray(const QJsonObject &object, const QString &key,
-                        const QString &location, qsizetype limit) {
+QJsonArray boundedArray(const QJsonObject &object, const QString &key, const QString &location,
+                        qsizetype limit) {
     const auto value = object.value(key);
     if (!value.isArray()) {
         throw ContractError(location + "." + key + " must be an array");
@@ -63,28 +63,24 @@ QJsonArray boundedArray(const QJsonObject &object, const QString &key,
     return values;
 }
 
-qsizetype boundedInteger(const QJsonObject &object, const QString &key,
-                         const QString &location, qsizetype maximum) {
+qsizetype boundedInteger(const QJsonObject &object, const QString &key, const QString &location,
+                         qsizetype maximum) {
     const auto value = detail::requiredInteger(object, key, location);
     if (value > maximum) {
-        throw ContractError(location + "." + key + " exceeds " +
-                            QString::number(maximum));
+        throw ContractError(location + "." + key + " exceeds " + QString::number(maximum));
     }
     return value;
 }
 
 bool validDigest(const QString &value) {
-    static const QRegularExpression pattern(
-        QStringLiteral(R"(^sha256:[0-9a-f]{64}$)"));
+    static const QRegularExpression pattern(QStringLiteral(R"(^sha256:[0-9a-f]{64}$)"));
     return pattern.match(value).hasMatch();
 }
 
-QString requiredDigest(const QJsonObject &object, const QString &key,
-                       const QString &location) {
+QString requiredDigest(const QJsonObject &object, const QString &key, const QString &location) {
     const auto digest = detail::requiredString(object, key, location);
     if (!validDigest(digest)) {
-        throw ContractError(location + "." + key +
-                            " must be a lowercase sha256 digest");
+        throw ContractError(location + "." + key + " must be a lowercase sha256 digest");
     }
     return digest;
 }
@@ -92,22 +88,21 @@ QString requiredDigest(const QJsonObject &object, const QString &key,
 DiffInput parseInput(const QJsonObject &inputs, const QString &key) {
     const auto object = requiredObject(inputs, key, QStringLiteral("root.inputs"));
     const auto location = QStringLiteral("root.inputs.") + key;
-    detail::rejectUnknownKeys(
-        object,
-        {QStringLiteral("configuration_count"), QStringLiteral("label"),
-         QStringLiteral("semantic_digest"), QStringLiteral("source_count")},
-        location);
+    detail::rejectUnknownKeys(object,
+                              {QStringLiteral("configuration_count"), QStringLiteral("label"),
+                               QStringLiteral("semantic_digest"),
+                               QStringLiteral("source_count")},
+                              location);
     DiffInput input;
-    input.configurationCount = boundedInteger(
-        object, QStringLiteral("configuration_count"), location, kMaxConfigurations);
+    input.configurationCount = boundedInteger(object, QStringLiteral("configuration_count"),
+                                              location, kMaxConfigurations);
     input.label = detail::requiredString(object, QStringLiteral("label"), location);
     if (input.label.size() > 256) {
         throw ContractError(location + ".label exceeds 256 characters");
     }
-    input.semanticDigest =
-        requiredDigest(object, QStringLiteral("semantic_digest"), location);
-    input.sourceCount = boundedInteger(
-        object, QStringLiteral("source_count"), location, kMaxConfigurations);
+    input.semanticDigest = requiredDigest(object, QStringLiteral("semantic_digest"), location);
+    input.sourceCount =
+        boundedInteger(object, QStringLiteral("source_count"), location, kMaxConfigurations);
     if (input.sourceCount > input.configurationCount) {
         throw ContractError(location + ".source_count exceeds configuration_count");
     }
@@ -115,8 +110,8 @@ DiffInput parseInput(const QJsonObject &inputs, const QString &key) {
 }
 
 QStringList parseIgnoredFields(const QJsonObject &object, const QString &location) {
-    const auto ignored = boundedArray(object, QStringLiteral("ignored_fields"), location,
-                                      kMaxIgnoredFields);
+    const auto ignored =
+        boundedArray(object, QStringLiteral("ignored_fields"), location, kMaxIgnoredFields);
     QStringList result;
     QSet<QString> seenIgnored;
     for (qsizetype index = 0; index < ignored.size(); ++index) {
@@ -135,17 +130,15 @@ QStringList parseIgnoredFields(const QJsonObject &object, const QString &locatio
     return result;
 }
 
-DiffSuppressionRule parseSuppressionRule(const QJsonValue &value,
-                                         const QString &ruleLocation) {
+DiffSuppressionRule parseSuppressionRule(const QJsonValue &value, const QString &ruleLocation) {
     if (!value.isObject()) {
         throw ContractError(ruleLocation + " must be an object");
     }
     const auto rule = value.toObject();
-    detail::rejectUnknownKeys(
-        rule, {QStringLiteral("category"), QStringLiteral("path")}, ruleLocation);
+    detail::rejectUnknownKeys(rule, {QStringLiteral("category"), QStringLiteral("path")},
+                              ruleLocation);
     DiffSuppressionRule parsed;
-    parsed.category = detail::requiredString(
-        rule, QStringLiteral("category"), ruleLocation);
+    parsed.category = detail::requiredString(rule, QStringLiteral("category"), ruleLocation);
     if (parsed.category != QStringLiteral("*") &&
         !kChangeCategories.contains(parsed.category)) {
         throw ContractError(ruleLocation + ".category is unsupported: " + parsed.category);
@@ -154,19 +147,18 @@ DiffSuppressionRule parseSuppressionRule(const QJsonValue &value,
     if (parsed.path.size() > 1024) {
         throw ContractError(ruleLocation + ".path exceeds 1024 characters");
     }
-    if (parsed.path.contains(QLatin1Char('\\')) ||
-        parsed.path.contains(QLatin1Char('[')) ||
+    if (parsed.path.contains(QLatin1Char('\\')) || parsed.path.contains(QLatin1Char('[')) ||
         parsed.path.contains(QLatin1Char(']'))) {
-        throw ContractError(
-            ruleLocation + ".path supports only /, literal characters, *, **, and ?");
+        throw ContractError(ruleLocation +
+                            ".path supports only /, literal characters, *, **, and ?");
     }
     return parsed;
 }
 
 QVector<DiffSuppressionRule> parseSuppressionRules(const QJsonObject &object,
                                                    const QString &location) {
-    const auto rules = boundedArray(object, QStringLiteral("suppression_rules"), location,
-                                    kMaxSuppressions);
+    const auto rules =
+        boundedArray(object, QStringLiteral("suppression_rules"), location, kMaxSuppressions);
     QVector<DiffSuppressionRule> result;
     QSet<QString> seenRules;
     for (qsizetype index = 0; index < rules.size(); ++index) {
@@ -184,8 +176,7 @@ QVector<DiffSuppressionRule> parseSuppressionRules(const QJsonObject &object,
             const auto currentIdentity =
                 parsed.category.toUtf8() + QByteArray(1, '\0') + parsed.path.toUtf8();
             if (currentIdentity < previousIdentity) {
-                throw ContractError(location +
-                                    ".suppression_rules is not in canonical order");
+                throw ContractError(location + ".suppression_rules is not in canonical order");
             }
         }
         seenRules.insert(identity);
@@ -197,18 +188,16 @@ QVector<DiffSuppressionRule> parseSuppressionRules(const QJsonObject &object,
 DiffPolicy parsePolicy(const QJsonObject &root) {
     const auto object = requiredObject(root, QStringLiteral("policy"), QStringLiteral("root"));
     const auto location = QStringLiteral("root.policy");
-    detail::rejectUnknownKeys(
-        object,
-        {QStringLiteral("ignored_fields"), QStringLiteral("suppression_rules"),
-         QStringLiteral("version")},
-        location);
+    detail::rejectUnknownKeys(object,
+                              {QStringLiteral("ignored_fields"),
+                               QStringLiteral("suppression_rules"), QStringLiteral("version")},
+                              location);
     DiffPolicy policy;
     policy.ignoredFields = parseIgnoredFields(object, location);
     policy.suppressionRules = parseSuppressionRules(object, location);
     policy.version = detail::requiredString(object, QStringLiteral("version"), location);
     if (policy.ignoredFields != kIgnoredFields) {
-        throw ContractError(location +
-                            ".ignored_fields does not match diff policy v1");
+        throw ContractError(location + ".ignored_fields does not match diff policy v1");
     }
     if (policy.version != QString::fromLatin1(kDiffPolicyV1)) {
         throw ContractError(location + ".version is unsupported: " + policy.version);
@@ -237,9 +226,8 @@ qsizetype appendGlobToken(QString &expression, const QString &pattern, qsizetype
 }
 
 QString globRegularExpression(const QString &pattern) {
-    QString expression = pattern.contains(QLatin1Char('/'))
-                             ? QStringLiteral("^")
-                             : QStringLiteral("^(?:.*/)?");
+    QString expression =
+        pattern.contains(QLatin1Char('/')) ? QStringLiteral("^") : QStringLiteral("^(?:.*/)?");
     for (qsizetype index = 0; index < pattern.size();) {
         index = appendGlobToken(expression, pattern, index);
     }
@@ -291,25 +279,23 @@ DiffUnit parseUnit(const QJsonValue &value, qsizetype index, const DiffPolicy &p
         throw ContractError(location + " must be an object");
     }
     const auto object = value.toObject();
-    detail::rejectUnknownKeys(
-        object,
-        {QStringLiteral("after"), QStringLiteral("before"), QStringLiteral("changes"),
-         QStringLiteral("kind"), QStringLiteral("source"), QStringLiteral("suppressed")},
-        location);
+    detail::rejectUnknownKeys(object,
+                              {QStringLiteral("after"), QStringLiteral("before"),
+                               QStringLiteral("changes"), QStringLiteral("kind"),
+                               QStringLiteral("source"), QStringLiteral("suppressed")},
+                              location);
     DiffUnit unit;
-    unit.after = diff_validation::parseConfiguration(
-        object, QStringLiteral("after"), location);
-    unit.before = diff_validation::parseConfiguration(
-        object, QStringLiteral("before"), location);
-    unit.kind = detail::requiredEnumString(
-        object, QStringLiteral("kind"), location,
-        {QStringLiteral("added"), QStringLiteral("changed"), QStringLiteral("moved"),
-         QStringLiteral("removed")});
+    unit.after = diff_validation::parseConfiguration(object, QStringLiteral("after"), location);
+    unit.before =
+        diff_validation::parseConfiguration(object, QStringLiteral("before"), location);
+    unit.kind =
+        detail::requiredEnumString(object, QStringLiteral("kind"), location,
+                                   {QStringLiteral("added"), QStringLiteral("changed"),
+                                    QStringLiteral("moved"), QStringLiteral("removed")});
     unit.source = diff_validation::parseSource(object, location);
-    unit.suppressed =
-        detail::requiredBool(object, QStringLiteral("suppressed"), location);
-    const auto changes = boundedArray(object, QStringLiteral("changes"), location,
-                                      kMaxDiffChanges);
+    unit.suppressed = detail::requiredBool(object, QStringLiteral("suppressed"), location);
+    const auto changes =
+        boundedArray(object, QStringLiteral("changes"), location, kMaxDiffChanges);
     unit.changes.reserve(changes.size());
     for (qsizetype changeIndex = 0; changeIndex < changes.size(); ++changeIndex) {
         unit.changes.append(diff_validation::parseChange(
@@ -330,35 +316,35 @@ DiffUnit parseUnit(const QJsonValue &value, qsizetype index, const DiffPolicy &p
 DiffSummary parseSummary(const QJsonObject &root) {
     const auto object = requiredObject(root, QStringLiteral("summary"), QStringLiteral("root"));
     const auto location = QStringLiteral("root.summary");
-    detail::rejectUnknownKeys(
-        object,
-        {QStringLiteral("added"), QStringLiteral("changed"),
-         QStringLiteral("change_count"), QStringLiteral("moved"),
-         QStringLiteral("removed"), QStringLiteral("suppressed_changes"),
-         QStringLiteral("suppressed_units"), QStringLiteral("unchanged"),
-         QStringLiteral("visible_changes"), QStringLiteral("visible_units")},
-        location);
+    detail::rejectUnknownKeys(object,
+                              {QStringLiteral("added"), QStringLiteral("changed"),
+                               QStringLiteral("change_count"), QStringLiteral("moved"),
+                               QStringLiteral("removed"), QStringLiteral("suppressed_changes"),
+                               QStringLiteral("suppressed_units"), QStringLiteral("unchanged"),
+                               QStringLiteral("visible_changes"),
+                               QStringLiteral("visible_units")},
+                              location);
     DiffSummary summary;
-    summary.added = boundedInteger(object, QStringLiteral("added"), location,
-                                   kMaxConfigurations);
-    summary.changed = boundedInteger(object, QStringLiteral("changed"), location,
-                                     kMaxConfigurations);
-    summary.changeCount = boundedInteger(object, QStringLiteral("change_count"), location,
-                                         kMaxSummaryChanges);
-    summary.moved = boundedInteger(object, QStringLiteral("moved"), location,
-                                   kMaxConfigurations);
-    summary.removed = boundedInteger(object, QStringLiteral("removed"), location,
-                                     kMaxConfigurations);
-    summary.suppressedChanges = boundedInteger(
-        object, QStringLiteral("suppressed_changes"), location, kMaxSummaryChanges);
-    summary.suppressedUnits = boundedInteger(
-        object, QStringLiteral("suppressed_units"), location, kMaxDiffUnits);
-    summary.unchanged = boundedInteger(object, QStringLiteral("unchanged"), location,
-                                       kMaxConfigurations);
-    summary.visibleChanges = boundedInteger(
-        object, QStringLiteral("visible_changes"), location, kMaxSummaryChanges);
-    summary.visibleUnits = boundedInteger(
-        object, QStringLiteral("visible_units"), location, kMaxDiffUnits);
+    summary.added =
+        boundedInteger(object, QStringLiteral("added"), location, kMaxConfigurations);
+    summary.changed =
+        boundedInteger(object, QStringLiteral("changed"), location, kMaxConfigurations);
+    summary.changeCount =
+        boundedInteger(object, QStringLiteral("change_count"), location, kMaxSummaryChanges);
+    summary.moved =
+        boundedInteger(object, QStringLiteral("moved"), location, kMaxConfigurations);
+    summary.removed =
+        boundedInteger(object, QStringLiteral("removed"), location, kMaxConfigurations);
+    summary.suppressedChanges = boundedInteger(object, QStringLiteral("suppressed_changes"),
+                                               location, kMaxSummaryChanges);
+    summary.suppressedUnits =
+        boundedInteger(object, QStringLiteral("suppressed_units"), location, kMaxDiffUnits);
+    summary.unchanged =
+        boundedInteger(object, QStringLiteral("unchanged"), location, kMaxConfigurations);
+    summary.visibleChanges =
+        boundedInteger(object, QStringLiteral("visible_changes"), location, kMaxSummaryChanges);
+    summary.visibleUnits =
+        boundedInteger(object, QStringLiteral("visible_units"), location, kMaxDiffUnits);
     return summary;
 }
 
@@ -410,8 +396,8 @@ void validateSummary(const DiffReport &report) {
 }
 
 QVector<DiffDiagnostic> parseDiagnostics(const QJsonObject &root) {
-    const auto values = boundedArray(root, QStringLiteral("diagnostics"), QStringLiteral("root"),
-                                     kMaxDiffDiagnostics);
+    const auto values = boundedArray(root, QStringLiteral("diagnostics"),
+                                     QStringLiteral("root"), kMaxDiffDiagnostics);
     QVector<DiffDiagnostic> diagnostics;
     diagnostics.reserve(values.size());
     for (qsizetype index = 0; index < values.size(); ++index) {
@@ -421,35 +407,32 @@ QVector<DiffDiagnostic> parseDiagnostics(const QJsonObject &root) {
             throw ContractError(location + " must be an object");
         }
         const auto object = values.at(index).toObject();
-        detail::rejectUnknownKeys(
-            object,
-            {QStringLiteral("code"), QStringLiteral("message"),
-             QStringLiteral("severity"), QStringLiteral("source")},
-            location);
+        detail::rejectUnknownKeys(object,
+                                  {QStringLiteral("code"), QStringLiteral("message"),
+                                   QStringLiteral("severity"), QStringLiteral("source")},
+                                  location);
         diagnostics.append(
             {detail::requiredString(object, QStringLiteral("code"), location),
              detail::requiredString(object, QStringLiteral("message"), location),
              detail::requiredEnumString(
                  object, QStringLiteral("severity"), location,
-                 {QStringLiteral("error"), QStringLiteral("info"),
-                  QStringLiteral("warning")}),
+                 {QStringLiteral("error"), QStringLiteral("info"), QStringLiteral("warning")}),
              detail::optionalString(object, QStringLiteral("source"), location)});
     }
     return diagnostics;
 }
 
-DiffReport parseDiffDocument(const QJsonDocument &document) {
+DiffReport parseDiffDocument(const QJsonDocument &document, std::atomic_bool *cancel) {
     if (!document.isObject()) {
         throw ContractError("diff report root must be an object");
     }
     const auto root = document.object();
-    detail::rejectUnknownKeys(
-        root,
-        {QStringLiteral("diagnostics"), QStringLiteral("inputs"),
-         QStringLiteral("policy"), QStringLiteral("producer"),
-         QStringLiteral("schema_version"), QStringLiteral("summary"),
-         QStringLiteral("units")},
-        QStringLiteral("root"));
+    detail::rejectUnknownKeys(root,
+                              {QStringLiteral("diagnostics"), QStringLiteral("inputs"),
+                               QStringLiteral("policy"), QStringLiteral("producer"),
+                               QStringLiteral("schema_version"), QStringLiteral("summary"),
+                               QStringLiteral("units")},
+                              QStringLiteral("root"));
     DiffReport report;
     report.schemaVersion =
         detail::requiredString(root, QStringLiteral("schema_version"), QStringLiteral("root"));
@@ -458,16 +441,15 @@ DiffReport parseDiffDocument(const QJsonDocument &document) {
     }
     const auto producer =
         requiredObject(root, QStringLiteral("producer"), QStringLiteral("root"));
-    detail::rejectUnknownKeys(
-        producer, {QStringLiteral("name"), QStringLiteral("version")},
-        QStringLiteral("root.producer"));
-    const auto producerName = detail::requiredString(
-        producer, QStringLiteral("name"), QStringLiteral("root.producer"));
+    detail::rejectUnknownKeys(producer, {QStringLiteral("name"), QStringLiteral("version")},
+                              QStringLiteral("root.producer"));
+    const auto producerName = detail::requiredString(producer, QStringLiteral("name"),
+                                                     QStringLiteral("root.producer"));
     if (producerName != QStringLiteral("buildscope")) {
         throw ContractError("root.producer.name is unsupported: " + producerName);
     }
-    report.producerVersion = detail::requiredString(
-        producer, QStringLiteral("version"), QStringLiteral("root.producer"));
+    report.producerVersion = detail::requiredString(producer, QStringLiteral("version"),
+                                                    QStringLiteral("root.producer"));
     const auto inputs = requiredObject(root, QStringLiteral("inputs"), QStringLiteral("root"));
     detail::rejectUnknownKeys(inputs, {QStringLiteral("after"), QStringLiteral("before")},
                               QStringLiteral("root.inputs"));
@@ -476,21 +458,23 @@ DiffReport parseDiffDocument(const QJsonDocument &document) {
     report.policy = parsePolicy(root);
     report.diagnostics = parseDiagnostics(root);
     report.summary = parseSummary(root);
-    const auto units = boundedArray(root, QStringLiteral("units"), QStringLiteral("root"),
-                                    kMaxDiffUnits);
+    const auto units =
+        boundedArray(root, QStringLiteral("units"), QStringLiteral("root"), kMaxDiffUnits);
     report.units.reserve(units.size());
     for (qsizetype index = 0; index < units.size(); ++index) {
+        if (cancel && cancel->load())
+            throw ContractError("diff parsing cancelled");
         report.units.append(parseUnit(units.at(index), index, report.policy));
     }
     validateSummary(report);
     return report;
 }
 
-}  // namespace
+} // namespace
 
-DiffReport loadDiffFile(const QString &path) {
-    return parseDiffDocument(detail::loadJsonContractFile(
-        path, QStringLiteral("diff report")));
+DiffReport loadDiffFile(const QString &path, std::atomic_bool *cancel) {
+    return parseDiffDocument(
+        detail::loadJsonContractFile(path, QStringLiteral("diff report"), {}, cancel), cancel);
 }
 
 QString renderDiffValue(const QJsonValue &value) {
@@ -506,4 +490,4 @@ QString renderDiffValue(const QJsonValue &value) {
     return QString::fromUtf8(rendered.mid(1, rendered.size() - 2));
 }
 
-}  // namespace buildscope
+} // namespace buildscope

@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="repository-fixtures"
+	tests="3"
+	failures="0"
+	disabled="0"
+	skipped="0"
+	hostname="local-fixture"
+	time="0"
+	timestamp="2026-10-03T19:51:01"
+	>
+	<testcase name="diskmap_format" classname="diskmap_format" time="0.0986397" status="run">
+		<properties/>
+		<system-out>********* Start testing of TestFormat *********
+Config: Using QtTest library 6.10.2, Qt 6.10.2 (x86_64-little_endian-lp64 shared (dynamic) release build; by GCC 15.2.0), ubuntu 26.04
+PASS   : TestFormat::initTestCase()
+PASS   : TestFormat::run()
+PASS   : TestFormat::cleanupTestCase()
+Totals: 3 passed, 0 failed, 0 skipped, 0 blacklisted, 93ms
+********* Finished testing of TestFormat *********
+</system-out>
+	</testcase>
+	<testcase name="buildscope_contract" classname="buildscope_contract" time="0.138597" status="run">
+		<properties/>
+		<system-out>********* Start testing of ContractTest *********
+Config: Using QtTest library 6.10.2, Qt 6.10.2 (x86_64-little_endian-lp64 shared (dynamic) release build; by GCC 15.2.0), ubuntu 26.04
+PASS   : ContractTest::initTestCase()
+PASS   : ContractTest::loadsVersionedSnapshot()
+PASS   : ContractTest::loadsNormalizedV2Snapshot()
+PASS   : ContractTest::loadsIncludeExplanationV3()
+PASS   : ContractTest::acceptsCommandOnlyV2Entry()
+PASS   : ContractTest::acceptsEmptyNonCompilerV2Arg()
+PASS   : ContractTest::preservesEmptyV1Arguments()
+PASS   : ContractTest::rejectsMalformedV2Core()
+PASS   : ContractTest::rejectsMalformedV3Core()
+PASS   : ContractTest::rejectsMismatchedEntryCount()
+PASS   : ContractTest::rejectsInvalidContracts()
+PASS   : ContractTest::rejectsDuplicateJsonKeys()
+PASS   : ContractTest::rejectsFinalSymlink()
+PASS   : ContractTest::rejectsOversizedFile()
+PASS   : ContractTest::rejectsTooManyEntries()
+PASS   : ContractTest::rejectsNonRegularFile()
+PASS   : ContractTest::rejectsClosedDescriptorDuringRead()
+PAS...
+[This part of the test output was removed since it exceeds the threshold of 1024 bytes.]
+</system-out>
+	</testcase>
+	<testcase name="loglens_parser" classname="loglens_parser" time="0.331474" status="run">
+		<properties/>
+		<system-out>********* Start testing of TestLogParser *********
+Config: Using QtTest library 6.10.2, Qt 6.10.2 (x86_64-little_endian-lp64 shared (dynamic) release build; by GCC 15.2.0), ubuntu 26.04
+PASS   : TestLogParser::initTestCase()
+PASS   : TestLogParser::testDetection()
+PASS   : TestLogParser::testPlainIso()
+PASS   : TestLogParser::testSyslog()
+PASS   : TestLogParser::testSyslogValidation()
+PASS   : TestLogParser::testJsonLine()
+PASS   : TestLogParser::testJsonValidationAndUnicode()
+PASS   : TestLogParser::testTimestampOffsetsAreValidated()
+PASS   : TestLogParser::testMalformedJsonCorpusNeverThrows()
+PASS   : TestLogParser::testJsonStringBoundIsReported()
+PASS   : TestLogParser::testJsonDiagnosticsRemainBounded()
+PASS   : TestLogParser::testJsonFieldDiagnosticsRemainBoundedAfterReaderDiagnostics()
+PASS   : TestLogParser::testUnparseableKeepsData()
+PASS   : TestLogParser::testContinuation()
+PASS   : TestLogParser::testAssemblerPreservesPollState()
+PASS   : TestLogParser::testAssemblerExtendsPreviousRecordAcrossPolls...
+[This part of the test output was removed since it exceeds the threshold of 1024 bytes.]
+</system-out>
+	</testcase>
+</testsuite>

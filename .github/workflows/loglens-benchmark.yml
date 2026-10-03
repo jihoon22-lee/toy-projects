@@ -67,6 +67,7 @@ jobs:
         working-directory: loglens
         run: |
           set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/loglens-benchmark"
           cmake -S . -B "$RUNNER_TEMP/loglens-benchmark/build" \
             -DCMAKE_BUILD_TYPE=Release \
             -DLOGLENS_BUILD_BENCHMARKS=ON \

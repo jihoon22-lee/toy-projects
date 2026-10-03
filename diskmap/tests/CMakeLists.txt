@@ -36,6 +36,7 @@ target_compile_definitions(test_cli_version PRIVATE
     DISKMAP_BINARY="$<TARGET_FILE:diskmap>")
 
 set(GUI_TESTS
+    test_portfolio_features
     test_main_window
     test_node_table_model
     test_storage_workbench

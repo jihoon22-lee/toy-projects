@@ -1,10 +1,12 @@
 #include "diskmap/cleanup.hpp"
+#include "duplicates_internal.hpp"
 
 #include <array>
 #include <algorithm>
 #include <cstdlib>
 #include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -17,7 +19,7 @@ namespace {
 
 namespace fs = std::filesystem;
 
-constexpr std::array<const char*, 17> kCleanupSkipMessages = {
+constexpr std::array<const char*, 19> kCleanupSkipMessages = {
     "",
     "selected entry is absent from the retained scan",
     "the scan root cannot be staged for cleanup",
@@ -35,9 +37,11 @@ constexpr std::array<const char*, 17> kCleanupSkipMessages = {
     "the filesystem entry type changed after scanning",
     "the filesystem size changed after scanning",
     "the filesystem hard-link count changed after scanning",
+    "the filesystem contents or change time changed after scanning",
+    "the cleanup plan does not retain a verified copy of this duplicate group",
 };
 
-constexpr std::array<const char*, 17> kCleanupSkipReasonNames = {
+constexpr std::array<const char*, 19> kCleanupSkipReasonNames = {
     "none",
     "missing-selection",
     "root-target",
@@ -55,6 +59,8 @@ constexpr std::array<const char*, 17> kCleanupSkipReasonNames = {
     "type-changed",
     "size-changed",
     "hard-link-changed",
+    "modified",
+    "missing-keeper",
 };
 
 fs::path normalizedAbsolute(const fs::path& value) {
@@ -98,6 +104,7 @@ bool protectedPath(const fs::path& path, const CleanupPolicy& policy) {
     }
     for (const fs::path& root : policy.protected_roots) {
         if (exactPath(root, normalized)
+            || pathContains(normalized, root)
             || (policy.protect_subtrees && pathContains(root, normalized))) {
             return true;
         }
@@ -167,16 +174,6 @@ bool cleanupEvidenceComplete(const FsNode& node) {
     return node.complete && subtreeComplete(node);
 }
 
-bool hasSymlinkAncestor(const FsNode& root, const NodeKey& key) {
-    const std::vector<const FsNode*> path = nodePathByKey(root, key);
-    if (path.empty()) {
-        return false;
-    }
-    return std::any_of(path.begin(), path.end() - 1, [](const FsNode* node) {
-        return nodeKind(*node) == FsKind::Symlink;
-    });
-}
-
 bool coveredByAcceptedDirectory(const fs::path& path,
                                 const std::set<fs::path>& acceptedDirectories) {
     fs::path parent = normalizedAbsolute(path).parent_path();
@@ -206,6 +203,10 @@ CleanupTarget targetFromNode(const FsNode& node, std::uint64_t generation) {
     target.hard_link_count_known = node.metadata.hard_link_count_known;
     target.symlink = target.kind == FsKind::Symlink;
     target.scan_generation = generation;
+    target.modified_ns = node.metadata.modified_ns;
+    target.modified_time_known = node.metadata.modified_time_known;
+    target.changed_ns = node.metadata.changed_ns;
+    target.changed_time_known = node.metadata.changed_time_known;
     return target;
 }
 
@@ -355,19 +356,34 @@ const char* cleanupSkipReasonName(CleanupSkipReason reason) {
 
 CleanupPlan planCleanup(const ScanResult& scan,
                         const std::vector<NodeKey>& selected,
-                        const CleanupPolicy& policy) {
+                        const CleanupPolicy& policy,
+                        const DuplicateAnalysis* duplicates) {
     if (policy.max_selected == 0 || selected.size() > policy.max_selected) {
         throw std::invalid_argument("cleanup selection exceeds the configured bound");
     }
     CleanupPlan plan;
     plan.scan_generation = scan.generation;
+    if (selected.empty()) return plan;
     std::vector<NodeKey> ordered = selected;
     std::sort(ordered.begin(), ordered.end(), selectionBefore);
     ordered.erase(std::unique(ordered.begin(), ordered.end()), ordered.end());
 
+    std::map<NodeKey, const FsNode*> nodeIndex;
+    std::set<NodeKey> symlinkDescendants;
+    std::vector<std::pair<const FsNode*, bool>> pending{{&scan.root, false}};
+    while (!pending.empty()) {
+        const auto [node, ancestorLink] = pending.back(); pending.pop_back();
+        const auto key = nodeKey(*node);
+        nodeIndex.emplace(key, node);
+        if (ancestorLink) symlinkDescendants.insert(key);
+        for (const auto& child : node->children) pending.push_back({&child, ancestorLink || nodeKind(*node) == FsKind::Symlink});
+    }
+    const auto lookup = [&](const NodeKey& key) -> const FsNode* {
+        const auto found = nodeIndex.find(key); return found == nodeIndex.end() ? nullptr : found->second;
+    };
     std::set<fs::path> acceptedDirectories;
     for (const NodeKey& key : ordered) {
-        const FsNode* node = findNodeByKey(scan.root, key);
+        const FsNode* node = lookup(key);
         if (node == nullptr) {
             plan.rejected.push_back(rejection(
                 key, key.normalized_path, CleanupSkipReason::MissingSelection,
@@ -375,7 +391,7 @@ CleanupPlan planCleanup(const ScanResult& scan,
             continue;
         }
         CleanupSkipReason reason = basicRejection(scan, *node, policy);
-        if (reason == CleanupSkipReason::None && hasSymlinkAncestor(scan.root, key)) {
+        if (reason == CleanupSkipReason::None && symlinkDescendants.count(key) != 0) {
             reason = CleanupSkipReason::SymlinkDescendant;
         }
         if (reason == CleanupSkipReason::None
@@ -392,6 +408,40 @@ CleanupPlan planCleanup(const ScanResult& scan,
             acceptedDirectories.insert(target.path);
         }
         plan.targets.push_back(std::move(target));
+    }
+    if (duplicates != nullptr) {
+        std::map<fs::path, std::size_t> selectedPaths;
+        for (std::size_t i = 0; i < plan.targets.size(); ++i) selectedPaths.emplace(normalizedAbsolute(plan.targets[i].path), i);
+        const auto selectedTarget = [&](const fs::path& input) -> std::optional<std::size_t> {
+            const auto original = normalizedAbsolute(input);
+            for (auto path = original; !path.empty();) {
+                const auto found = selectedPaths.find(path);
+                if (found != selectedPaths.end() && (path == original || plan.targets[found->second].kind == FsKind::Directory)) return found->second;
+                const auto parent = path.parent_path();
+                if (parent == path) break;
+                path = parent;
+            }
+            return std::nullopt;
+        };
+        std::set<std::size_t> rejected;
+        for (const auto& group : duplicates->groups) {
+            if (!group.certain || !group.reclaimable) continue;
+            const DuplicateEntry* keeper = nullptr;
+            for (const auto& entry : group.entries) if (!selectedTarget(entry.path)) { keeper = &entry; break; }
+            const FsNode* keeperNode = keeper ? lookup(keeper->key) : nullptr;
+            for (const auto& entry : group.entries) {
+                const auto index = selectedTarget(entry.path);
+                if (!index) continue;
+                const FsNode* node = lookup(entry.key);
+                if (!keeperNode || !node) { rejected.insert(*index); continue; }
+                plan.targets[*index].duplicate_proofs.push_back({entry.path, node->metadata, keeper->path, keeperNode->metadata, group.content_hash});
+            }
+        }
+        for (auto it = rejected.rbegin(); it != rejected.rend(); ++it) {
+            const auto& target = plan.targets[*it];
+            plan.rejected.push_back(rejection(target.key, target.path, CleanupSkipReason::MissingKeeper, skipMessage(CleanupSkipReason::MissingKeeper)));
+            plan.targets.erase(plan.targets.begin() + static_cast<std::ptrdiff_t>(*it));
+        }
     }
     computeReclaimable(scan, plan);
     return plan;
@@ -417,6 +467,9 @@ CleanupRevalidation revalidateCleanupTarget(const CleanupTarget& target,
                && (!result.current.hard_link_count_known
                    || result.current.hard_link_count != target.hard_link_count)) {
         result.reason = CleanupSkipReason::HardLinkChanged;
+    } else if ((target.modified_time_known && (!result.current.modified_time_known || result.current.modified_ns != target.modified_ns))
+               || (target.changed_time_known && (!result.current.changed_time_known || result.current.changed_ns != target.changed_ns))) {
+        result.reason = CleanupSkipReason::Modified;
     } else {
         result.accepted = true;
         result.reason = CleanupSkipReason::None;
@@ -425,4 +478,58 @@ CleanupRevalidation revalidateCleanupTarget(const CleanupTarget& target,
     return result;
 }
 
+bool verifyCleanupProofs(const CleanupTarget& target, std::string& error) {
+    if (target.duplicate_proofs.empty()) return true;
+    auto access = detail::makeSystemDuplicateFileAccess();
+    DuplicateAnalysis result;
+    DuplicateAnalysisOptions options;
+    DuplicateProgressFn progress;
+    detail::AnalysisContext context{options, *access, progress, nullptr, result};
+    for (const auto& proof : target.duplicate_proofs) {
+        if (proof.path == proof.keeper || proof.content_hash.empty()) { error = "invalid duplicate keeper proof"; return false; }
+        detail::Candidate candidate{proof.path, {}, proof.expected, proof.expected.logical_size, true, {}, {}};
+        detail::Candidate keeper{proof.keeper, {}, proof.keeper_expected, proof.keeper_expected.logical_size, true, {}, {}};
+        if (!detail::hashFull(candidate, context) || !detail::hashFull(keeper, context)
+            || candidate.hash != proof.content_hash || keeper.hash != proof.content_hash) {
+            error = "duplicate contents or surviving copy changed after review";
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace diskmap
+
+namespace diskmap {
+std::optional<NodeKey> chooseDuplicateKeeper(const DuplicateGroup& group,
+    const ScanResult& scan, DuplicateKeeperPolicy policy,
+    const std::filesystem::path& preferred, const std::vector<NodeKey>& staged) {
+    (void)scan;
+    if (policy == DuplicateKeeperPolicy::PreferredDirectory && !preferred.is_absolute()) return std::nullopt;
+    std::vector<const DuplicateEntry*> eligible;
+    for (const auto& entry : group.entries) {
+        bool covered = false;
+        for (const auto& key : staged) {
+            const auto relative = entry.path.lexically_relative(key.normalized_path);
+            if (key == entry.key || (key.kind == FsKind::Directory && !relative.empty() && *relative.begin() != "..")) covered = true;
+        }
+        if (!covered) eligible.push_back(&entry);
+    }
+    if (eligible.empty() || !group.certain || !group.reclaimable) return std::nullopt;
+    const auto inPreferred = [&](const auto* entry) {
+        if (preferred.empty()) return false;
+        const auto relative = entry->path.lexically_relative(preferred.lexically_normal());
+        return !relative.empty() && *relative.begin() != "..";
+    };
+    std::stable_sort(eligible.begin(), eligible.end(), [&](const auto* a, const auto* b) {
+        if (policy == DuplicateKeeperPolicy::PreferredDirectory && inPreferred(a) != inPreferred(b)) return inPreferred(a);
+        if (policy == DuplicateKeeperPolicy::Newest || policy == DuplicateKeeperPolicy::Oldest) {
+            if (a->modified_time_known != b->modified_time_known) return a->modified_time_known;
+            if (a->modified_time_known && b->modified_time_known && a->modified_ns != b->modified_ns)
+                return policy == DuplicateKeeperPolicy::Newest ? a->modified_ns > b->modified_ns : a->modified_ns < b->modified_ns;
+        }
+        return a->key < b->key;
+    });
+    return eligible.front()->key;
+}
+}
