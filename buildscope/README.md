@@ -22,6 +22,8 @@ What it does:
 The native producer in `src/native/` is dependency-free and bounded:
 
 - it rejects databases larger than 64 MiB or with more than 100,000 entries;
+- it streams the top-level array element by element, so peak parse memory is
+  bounded by the largest single entry rather than a whole-database DOM;
 - it performs JSON parsing and validation only—no shell or compiler process is started;
 - it preserves the raw `arguments` array or `command` string, plus `directory`, `file`, and optional
   `output` fields;

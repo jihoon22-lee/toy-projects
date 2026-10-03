@@ -38,5 +38,6 @@
       "release-type": "python",
       "component": "envlens"
     }
-  }
+  },
+  "bump-patch-for-minor-pre-major": true
 }
