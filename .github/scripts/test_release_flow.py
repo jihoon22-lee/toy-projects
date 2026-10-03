@@ -41,7 +41,9 @@ if args[0] == "api":
         state["tag"] = fields["sha"]
         finish("create-tag")
     if endpoint.endswith("/commits"):
-        if not state["tag"]: sys.exit(1)
+        if not state["tag"]:
+            print(json.dumps({"message": "Not Found", "status": "404"}))
+            sys.exit(1)
         finish("resolve-tag", state["tag"])
     if "/commits/" in endpoint:
         finish("resolve-commit", endpoint.rsplit("/", 1)[1])
