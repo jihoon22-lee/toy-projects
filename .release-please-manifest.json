@@ -1,9 +1,9 @@
 {
-  "loglens": "0.2.0",
-  "diskmap": "0.2.0",
-  "buildscope": "0.2.0",
-  "abilens": "0.2.0",
-  "envlens": "0.2.0",
+  "loglens": "0.2.1",
+  "diskmap": "0.2.1",
+  "buildscope": "0.2.1",
+  "abilens": "0.2.1",
+  "envlens": "0.2.1",
   "tracelens": "0.1.0",
   "testlens": "0.1.0",
   "servicelens": "0.1.0"
