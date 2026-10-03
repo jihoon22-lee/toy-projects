@@ -47,12 +47,9 @@ jobs:
           set -euo pipefail
           mkdir -p build
           cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON \
             2>&1 | tee build/configure.log
-          selected_major="$(sed -n 's/^-- .*using Qt\([56]\) .*/\1/p' \
-            build/configure.log | tail -1)"
-          if [ "$selected_major" != 6 ]; then
-            echo "::error::CMake selected Qt $selected_major, expected Qt 6"
+          if ! grep -Eq 'loglens: using Qt6 ' build/configure.log; then
+            echo "::error::CMake did not report Qt 6"
             exit 1
           fi
           cmake --build build/gui --parallel 2
@@ -101,8 +98,7 @@ jobs:
           build_dir="$benchmark_root/build"
           mkdir -p "$scratch_dir" "$artifact_dir" "$build_dir"
           cmake -S . -B "$build_dir" -DCMAKE_BUILD_TYPE=Release \
-            -DLOGLENS_BUILD_BENCHMARKS=ON \
-            -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON
+            -DLOGLENS_BUILD_BENCHMARKS=ON
           cmake --build "$build_dir" --parallel 2 \
             --target loglens-bench-generate loglens-bench-core loglens-bench-gui
           python3 benchmarks/run_benchmark.py \
@@ -280,12 +276,9 @@ jobs:
           set -euo pipefail
           mkdir -p build
           cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON \
             2>&1 | tee build/configure.log
-          selected_major="$(sed -n 's/^-- .*using Qt\([56]\) .*/\1/p' \
-            build/configure.log | tail -1)"
-          if [ "$selected_major" != 6 ]; then
-            echo "::error::CMake selected Qt $selected_major, expected Qt 6"
+          if ! grep -Eq 'loglens: using Qt6 ' build/configure.log; then
+            echo "::error::CMake did not report Qt 6"
             exit 1
           fi
           cmake --build build/gui --parallel 2

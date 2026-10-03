@@ -1,35 +1,22 @@
 #pragma once
 
-// Minimal hand-rolled assertions. Each tests/*.cpp compiles into its own
-// binary with no framework linked, so every test file defines its own main()
-// and returns checkSummary().
+// Non-fatal check macros on top of Qt Test. Unlike QVERIFY/COMPARE they keep
+// running after a failure, which is what these suites' sequences of
+// independent assertions need; every failure still registers as a test fail
+// in QTest output.
 
-#include <cstdio>
+#include <QTest>
+#include <cmath>
 
-inline int g_checkFailures = 0;
+#define CHECK(cond)                                                              \
+    QTest::qVerify(static_cast<bool>(cond), #cond, "", __FILE__, __LINE__)
 
-#define CHECK(cond)                                                                     \
-    do {                                                                                \
-        if (!(cond)) {                                                                  \
-            std::fprintf(stderr, "FAIL %s:%d: CHECK(%s)\n", __FILE__, __LINE__, #cond);  \
-            ++g_checkFailures;                                                          \
-        }                                                                               \
-    } while (0)
+#define CHECK_EQ(actual, expected)                                               \
+    QTest::qVerify((actual) == (expected), #actual " == " #expected, "",         \
+                   __FILE__, __LINE__)
 
-#define CHECK_EQ(actual, expected)                                                      \
-    do {                                                                                \
-        if (!((actual) == (expected))) {                                                \
-            std::fprintf(stderr, "FAIL %s:%d: CHECK_EQ(%s, %s)\n", __FILE__, __LINE__,   \
-                         #actual, #expected);                                            \
-            ++g_checkFailures;                                                          \
-        }                                                                               \
-    } while (0)
-
-inline int checkSummary() {
-    if (g_checkFailures == 0) {
-        std::printf("All checks passed\n");
-        return 0;
-    }
-    std::printf("%d check(s) FAILED\n", g_checkFailures);
-    return 1;
-}
+#define CHECK_NEAR(actual, expected, eps)                                        \
+    QTest::qVerify(                                                              \
+        std::fabs(static_cast<double>(actual) - static_cast<double>(expected))   \
+            <= static_cast<double>(eps),                                         \
+        #actual " ≈ " #expected " (±" #eps ")", "", __FILE__, __LINE__)

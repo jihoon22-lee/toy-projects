@@ -15,12 +15,55 @@
 #include <system_error>
 #include <utility>
 #include <vector>
+#include <QtTest>
+
+namespace impl {
+void testStableNames();
+void testProfilesRoundTripAndCanonicalOrdering();
+void testMissingStoreIsAnEmptySuccessfulLoad();
+void testQueriesRoundTripAndReuseFilterSemantics();
+void testSavedQuerySerializationEscapesJsonControls();
+void testSeparateLinesPolicyUsesTheSameAssemblerContract();
+void testInvalidSaveDoesNotTouchTheExistingStore();
+void testSchemaIsStrictAndMigrationFailsClosed();
+void testValidationRejectsInvalidValuesAndAcceptsUtf8();
+void testPersistenceSyntaxAndShapeFailures();
+void testBoundsAndUnsafePaths();
+void testPersistencePathSafetyFailures();
+void testPredictableTemporaryPathAttackCannotOverwriteFiles();
+} // namespace impl
+
+class TestPersistence : public QObject {
+    Q_OBJECT
+private slots:
+    void testStableNames() { impl::testStableNames(); }
+    void testProfilesRoundTripAndCanonicalOrdering() { impl::testProfilesRoundTripAndCanonicalOrdering(); }
+    void testMissingStoreIsAnEmptySuccessfulLoad() { impl::testMissingStoreIsAnEmptySuccessfulLoad(); }
+    void testQueriesRoundTripAndReuseFilterSemantics() { impl::testQueriesRoundTripAndReuseFilterSemantics(); }
+    void testSavedQuerySerializationEscapesJsonControls() { impl::testSavedQuerySerializationEscapesJsonControls(); }
+    void testSeparateLinesPolicyUsesTheSameAssemblerContract() { impl::testSeparateLinesPolicyUsesTheSameAssemblerContract(); }
+    void testInvalidSaveDoesNotTouchTheExistingStore() { impl::testInvalidSaveDoesNotTouchTheExistingStore(); }
+    void testSchemaIsStrictAndMigrationFailsClosed() { impl::testSchemaIsStrictAndMigrationFailsClosed(); }
+    void testValidationRejectsInvalidValuesAndAcceptsUtf8() { impl::testValidationRejectsInvalidValuesAndAcceptsUtf8(); }
+    void testPersistenceSyntaxAndShapeFailures() { impl::testPersistenceSyntaxAndShapeFailures(); }
+    void testBoundsAndUnsafePaths() { impl::testBoundsAndUnsafePaths(); }
+    void testPersistencePathSafetyFailures() { impl::testPersistencePathSafetyFailures(); }
+    void testPredictableTemporaryPathAttackCannotOverwriteFiles() {
+#ifndef _WIN32
+        impl::testPredictableTemporaryPathAttackCannotOverwriteFiles();
+#endif
+    }
+};
+
+QTEST_GUILESS_MAIN(TestPersistence)
+
+#include "test_persistence.moc"
 
 #ifndef _WIN32
 #    include <unistd.h>
 #endif
 
-namespace {
+namespace impl {
 
 namespace fs = std::filesystem;
 
@@ -699,23 +742,4 @@ void testPredictableTemporaryPathAttackCannotOverwriteFiles() {
 }
 #endif
 
-} // namespace
-
-int main() {
-    testStableNames();
-    testProfilesRoundTripAndCanonicalOrdering();
-    testMissingStoreIsAnEmptySuccessfulLoad();
-    testQueriesRoundTripAndReuseFilterSemantics();
-    testSavedQuerySerializationEscapesJsonControls();
-    testSeparateLinesPolicyUsesTheSameAssemblerContract();
-    testInvalidSaveDoesNotTouchTheExistingStore();
-    testSchemaIsStrictAndMigrationFailsClosed();
-    testValidationRejectsInvalidValuesAndAcceptsUtf8();
-    testPersistenceSyntaxAndShapeFailures();
-    testBoundsAndUnsafePaths();
-    testPersistencePathSafetyFailures();
-#ifndef _WIN32
-    testPredictableTemporaryPathAttackCannotOverwriteFiles();
-#endif
-    return checkSummary();
-}
+} // namespace impl

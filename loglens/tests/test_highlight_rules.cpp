@@ -3,12 +3,39 @@
 #include "loglens/highlight_rules.hpp"
 
 #include <string>
+#include <QtTest>
+
+namespace impl {
+void testEmpty();
+void testSingleAndRepeated();
+void testPriorityWins();
+void testTiePrefersEarlier();
+void testWholeLine();
+void testNonOverlappingCoexist();
+void testClear();
+} // namespace impl
+
+class TestHighlightRules : public QObject {
+    Q_OBJECT
+private slots:
+    void testEmpty() { impl::testEmpty(); }
+    void testSingleAndRepeated() { impl::testSingleAndRepeated(); }
+    void testPriorityWins() { impl::testPriorityWins(); }
+    void testTiePrefersEarlier() { impl::testTiePrefersEarlier(); }
+    void testWholeLine() { impl::testWholeLine(); }
+    void testNonOverlappingCoexist() { impl::testNonOverlappingCoexist(); }
+    void testClear() { impl::testClear(); }
+};
+
+QTEST_GUILESS_MAIN(TestHighlightRules)
+
+#include "test_highlight_rules.moc"
 
 using loglens::HighlightRules;
 using loglens::Rule;
 using loglens::Span;
 
-namespace {
+namespace impl {
 
 Rule makeRule(const std::string& pattern, int priority, const std::string& style,
               bool wholeLine = false) {
@@ -130,15 +157,4 @@ void testClear() {
     CHECK(!rules.rowStyle().has_value());
 }
 
-} // namespace
-
-int main() {
-    testEmpty();
-    testSingleAndRepeated();
-    testPriorityWins();
-    testTiePrefersEarlier();
-    testWholeLine();
-    testNonOverlappingCoexist();
-    testClear();
-    return checkSummary();
-}
+} // namespace impl
