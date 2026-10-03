@@ -1,10 +1,10 @@
 #include "abilens/diff.hpp"
 #include "abilens/elf.hpp"
+#include "abilens/inspect.hpp"
 #include "abilens/report.hpp"
-#include "abilens/readelf.hpp"
 
 #include <cassert>
-#include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -71,61 +71,168 @@ std::filesystem::path temporary_file(const std::string& name, const std::string&
     return std::filesystem::path(mutable_pattern.data());
 }
 
-std::filesystem::path temporary_directory(const std::string& name) {
-    const std::string pattern =
-        (std::filesystem::temp_directory_path() / ("abilens-" + name + "-XXXXXX")).string();
-    std::vector<char> mutable_pattern(pattern.begin(), pattern.end());
-    mutable_pattern.push_back('\0');
-    expect(::mkdtemp(mutable_pattern.data()) != nullptr,
-           "mkdtemp creates a private temporary directory");
-    return std::filesystem::path(mutable_pattern.data());
+// Little-endian writers for the synthetic ELF fixture.
+void put16(std::vector<unsigned char>& bytes, std::size_t offset, std::uint16_t value) {
+    bytes[offset] = static_cast<unsigned char>(value & 0xffU);
+    bytes[offset + 1U] = static_cast<unsigned char>((value >> 8U) & 0xffU);
+}
+void put32(std::vector<unsigned char>& bytes, std::size_t offset, std::uint32_t value) {
+    for (unsigned int i = 0; i < 4U; ++i) {
+        bytes[offset + i] = static_cast<unsigned char>((value >> (i * 8U)) & 0xffU);
+    }
+}
+void put64(std::vector<unsigned char>& bytes, std::size_t offset, std::uint64_t value) {
+    for (unsigned int i = 0; i < 8U; ++i) {
+        bytes[offset + i] = static_cast<unsigned char>((value >> (i * 8U)) & 0xffU);
+    }
 }
 
-std::string synthetic_transcript() {
-    return R"(ELF Header:
-  Class:                             ELF64
-  Type:                              DYN (Shared object file)
-  Machine:                           Advanced Micro Devices X86-64
-Section Headers:
-  [ 1] .dynsym           DYNSYM
-  [ 2] .symtab           SYMTAB
-Dynamic section at offset 0x200 contains 5 entries:
- 0x0000000000000001 (NEEDED)             Shared library: [libstdc++.so.6]
- 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]
- 0x000000000000000f (RPATH)              Library rpath: [/opt/abi:$ORIGIN/lib]
- 0x000000000000001d (RUNPATH)            Library runpath: [$ORIGIN/plugins]
+struct StringTable {
+    std::vector<unsigned char> bytes{1U, 0U};
+    std::uint64_t add(const std::string& value) {
+        const std::uint64_t index = bytes.size();
+        bytes.insert(bytes.end(), value.begin(), value.end());
+        bytes.push_back(0U);
+        return index;
+    }
+};
 
-Version needs section '.gnu.version_r' contains 2 entries:
-  0x0010: Version: 1  File: libc.so.6  Cnt: 1
-  0x0020:   Name: GLIBC_2.34  Flags: none  Version: 1
-  0x0030: Version: 1  File: libstdc++.so.6  Cnt: 2
-  0x0040:   Name: GLIBCXX_3.4.30  Flags: none  Version: 2
-  0x0050:   Name: CXXABI_1.3.13  Flags: none  Version: 3
-)";
+// Builds a complete little-endian ELF64 shared object.  PT_LOAD maps the
+// whole file 1:1 at vaddr 0 so every virtual address equals its file offset.
+// Dynamic entries: NEEDED libstdc++/libc, RPATH /opt/abi:$ORIGIN/lib, RUNPATH
+// $ORIGIN/plugins; verneed libc→GLIBC_2.34, libstdc++→GLIBCXX_3.4.30 +
+// CXXABI_1.3.13.  Section headers hold one .symtab when requested.
+std::vector<unsigned char> synthetic_elf(bool with_symtab, bool with_sections) {
+    constexpr std::size_t phoff = 0x40;
+    constexpr std::size_t dynoff = 0x100;
+    constexpr std::size_t stroff = 0x200;
+    constexpr std::size_t vnoff = 0x280;
+    constexpr std::size_t shoff = 0x300;
+    StringTable strtab;
+    const std::uint64_t s_libstdcxx = strtab.add("libstdc++.so.6");
+    const std::uint64_t s_libc = strtab.add("libc.so.6");
+    const std::uint64_t s_rpath = strtab.add("/opt/abi:$ORIGIN/lib");
+    const std::uint64_t s_runpath = strtab.add("$ORIGIN/plugins");
+    const std::uint64_t s_glibc = strtab.add("GLIBC_2.34");
+    const std::uint64_t s_glibcxx = strtab.add("GLIBCXX_3.4.30");
+    const std::uint64_t s_cxxabi = strtab.add("CXXABI_1.3.13");
+
+    const std::uint16_t shnum = with_sections ? (with_symtab ? 2U : 1U) : 0U;
+    std::vector<unsigned char> file(shoff + (with_sections ? 2U * 64U : 0U), 0U);
+
+    // ELF64 header.
+    file[0] = 0x7f; file[1] = 'E'; file[2] = 'L'; file[3] = 'F';
+    file[4] = 2;  // ELFCLASS64
+    file[5] = 1;  // little endian
+    file[6] = 1;  // EV_CURRENT
+    put16(file, 16, 3);       // ET_DYN
+    put16(file, 18, 62);      // EM_X86_64
+    put32(file, 20, 1);       // EV_CURRENT
+    put64(file, 32, phoff);   // e_phoff
+    put64(file, 40, shoff);   // e_shoff
+    put16(file, 52, 64);      // e_ehsize
+    put16(file, 54, 56);      // e_phentsize
+    put16(file, 56, 2);       // e_phnum
+    put16(file, 58, 64);      // e_shentsize
+    put16(file, 60, shnum);   // e_shnum
+    put16(file, 62, 0);       // e_shstrndx
+
+    // PT_LOAD: whole file, vaddr 0 == offset 0.
+    put32(file, phoff, 1);
+    put64(file, phoff + 8, 0);
+    put64(file, phoff + 16, 0);
+    put64(file, phoff + 40, file.size());
+
+    // PT_DYNAMIC at dynoff, size for the written entries.
+    put32(file, phoff + 56, 2);
+    put64(file, phoff + 56 + 8, dynoff);
+    put64(file, phoff + 56 + 16, dynoff);
+    put64(file, phoff + 56 + 40, 9U * 16U);
+
+    // Dynamic entries (tag, value) x9 + terminator slot left zero.
+    const std::uint64_t dynamics[][2] = {
+        {1, s_libstdcxx},   // DT_NEEDED
+        {1, s_libc},        // DT_NEEDED
+        {15, s_rpath},      // DT_RPATH
+        {29, s_runpath},    // DT_RUNPATH
+        {5, stroff},        // DT_STRTAB
+        {10, 0},            // DT_STRSZ (patched below)
+        {0x6ffffffe, vnoff},// DT_VERNEED
+        {0x6fffffff, 2},    // DT_VERNEEDNUM
+        {0, 0},             // DT_NULL
+    };
+    for (std::size_t i = 0; i < 9U; ++i) {
+        put64(file, dynoff + i * 16U, dynamics[i][0]);
+        put64(file, dynoff + i * 16U + 8U, dynamics[i][1]);
+    }
+    std::copy(strtab.bytes.begin(), strtab.bytes.end(), file.begin() + stroff);
+    put64(file, dynoff + 5U * 16U + 8U, strtab.bytes.size());  // DT_STRSZ
+
+    // Verneed record 1: libc.so.6 → GLIBC_2.34.
+    put16(file, vnoff, 1);            // vn_version
+    put16(file, vnoff + 2, 1);        // vn_cnt
+    put32(file, vnoff + 4, static_cast<std::uint32_t>(s_libc));
+    put32(file, vnoff + 8, 16);       // vn_aux
+    put32(file, vnoff + 12, 32);      // vn_next
+    put32(file, vnoff + 16 + 8, static_cast<std::uint32_t>(s_glibc));
+    put32(file, vnoff + 16 + 12, 0);  // vna_next
+
+    // Verneed record 2: libstdc++.so.6 → GLIBCXX_3.4.30, CXXABI_1.3.13.
+    const std::size_t vn2 = vnoff + 32;
+    put16(file, vn2, 1);
+    put16(file, vn2 + 2, 2);
+    put32(file, vn2 + 4, static_cast<std::uint32_t>(s_libstdcxx));
+    put32(file, vn2 + 8, 16);
+    put32(file, vn2 + 12, 0);
+    put32(file, vn2 + 16 + 8, static_cast<std::uint32_t>(s_glibcxx));
+    put32(file, vn2 + 16 + 12, 16);
+    put32(file, vn2 + 32 + 8, static_cast<std::uint32_t>(s_cxxabi));
+    put32(file, vn2 + 32 + 12, 0);
+
+    if (with_sections) {
+        // Section 0 is the null section; section 1 is a SHT_SYMTAB when asked.
+        if (with_symtab) {
+            put32(file, shoff + 64 + 4, 2);  // sh_type = SHT_SYMTAB
+        }
+    }
+    return file;
 }
 
-abilens::ElfReport test_readelf_parser(const std::string& transcript) {
-    abilens::ReadelfEvidence synthetic_evidence;
-    synthetic_evidence.return_code = 0;
-    synthetic_evidence.standard_output = transcript;
-    synthetic_evidence.capability = {true, "GNU readelf", "2.40"};
+abilens::ElfReport test_native_inspector() {
     const abilens::ElfReport parsed =
-        abilens::parse_readelf_text(transcript, synthetic_header(), synthetic_evidence);
-    expect(parsed.status == abilens::InputStatus::Valid, "synthetic readelf is valid");
+        abilens::inspect_elf_buffer(synthetic_elf(true, true), synthetic_header());
+    expect(parsed.status == abilens::InputStatus::Valid, "synthetic ELF is valid");
+    expect(parsed.tool.name == "abilens" && !parsed.tool.version.empty(),
+           "the internal analyzer is recorded");
     expect(parsed.needed.size() == 2U && parsed.needed.front() == "libc.so.6",
-           "NEEDED entries are parsed and sorted");
+           "DT_NEEDED entries are parsed and sorted");
     expect(parsed.rpath.size() == 2U && parsed.rpath.front() == "$ORIGIN/lib",
            "RPATH entries are split and sorted");
     expect(parsed.runpath.size() == 1U && parsed.runpath.front() == "$ORIGIN/plugins",
            "RUNPATH is parsed");
     expect(parsed.versions.size() == 3U, "typed ABI requirements are parsed");
     expect(parsed.stripped_known && !parsed.stripped, "symtab marks a binary as unstripped");
-    abilens::ReadelfEvidence unsupported_evidence = synthetic_evidence;
-    unsupported_evidence.capability = {false, "llvm-readelf", "18.0"};
-    const abilens::ElfReport unsupported =
-        abilens::parse_readelf_text(transcript, synthetic_header(), unsupported_evidence);
-    expect(unsupported.status == abilens::InputStatus::ToolError,
-           "non-GNU readelf capability fails closed");
+
+    const abilens::ElfReport stripped =
+        abilens::inspect_elf_buffer(synthetic_elf(false, true), synthetic_header());
+    expect(stripped.stripped_known && stripped.stripped,
+           "missing .symtab marks the binary stripped");
+
+    abilens::ElfHeader no_sections = synthetic_header();
+    no_sections.has_section_headers = false;
+    const abilens::ElfReport headerless =
+        abilens::inspect_elf_buffer(synthetic_elf(false, false), no_sections);
+    expect(!headerless.stripped_known,
+           "missing section headers leave strippedness unknown");
+    expect(headerless.needed.size() == 2U && headerless.versions.size() == 3U,
+           "segment parsing still reports dependencies and ABI requirements");
+
+    std::vector<unsigned char> corrupt = synthetic_elf(true, true);
+    put64(corrupt, 0x100 + 5U * 16U + 8U, corrupt.size() * 4U);  // DT_STRSZ out of bounds
+    const abilens::ElfReport misclassified =
+        abilens::inspect_elf_buffer(corrupt, synthetic_header());
+    expect(misclassified.status == abilens::InputStatus::Corrupt,
+           "out-of-bounds dynamic metadata fails closed");
     return parsed;
 }
 
@@ -155,8 +262,8 @@ void test_json_contract(const abilens::ElfReport& parsed) {
     const std::string json = abilens::serialize_report(parsed);
     const abilens::ElfReport round_trip = abilens::parse_report_json(json);
     expect(abilens::serialize_report(round_trip) == json, "report JSON is stable under round trip");
-    expect(round_trip.tool.name == "GNU readelf" && round_trip.tool.version == "2.40",
-           "report preserves the GNU readelf capability");
+    expect(round_trip.tool.name == "abilens" && round_trip.tool.version == "0.1.0",
+           "report preserves the analyzer identity");
     expect_parse_failure(json.substr(0U, json.size() - 1U) +
                              ",\"unexpected\":null}",
                          "unknown root fields are rejected");
@@ -173,9 +280,9 @@ void test_json_contract(const abilens::ElfReport& parsed) {
                          "unknown ABI namespaces are rejected");
     expect_parse_failure(replace_once(json, "\"GLIBC\":\"2.34\"", "\"GLIBC\":\"2.35\""),
                          "inconsistent ABI maximums are rejected");
-    expect_parse_failure(replace_once(json, "\"name\":\"GNU readelf\"",
+    expect_parse_failure(replace_once(json, "\"name\":\"abilens\"",
                                       "\"name\":\"llvm-readelf\""),
-                         "valid reports must identify GNU readelf");
+                         "valid reports must identify the abilens analyzer");
     std::string deeply_nested;
     for (unsigned int level = 0; level < 65U; ++level) {
         deeply_nested.push_back('[');
@@ -249,48 +356,6 @@ std::vector<std::filesystem::path> test_input_classification() {
     return {non_elf, corrupt};
 }
 
-std::filesystem::path test_readelf_output_bound(const std::filesystem::path& non_elf) {
-    const std::filesystem::path fake_dir = temporary_directory("fake-readelf");
-    const std::filesystem::path fake_readelf = fake_dir / "readelf";
-    {
-        std::ofstream script(fake_readelf);
-        script << "#!/bin/sh\n"
-                  "printf 'GNU readelfx 2.40\\n'\n";
-    }
-    expect(::chmod(fake_readelf.c_str(), 0700) == 0, "fake readelf is executable");
-    const char* old_path_value = std::getenv("PATH");
-    const std::string old_path = old_path_value == nullptr ? "" : old_path_value;
-    const std::string test_path =
-        fake_dir.generic_string() + (old_path.empty() ? "" : ":" + old_path);
-    expect(::setenv("PATH", test_path.c_str(), 1) == 0, "test PATH is installed");
-    const abilens::ReadelfEvidence near_match = abilens::run_readelf(non_elf);
-    expect(!near_match.capability.supported,
-           "GNU readelf capability requires an exact tool token");
-    {
-        std::ofstream script(fake_readelf);
-        script << "#!/bin/sh\n"
-                  "if [ \"$1\" = \"--version\" ]; then\n"
-                  "  printf 'GNU readelf (GNU Binutils) 2.40\\n'\n"
-                  "  exit 0\n"
-                  "fi\n"
-                  "while :; do printf '%1048576s' x; done\n";
-    }
-    const auto runner_start = std::chrono::steady_clock::now();
-    const abilens::ReadelfEvidence bounded = abilens::run_readelf(non_elf);
-    const auto runner_elapsed = std::chrono::steady_clock::now() - runner_start;
-    if (old_path_value == nullptr) {
-        (void)::unsetenv("PATH");
-    } else {
-        (void)::setenv("PATH", old_path.c_str(), 1);
-    }
-    expect(bounded.capability.supported, "GNU readelf capability is accepted");
-    expect(bounded.truncated && !bounded.timed_out,
-           "readelf output bound terminates the child");
-    expect(std::chrono::duration_cast<std::chrono::seconds>(runner_elapsed).count() < 5,
-           "readelf output bound does not wait for the timeout");
-    return fake_dir;
-}
-
 void remove_path(const std::filesystem::path& path) {
     std::error_code error;
     std::filesystem::remove(path, error);
@@ -299,16 +364,12 @@ void remove_path(const std::filesystem::path& path) {
 }  // namespace
 
 int main() {
-    const std::string transcript = synthetic_transcript();
-    const abilens::ElfReport parsed = test_readelf_parser(transcript);
+    const abilens::ElfReport parsed = test_native_inspector();
     const std::filesystem::path invalid_policy = test_policy(parsed);
     test_json_contract(parsed);
     test_diff_contract(parsed);
     const std::vector<std::filesystem::path> inputs = test_input_classification();
-    const std::filesystem::path fake_dir = test_readelf_output_bound(inputs[0]);
 
-    remove_path(fake_dir / "readelf");
-    remove_path(fake_dir);
     remove_path(inputs[0]);
     remove_path(inputs[1]);
     remove_path(invalid_policy);

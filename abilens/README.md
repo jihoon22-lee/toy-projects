@@ -2,8 +2,9 @@
 
 AbiLens is a small, dependency-free C++20 command-line inspector for Linux
 ELF build artifacts.  It validates the ELF identification and table bounds
-itself, then asks the system `readelf` for bounded, C-locale evidence.  The
-input artifact is never loaded or executed.
+itself, then parses program headers, dynamic tags, version requirements and
+string tables directly from the input bytes.  The artifact is never loaded or
+executed, and no external tool is invoked.
 
 The product is intentionally narrow:
 
@@ -72,32 +73,31 @@ input is not a valid report/ELF.
 
 ## Safety and support boundary
 
-The ELF header is read directly with bounded integer arithmetic before
-`readelf` is started.  `readelf` is invoked using `fork`/`execvp` with fixed
-arguments, no shell, a C locale, a 30-second deadline, and independent 8 MiB
-bounds for stdout and stderr.  A timeout, signal, or truncation is incomplete
-evidence and is reported as a tool error.
+The ELF header is read directly with bounded integer arithmetic.  Evidence
+then comes from the file's own structures: `PT_DYNAMIC` dynamic entries, the
+dynamic string table translated through `PT_LOAD` segments, and version
+requirement records.  Because segment data is authoritative, `DT_NEEDED`,
+`DT_RPATH`, `DT_RUNPATH`, and GLIBC/GLIBCXX/CXXABI requirements are still
+recovered when section headers are stripped; sections are only consulted for
+the `.symtab` strippedness check.  All offsets, counts, sizes, and string
+indices are bounds-checked; out-of-file tables and oversized structures fail
+closed.
 
-AbiLens currently targets GNU `readelf` output from ELF32/ELF64 Linux files.
-Before parsing an artifact, it runs the bounded, shell-free
-`readelf --version` capability check and requires a parseable GNU Binutils
-version.  The report's `tool` object records the stable name (`GNU readelf`)
-and numeric version used for the evidence; non-GNU or unparseable tools fail
-closed as `tool-error`.  Extended ELF table counts and unknown byte
-orders/classes are reported as unsupported.  ABI names outside the numeric
-GLIBC/GLIBCXX/CXXABI forms are not interpreted as floors.  The report schema
-is deliberately versioned and self-contained; see
-`schemas/abilens-report-v1.schema.json` and
+AbiLens targets ELF32/ELF64 little- and big-endian Linux files.  Inputs larger
+than 256 MiB are refused as a tool error rather than parsed partially.  The
+report's `tool` object records the analyzer identity (`abilens`) and its
+version.  Extended ELF table counts and unknown byte orders/classes are
+reported as unsupported.  ABI names outside the numeric GLIBC/GLIBCXX/CXXABI
+forms are not interpreted as floors.  The report schema is deliberately
+versioned and self-contained; see `schemas/abilens-report-v1.schema.json` and
 `schemas/abilens-diff-v1.schema.json`.
 
-Each inspection opens the target once and reads the ELF header and program
-headers from that descriptor. The same descriptor is passed to `readelf` as a
-`/proc/self/fd/<n>` path, so the structural and tool evidence refer to one
-opened file rather than independently reopened path names. AbiLens records the
-descriptor's device, inode, mode, size, mtime, and ctime and also rechecks the
-original path identity; an ordinary path replacement or in-place metadata
-change during evidence collection fails closed as a tool error. This requires
-Linux `/proc/self/fd`. It is an input-identity guard, not a cryptographic
+Each inspection opens the target once and reads every byte through that
+single descriptor, so the evidence refers to one opened file rather than an
+independently reopened path name.  AbiLens records the descriptor's device,
+inode, mode, size, mtime, and ctime and rechecks them after the read; an
+ordinary path replacement or in-place change during evidence collection fails
+closed as a tool error.  This is an input-identity guard, not a cryptographic
 content snapshot: an adversary that changes bytes and restores every observed
 metadata value before the final check is outside this guarantee.
 

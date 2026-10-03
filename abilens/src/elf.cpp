@@ -1,6 +1,7 @@
 #include "abilens/elf.hpp"
 
 #include "input_internal.hpp"
+#include "elf_internal.hpp"
 
 #include <algorithm>
 #include <array>
@@ -18,69 +19,9 @@ constexpr std::uint8_t kBigEndian = 2;
 constexpr std::uint32_t kPtDynamic = 2;
 constexpr std::uint16_t kExtendedCount = 0xffffU;
 
-bool range_inside(std::uint64_t offset,
-                  std::uint64_t count,
-                  std::uint64_t element_size,
-                  std::uint64_t file_size) {
-    if (element_size != 0 && count > std::numeric_limits<std::uint64_t>::max() / element_size) {
-        return false;
-    }
-    const std::uint64_t total = count * element_size;
-    return offset <= file_size && total <= file_size - offset;
-}
 
-std::uint16_t read_u16(const std::vector<unsigned char>& bytes,
-                       std::size_t offset,
-                       bool little) {
-    if (offset + 2U > bytes.size()) {
-        return 0;
-    }
-    if (little) {
-        const std::uint32_t value = static_cast<std::uint32_t>(bytes[offset]) |
-                                    (static_cast<std::uint32_t>(bytes[offset + 1U]) << 8U);
-        return static_cast<std::uint16_t>(value);
-    }
-    const std::uint32_t value = (static_cast<std::uint32_t>(bytes[offset]) << 8U) |
-                                static_cast<std::uint32_t>(bytes[offset + 1U]);
-    return static_cast<std::uint16_t>(value);
-}
 
-std::uint32_t read_u32(const std::vector<unsigned char>& bytes,
-                       std::size_t offset,
-                       bool little) {
-    if (offset + 4U > bytes.size()) {
-        return 0;
-    }
-    if (little) {
-        return static_cast<std::uint32_t>(bytes[offset]) |
-               (static_cast<std::uint32_t>(bytes[offset + 1U]) << 8U) |
-               (static_cast<std::uint32_t>(bytes[offset + 2U]) << 16U) |
-               (static_cast<std::uint32_t>(bytes[offset + 3U]) << 24U);
-    }
-    return (static_cast<std::uint32_t>(bytes[offset]) << 24U) |
-           (static_cast<std::uint32_t>(bytes[offset + 1U]) << 16U) |
-           (static_cast<std::uint32_t>(bytes[offset + 2U]) << 8U) |
-           static_cast<std::uint32_t>(bytes[offset + 3U]);
-}
 
-std::uint64_t read_u64(const std::vector<unsigned char>& bytes,
-                       std::size_t offset,
-                       bool little) {
-    if (offset + 8U > bytes.size()) {
-        return 0;
-    }
-    std::uint64_t value = 0;
-    if (little) {
-        for (unsigned int index = 0; index < 8U; ++index) {
-            value |= static_cast<std::uint64_t>(bytes[offset + index]) << (index * 8U);
-        }
-        return value;
-    }
-    for (unsigned int index = 0; index < 8U; ++index) {
-        value = (value << 8U) | static_cast<std::uint64_t>(bytes[offset + index]);
-    }
-    return value;
-}
 
 std::string type_name(std::uint16_t value) {
     switch (value) {
@@ -192,21 +133,21 @@ HeaderCheck parse_layout(const std::vector<unsigned char>& bytes,
         return failure(InputStatus::Corrupt,
                        "ELF file is shorter than its declared header class");
     }
-    if (read_u32(bytes, 20U, layout.little) != 1U) {
+    if (detail::read_u32(bytes, 20U, layout.little) != 1U) {
         return failure(InputStatus::Corrupt, "ELF header version is not current");
     }
-    layout.raw_type = read_u16(bytes, 16U, layout.little);
-    layout.raw_machine = read_u16(bytes, 18U, layout.little);
-    layout.phoff = layout.is_64 ? read_u64(bytes, 32U, layout.little)
-                                : read_u32(bytes, 28U, layout.little);
-    layout.shoff = layout.is_64 ? read_u64(bytes, 40U, layout.little)
-                                : read_u32(bytes, 32U, layout.little);
+    layout.raw_type = detail::read_u16(bytes, 16U, layout.little);
+    layout.raw_machine = detail::read_u16(bytes, 18U, layout.little);
+    layout.phoff = layout.is_64 ? detail::read_u64(bytes, 32U, layout.little)
+                                : detail::read_u32(bytes, 28U, layout.little);
+    layout.shoff = layout.is_64 ? detail::read_u64(bytes, 40U, layout.little)
+                                : detail::read_u32(bytes, 32U, layout.little);
     const std::size_t word_offset = layout.is_64 ? 52U : 40U;
-    const std::uint16_t ehsize = read_u16(bytes, word_offset, layout.little);
-    layout.phentsize = read_u16(bytes, word_offset + 2U, layout.little);
-    layout.phnum = read_u16(bytes, word_offset + 4U, layout.little);
-    layout.shentsize = read_u16(bytes, word_offset + 6U, layout.little);
-    layout.shnum = read_u16(bytes, word_offset + 8U, layout.little);
+    const std::uint16_t ehsize = detail::read_u16(bytes, word_offset, layout.little);
+    layout.phentsize = detail::read_u16(bytes, word_offset + 2U, layout.little);
+    layout.phnum = detail::read_u16(bytes, word_offset + 4U, layout.little);
+    layout.shentsize = detail::read_u16(bytes, word_offset + 6U, layout.little);
+    layout.shnum = detail::read_u16(bytes, word_offset + 8U, layout.little);
     if (ehsize != minimum_header_size) {
         return failure(InputStatus::Corrupt, "ELF header size does not match its class");
     }
@@ -223,7 +164,7 @@ HeaderCheck validate_tables(const HeaderLayout& layout, std::uint64_t file_size)
     const bool invalid_program_table =
         layout.phnum != 0U &&
         (layout.phentsize < expected_phentsize ||
-         !range_inside(layout.phoff, layout.phnum, layout.phentsize, file_size));
+         !detail::range_inside(layout.phoff, layout.phnum, layout.phentsize, file_size));
     if (invalid_program_table) {
         return failure(InputStatus::Corrupt,
                        "ELF program header table is outside the file");
@@ -231,7 +172,7 @@ HeaderCheck validate_tables(const HeaderLayout& layout, std::uint64_t file_size)
     const bool invalid_section_table =
         layout.shnum != 0U &&
         (layout.shentsize < expected_shentsize ||
-         !range_inside(layout.shoff, layout.shnum, layout.shentsize, file_size));
+         !detail::range_inside(layout.shoff, layout.shnum, layout.shentsize, file_size));
     if (invalid_section_table) {
         return failure(InputStatus::Corrupt,
                        "ELF section header table is outside the file");
@@ -257,7 +198,7 @@ HeaderCheck scan_dynamic_segment(const detail::OpenInput& input,
         }
         const std::vector<unsigned char> type_vector(type_bytes.begin(), type_bytes.end());
         has_dynamic = has_dynamic ||
-                      read_u32(type_vector, 0U, layout.little) == kPtDynamic;
+                      detail::read_u32(type_vector, 0U, layout.little) == kPtDynamic;
     }
     return success();
 }

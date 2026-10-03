@@ -1,7 +1,7 @@
 #include "abilens/report.hpp"
 
 #include "abilens/elf.hpp"
-#include "abilens/readelf.hpp"
+#include "abilens/inspect.hpp"
 #include "input_internal.hpp"
 #include "report_internal.hpp"
 
@@ -32,8 +32,7 @@ ElfReport inspect_file(const std::filesystem::path& path, const Policy& policy) 
         }
         return report;
     }
-    const ReadelfEvidence evidence = detail::run_readelf_input(input);
-    report = parse_readelf_text(evidence.standard_output, check.header, evidence);
+    report = detail::inspect_elf_input(input, check.header);
     report.input = path.generic_string();
     if (report.status == InputStatus::Valid) {
         report.policy = evaluate_policy(report, policy);
