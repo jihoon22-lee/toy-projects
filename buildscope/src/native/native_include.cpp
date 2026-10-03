@@ -1,6 +1,7 @@
 #include "native_include.hpp"
 
 #include "native_error.hpp"
+#include "native_glob.hpp"
 #include "native_replay.hpp"
 
 #include <QDateTime>
@@ -611,8 +612,71 @@ QJsonObject analyzeEntry(const QJsonObject &entry, const QString &projectRootVal
     };
 }
 
+bool matchesUnitGlob(const QJsonObject &entry, const QStringList &unitGlobs) {
+    const QString file = entry.value(QStringLiteral("file")).toString();
+#ifdef Q_OS_WIN
+    constexpr bool windows = true;
+#else
+    constexpr bool windows = false;
+#endif
+    for (const QString &pattern : unitGlobs) {
+        if (globMatches(file, pattern, windows)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void appendDiagnostic(QJsonObject &analysis, const QString &code,
+                      const QString &message) {
+    QJsonArray diagnostics =
+        analysis.value(QStringLiteral("diagnostics")).toArray();
+    diagnostics.append(QJsonObject{
+        {QStringLiteral("code"), code},
+        {QStringLiteral("message"), message},
+        {QStringLiteral("severity"), QStringLiteral("warning")},
+    });
+    analysis.insert(QStringLiteral("diagnostics"), diagnostics);
+}
+
+// "delayed" mode keeps an estimate for every unit and upgrades glob-matched
+// units to compiler-measured evidence within the replay budget.
+QJsonObject delayedAnalysis(const QJsonObject &entry, const QString &projectRoot,
+                            bool selected, const QJsonObject &limit) {
+    QJsonObject analysis;
+    try {
+        analysis = estimateEntry(entry, projectRoot);
+    } catch (const IncludeAnalysisError &error) {
+        return unavailable(QStringLiteral("include-analysis-unavailable"),
+                           QString::fromStdString(error.what()));
+    }
+    if (!selected) {
+        return analysis;
+    }
+    if (!limit.isEmpty()) {
+        const QJsonObject diagnostic =
+            limit.value(QStringLiteral("diagnostics")).toArray().first().toObject();
+        appendDiagnostic(
+            analysis,
+            diagnostic.value(QStringLiteral("code")).toString(),
+            QStringLiteral("compiler replay skipped: %1")
+                .arg(diagnostic.value(QStringLiteral("message")).toString()));
+        return analysis;
+    }
+    try {
+        return analyzeEntry(entry, projectRoot);
+    } catch (const IncludeAnalysisError &error) {
+        appendDiagnostic(
+            analysis, QStringLiteral("include-analysis-replay-failed"),
+            QStringLiteral("compiler replay unavailable: %1")
+                .arg(QString::fromStdString(error.what())));
+        return analysis;
+    }
+}
+
 void annotateSnapshot(QJsonObject &snapshot, const QString &projectRoot, const QString &mode,
-                      int maxUnits, int budgetSeconds) {
+                      int maxUnits, int budgetSeconds,
+                      const QStringList &unitGlobs) {
     if (maxUnits < 1 || maxUnits > kMaxAnalysisUnits) {
         throw IncludeAnalysisError(
             QStringLiteral("include analysis unit limit must be between 1 and %1")
@@ -623,29 +687,47 @@ void annotateSnapshot(QJsonObject &snapshot, const QString &projectRoot, const Q
             QStringLiteral("include analysis time budget must be between 1 and %1 seconds")
                 .arg(kMaxAnalysisBudgetSeconds));
     }
+    if (mode != QLatin1String("estimate") && mode != QLatin1String("compiler")
+        && mode != QLatin1String("delayed")) {
+        throw IncludeAnalysisError(
+            QStringLiteral("unsupported include analysis mode: %1").arg(mode));
+    }
     const qint64 started = QDateTime::currentMSecsSinceEpoch();
+    int replayed = 0;
     QJsonArray entries = snapshot.value(QStringLiteral("entries")).toArray();
     for (qsizetype index = 0; index < entries.size(); ++index) {
-        const QJsonObject limited =
-            budgetResult(static_cast<int>(index), maxUnits,
-                         QDateTime::currentMSecsSinceEpoch() - started, budgetSeconds);
         QJsonObject entry = entries.at(index).toObject();
         QJsonObject analysis;
-        if (!limited.isEmpty()) {
-            analysis = limited;
-        } else {
-            try {
-                if (mode == QLatin1String("compiler")) {
-                    analysis = analyzeEntry(entry, projectRoot);
-                } else if (mode == QLatin1String("estimate")) {
-                    analysis = estimateEntry(entry, projectRoot);
-                } else {
-                    throw IncludeAnalysisError(
-                        QStringLiteral("unsupported include analysis mode: %1").arg(mode));
+        if (mode == QLatin1String("delayed")) {
+            QJsonObject limit;
+            const bool selected = matchesUnitGlob(entry, unitGlobs);
+            if (selected) {
+                limit = budgetResult(
+                    replayed, maxUnits,
+                    QDateTime::currentMSecsSinceEpoch() - started, budgetSeconds);
+                if (limit.isEmpty()) {
+                    ++replayed;  // an attempt spends budget whether it succeeds
                 }
-            } catch (const IncludeAnalysisError &error) {
-                analysis = unavailable(QStringLiteral("include-analysis-unavailable"),
-                                       QString::fromStdString(error.what()));
+            }
+            analysis = delayedAnalysis(entry, projectRoot, selected, limit);
+        } else {
+            const QJsonObject limited =
+                budgetResult(static_cast<int>(index), maxUnits,
+                             QDateTime::currentMSecsSinceEpoch() - started,
+                             budgetSeconds);
+            if (!limited.isEmpty()) {
+                analysis = limited;
+            } else {
+                try {
+                    if (mode == QLatin1String("compiler")) {
+                        analysis = analyzeEntry(entry, projectRoot);
+                    } else {
+                        analysis = estimateEntry(entry, projectRoot);
+                    }
+                } catch (const IncludeAnalysisError &error) {
+                    analysis = unavailable(QStringLiteral("include-analysis-unavailable"),
+                                           QString::fromStdString(error.what()));
+                }
             }
         }
         entry.insert(QStringLiteral("include_analysis"), analysis);

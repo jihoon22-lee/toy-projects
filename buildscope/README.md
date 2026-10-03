@@ -184,7 +184,7 @@ is included in the `0.5.0` boundary rather than being published as a separate st
 
 The CLI remains backward-compatible by default. With no analysis flag it emits normalized v2, and
 `--schema-version v1` still emits the raw compatibility projection. `--include-analysis` accepts
-`estimate` or `compiler` and implies v3; it may also be written explicitly as:
+`estimate`, `compiler`, or `delayed` and implies v3; it may also be written explicitly as:
 
 The examples use the `repo_root` and `scratch_root` variables initialized in the
 run section below; `buildscope` is the producer executable built there. Choose a
@@ -208,11 +208,23 @@ buildscope "$repo_root/buildscope/fixtures/compile_commands.json" \
   --schema-version v3 --include-analysis compiler \
   --analysis-max-units 512 --analysis-time-budget 120 \
   --output "$scratch_root/buildscope.snapshot.compiler.json" --pretty
+
+# Delayed replay: every unit is estimated; only units whose normalized file
+# path matches a repeatable --analysis-unit glob are upgraded to a compiler
+# replay within the same unit/time budget.
+buildscope "$repo_root/buildscope/fixtures/compile_commands.json" \
+  --project-root "$repo_root/buildscope" \
+  --schema-version v3 --include-analysis delayed \
+  --analysis-unit 'src/*.cpp' \
+  --output "$scratch_root/buildscope.snapshot.delayed.json" --pretty
 ```
 
 `--schema-version v3` without an explicit mode selects `estimate`. Supplying
 `--include-analysis` with v1 or v2 is rejected, so a caller cannot silently drop the analysis
-fields. The published `schemas/buildscope-snapshot-v3.schema.json` is self-contained and strict:
+fields. In `delayed` mode every unit is estimated first and only `--analysis-unit` glob matches
+spend replay budget; a matched unit whose replay is cut by the unit/time budget or fails keeps its
+estimate plus a warning diagnostic rather than becoming unavailable, and a replay attempt counts
+against `--analysis-max-units` whether it succeeds or not. The published `schemas/buildscope-snapshot-v3.schema.json` is self-contained and strict:
 the root, entries, analysis records, edges, search candidates, diagnostics, and normalized fields
 reject unknown keys and use bounded arrays/strings and explicit enums. Every v3 entry contains an
 `include_analysis` record; if a unit cannot be inspected, the record keeps the reason in a warning
