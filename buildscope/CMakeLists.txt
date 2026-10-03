@@ -14,32 +14,15 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_AUTOUIC_SEARCH_PATHS "${CMAKE_CURRENT_SOURCE_DIR}/ui")
 
-if(WIN32)
-    set(_buildscope_pythonpath_separator ";")
-else()
-    set(_buildscope_pythonpath_separator ":")
-endif()
-set(_buildscope_pythonpath
-    "${CMAKE_CURRENT_SOURCE_DIR}/python${_buildscope_pythonpath_separator}${CMAKE_CURRENT_SOURCE_DIR}"
-)
-
 if(MSVC)
     add_compile_options(/W4 /WX /permissive-)
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 endif()
 
-set(_qt_package_names Qt6 Qt5)
-if(CMAKE_DISABLE_FIND_PACKAGE_Qt6)
-    list(REMOVE_ITEM _qt_package_names Qt6)
-endif()
-if(CMAKE_DISABLE_FIND_PACKAGE_Qt5)
-    list(REMOVE_ITEM _qt_package_names Qt5)
-endif()
-find_package(QT NAMES ${_qt_package_names} REQUIRED COMPONENTS Core Widgets Test)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Widgets Test)
-find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
-message(STATUS "buildscope: using Qt${QT_VERSION_MAJOR} ${QT_VERSION}")
+find_package(QT NAMES Qt6 REQUIRED COMPONENTS Core Widgets Test)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets Test)
+message(STATUS "buildscope: using Qt6 ${QT6_VERSION}")
 
 add_library(buildscope_contract STATIC
     src/core/compilation_model.cpp
@@ -62,10 +45,49 @@ add_library(buildscope_contract STATIC
 target_include_directories(buildscope_contract PUBLIC include)
 target_link_libraries(buildscope_contract PUBLIC Qt${QT_VERSION_MAJOR}::Core)
 
+add_library(buildscope_native STATIC
+    src/native/canonical_json.cpp
+    src/native/canonical_json.hpp
+    src/native/native_command.cpp
+    src/native/native_command.hpp
+    src/native/native_diff.cpp
+    src/native/native_diff.hpp
+    src/native/native_diff_policy.cpp
+    src/native/native_diff_policy.hpp
+    src/native/native_error.hpp
+    src/native/native_glob.cpp
+    src/native/native_glob.hpp
+    src/native/native_include.cpp
+    src/native/native_include.hpp
+    src/native/native_io.cpp
+    src/native/native_io.hpp
+    src/native/native_metadata.cpp
+    src/native/native_metadata.hpp
+    src/native/native_normalize.cpp
+    src/native/native_normalize.hpp
+    src/native/native_paths.cpp
+    src/native/native_paths.hpp
+    src/native/native_replay.cpp
+    src/native/native_replay.hpp
+    src/native/native_snapshot.cpp
+    src/native/native_snapshot.hpp
+)
+target_include_directories(buildscope_native PUBLIC src/native)
+target_link_libraries(buildscope_native PUBLIC buildscope_contract Qt${QT_VERSION_MAJOR}::Core)
+target_compile_definitions(buildscope_native PUBLIC
+    BUILDSCOPE_VERSION="${PROJECT_VERSION}"
+)
+
 add_executable(buildscope-cli src/core/cli_main.cpp)
 target_link_libraries(buildscope-cli PRIVATE buildscope_contract)
 set_target_properties(buildscope-cli PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/src/core"
+)
+
+add_executable(buildscope src/native/native_cli.cpp)
+target_link_libraries(buildscope PRIVATE buildscope_native)
+set_target_properties(buildscope PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/src/native"
 )
 
 add_library(buildscope_gui STATIC
@@ -86,7 +108,7 @@ set_target_properties(buildscope-gui PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/src/gui"
 )
 
-install(TARGETS buildscope-cli buildscope-gui
+install(TARGETS buildscope buildscope-cli buildscope-gui
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
     BUNDLE DESTINATION "${CMAKE_INSTALL_BINDIR}"
 )
@@ -103,15 +125,6 @@ install(DIRECTORY schemas/
 )
 
 enable_testing()
-
-add_test(
-    NAME buildscope_python
-    COMMAND ${CMAKE_COMMAND} -E env
-        "PYTHONPATH=${_buildscope_pythonpath}"
-        ${Python3_EXECUTABLE} -m unittest discover
-        -s "${CMAKE_CURRENT_SOURCE_DIR}/tests/python"
-        -p "test_*.py"
-)
 
 add_executable(test_contract tests/cpp/test_contract.cpp)
 target_include_directories(test_contract PRIVATE src/core)
@@ -152,11 +165,14 @@ target_compile_definitions(test_main_window PRIVATE
 add_test(NAME test_main_window COMMAND test_main_window)
 set_tests_properties(test_main_window PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_native tests/cpp/test_native.cpp)
+target_link_libraries(test_native PRIVATE buildscope_native Qt${QT_VERSION_MAJOR}::Test)
+add_test(NAME test_native COMMAND test_native)
+
 add_test(
     NAME test_hybrid_contract
     COMMAND ${CMAKE_COMMAND}
-        -DPYTHON_EXECUTABLE=${Python3_EXECUTABLE}
-        -DPYTHON_PACKAGE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/python
+        -DPRODUCER=$<TARGET_FILE:buildscope>
         -DDATABASE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/compile_commands.json
         -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/tests/integration/snapshot.json
         -DCONSUMER=$<TARGET_FILE:buildscope-cli>
@@ -166,8 +182,7 @@ add_test(
 add_test(
     NAME test_hybrid_include_contract
     COMMAND ${CMAKE_COMMAND}
-        -DPYTHON_EXECUTABLE=${Python3_EXECUTABLE}
-        -DPYTHON_PACKAGE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/python
+        -DPRODUCER=$<TARGET_FILE:buildscope>
         -DCOMPILER=${CMAKE_CXX_COMPILER}
         -DWORK=${CMAKE_CURRENT_BINARY_DIR}/tests/integration/include-trace
         -DCONSUMER=$<TARGET_FILE:buildscope-cli>
@@ -177,8 +192,7 @@ add_test(
 add_test(
     NAME test_hybrid_diff_contract
     COMMAND ${CMAKE_COMMAND}
-        -DPYTHON_EXECUTABLE=${Python3_EXECUTABLE}
-        -DPYTHON_PACKAGE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/python
+        -DPRODUCER=$<TARGET_FILE:buildscope>
         -DBEFORE_DATABASE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/diff-before.compile_commands.json
         -DAFTER_DATABASE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/diff-after.compile_commands.json
         -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/sample-diff.json

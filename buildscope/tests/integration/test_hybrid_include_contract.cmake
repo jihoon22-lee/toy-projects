@@ -1,5 +1,5 @@
-if(NOT DEFINED PYTHON_EXECUTABLE OR NOT DEFINED PYTHON_PACKAGE_ROOT)
-    message(FATAL_ERROR "Python contract inputs are required")
+if(NOT DEFINED PRODUCER)
+    message(FATAL_ERROR "native producer path is required")
 endif()
 if(NOT DEFINED COMPILER OR NOT DEFINED WORK OR NOT DEFINED CONSUMER)
     message(FATAL_ERROR "include-trace integration inputs are required")
@@ -31,8 +31,7 @@ file(WRITE "${WORK}/build/compile_commands.json" "[{
 
 set(_snapshot "${WORK}/snapshot-v3.json")
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "PYTHONPATH=${PYTHON_PACKAGE_ROOT}"
-        "${PYTHON_EXECUTABLE}" -m buildscope
+    COMMAND "${PRODUCER}"
         "${WORK}/build/compile_commands.json"
         --project-root "${WORK}"
         --include-analysis compiler
@@ -44,7 +43,7 @@ execute_process(
 )
 if(NOT _producer_result EQUAL 0)
     message(FATAL_ERROR
-        "Python include producer failed (${_producer_result}): ${_producer_stdout}${_producer_stderr}")
+        "native include producer failed (${_producer_result}): ${_producer_stdout}${_producer_stderr}")
 endif()
 
 file(READ "${_snapshot}" _payload)

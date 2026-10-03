@@ -1,9 +1,11 @@
 # BuildScope
 
-BuildScope is an offline explorer for C and C++ compile databases. A
-dependency-free Python analyzer reads `compile_commands.json` without
-executing its commands and emits a deterministic, versioned snapshot document;
-a C++20/Qt CLI and GUI validate and consume it.
+BuildScope is an offline explorer for C and C++ compile databases. A bounded
+native analyzer reads `compile_commands.json` without executing its commands
+and emits a deterministic, versioned snapshot document; the Qt CLI and GUI
+validate and consume it. The whole product is a single C++20/Qt6 codebase:
+the `buildscope` producer executable plus the `buildscope-cli` contract
+consumer and the `buildscope-gui` explorer.
 
 What it does:
 
@@ -15,23 +17,18 @@ What it does:
 - **explore** the snapshot in a Qt GUI: sources grouped with their
   configurations, status/search/detail views, and include-graph navigation.
 
-The Python package ships as a pure `py3-none-any` wheel and sdist, plus a
-single-file `buildscope.pyz` standalone; the native consumer ships as a Linux
-bundle.
-
 ## B0 scope
 
-The Python producer in `python/buildscope/` is dependency-free and bounded:
+The native producer in `src/native/` is dependency-free and bounded:
 
 - it rejects databases larger than 64 MiB or with more than 100,000 entries;
 - it performs JSON parsing and validation only—no shell or compiler process is started;
 - it preserves the raw `arguments` array or `command` string, plus `directory`, `file`, and optional
   `output` fields;
 - it emits the `schema_version`, producer, source-count, and sorted-entry fields in stable JSON.
-- its package metadata includes this README and builds as a pure `py3-none-any` wheel plus sdist.
 
-The original B0 C++ consumer in `include/` and `src/` validates the v1 core contract and declared
-entry count. The Python producer bounds the input compile database at 64 MiB/100,000 entries;
+The C++ consumer in `include/` and `src/` validates the v1 core contract and declared
+entry count. The producer bounds the input compile database at 64 MiB/100,000 entries;
 serialized snapshots and native reads are bounded separately at 256 MiB. The CLI prints a compact
 summary:
 
@@ -41,24 +38,25 @@ buildscope-cli SNAPSHOT.json
 
 The Qt window accepts an optional snapshot path or opens one through its file chooser, then shows
 source, working directory, and raw compiler invocation rows. CMake enables C++20,
-`CMAKE_AUTOMOC`, `CMAKE_AUTOUIC`, `CMAKE_AUTORCC`, and compile-command export. The B0 CTest set
-has four entries: Python unit tests, the C++ v1 contract, the Qt window, and the Python-producer →
-C++ consumer hybrid contract. B1 extends native acceptance with legacy v1 core validation and
+`CMAKE_AUTOMOC`, `CMAKE_AUTOUIC`, `CMAKE_AUTORCC`, and compile-command export. The CTest set
+covers the C++ v1 contract, the normalized model, the diff parser/validation, native-producer
+unit tests, the Qt window, and three producer → consumer integration contracts (snapshot,
+include trace, and diff). B1 extends native acceptance with legacy v1 core validation and
 bounded/core/cross-entry v2 validation; B2 completes the normalized C++ model/UI transition.
 
-The B0 `v1` snapshot remains the raw compatibility boundary. B1 normalization
-is implemented in the Python producer, while B2 presents the normalized view
+The B0 `v1` snapshot remains the raw compatibility boundary. Normalization
+is implemented in the native producer, while B2 presents the normalized view
 and retains the raw compatibility fields.
 
 ## B1 compile-database normalization (`buildscope.snapshot/v2`)
 
-The 0.2.0 Python core keeps every B0 raw entry field and adds deterministic derived data. At the
+The normalization core keeps every B0 raw entry field and adds deterministic derived data. At the
 top level, `source` now includes `project_root`; each entry has:
 
 The machine-readable contracts `buildscope-snapshot-v1.schema.json` and
-`buildscope-snapshot-v2.schema.json` are published under `schemas/` and included in the pure Python
-wheel under `buildscope/schemas/`. In v2, `producer.version` uses the public schema's bounded
-`maxLength` of 1 MiB and the same limit in the native reader.
+`buildscope-snapshot-v2.schema.json` are published under `schemas/`. In v2,
+`producer.version` uses the public schema's bounded `maxLength` of 1 MiB and
+the same limit in the native reader.
 
 - `normalized.argv`, `command_style`, `invocation_source` (`arguments` or `command`), `compiler`,
   `language`, `standard`, `defines`, `include_paths`, `sysroot`, `target`, `directory`, `source`,
@@ -108,8 +106,8 @@ claim the POSIX dir-fd atomic-race guarantee. The fallback re-checks the newly c
 identity and regular-file type with `lstat` before replacement and does not resolve a temporary
 symlink.
 
-`--project-root` controls classification (the CLI default is the current working directory; the
-Python API defaults to the database directory). Paths under that root are `project`; known vendor
+`--project-root` controls classification (the CLI default is the current working
+directory). Paths under that root are `project`; known vendor
 components such as `vendor`, `third_party`, `third-party`, `external`, `externals`, `deps`, and
 `_deps` are `vendor`; other paths are `system`. Lexical normalization does not require a path to
 exist. Native-host paths report file/directory existence and can derive `present`, `missing`, or
@@ -188,26 +186,24 @@ The CLI remains backward-compatible by default. With no analysis flag it emits n
 `--schema-version v1` still emits the raw compatibility projection. `--include-analysis` accepts
 `estimate` or `compiler` and implies v3; it may also be written explicitly as:
 
-The examples use the `repo_root`, `scratch_root`, and `py310_bin` variables initialized in the
-run section below; choose a scratch directory outside the repository.
+The examples use the `repo_root` and `scratch_root` variables initialized in the
+run section below; `buildscope` is the producer executable built there. Choose a
+scratch directory outside the repository.
 
 ```bash
 # v2 remains the default and does not execute a compiler.
-PYTHONPATH="$repo_root/buildscope/python" \
-  "$py310_bin" -m buildscope "$repo_root/buildscope/fixtures/compile_commands.json" \
+buildscope "$repo_root/buildscope/fixtures/compile_commands.json" \
   --project-root "$repo_root/buildscope" \
   --output "$scratch_root/buildscope.snapshot.v2.json" --pretty
 
 # Lexical/source-scan explanation; no subprocess is started.
-PYTHONPATH="$repo_root/buildscope/python" \
-  "$py310_bin" -m buildscope "$repo_root/buildscope/fixtures/compile_commands.json" \
+buildscope "$repo_root/buildscope/fixtures/compile_commands.json" \
   --project-root "$repo_root/buildscope" \
   --schema-version v3 --include-analysis estimate \
   --output "$scratch_root/buildscope.snapshot.estimate.json" --pretty
 
 # Compiler-measured explanation through the bounded replay policy.
-PYTHONPATH="$repo_root/buildscope/python" \
-  "$py310_bin" -m buildscope "$repo_root/buildscope/fixtures/compile_commands.json" \
+buildscope "$repo_root/buildscope/fixtures/compile_commands.json" \
   --project-root "$repo_root/buildscope" \
   --schema-version v3 --include-analysis compiler \
   --analysis-max-units 512 --analysis-time-budget 120 \
@@ -216,8 +212,7 @@ PYTHONPATH="$repo_root/buildscope/python" \
 
 `--schema-version v3` without an explicit mode selects `estimate`. Supplying
 `--include-analysis` with v1 or v2 is rejected, so a caller cannot silently drop the analysis
-fields. The published `schemas/buildscope-snapshot-v3.schema.json` is self-contained and strict,
-and is packaged with the pure wheel under `buildscope/schemas/` alongside v1/v2:
+fields. The published `schemas/buildscope-snapshot-v3.schema.json` is self-contained and strict:
 the root, entries, analysis records, edges, search candidates, diagnostics, and normalized fields
 reject unknown keys and use bounded arrays/strings and explicit enums. Every v3 entry contains an
 `include_analysis` record; if a unit cannot be inspected, the record keeps the reason in a warning
@@ -236,9 +231,8 @@ and runs with a fixed minimal environment. It is a bounded read-oriented replay,
 build invocation.
 
 Compiler execution, argument sanitization, and process/trace bounds are isolated in
-`buildscope/python/buildscope/compiler_replay.py`; `include_analysis.py` retains source scanning,
-edge assembly, and compiler-trace interpretation. The current split is 483 lines in
-`include_analysis.py` and 255 lines in `compiler_replay.py`.
+`src/native/native_replay.cpp`; `src/native/native_include.cpp` retains source scanning,
+edge assembly, and compiler-trace interpretation.
 
 The limits are explicit: 32,768 argv items and 1 MiB of argv text per unit, 16 MiB of compiler trace,
 100,000 edges, 4 MiB per source scan, 15 seconds per compiler trace, and (by default) 512
@@ -293,8 +287,7 @@ strict `buildscope.diff/v1` contract.
 ### CLI and exit policy
 
 ```bash
-PYTHONPATH="$repo_root/buildscope/python" \
-  "$py310_bin" -m buildscope diff \
+buildscope diff \
   "$repo_root/buildscope/fixtures/diff-before.compile_commands.json" \
   "$repo_root/buildscope/fixtures/diff-after.compile_commands.json" \
   --before-project-root /project \
@@ -303,7 +296,8 @@ PYTHONPATH="$repo_root/buildscope/python" \
   --output "$scratch_root/buildscope.diff.json"
 ```
 
-The installed `buildscope-diff` entry point accepts the same arguments. Exit status is intentionally
+The `diff` subcommand accepts the same arguments as the snapshot command's shared
+options. Exit status is intentionally
 small and scriptable:
 
 | Status | Meaning |
@@ -352,66 +346,40 @@ digests, omitted semantic changes, and invalid suppression evidence. `buildscope
 DIFF.json` consumes the same contract, while the native Qt GUI opens it in an issues-first tree with
 change details, filtering, and suppressed counts.
 
-The B4 fixture and test coverage includes Python semantic/CLI tests, native C++ parser/model and
-adversarial rejection tests, the Python-to-C++ byte-identical hybrid contract, and the GUI diff-mode
-test. Python is `83/83`; Ruff check/format covers `19` files and mypy covers `15` source files. The
-default Qt5 5.15.18 and Qt6 6.10.2 Release CMake/CTest matrices are each `9/9`; enabling
-`BUILDSCOPE_BUILD_BENCHMARKS` makes each matrix `10/10`. The pure
-`buildscope-0.5.0-py3-none-any` wheel contains the v1/v2/v3 snapshot and diff v1 schemas and no
-native extension.
+The fixture and test coverage includes native producer unit tests, C++ parser/model and
+adversarial rejection tests, the producer → consumer byte-identical integration contracts
+(snapshot, include trace, and diff), and the GUI diff-mode test. The Qt6 Release CMake/CTest
+matrix is `9/9`; enabling `BUILDSCOPE_BUILD_BENCHMARKS` makes it `10/10`.
 
 ## Run without installing into the repository
 
-All build and temporary output below stays under a scratch directory. The Python package is loaded
-with `PYTHONPATH`; it is not installed into `buildscope`.
+All build and temporary output below stays under a scratch directory.
 
 ```bash
 repo_root="$(git rev-parse --show-toplevel)"
 scratch_root="$(mktemp -d /tmp/buildscope-b2.XXXXXX)"
-py310_bin="$(command -v python3.10)"
 
-# Python producer/unit tests, with no package install.
-PYTHONPATH="$repo_root/buildscope/python" \
-  "$py310_bin" -m unittest discover \
-  -s "$repo_root/buildscope/tests/python" -p 'test_*.py'
+cmake -S "$repo_root/buildscope" -B "$scratch_root/qt6" \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DBUILDSCOPE_BUILD_BENCHMARKS=ON
+cmake --build "$scratch_root/qt6" --parallel 2
+QT_QPA_PLATFORM=offscreen \
+  ctest --test-dir "$scratch_root/qt6" --output-on-failure
 
-PYTHONPATH="$repo_root/buildscope/python" \
-  "$py310_bin" -m buildscope \
+# The native producer emits a v2 snapshot; the consumer validates it.
+"$scratch_root/qt6/src/native/buildscope" \
   "$repo_root/buildscope/fixtures/compile_commands.json" \
   --project-root "$repo_root/buildscope" \
   --schema-version v2 \
   --output "$scratch_root/buildscope.snapshot.json" --pretty
+"$scratch_root/qt6/src/core/buildscope-cli" \
+  "$scratch_root/buildscope.snapshot.json"
 
 # Explicit raw v1 compatibility projection.
-PYTHONPATH="$repo_root/buildscope/python" \
-  "$py310_bin" -m buildscope \
+"$scratch_root/qt6/src/native/buildscope" \
   "$repo_root/buildscope/fixtures/compile_commands.json" \
   --schema-version v1 \
   --output "$scratch_root/buildscope.snapshot.v1.json" --pretty
-
-# Qt 6.10.2 leg.
-cmake -S "$repo_root/buildscope" -B "$scratch_root/qt6" \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON \
-  -DBUILDSCOPE_BUILD_BENCHMARKS=ON \
-  -DPython3_EXECUTABLE="$py310_bin"
-cmake --build "$scratch_root/qt6" --parallel
-QT_QPA_PLATFORM=offscreen \
-  ctest --test-dir "$scratch_root/qt6" --output-on-failure
-
-# Qt 5.15.18 leg.
-cmake -S "$repo_root/buildscope" -B "$scratch_root/qt5" \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_DISABLE_FIND_PACKAGE_Qt6=ON \
-  -DBUILDSCOPE_BUILD_BENCHMARKS=ON \
-  -DPython3_EXECUTABLE="$py310_bin"
-cmake --build "$scratch_root/qt5" --parallel
-QT_QPA_PLATFORM=offscreen \
-  ctest --test-dir "$scratch_root/qt5" --output-on-failure
-
-# The native consumer accepts the Python-produced v2 snapshot.
-"$scratch_root/qt6/src/core/buildscope-cli" \
-  "$scratch_root/buildscope.snapshot.json"
 
 # The preserved fixture independently retains the v1 compatibility path.
 "$scratch_root/qt6/src/core/buildscope-cli" \
