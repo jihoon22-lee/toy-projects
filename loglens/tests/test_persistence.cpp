@@ -422,6 +422,21 @@ void testSessionRoundTripAndValidation() {
     CHECK_EQ(loaded.state.filter, state.filter);
     CHECK_EQ(loaded.state.level, state.level);
 
+    // A format plugin is part of the parsing choice and must round-trip; it is
+    // written only when set so plugin-free sessions keep their exact bytes.
+    const fs::path pluginPath = directory.path() / "plugin.session.json";
+    loglens::SessionState pluginState = state;
+    pluginState.format_plugin = "/etc/loglens/myapp.format.json";
+    CHECK(loglens::saveSession(pluginPath.string(), pluginState, error));
+    CHECK(readFile(pluginPath).find(
+              "\"max_record_bytes\":4096,\"format_plugin\":"
+              "\"/etc/loglens/myapp.format.json\"}")
+          != std::string::npos);
+    const loglens::SessionLoadResult pluginLoad = loglens::loadSession(pluginPath.string());
+    CHECK(pluginLoad.ok());
+    CHECK_EQ(pluginLoad.state.format_plugin, pluginState.format_plugin);
+    CHECK(loaded.state.format_plugin.empty());
+
     // A minimal session needs only schema and source.path; the rest default.
     const fs::path minimal = directory.path() / "minimal.session.json";
     writeFile(minimal,

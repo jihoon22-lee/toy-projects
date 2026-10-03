@@ -39,6 +39,12 @@ enum class FormatPluginError {
 
 const char* formatPluginErrorName(FormatPluginError code);
 
+// Compiles a plugin pattern (ECMAScript grammar). On libstdc++ the
+// non-recursive executor is selected: the default backtracking executor
+// recurses once per input character and overflows the stack on long lines.
+// Back-references are therefore rejected. Throws std::regex_error.
+std::regex compileFormatPattern(const std::string& pattern);
+
 // Loads and validates a plugin document. On success `plugin.pattern` holds
 // the compiled expression; on failure `error` names the offending field.
 FormatPluginError loadFormatPlugin(const std::string& path, FormatPlugin& plugin,
@@ -46,7 +52,10 @@ FormatPluginError loadFormatPlugin(const std::string& path, FormatPlugin& plugin
 
 // Parses one line through a plugin. A non-matching line returns
 // ParseStatus::Unstructured with the raw line preserved — the same fallback
-// contract the built-in formats honour.
+// contract the built-in formats honour. A line the matcher cannot evaluate
+// safely (regex resource limits, or an over-long line on standard libraries
+// whose matcher recurses per character) also stays Unstructured, with a
+// LimitExceeded diagnostic.
 LogRecord parsePluginLine(const std::string& line, const FormatPlugin& plugin,
                           std::size_t lineNumber);
 

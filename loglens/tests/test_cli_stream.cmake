@@ -238,3 +238,56 @@ string(FIND "${oversized_output}" "[4 source byte(s) omitted]" omission_position
 if(omission_position EQUAL -1)
     message(FATAL_ERROR "oversized record omission was not surfaced")
 endif()
+
+# A format plugin is one parsing choice with --format: combining them is an
+# error, and --save-session must carry the plugin so --session reparses the
+# log the same way instead of silently falling back to the built-in format.
+set(plugin_file "${CMAKE_CURRENT_BINARY_DIR}/loglens-cli.format.json")
+file(WRITE "${plugin_file}" [=[{"kind":"loglens.format/v1","name":"bracket",
+"pattern":"^(\\S+) (\\w+) +\\[(\\w+)\\] (.*)$",
+"fields":{"timestamp":1,"level":2,"source":3,"message":4}}]=])
+execute_process(
+    COMMAND "${LOGLENS}" "${INPUT}" --format plain --format-plugin "${plugin_file}"
+    RESULT_VARIABLE conflict_result
+    OUTPUT_VARIABLE conflict_output
+    ERROR_VARIABLE conflict_error
+)
+if(conflict_result EQUAL 0 OR NOT conflict_error MATCHES "cannot be combined")
+    message(FATAL_ERROR "--format with --format-plugin was not rejected (${conflict_result}): ${conflict_error}")
+endif()
+
+set(plugin_session "${CMAKE_CURRENT_BINARY_DIR}/loglens-plugin-session.json")
+execute_process(
+    COMMAND "${LOGLENS}" "${INPUT}" --format-plugin "${plugin_file}"
+            --save-session "${plugin_session}"
+    RESULT_VARIABLE plugin_result
+    OUTPUT_VARIABLE plugin_output
+    ERROR_VARIABLE plugin_error
+)
+if(NOT plugin_result EQUAL 0)
+    message(FATAL_ERROR "loglens --format-plugin failed (${plugin_result}): ${plugin_error}")
+endif()
+file(READ "${plugin_session}" plugin_session_contents)
+if(NOT plugin_session_contents MATCHES "\"format_plugin\":")
+    message(FATAL_ERROR "saved session lost the format plugin:\n${plugin_session_contents}")
+endif()
+execute_process(
+    COMMAND "${LOGLENS}" --session "${plugin_session}"
+    RESULT_VARIABLE replay_result
+    OUTPUT_VARIABLE replay_output
+    ERROR_VARIABLE replay_error
+)
+execute_process(
+    COMMAND "${LOGLENS}" "${INPUT}" --format auto
+    OUTPUT_VARIABLE builtin_output
+)
+file(REMOVE "${plugin_session}" "${plugin_file}")
+if(NOT replay_result EQUAL 0)
+    message(FATAL_ERROR "loglens --session with a plugin failed (${replay_result}): ${replay_error}")
+endif()
+if(NOT replay_output STREQUAL plugin_output)
+    message(FATAL_ERROR "session replay did not reparse with the plugin:\n${replay_output}\n--- expected ---\n${plugin_output}")
+endif()
+if(plugin_output STREQUAL builtin_output)
+    message(FATAL_ERROR "plugin fixture is indistinguishable from the built-in parser")
+endif()
