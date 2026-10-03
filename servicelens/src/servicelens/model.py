@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
-VERSION = "0.1.0"  # x-release-please-version
+VERSION = "0.2.0"  # x-release-please-version
 SNAPSHOT = "servicelens.snapshot/v1"
 DIFF = "servicelens.diff/v1"
 SEMANTICS = "systemd-255-subset-v1"
