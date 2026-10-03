@@ -223,6 +223,31 @@ def _normalize_distribution(value: Any, homes: tuple[str, ...], *, redact: bool)
             }
         )
         normalized["metadata"]["wheel_tags"] = wheel_tags
+    external_value = (
+        metadata.get("requires_external")
+        if "requires_external" in metadata
+        else raw.get("requires_external")
+    )
+    if "requires_external" in metadata or "requires_external" in raw:
+        requires_external = sorted(
+            {
+                _redact_if_enabled(
+                    _string(
+                        item,
+                        "distribution.metadata.requires_external item",
+                        allow_empty=False,
+                    ),
+                    homes,
+                    redact,
+                )
+                for item in _array(
+                    external_value,
+                    "distribution.metadata.requires_external",
+                    maximum=MAX_COLLECTION_ITEMS,
+                )
+            }
+        )
+        normalized["metadata"]["requires_external"] = requires_external
     return normalized
 
 

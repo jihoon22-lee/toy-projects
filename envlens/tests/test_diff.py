@@ -29,6 +29,7 @@ def _distribution(
     requirements: list[str] | None = None,
     requires_python: str = ">=3.10",
     wheel_tags: list[str] | None = None,
+    external: list[str] | None = None,
 ) -> dict[str, object]:
     metadata: dict[str, object] = {
         "requires_python": requires_python,
@@ -36,6 +37,8 @@ def _distribution(
     }
     if wheel_tags is not None:
         metadata["wheel_tags"] = wheel_tags
+    if external is not None:
+        metadata["requires_external"] = external
     distribution: dict[str, object] = {
         "name": name,
         "normalized_name": name.replace("_", "-").lower(),
@@ -145,6 +148,23 @@ def test_diff_reports_offline_dependency_and_compatibility_evidence() -> None:
     assert wheel_check["status"] == "incompatible"
     assert all("certainty" in item for item in result["dependencies"] + result["compatibility"])
     assert result["status"] == "incompatible"
+
+
+def test_external_requirements_surface_as_unknown_evidence() -> None:
+    after = _snapshot(
+        [_distribution("pkg", "1.0", external=["libsystemd >= 240"])],
+    )
+    result = compare_snapshots(_snapshot([]), after)
+
+    external = next(
+        item for item in result["dependencies"] if item["kind"] == "external-requirement"
+    )
+    assert external["name"] == "pkg"
+    assert external["requirement"] == "libsystemd >= 240"
+    assert external["certainty"] == "unknown"
+    # External requirements cannot be verified offline, so they downgrade the
+    # run to "unknown" rather than "incompatible".
+    assert result["status"] == "unknown"
 
 
 def test_compatibility_helpers_cover_unknown_and_wildcard_cases() -> None:
