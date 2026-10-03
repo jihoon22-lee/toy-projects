@@ -95,9 +95,7 @@ def test_cli_check_emits_compatibility_report(tmp_path: Path) -> None:
 
 def test_cli_check_reports_issues_as_exit_one(tmp_path: Path) -> None:
     snapshot_doc = _snapshot("1.0")
-    snapshot_doc["distributions"][0]["metadata"]["requires_dist"] = [
-        "missing-dependency>=9.9"
-    ]
+    snapshot_doc["distributions"][0]["metadata"]["requires_dist"] = ["missing-dependency>=9.9"]
     snapshot = tmp_path / "snapshot.json"
     snapshot.write_text(json.dumps(snapshot_doc), encoding="utf-8")
     output = io.StringIO()
