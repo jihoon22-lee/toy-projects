@@ -3,24 +3,31 @@
   "include-component-in-tag": true,
   "include-v-in-tag": true,
   "tag-separator": "/",
-  "separate-pull-requests": true,
   "draft": true,
   "packages": {
     "loglens": {
       "release-type": "simple",
-      "extra-files": ["src/main.cpp"]
+      "extra-files": [
+        "src/main.cpp"
+      ]
     },
     "diskmap": {
       "release-type": "simple",
-      "extra-files": ["src/main.cpp"]
+      "extra-files": [
+        "src/main.cpp"
+      ]
     },
     "buildscope": {
       "release-type": "simple",
-      "extra-files": ["CMakeLists.txt"]
+      "extra-files": [
+        "CMakeLists.txt"
+      ]
     },
     "abilens": {
       "release-type": "simple",
-      "extra-files": ["include/abilens/model.hpp"]
+      "extra-files": [
+        "include/abilens/model.hpp"
+      ]
     },
     "envlens": {
       "release-type": "python"
