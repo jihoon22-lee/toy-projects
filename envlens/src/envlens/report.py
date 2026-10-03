@@ -192,11 +192,29 @@ def _runtime_text(report: Mapping[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _check_text(report: Mapping[str, Any]) -> str:
+    summary = _mapping(report.get("summary"))
+    lines = [
+        f"envlens check: {_value(report, 'status', 'unknown').upper()}",
+        "",
+        "Summary: "
+        + ", ".join(
+            f"{key}={summary.get(key, 0)}"
+            for key in ("compatibility_issues", "compatibility_unknown", "dependency_issues")
+        ),
+    ]
+    lines.extend(_compatibility_lines(report))
+    lines.extend(_dependency_lines(report))
+    return "\n".join(lines) + "\n"
+
+
 def render_text(report: Mapping[str, Any]) -> str:
     """Render a report as concise issues-first text."""
 
     if report.get("schema_version") == "envlens.runtime/v1":
         return _runtime_text(report)
+    if report.get("schema_version") == "envlens.compatibility/v1":
+        return _check_text(report)
     return _diff_text(report)
 
 
@@ -308,18 +326,27 @@ def _diff_markdown(report: Mapping[str, Any]) -> str:
         "| --- | --- | --- | --- |",
     ]
     lines.extend(_diff_change_rows(report))
-    lines.extend(
-        [
-            "",
-            "## Compatibility",
-            "",
-            "| Kind | Name | Status | Certainty | Reason |",
-            "| --- | --- | --- | --- | --- |",
-        ]
-    )
+    lines.append("")
+    lines.extend(_evidence_markdown_sections(report))
+    return "\n".join(lines) + "\n"
+
+
+def _evidence_markdown_sections(report: Mapping[str, Any]) -> list[str]:
+    lines = [
+        "## Compatibility",
+        "",
+        "| Kind | Name | Status | Certainty | Reason |",
+        "| --- | --- | --- | --- | --- |",
+    ]
     lines.extend(_compatibility_markdown_rows(report))
     lines.extend(["", "## Dependency issues", ""])
     lines.extend(_dependency_markdown_lines(report))
+    return lines
+
+
+def _check_markdown(report: Mapping[str, Any]) -> str:
+    lines = [f"# EnvLens check — {_value(report, 'status', 'unknown').upper()}", ""]
+    lines.extend(_evidence_markdown_sections(report))
     return "\n".join(lines) + "\n"
 
 
@@ -328,6 +355,8 @@ def render_markdown(report: Mapping[str, Any]) -> str:
 
     if report.get("schema_version") == "envlens.runtime/v1":
         return _runtime_markdown(report)
+    if report.get("schema_version") == "envlens.compatibility/v1":
+        return _check_markdown(report)
     return _diff_markdown(report)
 
 

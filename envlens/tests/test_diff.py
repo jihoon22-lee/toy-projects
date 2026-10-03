@@ -167,6 +167,51 @@ def test_external_requirements_surface_as_unknown_evidence() -> None:
     assert result["status"] == "unknown"
 
 
+def test_standing_external_requirements_do_not_change_an_unchanged_diff() -> None:
+    snapshot = _snapshot([_distribution("pkg", "1.0", external=["libsystemd >= 240"])])
+
+    result = compare_snapshots(snapshot, snapshot)
+
+    assert result["status"] == "unchanged"
+    assert [item["kind"] for item in result["dependencies"]] == ["external-requirement"]
+
+
+def test_newly_declared_external_requirement_still_downgrades_the_diff() -> None:
+    before = _snapshot([_distribution("pkg", "1.0", external=["libsystemd >= 240"])])
+    after = _snapshot([_distribution("pkg", "1.0", external=["libsystemd >= 240", "libpq >= 14"])])
+
+    result = compare_snapshots(before, after)
+
+    assert result["status"] == "unknown"
+
+
+def test_check_reports_external_requirements_without_failing() -> None:
+    report = check_compatibility(
+        _snapshot([_distribution("pkg", "1.0", external=["libsystemd >= 240"])])
+    )
+
+    assert report["status"] == "compatible"
+    assert report["dependencies"][0]["kind"] == "external-requirement"
+    assert set(report["summary"]) == {
+        "compatibility_issues",
+        "compatibility_unknown",
+        "dependency_issues",
+    }
+
+
+def test_check_reports_render_as_check_not_diff() -> None:
+    report = check_compatibility(_snapshot([_distribution("one", "1.0")]))
+
+    text = render_text(report)
+    markdown = render_markdown(report)
+
+    assert text.startswith("envlens check: COMPATIBLE\n")
+    assert "added=" not in text
+    assert markdown.startswith("# EnvLens check — COMPATIBLE\n")
+    assert "| Category |" not in markdown
+    assert "## Compatibility" in markdown
+
+
 def test_compatibility_helpers_cover_unknown_and_wildcard_cases() -> None:
     identity = {"version": "3.10.12", "version_info": [3, 10, 12, "final", 0]}
     assert satisfies_requires_python(">=3.10,<4", identity) is True
