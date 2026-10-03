@@ -52,7 +52,7 @@
         {
           "type": "toml",
           "path": "uv.lock",
-          "jsonpath": "$.package[?(@.name=='testlens')].version"
+          "jsonpath": "$.package[?(@.name.value=='testlens')].version"
         }
       ]
     },
@@ -63,7 +63,7 @@
         {
           "type": "toml",
           "path": "uv.lock",
-          "jsonpath": "$.package[?(@.name=='servicelens')].version"
+          "jsonpath": "$.package[?(@.name.value=='servicelens')].version"
         },
         {
           "type": "generic",
