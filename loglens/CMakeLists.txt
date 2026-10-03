@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(loglens VERSION 0.2.1 LANGUAGES CXX) # x-release-please-version
+project(loglens VERSION 0.3.0 LANGUAGES CXX) # x-release-please-version
 include(GNUInstallDirs)
 
 option(LOGLENS_BUILD_BENCHMARKS "Build opt-in large-file benchmark tools" OFF)
