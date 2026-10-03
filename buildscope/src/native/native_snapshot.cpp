@@ -140,11 +140,21 @@ void forEachDatabaseElement(const QByteArray &raw, Visit &&visit) {
         return character == ' ' || character == '\t' || character == '\n' ||
                character == '\r';
     };
-    qsizetype cursor = 0;
+    // QJsonDocument skips a leading UTF-8 BOM, so the streaming walk does too:
+    // Windows tools commonly write compile_commands.json with one.
+    qsizetype cursor = raw.startsWith("\xEF\xBB\xBF") ? 3 : 0;
     while (cursor < raw.size() && isSpace(raw.at(cursor))) {
         ++cursor;
     }
     if (cursor >= raw.size() || raw.at(cursor) != '[') {
+        // Only the error path builds a document, to keep the precise
+        // diagnosis for input that is not JSON at all.
+        QJsonParseError parseError{};
+        (void)QJsonDocument::fromJson(raw, &parseError);
+        if (parseError.error != QJsonParseError::NoError) {
+            throw SnapshotError(QStringLiteral("cannot read compilation database: %1")
+                                    .arg(parseError.errorString()));
+        }
         throw SnapshotError(
             QStringLiteral("compilation database root must be an array"));
     }
@@ -211,6 +221,10 @@ void forEachDatabaseElement(const QByteArray &raw, Visit &&visit) {
         if (!closed) {
             throw SnapshotError(QStringLiteral(
                 "cannot read compilation database: unexpected end of input"));
+        }
+        if (cursor == begin) {
+            throw SnapshotError(QStringLiteral(
+                "cannot read compilation database: empty element in entry array"));
         }
         visit(raw.mid(begin, cursor - begin));
         if (raw.at(cursor) == ',') {

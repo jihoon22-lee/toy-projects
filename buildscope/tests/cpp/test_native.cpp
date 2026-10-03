@@ -59,6 +59,7 @@ private slots:
     void atomicWrite();
     void protectedOutput();
     void rejections();
+    void byteOrderMark();
     void schemaProjections();
     void delayedAnalysisSelection();
     void suppressions();
@@ -431,6 +432,46 @@ void NativeProducerTest::rejections() {
     QVERIFY_THROWS_EXCEPTION(std::exception, loadCompilationDatabase(path, {}));
     writePayload(QStringLiteral("[NaN]"));
     QVERIFY_THROWS_EXCEPTION(std::exception, loadCompilationDatabase(path, {}));
+
+    auto errorFor = [&path](const QByteArray &payload) {
+        QFile file(path);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            return QStringLiteral("cannot write payload");
+        }
+        file.write(payload);
+        file.close();
+        try {
+            (void)loadCompilationDatabase(path, {});
+        } catch (const std::exception &error) {
+            return QString::fromUtf8(error.what());
+        }
+        return QString();
+    };
+    QCOMPARE(errorFor("{\"not\":\"array\"}"),
+             QStringLiteral("compilation database root must be an array"));
+    QVERIFY(errorFor("not json").startsWith(
+        QStringLiteral("cannot read compilation database: ")));
+    QVERIFY(!errorFor("not json").contains(QStringLiteral("root must be an array")));
+    QCOMPARE(errorFor("[{\"directory\":\"/tmp\",\"file\":\"a.c\",\"command\":\"cc\"},,]"),
+             QStringLiteral("cannot read compilation database: empty element in entry array"));
+    QCOMPARE(errorFor("[,]"),
+             QStringLiteral("cannot read compilation database: empty element in entry array"));
+}
+
+void NativeProducerTest::byteOrderMark() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.path() + QStringLiteral("/cc.json");
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("\xEF\xBB\xBF");
+    file.write(QStringLiteral("[{\"directory\":\"%1\",\"file\":\"a.c\","
+                              "\"command\":\"cc -c a.c\"}]")
+                   .arg(directory.path())
+                   .toUtf8());
+    file.close();
+    const QJsonObject snapshot = loadCompilationDatabase(path, directory.path());
+    QCOMPARE(snapshot.value(QStringLiteral("entries")).toArray().size(), 1);
 }
 
 void NativeProducerTest::schemaProjections() {
