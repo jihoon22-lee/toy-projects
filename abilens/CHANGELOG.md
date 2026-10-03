@@ -8,7 +8,7 @@
 - Fix unknown symbol policies, removed exports and ELF32 symbol offsets.
 - Add CI failure policies and complete install layout.
 
-## [0.3.0](https://github.com/jihoon22-lee/toy-projects/compare/abilens/v0.2.0...abilens/v0.3.0) (2026-10-03)
+## [0.2.1](https://github.com/jihoon22-lee/toy-projects/compare/abilens/v0.2.0...abilens/v0.2.1) (2026-10-03)
 
 
 ### Features

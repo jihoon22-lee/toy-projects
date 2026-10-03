@@ -7,7 +7,7 @@
   extras, dependency paths, import overlap and CI policies.
 - Bound compilation batches and protect report inputs from output aliases.
 
-## [0.3.0](https://github.com/jihoon22-lee/toy-projects/compare/envlens/v0.2.0...envlens/v0.3.0) (2026-10-03)
+## [0.2.1](https://github.com/jihoon22-lee/toy-projects/compare/envlens/v0.2.0...envlens/v0.2.1) (2026-10-03)
 
 
 ### Features
