@@ -2,63 +2,44 @@
 
 BuildScope has two stages:
 
-1. A released `buildscope.pyz` or pure Python wheel reads an existing
+1. The `buildscope` producer executable reads an existing
    `compile_commands.json` and writes a versioned snapshot (or diff report).
-2. The native `buildscope-cli` and `buildscope-gui` load that JSON for terminal
+2. `buildscope-cli` and `buildscope-gui` load that JSON for terminal
    or desktop inspection.
 
-The Python stage is offline and does not execute compiler commands. The native
-programs consume snapshots and diff reports, not a raw compilation database.
-
-The current stable release is [BuildScope 0.5.0](https://github.com/jihoon22-lee/toy-projects/releases/tag/buildscope-v0.5.0),
-published on 2026-09-02 KST. It is an immutable, non-draft, non-prerelease release with exactly
-nine independently audited assets; the canonical [README release table](../README.md#buildscope-050-publication-evidence-2026-09-02-kst)
-lists their API-reported sizes and SHA-256 digests.
+The producer stage is offline and does not execute compiler commands unless
+`--include-analysis compiler` explicitly opts into the bounded replay policy.
+The consumers read snapshots and diff reports, not a raw compilation database.
 
 ## Prerequisites
 
-- Python 3.10 or newer
+- A CMake build of this directory (Qt 6 required for the GUI; the producer
+  links Qt Core only)
 - A CMake-generated or otherwise captured `compile_commands.json`
-- A release build of the native CLI/GUI (or a local CMake build of them)
 
 The examples in this directory are deliberately small and independent of Qt:
 `examples/cmake` can generate a database with CMake, while
 `examples/qmake` demonstrates a qmake project and includes a deterministic
 sample database for the producer.
 
-## Produce a snapshot
-
-Set the repository and release paths once. Replace `release_root` with the
-directory containing the BuildScope 0.5.0 release assets.
+## Build
 
 ```bash
 repo_root="$(git rev-parse --show-toplevel)"
-release_root="/path/to/buildscope-0.5.0"
 scratch_root="$(mktemp -d /tmp/buildscope-quickstart.XXXXXX)"
+
+cmake -S "$repo_root/buildscope" -B "$scratch_root/build" \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build "$scratch_root/build" --parallel 2
 ```
 
-### Standalone zipapp
+The producer lands at `$scratch_root/build/src/native/buildscope`, the
+consumers at `src/core/buildscope-cli` and `src/gui/buildscope-gui`.
 
-The standalone artifact is a self-contained `buildscope.pyz`:
-
-```bash
-chmod +x "$release_root/buildscope.pyz"
-"$release_root/buildscope.pyz" \
-  "$repo_root/buildscope/examples/cmake/compile_commands.json" \
-  --project-root "$repo_root/buildscope/examples/cmake" \
-  --output "$scratch_root/cmake.snapshot.json" --pretty
-```
-
-### Wheel
-
-The wheel is pure Python (`buildscope-0.5.0-py3-none-any.whl`) and exposes the
-same `buildscope` and `buildscope-diff` commands:
+## Produce a snapshot
 
 ```bash
-python3.10 -m venv "$scratch_root/venv"
-"$scratch_root/venv/bin/python" -m pip install --no-deps \
-  "$release_root/buildscope-0.5.0-py3-none-any.whl"
-"$scratch_root/venv/bin/buildscope" \
+"$scratch_root/build/src/native/buildscope" \
   "$repo_root/buildscope/examples/cmake/compile_commands.json" \
   --project-root "$repo_root/buildscope/examples/cmake" \
   --output "$scratch_root/cmake.snapshot.json" --pretty
@@ -71,8 +52,8 @@ writes `compile_commands.json` in the build tree because the example enables
 ```bash
 cmake -S "$repo_root/buildscope/examples/cmake" \
   -B "$scratch_root/cmake-build" -DCMAKE_BUILD_TYPE=Release
-cmake --build "$scratch_root/cmake-build" --parallel
-"$scratch_root/venv/bin/buildscope" \
+cmake --build "$scratch_root/cmake-build" --parallel 2
+"$scratch_root/build/src/native/buildscope" \
   "$scratch_root/cmake-build/compile_commands.json" \
   --project-root "$repo_root/buildscope/examples/cmake" \
   --output "$scratch_root/cmake-generated.snapshot.json" --pretty
@@ -82,14 +63,11 @@ The checked-in example database is useful for a reproducible smoke test; the
 generated database reflects the compiler and build directory on the current
 machine.
 
-## Inspect with the native consumers
-
-Point these variables at the binaries from the release bundle or an out-of-tree
-CMake build of `buildscope`:
+## Inspect with the consumers
 
 ```bash
-native_cli="/path/to/buildscope-cli"
-native_gui="/path/to/buildscope-gui"
+native_cli="$scratch_root/build/src/core/buildscope-cli"
+native_gui="$scratch_root/build/src/gui/buildscope-gui"
 
 "$native_cli" "$scratch_root/cmake.snapshot.json"
 "$native_gui" "$scratch_root/cmake.snapshot.json"
@@ -106,7 +84,7 @@ status 0 when there are no visible changes, 1 when visible changes exist, and
 2 for invalid input or another processing error:
 
 ```bash
-"$scratch_root/venv/bin/buildscope-diff" \
+"$scratch_root/build/src/native/buildscope" diff \
   "$repo_root/buildscope/fixtures/diff-before.compile_commands.json" \
   "$repo_root/buildscope/fixtures/diff-after.compile_commands.json" \
   --project-root "$repo_root/buildscope" \
@@ -136,7 +114,7 @@ qmake -o "$scratch_root/qmake-build/Makefile" \
   cd "$scratch_root/qmake-build"
   bear --output compile_commands.json -- make -j2
 )
-"$scratch_root/venv/bin/buildscope" \
+"$scratch_root/build/src/native/buildscope" \
   "$scratch_root/qmake-build/compile_commands.json" \
   --project-root "$repo_root/buildscope/examples/qmake" \
   --output "$scratch_root/qmake.snapshot.json" --pretty

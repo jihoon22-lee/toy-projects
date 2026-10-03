@@ -9,7 +9,7 @@
 |---|---|---|
 | [diskmap](diskmap/) | 디스크 사용량 트리맵 뷰어와 cleanup·storage workbench | CMake · Qt6 GUI |
 | [loglens](loglens/) | 로그 뷰어·분석기와 investigation workbench | CMake · Qt5/Qt6 GUI |
-| [buildscope](buildscope/) | compile database explorer (Python producer + C++/Qt consumer) | CMake · Python 3.10+ · Qt5/Qt6 |
+| [buildscope](buildscope/) | compile database explorer (네이티브 producer + Qt consumer) | CMake · C++20 · Qt6 |
 | [envlens](envlens/) | Python 환경 snapshot·diff·runtime inspection CLI/library | pure Python 3.10+ |
 | [abilens](abilens/) | Linux ELF/ABI artifact inspector | 손으로 쓴 Make · C++20 |
 
@@ -97,10 +97,9 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel 2
 QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
 
-# buildscope — Python 테스트 + CMake/CTest
+# buildscope — CMake/CTest
 cd ../buildscope
-PYTHONPATH=python python3 -m unittest discover -s tests/python -p 'test_*.py'
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --parallel
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --parallel 2
 QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
 
 # envlens — pytest + ruff + mypy

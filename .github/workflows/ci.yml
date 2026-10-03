@@ -47,7 +47,6 @@ jobs:
           set -euo pipefail
           mkdir -p build
           cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON \
             2>&1 | tee build/configure.log
           selected_major="$(sed -n 's/^-- .*using Qt\([56]\) .*/\1/p' \
             build/configure.log | tail -1)"
@@ -102,7 +101,6 @@ jobs:
           mkdir -p "$scratch_dir" "$artifact_dir" "$build_dir"
           cmake -S . -B "$build_dir" -DCMAKE_BUILD_TYPE=Release \
             -DLOGLENS_BUILD_BENCHMARKS=ON \
-            -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON
           cmake --build "$build_dir" --parallel 2 \
             --target loglens-bench-generate loglens-bench-core loglens-bench-gui
           python3 benchmarks/run_benchmark.py \
@@ -280,7 +278,6 @@ jobs:
           set -euo pipefail
           mkdir -p build
           cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON \
             2>&1 | tee build/configure.log
           selected_major="$(sed -n 's/^-- .*using Qt\([56]\) .*/\1/p' \
             build/configure.log | tail -1)"
@@ -332,7 +329,6 @@ jobs:
           mkdir -p "$build_dir" "$artifact_dir"
           cmake -S . -B "$build_dir" -DCMAKE_BUILD_TYPE=Release \
             -DBUILDSCOPE_BUILD_BENCHMARKS=ON \
-            -DCMAKE_DISABLE_FIND_PACKAGE_Qt5=ON
           cmake --build "$build_dir" --parallel 2 --target buildscope-model-benchmark
           "$build_dir/buildscope-model-benchmark" 100000 10000 \
             | tee "$artifact_dir/summary.json"
@@ -362,58 +358,6 @@ jobs:
           path: ${{ runner.temp }}/buildscope-benchmark/artifact
           if-no-files-found: warn
           retention-days: 14
-
-  buildscope-python:
-    name: BuildScope Python quality (${{ matrix.label }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - python_version: "3.10"
-            label: py310
-          - python_version: "3.14"
-            label: latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Set up Python ${{ matrix.label }}
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: ${{ matrix.python_version }}
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-
-      - name: Install pinned Python quality tools
-        run: |
-          set -euo pipefail
-          python_bin="$(python -c 'import sys; print(sys.executable)')"
-          tool_env="$RUNNER_TEMP/buildscope-python-${{ matrix.label }}"
-          uv venv --python "$python_bin" "$tool_env"
-          uv pip install --python "$tool_env/bin/python" \
-            ruff==0.16.5 \
-            pytest==9.1.1 \
-            mypy==2.3.1
-          echo "B5_PYTHON=$tool_env/bin/python" >> "$GITHUB_ENV"
-
-      - name: Run Python tests, lint, format, and types
-        run: |
-          set -euo pipefail
-          quality_root="$RUNNER_TEMP/buildscope-python-${{ matrix.label }}"
-          (
-            cd buildscope
-            PYTHONPATH=python:. "$quality_root/bin/python" -m pytest tests/python
-            "$quality_root/bin/ruff" check python tools tests/python
-            "$quality_root/bin/ruff" format --check python tools tests/python
-            MYPYPATH=python "$quality_root/bin/mypy" --python-version 3.10 \
-              python/buildscope tools/build_standalone.py
-          )
 
   envlens:
     name: envlens Python quality (${{ matrix.label }})
@@ -742,7 +686,7 @@ jobs:
   merge-gate:
     name: Merge Gate
     if: ${{ always() }}
-    needs: [loglens, diskmap, buildscope, buildscope-python, envlens, abilens]
+    needs: [loglens, diskmap, buildscope, envlens, abilens]
     runs-on: ubuntu-latest
     permissions: {}
 
@@ -752,7 +696,6 @@ jobs:
           LOGLENS: ${{ needs.loglens.result }}
           DISKMAP: ${{ needs.diskmap.result }}
           BUILDSCOPE: ${{ needs.buildscope.result }}
-          BUILDSCOPE_PYTHON: ${{ needs.buildscope-python.result }}
           ENVLENS: ${{ needs.envlens.result }}
           ABILENS: ${{ needs.abilens.result }}
         run: |
@@ -762,7 +705,6 @@ jobs:
             "loglens:$LOGLENS" \
             "diskmap:$DISKMAP" \
             "buildscope:$BUILDSCOPE" \
-            "buildscope-python:$BUILDSCOPE_PYTHON" \
             "envlens:$ENVLENS" \
             "abilens:$ABILENS"; do
             name="${pair%%:*}"

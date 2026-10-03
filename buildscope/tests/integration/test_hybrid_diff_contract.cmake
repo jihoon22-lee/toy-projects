@@ -1,15 +1,14 @@
-if(NOT DEFINED PYTHON_EXECUTABLE OR NOT DEFINED PYTHON_PACKAGE_ROOT OR
+if(NOT DEFINED PRODUCER OR
    NOT DEFINED BEFORE_DATABASE OR NOT DEFINED AFTER_DATABASE OR
    NOT DEFINED EXPECTED OR NOT DEFINED OUTPUT OR NOT DEFINED CONSUMER)
-    message(FATAL_ERROR "hybrid diff test is missing a required argument")
+    message(FATAL_ERROR "diff contract test is missing a required argument")
 endif()
 
 get_filename_component(output_directory "${OUTPUT}" DIRECTORY)
 file(MAKE_DIRECTORY "${output_directory}")
 
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "PYTHONPATH=${PYTHON_PACKAGE_ROOT}"
-            "${PYTHON_EXECUTABLE}" -m buildscope diff
+    COMMAND "${PRODUCER}" diff
             "${BEFORE_DATABASE}" "${AFTER_DATABASE}"
             --before-project-root /project --after-project-root /project
             --pretty --output "${OUTPUT}"
@@ -48,8 +47,7 @@ endif()
 
 set(suppressed_output "${output_directory}/suppressed-diff.json")
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env "PYTHONPATH=${PYTHON_PACKAGE_ROOT}"
-            "${PYTHON_EXECUTABLE}" -m buildscope diff
+    COMMAND "${PRODUCER}" diff
             "${BEFORE_DATABASE}" "${AFTER_DATABASE}"
             --before-project-root /project --after-project-root /project
             --suppress "standard:*.cpp" --output "${suppressed_output}"
