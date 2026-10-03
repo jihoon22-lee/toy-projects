@@ -87,6 +87,7 @@ std::string serialize_report(const ElfReport& report) {
            << ",\"rpath\":" << json_string_array(rpath)
            << ",\"runpath\":" << json_string_array(runpath)
            << "},\"symbols\":" << json_string_array(sorted_strings(report.symbols))
+           << ",\"vtables\":" << json_string_array(sorted_strings(report.vtables))
            << ",\"abi\":{\"versions\":[";
     for (std::size_t index = 0; index < versions.size(); ++index) {
         if (index != 0U) {
@@ -127,6 +128,7 @@ void append_elf_text(std::ostringstream& output, const ElfReport& report) {
     append_text_values(output, "RPATH", report.rpath);
     append_text_values(output, "RUNPATH", report.runpath);
     output << "  dynamic symbols: " << report.symbols.size() << "\n";
+    output << "  vtable symbols: " << report.vtables.size() << "\n";
     output << "  ABI maximums: GLIBC=" << maximum_version(report, "GLIBC")
            << " GLIBCXX=" << maximum_version(report, "GLIBCXX")
            << " CXXABI=" << maximum_version(report, "CXXABI") << "\n";

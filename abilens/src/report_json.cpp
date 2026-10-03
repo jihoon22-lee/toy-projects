@@ -262,13 +262,14 @@ void parse_policy(const JsonValue& root, ElfReport& report) {
 
 ElfReport parse_report_json(const std::string& json) {
     const JsonValue root = detail::parse_json(json);
-    // "symbols" is additive within abilens.report/v1: reports written before
-    // the field existed remain valid documents.
+    // "symbols" and "vtables" are additive within abilens.report/v1: reports
+    // written before the fields existed remain valid documents.
     require_object(root, "root",
-                   std::array<const char*, 11U>{"schema", "input", "status", "message",
+                   std::array<const char*, 12U>{"schema", "input", "status", "message",
                                                 "tool", "elf", "dependencies", "abi",
-                                                "symbols", "policy", "diagnostics"},
-                   10U, 11U);
+                                                "symbols", "vtables", "policy",
+                                                "diagnostics"},
+                   10U, 12U);
     if (required_string(root, "schema") != ElfReport::schema) {
         throw std::runtime_error("unsupported AbiLens report schema");
     }
@@ -281,6 +282,7 @@ ElfReport parse_report_json(const std::string& json) {
     parse_dependencies(root, report);
     parse_abi(root, report);
     report.symbols = optional_string_array(root, "symbols");
+    report.vtables = optional_string_array(root, "vtables");
     parse_policy(root, report);
     report.diagnostics = required_string_array(root, "diagnostics");
     return report;

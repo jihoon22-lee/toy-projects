@@ -83,6 +83,8 @@ int main(int argc, char** argv) {
     expect(!report.versions.empty(), "fixture exposes version requirements");
     expect(contains(report.symbols, "abilens_fixture_value@ABILENS_1.0"),
            "defined dynamic symbols carry verdef-qualified names");
+    expect(contains(report.vtables, "_ZTV13FixtureVtable@ABILENS_1.0"),
+           "exported Itanium vtables surface on their own axis");
     expect(!abilens::serialize_report(report).empty(), "real report serializes");
     test_input_identity(fixture);
 

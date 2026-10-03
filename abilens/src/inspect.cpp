@@ -520,8 +520,14 @@ bool read_symbols(ElfView& view,
                 }
             }
         }
+        // Itanium-ABI vtables (_ZTV<name>) get their own report axis: removing
+        // one breaks every downstream subclass, so they surface separately.
+        if (qualified.rfind("_ZTV", 0) == 0) report.vtables.push_back(qualified);
         unique.insert(std::move(qualified));
     }
+    std::sort(report.vtables.begin(), report.vtables.end());
+    report.vtables.erase(std::unique(report.vtables.begin(), report.vtables.end()),
+                         report.vtables.end());
     report.symbols.assign(unique.begin(), unique.end());
     return true;
 }
