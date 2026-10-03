@@ -43,6 +43,8 @@ private slots:
     void drainsBacklogWithFollowDisabled();
     void searchAndFilterCanChangeDuringBackgroundLoading();
     void invalidFilterPreservesViewAndReportsVisibleByteRange();
+    void sessionFilesDriveFilterAndSource();
+    void sessionSaveNeverTargetsTheOpenLog();
     void loadProgressReportsFinalFromStartState();
     void loadProgressReportsInitialOpenError();
 };
@@ -625,6 +627,75 @@ void TestMainWindow::invalidFilterPreservesViewAndReportsVisibleByteRange() {
     QCOMPARE(cell(window, 0, LogModel::ColumnLevel), QStringLiteral("ERROR"));
     QVERIFY(status(window)->text().contains(QStringLiteral("bytes [14,19)")));
     QVERIFY(status(window)->text().contains(QStringLiteral("unexpected trailing input")));
+}
+
+void TestMainWindow::sessionFilesDriveFilterAndSource() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("app.log"));
+    writeFile(path, lineWithMessage("INFO", 1, "alpha") + lineWithMessage("DEBUG", 2, "beta")
+                        + lineWithMessage("WARN", 3, "alpha") + lineWithMessage("ERROR", 4, "gamma"));
+    auto writeSession = [&](const QString& name, const QByteArray& extra) {
+        const QString sessionPath = dir.filePath(name);
+        writeFile(sessionPath, QByteArray("{\"schema\":\"loglens.session/v1\",\"source\":{\"path\":\"")
+                                   + path.toUtf8() + QByteArray("\"}") + extra
+                                   + QByteArray("}"));
+        return sessionPath;
+    };
+
+    // The CLI requires both --level and --filter to hold. Joining them must
+    // not let `AND` bind to the first OR branch only.
+    const QString leveled = writeSession(
+        QStringLiteral("leveled.session.json"),
+        ",\"level\":\"WARN\",\"filter\":\"message~alpha OR message~beta\"");
+    MainWindow window;
+    QVERIFY(window.openSession(leveled));
+    auto* filterEdit = window.findChild<QLineEdit*>(QStringLiteral("filterEdit"));
+    QVERIFY(filterEdit != nullptr);
+    QCOMPARE(filterEdit->text(),
+             QStringLiteral("level>=WARN AND (message~alpha OR message~beta)"));
+    QTRY_COMPARE(rowCount(window), 1);
+    QCOMPARE(cell(window, 0, LogModel::ColumnLine), QStringLiteral("3"));
+
+    // A session without a filter clears the one left from the previous view.
+    filterEdit->setText(QStringLiteral("level>=ERROR"));
+    QVERIFY(QMetaObject::invokeMethod(&window, "applyFilter", Qt::DirectConnection));
+    QTRY_COMPARE(rowCount(window), 1);
+    const QString unfiltered = writeSession(QStringLiteral("plain.session.json"), QByteArray());
+    QVERIFY(window.openSession(unfiltered));
+    QCOMPARE(filterEdit->text(), QString());
+    QTRY_COMPARE(rowCount(window), 4);
+}
+
+void TestMainWindow::sessionSaveNeverTargetsTheOpenLog() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("service.log"));
+    const QByteArray contents = line("INFO", 1) + line("ERROR", 2);
+    writeFile(path, contents);
+
+    MainWindow window;
+    window.openPath(path);
+    QTRY_COMPARE(rowCount(window), 2);
+    QCOMPARE(window.suggestedSessionPath(), dir.filePath(QStringLiteral("service.session.json")));
+
+    QVERIFY(!window.saveSessionTo(path));
+    QVERIFY(status(window)->text().contains(QStringLiteral("over the open log")));
+    QFile log(path);
+    QVERIFY(log.open(QIODevice::ReadOnly));
+    QCOMPARE(log.readAll(), contents);
+    log.close();
+
+    auto* filterEdit = window.findChild<QLineEdit*>(QStringLiteral("filterEdit"));
+    QVERIFY(filterEdit != nullptr);
+    filterEdit->setText(QStringLiteral("level>=ERROR"));
+    QVERIFY(QMetaObject::invokeMethod(&window, "applyFilter", Qt::DirectConnection));
+    QVERIFY(window.saveSessionTo(window.suggestedSessionPath()));
+
+    MainWindow reopened;
+    QVERIFY(reopened.openSession(window.suggestedSessionPath()));
+    QTRY_COMPARE(rowCount(reopened), 1);
+    QCOMPARE(cell(reopened, 0, LogModel::ColumnLevel), QStringLiteral("ERROR"));
 }
 
 void TestMainWindow::loadProgressReportsFinalFromStartState() {
