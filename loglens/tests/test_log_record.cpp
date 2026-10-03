@@ -1,6 +1,27 @@
 #include "check.hpp"
 
 #include "loglens/log_record.hpp"
+#include <QtTest>
+
+namespace impl {
+void testAliases();
+void testNames();
+void testOrdering();
+void testIndexing();
+} // namespace impl
+
+class TestLogRecord : public QObject {
+    Q_OBJECT
+private slots:
+    void testAliases() { impl::testAliases(); }
+    void testNames() { impl::testNames(); }
+    void testOrdering() { impl::testOrdering(); }
+    void testIndexing() { impl::testIndexing(); }
+};
+
+QTEST_GUILESS_MAIN(TestLogRecord)
+
+#include "test_log_record.moc"
 
 using loglens::Level;
 using loglens::levelAtLeast;
@@ -8,7 +29,7 @@ using loglens::levelIndex;
 using loglens::levelName;
 using loglens::parseLevel;
 
-namespace {
+namespace impl {
 
 void testAliases() {
     CHECK(parseLevel("TRACE") == Level::Trace);
@@ -54,12 +75,4 @@ void testIndexing() {
     CHECK(levelIndex(Level::Warn) < loglens::kLevelCount);
 }
 
-} // namespace
-
-int main() {
-    testAliases();
-    testNames();
-    testOrdering();
-    testIndexing();
-    return checkSummary();
-}
+} // namespace impl

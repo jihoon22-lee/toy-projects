@@ -7,6 +7,8 @@
 
 namespace abilens {
 
+inline constexpr const char* kAbiLensVersion = "0.1.0";
+
 enum class InputStatus {
     Valid,
     NonElf,
@@ -43,21 +45,6 @@ struct VersionRequirement {
 struct ToolInfo {
     std::string name;
     std::string version;
-};
-
-struct ReadelfCapability {
-    bool supported = false;
-    std::string name;
-    std::string version;
-};
-
-struct ReadelfEvidence {
-    int return_code = -1;
-    bool timed_out = false;
-    bool truncated = false;
-    std::string standard_output;
-    std::string standard_error;
-    ReadelfCapability capability;
 };
 
 struct Policy {

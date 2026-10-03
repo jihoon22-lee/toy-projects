@@ -13,6 +13,53 @@
 #include <string>
 #include <system_error>
 #include <vector>
+#include <QtTest>
+
+namespace impl {
+void testFileIdentityEqualityAndPublicEnums();
+void testFakeSourceBatches();
+void testFakeSourceFailure();
+void testPolymorphicDestruction();
+void testTailerInitialIdentityAndAppend();
+void testTailerLineAdapterStillReadsAndResumes();
+void testTailerBoolChunkAdapterPreservesPartialBytes();
+void testTailerBoundsEachChunkAndReportsBacklog();
+void testTailerHonoursAnEarlierSnapshotBoundary();
+void testTailerCanStartAtAValidatedCallerOffset();
+void testTailerLineAdapterJoinsChunkAndCrLfBoundaries();
+void testTailerRejectsUnsafeChunkSizes();
+void testTailerDetectsInPlaceTruncation();
+void testTailerDetectsAtomicRenameAtEverySize();
+void testTailerMissingIsRetryableAndRecreateIsReplacement();
+void testTailerRejectsDirectoryAsUnsupportedFileType();
+void testTailerAdapterErrorStringRemainsCompatible();
+} // namespace impl
+
+class TestLogSource : public QObject {
+    Q_OBJECT
+private slots:
+    void testFileIdentityEqualityAndPublicEnums() { impl::testFileIdentityEqualityAndPublicEnums(); }
+    void testFakeSourceBatches() { impl::testFakeSourceBatches(); }
+    void testFakeSourceFailure() { impl::testFakeSourceFailure(); }
+    void testPolymorphicDestruction() { impl::testPolymorphicDestruction(); }
+    void testTailerInitialIdentityAndAppend() { impl::testTailerInitialIdentityAndAppend(); }
+    void testTailerLineAdapterStillReadsAndResumes() { impl::testTailerLineAdapterStillReadsAndResumes(); }
+    void testTailerBoolChunkAdapterPreservesPartialBytes() { impl::testTailerBoolChunkAdapterPreservesPartialBytes(); }
+    void testTailerBoundsEachChunkAndReportsBacklog() { impl::testTailerBoundsEachChunkAndReportsBacklog(); }
+    void testTailerHonoursAnEarlierSnapshotBoundary() { impl::testTailerHonoursAnEarlierSnapshotBoundary(); }
+    void testTailerCanStartAtAValidatedCallerOffset() { impl::testTailerCanStartAtAValidatedCallerOffset(); }
+    void testTailerLineAdapterJoinsChunkAndCrLfBoundaries() { impl::testTailerLineAdapterJoinsChunkAndCrLfBoundaries(); }
+    void testTailerRejectsUnsafeChunkSizes() { impl::testTailerRejectsUnsafeChunkSizes(); }
+    void testTailerDetectsInPlaceTruncation() { impl::testTailerDetectsInPlaceTruncation(); }
+    void testTailerDetectsAtomicRenameAtEverySize() { impl::testTailerDetectsAtomicRenameAtEverySize(); }
+    void testTailerMissingIsRetryableAndRecreateIsReplacement() { impl::testTailerMissingIsRetryableAndRecreateIsReplacement(); }
+    void testTailerRejectsDirectoryAsUnsupportedFileType() { impl::testTailerRejectsDirectoryAsUnsupportedFileType(); }
+    void testTailerAdapterErrorStringRemainsCompatible() { impl::testTailerAdapterErrorStringRemainsCompatible(); }
+};
+
+QTEST_GUILESS_MAIN(TestLogSource)
+
+#include "test_log_source.moc"
 
 using loglens::FileIdentity;
 using loglens::FileTailer;
@@ -21,7 +68,7 @@ using loglens::SourceChange;
 using loglens::SourceChunk;
 using loglens::SourceErrorKind;
 
-namespace {
+namespace impl {
 
 namespace fs = std::filesystem;
 
@@ -532,25 +579,4 @@ void testTailerAdapterErrorStringRemainsCompatible() {
     CHECK(!chunk.ok());
 }
 
-} // namespace
-
-int main() {
-    testFileIdentityEqualityAndPublicEnums();
-    testFakeSourceBatches();
-    testFakeSourceFailure();
-    testPolymorphicDestruction();
-    testTailerInitialIdentityAndAppend();
-    testTailerLineAdapterStillReadsAndResumes();
-    testTailerBoolChunkAdapterPreservesPartialBytes();
-    testTailerBoundsEachChunkAndReportsBacklog();
-    testTailerHonoursAnEarlierSnapshotBoundary();
-    testTailerCanStartAtAValidatedCallerOffset();
-    testTailerLineAdapterJoinsChunkAndCrLfBoundaries();
-    testTailerRejectsUnsafeChunkSizes();
-    testTailerDetectsInPlaceTruncation();
-    testTailerDetectsAtomicRenameAtEverySize();
-    testTailerMissingIsRetryableAndRecreateIsReplacement();
-    testTailerRejectsDirectoryAsUnsupportedFileType();
-    testTailerAdapterErrorStringRemainsCompatible();
-    return checkSummary();
-}
+} // namespace impl

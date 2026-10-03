@@ -48,10 +48,8 @@ jobs:
           mkdir -p build
           cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release \
             2>&1 | tee build/configure.log
-          selected_major="$(sed -n 's/^-- .*using Qt\([56]\) .*/\1/p' \
-            build/configure.log | tail -1)"
-          if [ "$selected_major" != 6 ]; then
-            echo "::error::CMake selected Qt $selected_major, expected Qt 6"
+          if ! grep -Eq 'loglens: using Qt6 ' build/configure.log; then
+            echo "::error::CMake did not report Qt 6"
             exit 1
           fi
           cmake --build build/gui --parallel 2
@@ -670,7 +668,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential binutils
+          sudo apt-get install -y --no-install-recommends build-essential
 
       - name: Build
         working-directory: abilens

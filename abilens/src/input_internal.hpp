@@ -50,7 +50,7 @@ private:
 };
 
 HeaderCheck validate_elf_input(const OpenInput& input);
-ReadelfEvidence run_readelf_input(const OpenInput& input);
+ElfReport inspect_elf_input(const OpenInput& input, const ElfHeader& header);
 
 }  // namespace detail
 }  // namespace abilens

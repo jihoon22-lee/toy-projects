@@ -89,7 +89,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--build-dir", type=Path, required=True)
     parser.add_argument("--scratch", type=Path)
     parser.add_argument("--artifact-dir", type=Path, required=True)
-    parser.add_argument("--qt-major", type=int, choices=(5, 6), required=True)
+    parser.add_argument("--qt-major", type=int, choices=(6,), required=True)
     parser.add_argument("--generator", type=Path)
     parser.add_argument("--core", type=Path)
     parser.add_argument("--gui", type=Path)
@@ -308,9 +308,9 @@ def toolchain(qt_major: int) -> dict[str, Any]:
         "compiler": command_version(("c++", "--version")),
         "pkg_config": command_version(("pkg-config", "--version")),
     }
-    qmake = "qmake6" if qt_major == 6 else "qmake"
-    commands["qmake"] = command_version((qmake, "-v"))
-    commands["qt_version"] = command_version((qmake, "-query", "QT_VERSION"))
+    commands["qt_version"] = command_version(
+        ("pkg-config", "--modversion", f"Qt{qt_major}Core")
+    )
     memory = None
     meminfo = Path("/proc/meminfo")
     if meminfo.is_file():

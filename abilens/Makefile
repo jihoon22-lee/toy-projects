@@ -12,7 +12,7 @@ LDLIBS ?=
 
 INCLUDES := -Iinclude
 OUT_GUARD := tools/guard-out.sh
-CORE_SOURCES := src/input.cpp src/elf.cpp src/readelf.cpp src/readelf_process.cpp src/report.cpp src/report_helpers.cpp src/report_json_parser.cpp src/report_json.cpp src/policy.cpp src/diff.cpp
+CORE_SOURCES := src/input.cpp src/elf.cpp src/inspect.cpp src/report.cpp src/report_helpers.cpp src/report_json_parser.cpp src/report_json.cpp src/policy.cpp src/diff.cpp
 CORE_OBJECTS := $(CORE_SOURCES:src/%.cpp=$(OUT)/obj/%.o)
 TEST_SOURCES := tests/test_parser.cpp tests/test_integration.cpp
 TEST_OBJECTS := $(TEST_SOURCES:tests/%.cpp=$(OUT)/obj/tests/%.o)
@@ -38,7 +38,7 @@ $(OUT)/obj/%.o: src/%.cpp | guard-out
 
 $(OUT)/obj/tests/%.o: tests/%.cpp | guard-out
 	@mkdir -p $(dir $@)
-	$(CXX) $(CPPFLAGS) $(INCLUDES) $(CXXFLAGS) -MMD -MP -c $< -o $@
+	$(CXX) $(CPPFLAGS) $(INCLUDES) -Isrc $(CXXFLAGS) -MMD -MP -c $< -o $@
 
 $(STATIC_LIB): $(CORE_OBJECTS) | guard-out
 	@mkdir -p $(dir $@)

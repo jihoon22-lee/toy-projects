@@ -13,7 +13,7 @@
 
 namespace {
 
-constexpr const char* kVersion = "0.1.0";
+constexpr const char* kVersion = abilens::kAbiLensVersion;
 constexpr std::size_t kReportInputLimit = 8U * 1024U * 1024U;
 
 struct Options {
