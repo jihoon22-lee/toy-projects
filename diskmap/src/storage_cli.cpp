@@ -379,4 +379,75 @@ void printDuplicateAnalysis(const diskmap::DuplicateAnalysis& analysis,
     }
 }
 
+void printCleanupPlan(const diskmap::CleanupPlan& plan,
+                      bool json,
+                      std::ostream& out) {
+    if (json) {
+        out << "{\"reclaimable_bytes\":" << plan.reclaimable_bytes
+            << ",\"reclaimable_bytes_known\":"
+            << (plan.reclaimable_bytes_known ? "true" : "false")
+            << ",\"scan_generation\":" << plan.scan_generation << ",\"targets\":[";
+        bool first = true;
+        for (const diskmap::CleanupTarget& target : plan.targets) {
+            if (!first) {
+                out << ',';
+            }
+            first = false;
+            out << "{\"path\":\""
+                << escapeJsonStringContent(target.path.generic_string())
+                << "\",\"logical_size\":" << target.logical_size
+                << ",\"allocated_size\":" << target.allocated_size
+                << ",\"allocated_size_known\":"
+                << (target.allocated_size_known ? "true" : "false")
+                << ",\"hard_link_count\":" << target.hard_link_count
+                << ",\"hard_link_count_known\":"
+                << (target.hard_link_count_known ? "true" : "false")
+                << ",\"symlink\":" << (target.symlink ? "true" : "false") << '}';
+        }
+        out << "],\"rejected\":[";
+        first = true;
+        for (const diskmap::CleanupRejectedTarget& rejected : plan.rejected) {
+            if (!first) {
+                out << ',';
+            }
+            first = false;
+            out << "{\"path\":\""
+                << escapeJsonStringContent(rejected.path.generic_string())
+                << "\",\"reason\":\""
+                << diskmap::cleanupSkipReasonName(rejected.reason)
+                << "\",\"message\":\""
+                << escapeJsonStringContent(rejected.message) << "\"}";
+        }
+        out << "]}\n";
+        return;
+    }
+
+    out << "Cleanup plan (dry run, nothing moved): " << plan.targets.size()
+        << " target(s), " << plan.rejected.size() << " rejected, reclaimable "
+        << plan.reclaimable_bytes << " byte(s)"
+        << (plan.reclaimable_bytes_known ? "" : " (estimate)") << "\n";
+    for (const diskmap::CleanupTarget& target : plan.targets) {
+        out << "  target  " << target.path.generic_string() << "  "
+            << target.logical_size << " byte(s)";
+        if (!target.hard_link_count_known || target.hard_link_count > 1) {
+            out << "  hard_links="
+                << (target.hard_link_count_known
+                        ? std::to_string(target.hard_link_count)
+                        : std::string("unknown"));
+        }
+        if (target.symlink) {
+            out << "  (symlink)";
+        }
+        out << "\n";
+    }
+    for (const diskmap::CleanupRejectedTarget& rejected : plan.rejected) {
+        out << "  rejected  " << rejected.path.generic_string() << "  "
+            << diskmap::cleanupSkipReasonName(rejected.reason);
+        if (!rejected.message.empty()) {
+            out << "  " << rejected.message;
+        }
+        out << "\n";
+    }
+}
+
 } // namespace diskmap_cli

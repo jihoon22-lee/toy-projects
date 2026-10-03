@@ -34,6 +34,7 @@ struct CliOptions {
     std::string load_snapshot;
     std::string compare_snapshot;
     bool duplicates = false;
+    bool cleanup_plan = false;
     std::vector<std::string> diff_kinds;
     std::uint64_t diff_min_delta = 0;
     bool diff_certain_only = false;
@@ -62,6 +63,8 @@ void printUsage(std::ostream& out) {
         << "  --diff-min-delta BYTES print only changes of at least BYTES\n"
         << "  --diff-certain-only print only certain (non-candidate) changes\n"
         << "  --duplicates        inspect duplicate evidence (review-only)\n"
+        << "  --cleanup-plan      dry-run plan staging certain reclaimable\n"
+        << "                      duplicate copies (nothing is moved)\n"
         << "  --help              show this message\n"
         << "  --version           print the version and exit\n";
 }
@@ -143,6 +146,10 @@ bool applyFlag(const std::string& arg, CliOptions& options) {
     }
     if (arg == "--one-file-system") {
         options.one_file_system = true;
+        return true;
+    }
+    if (arg == "--cleanup-plan") {
+        options.cleanup_plan = true;
         return true;
     }
     if (arg == "--duplicates") {
@@ -467,6 +474,25 @@ int runDiskmap(const CliOptions& options) {
                                        diffFilter(options));
         return 0;
     }
+    if (options.cleanup_plan) {
+        const diskmap::DuplicateAnalysis analysis =
+            diskmap::analyzeDuplicates(result);
+        std::vector<diskmap::NodeKey> keys;
+        for (const diskmap::DuplicateGroup& group : analysis.groups) {
+            // Same rule the GUI stages: keep the path-sorted first entry as
+            // the deterministic representative and plan only the other
+            // certain, byte-equal copies. planCleanup re-checks every node.
+            if (!group.reclaimable || !group.certain || group.entries.size() < 2) {
+                continue;
+            }
+            for (std::size_t index = 1; index < group.entries.size(); ++index) {
+                keys.push_back(group.entries[index].key);
+            }
+        }
+        const diskmap::CleanupPlan plan = diskmap::planCleanup(result, keys);
+        diskmap_cli::printCleanupPlan(plan, options.json, std::cout);
+        return 0;
+    }
     if (options.duplicates) {
         const diskmap::DuplicateAnalysis analysis =
             diskmap::analyzeDuplicates(result);
@@ -528,6 +554,19 @@ int main(int argc, char** argv) {
                                options.diff_min_delta > 0 || options.diff_certain_only;
     if (hasDiffFilter && options.compare_snapshot.empty()) {
         std::cerr << "error: --diff-* options require --compare-snapshot\n";
+        printUsage(std::cerr);
+        return 1;
+    }
+    // Staging mirrors the GUI rule: cleanup planning needs live scan evidence,
+    // never the stale view inside a saved snapshot.
+    if (options.cleanup_plan && hasLoadedSnapshot) {
+        std::cerr << "error: --cleanup-plan requires a live scan path\n";
+        printUsage(std::cerr);
+        return 1;
+    }
+    if (options.cleanup_plan && !options.compare_snapshot.empty()) {
+        std::cerr << "error: --cleanup-plan cannot be combined with "
+                     "--compare-snapshot\n";
         printUsage(std::cerr);
         return 1;
     }

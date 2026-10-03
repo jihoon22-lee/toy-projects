@@ -325,11 +325,65 @@ private slots:
     void run();
 };
 
+namespace {
+
+void testCleanupPlanReports() {
+    diskmap::CleanupPlan plan;
+    plan.reclaimable_bytes = 8192;
+    plan.reclaimable_bytes_known = true;
+    plan.scan_generation = 7;
+
+    diskmap::CleanupTarget target;
+    target.key = key("/tmp/dup-a");
+    target.path = target.key.normalized_path;
+    target.kind = FsKind::RegularFile;
+    target.logical_size = 42;
+    target.allocated_size = 4096;
+    target.allocated_size_known = true;
+    target.hard_link_count = 1;
+    target.hard_link_count_known = true;
+    target.scan_generation = 7;
+    plan.targets.push_back(target);
+
+    diskmap::CleanupRejectedTarget rejected;
+    rejected.key = key("/tmp/protected");
+    rejected.path = rejected.key.normalized_path;
+    rejected.reason = diskmap::CleanupSkipReason::ProtectedRoot;
+    rejected.message = "path is protected";
+    plan.rejected.push_back(rejected);
+
+    std::ostringstream text;
+    diskmap_cli::printCleanupPlan(plan, false, text);
+    const std::string renderedText = text.str();
+    CHECK(contains(renderedText,
+                   "Cleanup plan (dry run, nothing moved): 1 target(s), 1 rejected, "
+                   "reclaimable 8192 byte(s)"));
+    CHECK(contains(renderedText, "target  /tmp/dup-a  42 byte(s)"));
+    CHECK(contains(renderedText, "rejected  /tmp/protected  protected-root  path is protected"));
+
+    std::ostringstream json;
+    diskmap_cli::printCleanupPlan(plan, true, json);
+    const std::string renderedJson = json.str();
+    CHECK(contains(renderedJson, "\"reclaimable_bytes\":8192"));
+    CHECK(contains(renderedJson, "\"reclaimable_bytes_known\":true"));
+    CHECK(contains(renderedJson, "\"scan_generation\":7"));
+    CHECK(contains(renderedJson, "\"path\":\"/tmp/dup-a\""));
+    CHECK(contains(renderedJson, "\"allocated_size\":4096"));
+    CHECK(contains(renderedJson, "\"reason\":\"protected-root\""));
+
+    const std::size_t open = renderedJson.find('{');
+    CHECK(open != std::string::npos);
+    CHECK(renderedJson.back() == '\n');
+}
+
+} // namespace
+
 void TestStorageCli::run() {
     testEmptyReports();
     testSnapshotReports();
     testSnapshotDiffFilters();
     testDuplicateReports();
+    testCleanupPlanReports();
 }
 
 QTEST_GUILESS_MAIN(TestStorageCli)

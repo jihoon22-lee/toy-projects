@@ -53,6 +53,8 @@ Usage: diskmap <path> [options]
   --diff-min-delta BYTES print only changes of at least BYTES
   --diff-certain-only print only certain (non-candidate) changes
   --duplicates        inspect duplicate evidence (review-only)
+  --cleanup-plan      dry-run plan staging certain reclaimable
+                      duplicate copies (nothing is moved)
   --help              show this message
 ```
 
@@ -72,7 +74,15 @@ never deletes anything.
 ./build/gui/src/diskmap --load-snapshot before.json --json
 ./build/gui/src/diskmap --load-snapshot before.json --duplicates
 ./build/gui/src/diskmap --load-snapshot after.json --compare-snapshot before.json
+./build/gui/src/diskmap path/to/tree --cleanup-plan
 ```
+
+`--cleanup-plan` is a dry run: it runs the duplicate analysis, stages every
+certain reclaimable copy except each group's deterministic first path — the
+same staging rule as the GUI's "Stage safe duplicate copies" — and prints the
+targets, per-target rejections with stable reasons, and the reclaimable byte
+total. Nothing is moved or deleted; the plan requires a live scan path and
+cannot run against a loaded snapshot or inside `--compare-snapshot`.
 
 `--load-snapshot` combined with `--compare-snapshot` diffs two saved
 snapshots without scanning: the compare file is the baseline and the loaded
