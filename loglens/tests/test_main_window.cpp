@@ -435,6 +435,16 @@ void TestMainWindow::controlsHaveStableNamesAndFollowIsSwitchable() {
     QCOMPARE(tailRecords->maximum(), 8192);
     QCOMPARE(tailRecords->value(), 8192);
     QVERIFY(tailRecords->isEnabled());
+    auto* openSessionButton =
+        window.findChild<QPushButton*>(QStringLiteral("openSessionButton"));
+    auto* saveSessionButton =
+        window.findChild<QPushButton*>(QStringLiteral("saveSessionButton"));
+    QVERIFY(openSessionButton != nullptr);
+    QVERIFY(saveSessionButton != nullptr);
+    QCOMPARE(openSessionButton->accessibleName(),
+             QStringLiteral("Open investigation session"));
+    QCOMPARE(saveSessionButton->accessibleName(),
+             QStringLiteral("Save investigation session"));
     QCOMPARE(follow->accessibleName(), QStringLiteral("Follow log file"));
     QCOMPARE(logTable->accessibleName(), QStringLiteral("Log records"));
     QCOMPARE(timeline->accessibleName(), QStringLiteral("Log timeline"));

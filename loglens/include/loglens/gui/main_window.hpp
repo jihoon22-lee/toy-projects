@@ -162,6 +162,8 @@ private:
     loglens::Format selectedFormat() const;
     loglens::MultilinePolicy selectedMultilinePolicy() const;
     bool applyFilterText(const QString& text, const QString& successMessage = QString());
+    void saveSessionToFile();
+    void openSessionFile();
     void showPersistenceError(const QString& action,
                               const loglens::PersistenceError& error);
     bool prepareDefaultStoreDirectory(bool profiles);
