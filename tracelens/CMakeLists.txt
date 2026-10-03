@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(TraceLens VERSION 1.0.0 LANGUAGES CXX) # x-release-please-version
+project(TraceLens VERSION 0.1.0 LANGUAGES CXX) # x-release-please-version
 include(GNUInstallDirs)
 include(CTest)
 set(CMAKE_CXX_STANDARD 20)

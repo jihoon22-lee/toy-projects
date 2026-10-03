@@ -4,7 +4,7 @@
   "buildscope": "0.2.0",
   "abilens": "0.2.0",
   "envlens": "0.2.0",
-  "tracelens": "1.0.0",
+  "tracelens": "0.1.0",
   "testlens": "0.1.0",
   "servicelens": "0.1.0"
 }
