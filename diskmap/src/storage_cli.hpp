@@ -5,6 +5,7 @@
 #include <set>
 #include <string>
 
+#include "diskmap/cleanup.hpp"
 #include "diskmap/duplicates.hpp"
 #include "diskmap/snapshot.hpp"
 
@@ -31,5 +32,11 @@ void printSnapshotDiff(const diskmap::SnapshotDiff& diff,
 void printDuplicateAnalysis(const diskmap::DuplicateAnalysis& analysis,
                             bool json,
                             std::ostream& out);
+
+// Prints a dry-run cleanup plan. The staged duplicate copies that produced
+// it are listed for context; nothing is moved or deleted by this output.
+void printCleanupPlan(const diskmap::CleanupPlan& plan,
+                      bool json,
+                      std::ostream& out);
 
 } // namespace diskmap_cli
