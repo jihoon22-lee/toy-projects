@@ -268,15 +268,20 @@ QJsonObject loadCompilationDatabase(const QString &path, const QString &projectR
             throw SnapshotError(QString::fromUtf8(error.what()));
         }
         rejectNonstandardConstants(element);
+        // QJsonDocument requires an object/array root on older Qt6 releases,
+        // so scalar entries are parsed through a one-element array wrapper.
         QJsonParseError parseError{};
-        const QJsonValue value = QJsonValue::fromJson(element, &parseError);
-        if (parseError.error != QJsonParseError::NoError) {
+        const QJsonDocument document = QJsonDocument::fromJson(
+            QByteArrayLiteral("[") + element + QByteArrayLiteral("]"), &parseError);
+        if (parseError.error != QJsonParseError::NoError || !document.isArray()
+            || document.array().size() != 1) {
             throw SnapshotError(
                 QStringLiteral("cannot read compilation database entry %1: %2")
                     .arg(index)
                     .arg(parseError.errorString()));
         }
-        entries.append(snapshotEntry(value, index, root, databaseParent));
+        entries.append(snapshotEntry(document.array().first(), index, root,
+                                     databaseParent));
         ++index;
     });
     annotateEntrySets(entries);
