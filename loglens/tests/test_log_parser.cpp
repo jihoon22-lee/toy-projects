@@ -40,6 +40,7 @@ void testPluginLineParsesMappedFields();
 void testPluginLineReportsFieldDiagnostics();
 void testPluginNonMatchingLineStaysUnstructured();
 void testPluginLoaderValidation();
+void testPluginLongLinesDoNotExhaustTheStack();
 void testAssemblerRoutesThroughPlugin();
 } // namespace impl
 
@@ -76,6 +77,9 @@ private slots:
     void testPluginLineReportsFieldDiagnostics() { impl::testPluginLineReportsFieldDiagnostics(); }
     void testPluginNonMatchingLineStaysUnstructured() { impl::testPluginNonMatchingLineStaysUnstructured(); }
     void testPluginLoaderValidation() { impl::testPluginLoaderValidation(); }
+    void testPluginLongLinesDoNotExhaustTheStack() {
+        impl::testPluginLongLinesDoNotExhaustTheStack();
+    }
     void testAssemblerRoutesThroughPlugin() { impl::testAssemblerRoutesThroughPlugin(); }
 };
 
@@ -730,7 +734,7 @@ FormatPlugin myappPlugin() {
     FormatPlugin plugin;
     plugin.name = "myapp";
     plugin.pattern_text = "^(\\S+) \\[(\\w+)\\] ([^:]+): (.*)$";
-    plugin.pattern = std::regex(plugin.pattern_text);
+    plugin.pattern = loglens::compileFormatPattern(plugin.pattern_text);
     plugin.fields.timestamp = 1;
     plugin.fields.level = 2;
     plugin.fields.source = 3;
@@ -816,6 +820,54 @@ void testPluginLoaderValidation() {
 
     CHECK_EQ(loadFormatPlugin(path.toStdString() + ".missing", plugin, error),
              FormatPluginError::ReadFailed);
+
+    // Capture-group numbers must be whole integers, not truncated decimals.
+    writeDoc(R"json({"kind":"loglens.format/v1","name":"x","pattern":"(a)(b)(c)",
+                "fields":{"message":2.9}})json");
+    CHECK_EQ(loadFormatPlugin(path.toStdString(), plugin, error),
+             FormatPluginError::InvalidField);
+    writeDoc(R"json({"kind":"loglens.format/v1","name":"x","pattern":"(a)(b)(c)",
+                "fields":{"message":1e1}})json");
+    CHECK_EQ(loadFormatPlugin(path.toStdString(), plugin, error),
+             FormatPluginError::InvalidField);
+
+#if defined(__GLIBCXX__)
+    // The non-recursive matcher cannot evaluate back-references, so they are
+    // rejected when the plugin loads rather than misbehaving per line.
+    writeDoc(R"json({"kind":"loglens.format/v1","name":"x","pattern":"(a)\\1",
+                "fields":{"message":1}})json");
+    CHECK_EQ(loadFormatPlugin(path.toStdString(), plugin, error),
+             FormatPluginError::InvalidField);
+#endif
+}
+
+void testPluginLongLinesDoNotExhaustTheStack() {
+    // The backtracking std::regex executor recursed once per character and
+    // overflowed an 8 MiB stack on a 64 KiB line with `(.*)`.
+    FormatPlugin plugin;
+    plugin.name = "greedy";
+    plugin.pattern_text = "^(\\S+) ((\\w|\\s|-|:)+)$";
+    plugin.pattern = loglens::compileFormatPattern(plugin.pattern_text);
+    plugin.fields.timestamp = 1;
+    plugin.fields.message = 2;
+    const std::string line =
+        "2026-10-03T10:00:01.000Z " + std::string(loglens::kMaxRecordBytes - 32, 'x');
+    const LogRecord record = parsePluginLine(line, plugin, 1);
+#if defined(__GLIBCXX__)
+    CHECK(record.parse_status == ParseStatus::Parsed);
+    CHECK_EQ(record.message.size(), line.size() - 25);
+#else
+    CHECK(record.parse_status == ParseStatus::Unstructured);
+    CHECK(!record.diagnostics.empty());
+#endif
+    CHECK_EQ(record.raw, line);
+
+    RecordAssembler assembler(Format::Auto, EncodingErrorPolicy::PreserveBytes,
+                              loglens::kMaxRecordBytes,
+                              loglens::MultilinePolicy::FoldContinuations);
+    assembler.setFormatPlugin(&plugin);
+    const std::vector<RecordDelta> deltas = assembler.consumeBytes(line + "\n");
+    CHECK_EQ(deltas.size(), static_cast<std::size_t>(1));
 }
 
 void testAssemblerRoutesThroughPlugin() {

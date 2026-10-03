@@ -404,9 +404,25 @@ LogRecord parsePluginLine(const std::string& line, const FormatPlugin& plugin,
     record.line_number = lineNumber;
     record.input_bytes = line.size();
 
+    record.message = line;
+#if !defined(__GLIBCXX__)
+    // Without libstdc++'s non-recursive executor the matcher's stack depth
+    // grows with the input, so long lines are not handed to it at all.
+    constexpr std::size_t kMaxRecursiveMatchBytes = 2048;
+    if (line.size() > kMaxRecursiveMatchBytes) {
+        addDiagnostic(record, ParseDiagnosticCode::LimitExceeded, "pattern", 0,
+                      "line is too long for the plugin matcher on this platform");
+        return record;
+    }
+#endif
     std::smatch match;
-    if (!std::regex_match(line, match, plugin.pattern)) {
-        record.message = line;
+    try {
+        if (!std::regex_match(line, match, plugin.pattern)) {
+            return record;
+        }
+    } catch (const std::regex_error&) {
+        addDiagnostic(record, ParseDiagnosticCode::LimitExceeded, "pattern", 0,
+                      "plugin pattern exceeded the matcher's resource limits");
         return record;
     }
     record.parse_status = ParseStatus::Parsed;
@@ -442,9 +458,9 @@ LogRecord parsePluginLine(const std::string& line, const FormatPlugin& plugin,
     if (plugin.fields.source != 0) {
         record.source = field(plugin.fields.source);
     }
-    record.message = field(plugin.fields.message);
-    if (record.message.empty()) {
-        record.message = line;
+    const std::string message = field(plugin.fields.message);
+    if (!message.empty()) {
+        record.message = message;
     }
     return record;
 }

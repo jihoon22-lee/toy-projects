@@ -4,6 +4,7 @@
 #include "storage_json.hpp"
 
 #include <cstdint>
+#include <string>
 
 namespace loglens {
 
@@ -27,7 +28,14 @@ bool parseGroupNumber(const detail::StorageJsonNode& object, const char* field,
         return false;
     }
     try {
-        const unsigned long long parsed = std::stoull(node->text);
+        // The whole token must be digits: stoull alone stops at the first
+        // non-digit and would read `2.9` as 2 and `1e1` as 1.
+        std::size_t consumed = 0;
+        const unsigned long long parsed = std::stoull(node->text, &consumed);
+        if (consumed != node->text.size() || node->text.front() == '-') {
+            error = std::string("fields.") + field + " must be a whole capture-group number";
+            return false;
+        }
         if (parsed == 0 || parsed > kMaxCaptureGroup) {
             error = std::string("fields.") + field +
                     " must be a capture-group number between 1 and 32";
@@ -42,6 +50,14 @@ bool parseGroupNumber(const detail::StorageJsonNode& object, const char* field,
 }
 
 } // namespace
+
+std::regex compileFormatPattern(const std::string& pattern) {
+#if defined(__GLIBCXX__)
+    return std::regex(pattern, std::regex::ECMAScript | std::regex_constants::__polynomial);
+#else
+    return std::regex(pattern, std::regex::ECMAScript);
+#endif
+}
 
 const char* formatPluginErrorName(FormatPluginError code) {
     switch (code) {
@@ -110,7 +126,7 @@ FormatPluginError loadFormatPlugin(const std::string& path, FormatPlugin& plugin
     }
     plugin.pattern_text = pattern->text;
     try {
-        plugin.pattern = std::regex(plugin.pattern_text, std::regex::ECMAScript);
+        plugin.pattern = compileFormatPattern(plugin.pattern_text);
     } catch (const std::regex_error& failure) {
         error = std::string("invalid plugin pattern: ") + failure.what();
         return FormatPluginError::InvalidField;

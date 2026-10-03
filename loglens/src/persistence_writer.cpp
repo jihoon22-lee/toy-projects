@@ -96,6 +96,10 @@ std::string serializeSession(const SessionState& state) {
     appendJsonString(output, multilinePolicyName(state.multiline));
     output += ",\"max_record_bytes\":";
     output += std::to_string(state.max_record_bytes);
+    if (!state.format_plugin.empty()) {
+        output += ",\"format_plugin\":";
+        appendJsonString(output, state.format_plugin);
+    }
     output += "}";
     if (!state.filter.empty()) {
         output += ",\"filter\":";

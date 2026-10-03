@@ -40,6 +40,9 @@ struct SessionState {
     std::size_t max_record_bytes = kDefaultMaxRecordBytes;
     std::string filter;
     std::string level;
+    // Optional path to a loglens.format/v1 plugin. When set it replaces
+    // `format` for parsing, so a reloaded session parses the same way.
+    std::string format_plugin;
 };
 
 enum class PersistenceErrorCode {

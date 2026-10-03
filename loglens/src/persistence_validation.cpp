@@ -220,6 +220,11 @@ bool validSession(const SessionState& state, PersistenceError& error) {
                             "session format is not supported");
         return false;
     }
+    if (!state.format_plugin.empty()
+        && !validBoundedText(state.format_plugin, "session format plugin path",
+                             kMaxSessionPathBytes, error)) {
+        return false;
+    }
     if (std::string_view(multilinePolicyName(state.multiline)) == "unknown") {
         setPersistenceError(error, PersistenceErrorCode::InvalidValue,
                             "session multiline policy is not supported");

@@ -264,8 +264,8 @@ SourceProfileLoadResult loadProfilesImpl(const std::string& path) {
 
 bool parseSessionSource(const detail::StorageJsonNode& object,
                         SessionState& state, PersistenceError& error) {
-    if (!hasOnlyFields(object,
-                       {"path", "format", "multiline", "max_record_bytes"})) {
+    if (!hasOnlyFields(object, {"path", "format", "multiline", "max_record_bytes",
+                                "format_plugin"})) {
         detail::setPersistenceError(error, PersistenceErrorCode::Malformed,
                  "session source contains an unknown or duplicate field");
         return false;
@@ -275,6 +275,7 @@ bool parseSessionSource(const detail::StorageJsonNode& object,
     if (!requireString(object, "path", state.source_path, error)
         || !optionalString(object, "format", format, error)
         || !optionalString(object, "multiline", multiline, error)
+        || !optionalString(object, "format_plugin", state.format_plugin, error)
         || !optionalUnsigned(object, "max_record_bytes",
                              state.max_record_bytes, error)) {
         return false;

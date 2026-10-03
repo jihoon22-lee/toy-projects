@@ -65,6 +65,7 @@ void printUsage(std::ostream& out) {
         << "  --level LEVEL   shorthand for level>=LEVEL\n"
         << "  --format F      auto|plain|syslog|json|raw (default auto)\n"
         << "  --format-plugin FILE  parse with a loglens.format/v1 plugin\n"
+        << "                  (replaces --format; saved with --save-session)\n"
         << "  --stats         print level histogram and top patterns\n"
         << "  --bucket MS     histogram bucket size (default 60000)\n"
         << "  --top N         number of patterns to show (default 10)\n"
@@ -339,8 +340,11 @@ bool applySessionFile(CliOptions& options) {
     if (!options.level_set) {
         options.level = state.level;
     }
-    if (!options.format_set) {
+    // A plugin and a built-in format are one parsing choice: an explicit
+    // --format or --format-plugin on the command line replaces both.
+    if (!options.format_set && options.format_plugin.empty()) {
         options.format = formatCliName(state.format);
+        options.format_plugin = state.format_plugin;
     }
     options.multiline = state.multiline;
     options.max_record_bytes = state.max_record_bytes;
@@ -354,6 +358,7 @@ bool saveSessionFile(const CliOptions& options) {
     loglens::SessionState state;
     state.source_path = options.path;
     state.format = resolveFormat(options.format);
+    state.format_plugin = options.format_plugin;
     state.multiline = options.multiline;
     state.max_record_bytes = options.max_record_bytes;
     state.filter = options.filter;
@@ -379,7 +384,7 @@ int run(const CliOptions& options) {
     const loglens::Format format = resolveFormat(options.format);
     loglens::RecordAssembler assembler(format, loglens::EncodingErrorPolicy::PreserveBytes,
                                        options.max_record_bytes, options.multiline);
-    // A format plugin takes precedence over --format for every record; it
+    // A format plugin replaces the built-in format for every record; it
     // stays scoped to run() so the assembler never holds a dangling pointer.
     loglens::FormatPlugin plugin;
     if (!options.format_plugin.empty()) {
@@ -442,6 +447,11 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (!options.valid) {
+        printUsage(std::cerr);
+        return 1;
+    }
+    if (options.format_set && !options.format_plugin.empty()) {
+        std::cerr << "error: --format and --format-plugin cannot be combined\n";
         printUsage(std::cerr);
         return 1;
     }
