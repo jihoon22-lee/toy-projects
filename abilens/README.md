@@ -57,8 +57,12 @@ build bookkeeping, not release artifacts.
 
 The policy file is a bounded UTF-8 text file with one `key=value` per line.
 Supported keys are `expected_class`, `expected_machine`, `max_glibc`,
-`max_glibcxx`, `max_cxxabi`, `forbid_absolute_rpath`, and
-`forbidden_needed` (a comma-separated list).  Version values are numeric,
+`max_glibcxx`, `max_cxxabi`, `forbid_absolute_rpath`, `forbid_rpath`,
+`forbid_runpath`, `forbid_stripped`, `forbidden_needed`,
+`forbidden_symbols`, and `required_symbols` (the three `forbidden_*`/
+`required_*` keys take comma-separated lists).  Symbol rules compare against
+the report's exported identities, so `required_symbols=init@MYAPP_1.0`
+pins a specific version definition.  Version values are numeric,
 for example `max_glibc=2.31`.
 
 ```sh

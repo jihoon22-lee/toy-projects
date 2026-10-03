@@ -15,7 +15,9 @@ bool policy_applied(const Policy& policy) {
     return !policy.expected_class.empty() || !policy.expected_machine.empty() ||
            !policy.max_glibc.empty() || !policy.max_glibcxx.empty() ||
            !policy.max_cxxabi.empty() || policy.forbid_absolute_rpath ||
-           !policy.forbidden_needed.empty();
+           !policy.forbidden_needed.empty() || !policy.forbidden_symbols.empty() ||
+           !policy.required_symbols.empty() || policy.forbid_stripped ||
+           policy.forbid_rpath || policy.forbid_runpath;
 }
 
 void append_identity_violations(const ElfReport& report, const Policy& policy,
@@ -89,16 +91,16 @@ bool parse_boolean(const std::string& value) {
     throw std::runtime_error("policy boolean is invalid: " + value);
 }
 
-void assign_forbidden_dependencies(Policy& policy, const std::string& value) {
+void assign_list(std::vector<std::string>& target, const std::string& value) {
     std::istringstream values(value);
-    std::string dependency;
-    while (std::getline(values, dependency, ',')) {
-        dependency = detail::trim(dependency);
-        if (!dependency.empty()) {
-            policy.forbidden_needed.push_back(dependency);
+    std::string item;
+    while (std::getline(values, item, ',')) {
+        item = detail::trim(item);
+        if (!item.empty()) {
+            target.push_back(item);
         }
     }
-    policy.forbidden_needed = detail::sorted_strings(policy.forbidden_needed);
+    target = detail::sorted_strings(target);
 }
 
 void assign_policy_value(Policy& policy, const std::string& key,
@@ -116,7 +118,17 @@ void assign_policy_value(Policy& policy, const std::string& key,
     } else if (key == "forbid_absolute_rpath") {
         policy.forbid_absolute_rpath = parse_boolean(value);
     } else if (key == "forbidden_needed") {
-        assign_forbidden_dependencies(policy, value);
+        assign_list(policy.forbidden_needed, value);
+    } else if (key == "forbidden_symbols") {
+        assign_list(policy.forbidden_symbols, value);
+    } else if (key == "required_symbols") {
+        assign_list(policy.required_symbols, value);
+    } else if (key == "forbid_stripped") {
+        policy.forbid_stripped = parse_boolean(value);
+    } else if (key == "forbid_rpath") {
+        policy.forbid_rpath = parse_boolean(value);
+    } else if (key == "forbid_runpath") {
+        policy.forbid_runpath = parse_boolean(value);
     } else {
         throw std::runtime_error("unknown policy key: " + key);
     }
@@ -167,6 +179,31 @@ PolicyEvaluation evaluate_policy(const ElfReport& report, const Policy& policy) 
     if (policy.forbid_absolute_rpath) {
         append_absolute_path_violations(report.rpath, "RPATH", result.violations);
         append_absolute_path_violations(report.runpath, "RUNPATH", result.violations);
+    }
+    if (policy.forbid_rpath) {
+        for (const std::string& value : report.rpath) {
+            result.violations.push_back("RPATH entry is forbidden: " + value);
+        }
+    }
+    if (policy.forbid_runpath) {
+        for (const std::string& value : report.runpath) {
+            result.violations.push_back("RUNPATH entry is forbidden: " + value);
+        }
+    }
+    for (const std::string& symbol : report.symbols) {
+        if (std::find(policy.forbidden_symbols.begin(), policy.forbidden_symbols.end(),
+                      symbol) != policy.forbidden_symbols.end()) {
+            result.violations.push_back("forbidden exported symbol: " + symbol);
+        }
+    }
+    for (const std::string& required : policy.required_symbols) {
+        if (std::find(report.symbols.begin(), report.symbols.end(), required) ==
+            report.symbols.end()) {
+            result.violations.push_back("required exported symbol missing: " + required);
+        }
+    }
+    if (policy.forbid_stripped && report.stripped_known && report.stripped) {
+        result.violations.push_back("binary is stripped (policy requires .symtab)");
     }
     append_dependency_violations(report, policy, result.violations);
     result.passed = result.violations.empty();

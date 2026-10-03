@@ -55,6 +55,13 @@ struct Policy {
     std::string max_cxxabi;
     bool forbid_absolute_rpath = false;
     std::vector<std::string> forbidden_needed;
+    // Exported-symbol rules compare against the same name@version identities
+    // the report emits, so a rule can pin a specific version definition.
+    std::vector<std::string> forbidden_symbols;
+    std::vector<std::string> required_symbols;
+    bool forbid_stripped = false;
+    bool forbid_rpath = false;
+    bool forbid_runpath = false;
 };
 
 struct PolicyEvaluation {
