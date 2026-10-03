@@ -10,7 +10,12 @@ from pathlib import Path
 from typing import Any
 
 from envlens import __version__
-from envlens.diff import DiffError, compare_snapshots, load_snapshot
+from envlens.diff import (
+    DiffError,
+    check_compatibility,
+    compare_snapshots,
+    load_snapshot,
+)
 from envlens.io import write_report, write_snapshot
 from envlens.probe import ProbeError, resolve_interpreter
 from envlens.project import ProjectError, inspect_pyproject
@@ -64,6 +69,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="report format (default: text)",
     )
     diff.add_argument("--pretty", action="store_true", help="indent JSON reports")
+    check = commands.add_parser(
+        "check",
+        help="compatibility/dependency evidence for one offline snapshot",
+    )
+    check.add_argument("snapshot", type=Path, help="snapshot file (use - for stdin)")
+    check.add_argument(
+        "--project",
+        "--pyproject",
+        dest="project",
+        type=Path,
+        help="optional pyproject.toml for project compatibility/dependency checks",
+    )
+    check.add_argument("--output", type=Path, default=Path("-"))
+    check.add_argument(
+        "--format",
+        choices=("text", "json", "markdown", "md"),
+        default="text",
+        help="report format (default: text)",
+    )
+    check.add_argument("--pretty", action="store_true", help="indent JSON reports")
     runtime = commands.add_parser(
         "runtime",
         aliases=["smoke", "runtime-check"],
@@ -137,7 +162,7 @@ def _report_exit_code(report: dict[str, Any]) -> int:
     status = report.get("status")
     if status is None and isinstance(report.get("summary"), dict):
         status = report["summary"].get("status")
-    return 0 if status in {None, "unchanged", "passed"} else 1
+    return 0 if status in {None, "unchanged", "compatible", "passed"} else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -165,6 +190,17 @@ def main(argv: list[str] | None = None) -> int:
             after = _load_snapshot_argument(args.after)
             project = inspect_pyproject(args.project) if args.project is not None else None
             report = compare_snapshots(before, after, project=project)
+            _emit_report(
+                report,
+                output=args.output,
+                format=args.format,
+                pretty=args.pretty,
+            )
+            return _report_exit_code(report)
+        if args.command == "check":
+            snapshot = _load_snapshot_argument(args.snapshot)
+            project = inspect_pyproject(args.project) if args.project is not None else None
+            report = check_compatibility(snapshot, project=project)
             _emit_report(
                 report,
                 output=args.output,

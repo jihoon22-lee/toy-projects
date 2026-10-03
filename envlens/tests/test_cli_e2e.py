@@ -77,6 +77,36 @@ def test_cli_diff_emits_json_and_returns_change_status(tmp_path: Path) -> None:
     assert report["upgraded"][0]["to_version"] == "2.0"
 
 
+def test_cli_check_emits_compatibility_report(tmp_path: Path) -> None:
+    snapshot = tmp_path / "snapshot.json"
+    snapshot.write_text(json.dumps(_snapshot("1.0")), encoding="utf-8")
+    output = io.StringIO()
+
+    with redirect_stdout(output):
+        result = cli.main(["check", str(snapshot), "--format", "json"])
+
+    assert result == 0
+    report = json.loads(output.getvalue())
+    assert report["schema_version"] == "envlens.compatibility/v1"
+    assert report["status"] == "compatible"
+    assert isinstance(report["compatibility"], list)
+    assert isinstance(report["dependencies"], list)
+
+
+def test_cli_check_reports_issues_as_exit_one(tmp_path: Path) -> None:
+    snapshot_doc = _snapshot("1.0")
+    snapshot_doc["distributions"][0]["metadata"]["requires_dist"] = ["missing-dependency>=9.9"]
+    snapshot = tmp_path / "snapshot.json"
+    snapshot.write_text(json.dumps(snapshot_doc), encoding="utf-8")
+    output = io.StringIO()
+
+    with redirect_stdout(output):
+        result = cli.main(["check", str(snapshot)])
+
+    assert result == 1
+    assert "missing-dependency" in output.getvalue()
+
+
 def test_cli_runtime_forwards_matrix_and_writes_markdown(tmp_path: Path) -> None:
     output_path = tmp_path / "runtime.md"
     fake = {

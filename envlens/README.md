@@ -150,6 +150,19 @@ means the bounded metadata and version evaluator reached a direct conclusion;
 syntax, absent import/wheel evidence, or versions outside the evaluator. No
 resolver, package index, wheel download, or network request is performed.
 
+## Check one environment
+
+`check` evaluates a single snapshot's compatibility and dependency evidence
+without needing a comparison partner — the `envlens.compatibility/v1` report
+answers "does this recorded environment satisfy its own declared
+requirements?". An optional `--project` adds the pyproject compatibility
+checks, and the exit status is 0 for `compatible` and 1 otherwise.
+
+```bash
+envlens check snapshot.json --format json
+envlens check snapshot.json --project pyproject.toml
+```
+
 ## Project and runtime smoke checks
 
 `runtime` (also available as `smoke`) reads `pyproject.toml` without importing
