@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/jihoon22-lee/toy-projects/compare/buildscope/v0.2.0...buildscope/v0.3.0) (2026-10-03)
+
+
+### Features
+
+* **buildscope:** add delayed include-analysis mode with unit globs ([#101](https://github.com/jihoon22-lee/toy-projects/issues/101)) ([9ad0e22](https://github.com/jihoon22-lee/toy-projects/commit/9ad0e228c7e9a237d71934ed2ba895c82814a8fe))
+
 ## [0.2.0](https://github.com/jihoon22-lee/toy-projects/compare/v0.1.0...v0.2.0) (2026-10-03)
 
 

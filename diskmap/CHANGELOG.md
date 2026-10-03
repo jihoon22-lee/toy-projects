@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/jihoon22-lee/toy-projects/compare/diskmap/v0.2.0...diskmap/v0.3.0) (2026-10-03)
+
+
+### Features
+
+* **diskmap:** filter snapshot diff reports by kind, delta, certainty ([#99](https://github.com/jihoon22-lee/toy-projects/issues/99)) ([881b168](https://github.com/jihoon22-lee/toy-projects/commit/881b16834de477edc07b0488f61ad29c767c8635))
+
 ## [0.2.0](https://github.com/jihoon22-lee/toy-projects/compare/v0.1.0...v0.2.0) (2026-10-03)
 
 

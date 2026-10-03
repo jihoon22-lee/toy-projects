@@ -17,7 +17,7 @@
 namespace {
 
 // The version --version prints. loglens's single version surface.
-constexpr const char* kVersion = "0.2.0";  // x-release-please-version
+constexpr const char* kVersion = "0.3.0";  // x-release-please-version
 
 struct CliOptions {
     std::string path;

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/jihoon22-lee/toy-projects/compare/loglens/v0.2.0...loglens/v0.3.0) (2026-10-03)
+
+
+### Features
+
+* **loglens:** save and reload investigation sessions ([#100](https://github.com/jihoon22-lee/toy-projects/issues/100)) ([a66f42f](https://github.com/jihoon22-lee/toy-projects/commit/a66f42fcc20d2156fb8ffbffb380085a67354be7))
+
 ## [0.2.0](https://github.com/jihoon22-lee/toy-projects/compare/v0.1.0...v0.2.0) (2026-10-03)
 
 

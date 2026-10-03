@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/jihoon22-lee/toy-projects/compare/abilens/v0.2.0...abilens/v0.3.0) (2026-10-03)
+
+
+### Features
+
+* **abilens:** diff the exported dynamic-symbol surface ([#98](https://github.com/jihoon22-lee/toy-projects/issues/98)) ([90b0055](https://github.com/jihoon22-lee/toy-projects/commit/90b00550c1fa637690590b5dec2bf438b341b365))
+
 ## [0.2.0](https://github.com/jihoon22-lee/toy-projects/compare/v0.1.0...v0.2.0) (2026-10-03)
 
 
