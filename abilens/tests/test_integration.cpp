@@ -81,6 +81,8 @@ int main(int argc, char** argv) {
     expect(report.header.has_dynamic, "fixture has dynamic metadata");
     expect(contains(report.needed, "libstdc++.so.6"), "fixture records libstdc++ dependency");
     expect(!report.versions.empty(), "fixture exposes version requirements");
+    expect(contains(report.symbols, "abilens_fixture_value@ABILENS_1.0"),
+           "defined dynamic symbols carry verdef-qualified names");
     expect(!abilens::serialize_report(report).empty(), "real report serializes");
     test_input_identity(fixture);
 
