@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/jihoon22-lee/toy-projects/compare/abilens/v0.1.1...abilens/v0.1.2) (2026-10-03)
+
+
+### Bug Fixes
+
+* **abilens:** fail closed on unknown evidence and degrade bad version tables ([334d748](https://github.com/jihoon22-lee/toy-projects/commit/334d74894c021ce1c020b5f2649e01e8e0c8d97d))
+
 ## [0.1.1](https://github.com/jihoon22-lee/toy-projects/compare/abilens/v0.1.0...abilens/v0.1.1) (2026-10-03)
 
 
