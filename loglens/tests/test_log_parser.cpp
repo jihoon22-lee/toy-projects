@@ -1,9 +1,12 @@
 #include "check.hpp"
 
+#include "loglens/format_plugin.hpp"
 #include "loglens/log_parser.hpp"
 
+#include <fstream>
 #include <stdexcept>
 #include <utility>
+#include <QTemporaryDir>
 #include <QtTest>
 
 namespace impl {
@@ -33,6 +36,11 @@ void testAssemblerResetDropsOldGenerationState();
 void testAssemblerMakesTheBytePreservingErrorPolicyExplicit();
 void testAssemblerResetPreservesTailWindowLineNumbers();
 void testAssemblerResetRejectsZeroLineNumber();
+void testPluginLineParsesMappedFields();
+void testPluginLineReportsFieldDiagnostics();
+void testPluginNonMatchingLineStaysUnstructured();
+void testPluginLoaderValidation();
+void testAssemblerRoutesThroughPlugin();
 } // namespace impl
 
 class TestLogParser : public QObject {
@@ -64,6 +72,11 @@ private slots:
     void testAssemblerMakesTheBytePreservingErrorPolicyExplicit() { impl::testAssemblerMakesTheBytePreservingErrorPolicyExplicit(); }
     void testAssemblerResetPreservesTailWindowLineNumbers() { impl::testAssemblerResetPreservesTailWindowLineNumbers(); }
     void testAssemblerResetRejectsZeroLineNumber() { impl::testAssemblerResetRejectsZeroLineNumber(); }
+    void testPluginLineParsesMappedFields() { impl::testPluginLineParsesMappedFields(); }
+    void testPluginLineReportsFieldDiagnostics() { impl::testPluginLineReportsFieldDiagnostics(); }
+    void testPluginNonMatchingLineStaysUnstructured() { impl::testPluginNonMatchingLineStaysUnstructured(); }
+    void testPluginLoaderValidation() { impl::testPluginLoaderValidation(); }
+    void testAssemblerRoutesThroughPlugin() { impl::testAssemblerRoutesThroughPlugin(); }
 };
 
 QTEST_GUILESS_MAIN(TestLogParser)
@@ -84,6 +97,10 @@ using loglens::parseDiagnosticCodeName;
 using loglens::parseStatusName;
 using loglens::RecordAssembler;
 using loglens::RecordDelta;
+using loglens::FormatPlugin;
+using loglens::FormatPluginError;
+using loglens::loadFormatPlugin;
+using loglens::parsePluginLine;
 
 namespace impl {
 
@@ -707,6 +724,120 @@ void testAssemblerResetRejectsZeroLineNumber() {
         threw = true;
     }
     CHECK(threw);
+}
+
+FormatPlugin myappPlugin() {
+    FormatPlugin plugin;
+    plugin.name = "myapp";
+    plugin.pattern_text = "^(\\S+) \\[(\\w+)\\] ([^:]+): (.*)$";
+    plugin.pattern = std::regex(plugin.pattern_text);
+    plugin.fields.timestamp = 1;
+    plugin.fields.level = 2;
+    plugin.fields.source = 3;
+    plugin.fields.message = 4;
+    return plugin;
+}
+
+void testPluginLineParsesMappedFields() {
+    const FormatPlugin plugin = myappPlugin();
+    const LogRecord record =
+        parsePluginLine("2026-10-03T10:00:01.000Z [ERROR] db: connection refused",
+                        plugin, 7);
+    CHECK(record.parse_status == ParseStatus::Parsed);
+    CHECK(record.timestamp_ms > 0);
+    CHECK(record.level == Level::Error);
+    CHECK_EQ(record.source, std::string("db"));
+    CHECK_EQ(record.message, std::string("connection refused"));
+    CHECK_EQ(record.line_number, static_cast<std::size_t>(7));
+    CHECK_EQ(record.raw, std::string("2026-10-03T10:00:01.000Z [ERROR] db: connection refused"));
+}
+
+void testPluginLineReportsFieldDiagnostics() {
+    const FormatPlugin plugin = myappPlugin();
+    const LogRecord record =
+        parsePluginLine("not-a-time [LOUD] db: ping", plugin, 1);
+    CHECK(record.parse_status == ParseStatus::Partial);
+    CHECK(record.level == Level::Unknown);
+    CHECK(!record.diagnostics.empty());
+}
+
+void testPluginNonMatchingLineStaysUnstructured() {
+    const FormatPlugin plugin = myappPlugin();
+    const LogRecord record = parsePluginLine("totally different", plugin, 3);
+    CHECK(record.parse_status == ParseStatus::Unstructured);
+    CHECK_EQ(record.message, std::string("totally different"));
+    CHECK_EQ(record.raw, std::string("totally different"));
+}
+
+void testPluginLoaderValidation() {
+    QTemporaryDir directory;
+    CHECK(directory.isValid());
+    const QString path = directory.filePath("plugin.json");
+
+    auto writeDoc = [&](const QByteArray& bytes) {
+        std::ofstream out(path.toStdString(), std::ios::binary);
+        out.write(bytes.constData(), bytes.size());
+    };
+
+    FormatPlugin plugin;
+    std::string error;
+
+    writeDoc(R"json({"kind":"loglens.format/v1","name":"myapp",
+                "fields":{"timestamp":1,"level":2,"source":3,"message":4},
+                "pattern":"^(\\S+) \\[(\\w+)\\] ([^:]+): (.*)$"})json");
+    CHECK_EQ(loadFormatPlugin(path.toStdString(), plugin, error),
+             FormatPluginError::None);
+    CHECK_EQ(plugin.name, std::string("myapp"));
+    CHECK_EQ(plugin.fields.source, static_cast<std::size_t>(3));
+
+    writeDoc(R"json({"kind":"loglens.format/v1","name":"x","pattern":"(.*)",
+                "fields":{"level":1}})json");
+    CHECK_EQ(loadFormatPlugin(path.toStdString(), plugin, error),
+             FormatPluginError::MissingField);
+
+    writeDoc(R"json({"kind":"other/v9","name":"x","pattern":"(.*)",
+                "fields":{"message":1}})json");
+    CHECK_EQ(loadFormatPlugin(path.toStdString(), plugin, error),
+             FormatPluginError::UnsupportedVersion);
+
+    writeDoc(R"json({"kind":"loglens.format/v1","name":"x","pattern":"(.*)",
+                "fields":{"message":5}})json");
+    CHECK_EQ(loadFormatPlugin(path.toStdString(), plugin, error),
+             FormatPluginError::InvalidField);
+
+    writeDoc(R"json({"kind":"loglens.format/v1","name":"x","pattern":"([",
+                "fields":{"message":1}})json");
+    CHECK_EQ(loadFormatPlugin(path.toStdString(), plugin, error),
+             FormatPluginError::InvalidField);
+
+    writeDoc("{not json");
+    CHECK_EQ(loadFormatPlugin(path.toStdString(), plugin, error),
+             FormatPluginError::MalformedDocument);
+
+    CHECK_EQ(loadFormatPlugin(path.toStdString() + ".missing", plugin, error),
+             FormatPluginError::ReadFailed);
+}
+
+void testAssemblerRoutesThroughPlugin() {
+    const FormatPlugin plugin = myappPlugin();
+    RecordAssembler assembler;
+    assembler.setFormatPlugin(&plugin);
+    CHECK(assembler.formatPlugin() == &plugin);
+
+    const std::vector<RecordDelta> deltas = assembler.consumeBytes(
+        "2026-10-03T10:00:01.000Z [WARN] auth: slow path\nfree text\n");
+    CHECK_EQ(deltas.size(), static_cast<std::size_t>(2));
+    CHECK(deltas[0].record.level == Level::Warn);
+    CHECK_EQ(deltas[0].record.source, std::string("auth"));
+    CHECK_EQ(deltas[0].record.message, std::string("slow path"));
+    CHECK(deltas[1].record.parse_status == ParseStatus::Unstructured);
+    CHECK_EQ(deltas[1].record.message, std::string("free text"));
+
+    assembler.setFormatPlugin(nullptr);
+    const std::vector<RecordDelta> plain = assembler.consumeBytes(
+        "2026-08-26T04:15:22Z INFO [api] builtin\n");
+    CHECK_EQ(plain.size(), static_cast<std::size_t>(1));
+    CHECK(plain[0].record.level == Level::Info);
 }
 
 } // namespace impl

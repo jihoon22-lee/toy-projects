@@ -14,6 +14,7 @@ message(STATUS "loglens: using Qt6 ${Qt6_VERSION}")
 # The core is Qt-free so it links anywhere; the GUI adds Qt on top.
 add_library(loglens_core STATIC
     src/filter_expr.cpp
+    src/format_plugin.cpp
     src/highlight_rules.cpp
     src/initial_load.cpp
     src/json_line_parser.cpp
