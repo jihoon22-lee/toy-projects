@@ -80,7 +80,11 @@ requirement records.  Because segment data is authoritative, `DT_NEEDED`,
 `DT_RPATH`, `DT_RUNPATH`, and GLIBC/GLIBCXX/CXXABI requirements are still
 recovered when section headers are stripped, as is the exported dynamic
 symbol set (from `DT_SYMTAB` bounded by `DT_HASH`/`DT_GNU_HASH`); sections are
-only consulted for the `.symtab` strippedness check.  All offsets, counts,
+only consulted for the `.symtab` strippedness check.  When the binary carries
+`DT_VERDEF`/`DT_VERSYM` version definitions, exported symbols are reported
+with their version identity (`name@version`) — a renamed or rebased version
+node therefore shows as a removed/added symbol in the diff.  All offsets,
+counts,
 sizes, and string
 indices are bounds-checked; out-of-file tables and oversized structures fail
 closed.

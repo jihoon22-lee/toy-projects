@@ -48,9 +48,10 @@ $(RELEASE_BIN): src/main.cpp $(STATIC_LIB) | guard-out
 	@mkdir -p $(dir $@)
 	$(CXX) $(CPPFLAGS) $(INCLUDES) $(CXXFLAGS) $< $(STATIC_LIB) $(LDFLAGS) $(LDLIBS) -o $@
 
-$(SHARED_FIXTURE): src/fixture.cpp | guard-out
+$(SHARED_FIXTURE): src/fixture.cpp src/fixture.map | guard-out
 	@mkdir -p $(dir $@)
-	$(CXX) $(CPPFLAGS) $(INCLUDES) $(CXXFLAGS) -fPIC -shared $< $(LDFLAGS) $(LDLIBS) -o $@
+	$(CXX) $(CPPFLAGS) $(INCLUDES) $(CXXFLAGS) -fPIC -shared $< \
+	    -Wl,--version-script=src/fixture.map $(LDFLAGS) $(LDLIBS) -o $@
 
 $(PARSER_TEST): $(OUT)/obj/tests/test_parser.o $(STATIC_LIB) | guard-out
 	@mkdir -p $(dir $@)
