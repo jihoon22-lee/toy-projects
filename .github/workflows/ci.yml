@@ -451,15 +451,18 @@ jobs:
           first_build="$artifact_dir/build-a"
           second_build="$artifact_dir/build-b"
           mkdir -p "$first_build" "$second_build"
+          version="$(sed -n 's/^version = "\(.*\)"$/\1/p' envlens/pyproject.toml | head -1)"
+          test -n "$version"
           (cd envlens && SOURCE_DATE_EPOCH=1700000000 uv build --out-dir "$first_build")
           (cd envlens && SOURCE_DATE_EPOCH=1700000000 uv build --out-dir "$second_build")
-          cmp "$first_build/envlens-0.1.0-py3-none-any.whl" \
-            "$second_build/envlens-0.1.0-py3-none-any.whl"
-          cmp "$first_build/envlens-0.1.0.tar.gz" \
-            "$second_build/envlens-0.1.0.tar.gz"
+          cmp "$first_build/envlens-$version-py3-none-any.whl" \
+            "$second_build/envlens-$version-py3-none-any.whl"
+          cmp "$first_build/envlens-$version.tar.gz" \
+            "$second_build/envlens-$version.tar.gz"
           sha256sum "$first_build"/* > "$artifact_dir/SHA256SUMS"
-          "$ENVLENS_PYTHON" - "$first_build" <<'PY'
+          ENVLENS_VERSION="$version" "$ENVLENS_PYTHON" - "$first_build" <<'PY'
           from email.parser import Parser
+          import os
           import sys
           import tarfile
           import zipfile
@@ -478,8 +481,9 @@ jobs:
                       )
 
           artifact_dir = Path(sys.argv[1])
-          wheel = artifact_dir / "envlens-0.1.0-py3-none-any.whl"
-          sdist = artifact_dir / "envlens-0.1.0.tar.gz"
+          version = os.environ["ENVLENS_VERSION"]
+          wheel = artifact_dir / f"envlens-{version}-py3-none-any.whl"
+          sdist = artifact_dir / f"envlens-{version}.tar.gz"
           for path in (wheel, sdist):
               if not path.is_file() or path.stat().st_size == 0:
                   raise SystemExit(f"missing envlens release artifact: {path}")
@@ -532,7 +536,7 @@ jobs:
                   "envlens wheel",
                   {
                       "Name": "envlens",
-                      "Version": "0.1.0",
+                      "Version": version,
                       "Requires-Python": ">=3.10",
                   },
               )
@@ -582,7 +586,7 @@ jobs:
                       "envlens sdist",
                       {
                           "Name": "envlens",
-                          "Version": "0.1.0",
+                          "Version": version,
                           "Requires-Python": ">=3.10",
                       },
                   )
@@ -597,8 +601,8 @@ jobs:
           consumer_env="$quality_root/wheel-consumer"
           uv venv --python "$ENVLENS_PYTHON" "$consumer_env"
           uv pip install --python "$consumer_env/bin/python" --no-deps \
-            "$first_build/envlens-0.1.0-py3-none-any.whl"
-          test "$("$consumer_env/bin/envlens" --version)" = "envlens 0.1.0"
+            "$first_build/envlens-$version-py3-none-any.whl"
+          test "$("$consumer_env/bin/envlens" --version)" = "envlens $version"
           "$consumer_env/bin/envlens" snapshot \
             --interpreter "$consumer_env/bin/python" \
             --captured-at 2026-09-03T00:00:00Z \
