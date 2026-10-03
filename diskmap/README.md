@@ -48,14 +48,22 @@ Usage: diskmap <path> [options]
   --save-snapshot FILE save the scan as a bounded snapshot
   --load-snapshot FILE inspect a saved snapshot without scanning
   --compare-snapshot FILE compare the scan with a saved snapshot
+  --diff-kind KIND    print only these change kinds (repeatable:
+                      added removed grown shrunk moved uncertain)
+  --diff-min-delta BYTES print only changes of at least BYTES
+  --diff-certain-only print only certain (non-candidate) changes
   --duplicates        inspect duplicate evidence (review-only)
   --help              show this message
 ```
 
 A snapshot comparison classifies each entry as added, removed, grown, shrunk,
 moved, or uncertain, and reports whether the comparison as a whole was
-uncertain. Duplicate inspection is review-only: it reports evidence and never
-deletes anything.
+uncertain. The `--diff-*` options narrow which changes are printed — they
+filter the report only and never weaken the conservative classification. A
+delta bound applies to the change in bytes and is proven only when both
+metrics are known. The options combine and apply identically to text and
+JSON output. Duplicate inspection is review-only: it reports evidence and
+never deletes anything.
 
 ```sh
 ./build/gui/src/diskmap path/to/tree --save-snapshot before.json
