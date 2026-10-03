@@ -327,21 +327,74 @@ def _dependency_issues(
     return _dependency_issues_impl(project, grouped, _certainty(snapshot), _identity(snapshot))
 
 
-def _diff_status(
+def _external_requirement_keys(snapshot: Mapping[str, Any]) -> set[tuple[str, str]]:
+    keys: set[tuple[str, str]] = set()
+    for normalized, distributions in _group_distributions(snapshot).items():
+        for distribution in distributions:
+            metadata = distribution.get("metadata")
+            external = metadata.get("requires_external") if isinstance(metadata, dict) else None
+            if isinstance(external, list):
+                keys.update((normalized, str(item)) for item in external)
+    return keys
+
+
+def _status_dependencies(
+    dependencies: list[dict[str, Any]],
+    baseline_external: set[tuple[str, str]],
+) -> list[dict[str, Any]]:
+    """Return the dependency records that may move the run status.
+
+    An external requirement the baseline already declared is standing,
+    unverifiable evidence: it stays in the report but does not downgrade a run
+    that introduced nothing new. Newly introduced ones still make it unknown.
+    """
+
+    return [
+        item
+        for item in dependencies
+        if item.get("kind") != "external-requirement"
+        or (str(item.get("name", "")), str(item.get("requirement", ""))) not in baseline_external
+    ]
+
+
+def _evidence_status(
     summary: Mapping[str, int],
     dependencies: list[dict[str, Any]],
-) -> str:
+) -> str | None:
     certain_dependency_issue = any(
         item.get("kind") in {"missing", "version-conflict"} and item.get("certainty") == "certain"
         for item in dependencies
     )
     if summary["compatibility_issues"] or certain_dependency_issue:
         return "incompatible"
-    if summary["compatibility_unknown"] or dependencies or summary["changed"]:
+    if summary["compatibility_unknown"] or dependencies:
+        return "unknown"
+    return None
+
+
+def _diff_status(
+    summary: Mapping[str, int],
+    dependencies: list[dict[str, Any]],
+) -> str:
+    evidence = _evidence_status(summary, dependencies)
+    if evidence is not None:
+        return evidence
+    if summary["changed"]:
         return "unknown"
     if any(summary[key] for key in ("added", "removed", "upgraded", "downgraded")):
         return "changed"
     return "unchanged"
+
+
+def _evidence_summary(
+    compatibility: list[dict[str, Any]],
+    dependencies: list[dict[str, Any]],
+) -> dict[str, int]:
+    return {
+        "compatibility_issues": sum(item.get("status") == "incompatible" for item in compatibility),
+        "compatibility_unknown": sum(item.get("status") == "unknown" for item in compatibility),
+        "dependency_issues": len(dependencies),
+    }
 
 
 def compare_snapshots(
@@ -370,15 +423,14 @@ def compare_snapshots(
     dependencies = _dependency_issues(right, project_input)
     summary = {
         **{name: len(values) for name, values in changes.items()},
-        "compatibility_issues": sum(item.get("status") == "incompatible" for item in compatibility),
-        "compatibility_unknown": sum(item.get("status") == "unknown" for item in compatibility),
-        "dependency_issues": len(dependencies),
+        **_evidence_summary(compatibility, dependencies),
     }
+    status_dependencies = _status_dependencies(dependencies, _external_requirement_keys(left))
     return {
         "schema_version": "envlens.diff/v1",
         "before": _interpreter_summary(left),
         "after": _interpreter_summary(right),
-        "status": _diff_status(summary, dependencies),
+        "status": _diff_status(summary, status_dependencies),
         "summary": summary,
         **changes,
         "project_imports": import_evidence,
@@ -413,16 +465,18 @@ def check_compatibility(
     """Return offline compatibility/dependency evidence for one snapshot."""
 
     value = _snapshot_input(snapshot)
-    report = compare_snapshots(value, value, project=project)
-    status = report["status"]
-    if status == "unchanged":
-        status = "compatible"
+    compatibility = _compatibility_evidence(_group_distributions(value), _identity(value), project)
+    dependencies = _dependency_issues(value, project)
+    summary = _evidence_summary(compatibility, dependencies)
+    # One snapshot has no baseline, so every external requirement it declares
+    # is standing evidence: reported, but never a reason to fail the check.
+    status_dependencies = _status_dependencies(dependencies, _external_requirement_keys(value))
     return {
         "schema_version": "envlens.compatibility/v1",
-        "status": status,
-        "compatibility": report["compatibility"],
-        "dependencies": report["dependencies"],
-        "summary": report["summary"],
+        "status": _evidence_status(summary, status_dependencies) or "compatible",
+        "compatibility": compatibility,
+        "dependencies": dependencies,
+        "summary": summary,
     }
 
 

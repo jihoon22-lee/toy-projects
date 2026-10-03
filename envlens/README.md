@@ -154,7 +154,10 @@ Distributions that declare `Requires-External` metadata (system libraries,
 tools, or headers outside Python packaging) surface as `external-requirement`
 dependency records with `certainty: "unknown"` — envlens reports them as
 unverifiable evidence rather than silently dropping the declaration or
-treating it as a failure.
+treating it as a failure.  Only a newly introduced external requirement moves
+a `diff` to `unknown`; one the `before` snapshot already declared is standing
+evidence and stays in the report without changing an otherwise `unchanged`
+result.
 
 ## Check one environment
 
@@ -162,7 +165,12 @@ treating it as a failure.
 without needing a comparison partner — the `envlens.compatibility/v1` report
 answers "does this recorded environment satisfy its own declared
 requirements?". An optional `--project` adds the pyproject compatibility
-checks, and the exit status is 0 for `compatible` and 1 otherwise.
+checks, and the exit status is 0 for `compatible` and 1 otherwise. The report
+carries `compatibility`, `dependencies`, and a `summary` of
+`compatibility_issues`, `compatibility_unknown`, and `dependency_issues`;
+text and Markdown output are headed `envlens check`. External requirements
+are listed but never fail a check on their own: one snapshot has no
+baseline, so they are standing evidence.
 
 ```bash
 envlens check snapshot.json --format json
