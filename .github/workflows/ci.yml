@@ -100,7 +100,7 @@ jobs:
           build_dir="$benchmark_root/build"
           mkdir -p "$scratch_dir" "$artifact_dir" "$build_dir"
           cmake -S . -B "$build_dir" -DCMAKE_BUILD_TYPE=Release \
-            -DLOGLENS_BUILD_BENCHMARKS=ON \
+            -DLOGLENS_BUILD_BENCHMARKS=ON
           cmake --build "$build_dir" --parallel 2 \
             --target loglens-bench-generate loglens-bench-core loglens-bench-gui
           python3 benchmarks/run_benchmark.py \
@@ -328,7 +328,7 @@ jobs:
           artifact_dir="$benchmark_root/artifact"
           mkdir -p "$build_dir" "$artifact_dir"
           cmake -S . -B "$build_dir" -DCMAKE_BUILD_TYPE=Release \
-            -DBUILDSCOPE_BUILD_BENCHMARKS=ON \
+            -DBUILDSCOPE_BUILD_BENCHMARKS=ON
           cmake --build "$build_dir" --parallel 2 --target buildscope-model-benchmark
           "$build_dir/buildscope-model-benchmark" 100000 10000 \
             | tee "$artifact_dir/summary.json"
