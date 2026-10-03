@@ -269,6 +269,18 @@ std::filesystem::path test_policy(const abilens::ElfReport& parsed) {
     const abilens::PolicyEvaluation evaluation = abilens::evaluate_policy(parsed, policy);
     expect(!evaluation.passed && evaluation.violations.size() == 2U,
            "policy reports ABI floor and absolute path violations");
+
+    abilens::Policy symbol_rules;
+    symbol_rules.forbidden_symbols = {"abilens_export_a"};
+    symbol_rules.required_symbols = {"abilens_export_b", "abilens_export_missing"};
+    const abilens::PolicyEvaluation symbol_eval =
+        abilens::evaluate_policy(parsed, symbol_rules);
+    expect(!symbol_eval.passed && symbol_eval.violations.size() == 2U,
+           "policy reports forbidden and missing exported symbols");
+    abilens::Policy satisfied;
+    satisfied.required_symbols = {"abilens_export_a", "abilens_export_b"};
+    expect(abilens::evaluate_policy(parsed, satisfied).passed,
+           "required_symbols accepts present exports");
     const std::filesystem::path invalid_policy =
         temporary_file("invalid-policy", std::string("max_glibc=2.31") +
                                              static_cast<char>(0xff) + "\n");
