@@ -7,6 +7,13 @@
   extras, dependency paths, import overlap and CI policies.
 - Bound compilation batches and protect report inputs from output aliases.
 
+## [0.2.0](https://github.com/jihoon22-lee/toy-projects/compare/envlens/v0.1.2...envlens/v0.2.0) (2026-10-03)
+
+
+### Features
+
+* expand eight independent diagnostic tools and verified releases ([#120](https://github.com/jihoon22-lee/toy-projects/issues/120)) ([3a01bb9](https://github.com/jihoon22-lee/toy-projects/commit/3a01bb93c3fee936a335bb9445400b5f469d6a87))
+
 ## [0.1.2](https://github.com/jihoon22-lee/toy-projects/compare/envlens/v0.1.1...envlens/v0.1.2) (2026-10-03)
 
 

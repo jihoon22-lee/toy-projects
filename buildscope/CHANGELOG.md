@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/jihoon22-lee/toy-projects/compare/buildscope/v0.1.2...buildscope/v0.2.0) (2026-10-03)
+
+
+### Features
+
+* expand eight independent diagnostic tools and verified releases ([#120](https://github.com/jihoon22-lee/toy-projects/issues/120)) ([3a01bb9](https://github.com/jihoon22-lee/toy-projects/commit/3a01bb93c3fee936a335bb9445400b5f469d6a87))
+
 ## 0.2.0 (development)
 
 - Add snapshot v4 with explicit completeness, bounded analysis-run metadata and separate lexical fallback for partial compiler traces; retain v1–v3 readers and legacy projections.
