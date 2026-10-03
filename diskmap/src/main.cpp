@@ -18,7 +18,7 @@
 namespace {
 
 // The version --version prints. diskmap's single version surface.
-constexpr const char* kVersion = "0.2.0";  // x-release-please-version
+constexpr const char* kVersion = "0.1.0";  // x-release-please-version
 
 struct CliOptions {
     std::string path;
