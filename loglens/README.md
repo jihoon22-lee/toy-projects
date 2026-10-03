@@ -92,6 +92,31 @@ fields.  A missing or malformed required token makes an explicitly selected
 syslog record `Partial` and adds a bounded diagnostic; the original line stays
 available in `raw` and malformed components are not copied into `source`.
 
+## Format plugins
+
+`--format-plugin FILE` loads a declarative `loglens.format/v1` document so a
+custom line shape flows through the same record pipeline as the built-in
+formats — multiline folding, record byte limits, filters, and sessions behave
+identically.  The plugin document names one ECMAScript regular expression
+whose numbered capture groups map onto record fields:
+
+```json
+{"kind":"loglens.format/v1","name":"myapp",
+ "pattern":"^(\\S+) \\[(\\w+)\\] ([^:]+): (.*)$",
+ "fields":{"timestamp":1,"level":2,"source":3,"message":4}}
+```
+
+`message` is required; the other fields are optional group numbers (1–32).
+Captured timestamps go through the same ISO validator as the built-in parser
+and captured levels through the same case-insensitive level table, so an
+invalid token produces a `Partial` record with a bounded diagnostic instead
+of a silent guess.  A line the pattern does not match stays `Unstructured`
+with the raw bytes preserved — plugin records and unparseable lines can be
+filtered, exported, and diffed side by side.  Documents are bounded to 4 MiB
+and validated strictly: an unreadable file, malformed JSON, an unknown
+`kind`, a bad expression, or a field mapping outside the pattern's capture
+groups is a load error, never a partial plugin.
+
 ## Persistent profiles and saved queries
 
 The core persistence API in `include/loglens/persistence.hpp` stores source

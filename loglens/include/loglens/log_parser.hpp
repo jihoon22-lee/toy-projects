@@ -11,6 +11,8 @@
 
 namespace loglens {
 
+struct FormatPlugin;
+
 constexpr std::size_t kDefaultMaxRecordBytes = 64 * 1024;
 constexpr std::size_t kMaxRecordBytes = 1024 * 1024;
 
@@ -94,6 +96,12 @@ public:
 
     void setFormat(Format format);
     Format format() const;
+    // Non-owning pointer to a loaded format plugin; when set, plugin parsing
+    // replaces the built-in format selection for every subsequent record.
+    // The caller must keep the plugin alive and call setFormatPlugin(nullptr)
+    // before destroying it.
+    void setFormatPlugin(const FormatPlugin* plugin);
+    const FormatPlugin* formatPlugin() const;
     EncodingErrorPolicy encodingErrorPolicy() const;
     std::uint64_t generation() const;
     std::size_t nextLineNumber() const;
@@ -104,6 +112,7 @@ public:
 
 private:
     Format format_ = Format::Auto;
+    const FormatPlugin* format_plugin_ = nullptr;
     EncodingErrorPolicy encoding_error_policy_ = EncodingErrorPolicy::PreserveBytes;
     std::uint64_t generation_ = 0;
     std::size_t next_line_number_ = 1;

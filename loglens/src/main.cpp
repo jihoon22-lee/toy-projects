@@ -1,4 +1,5 @@
 #include "loglens/filter_expr.hpp"
+#include "loglens/format_plugin.hpp"
 #include "loglens/log_parser.hpp"
 #include "loglens/log_record.hpp"
 #include "loglens/log_source.hpp"
@@ -24,6 +25,7 @@ struct CliOptions {
     std::string filter;
     std::string level;
     std::string format = "auto";
+    std::string format_plugin;
     std::string session_load;
     std::string session_save;
     bool filter_set = false;
@@ -62,6 +64,7 @@ void printUsage(std::ostream& out) {
         << "  --filter EXPR   e.g. \"level>=WARN AND message~timeout\"\n"
         << "  --level LEVEL   shorthand for level>=LEVEL\n"
         << "  --format F      auto|plain|syslog|json|raw (default auto)\n"
+        << "  --format-plugin FILE  parse with a loglens.format/v1 plugin\n"
         << "  --stats         print level histogram and top patterns\n"
         << "  --bucket MS     histogram bucket size (default 60000)\n"
         << "  --top N         number of patterns to show (default 10)\n"
@@ -111,6 +114,8 @@ bool applyStringOption(const std::vector<std::string>& args, std::size_t& index,
     } else if (arg == "--format") {
         target = &options.format;
         options.format_set = true;
+    } else if (arg == "--format-plugin") {
+        target = &options.format_plugin;
     } else if (arg == "--session") {
         target = &options.session_load;
     } else if (arg == "--save-session") {
@@ -374,6 +379,21 @@ int run(const CliOptions& options) {
     const loglens::Format format = resolveFormat(options.format);
     loglens::RecordAssembler assembler(format, loglens::EncodingErrorPolicy::PreserveBytes,
                                        options.max_record_bytes, options.multiline);
+    // A format plugin takes precedence over --format for every record; it
+    // stays scoped to run() so the assembler never holds a dangling pointer.
+    loglens::FormatPlugin plugin;
+    if (!options.format_plugin.empty()) {
+        std::string error;
+        const loglens::FormatPluginError code =
+            loglens::loadFormatPlugin(options.format_plugin, plugin, error);
+        if (code != loglens::FormatPluginError::None) {
+            std::cerr << "fatal: cannot load format plugin '" << options.format_plugin
+                      << "' (" << loglens::formatPluginErrorName(code) << "): " << error
+                      << "\n";
+            return 1;
+        }
+        assembler.setFormatPlugin(&plugin);
+    }
     loglens::RingBuffer records(options.capacity);
     loglens::FileTailer tailer(options.path);
     std::optional<std::uint64_t> snapshotEnd;
