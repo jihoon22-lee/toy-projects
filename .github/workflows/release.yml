@@ -125,14 +125,17 @@ jobs:
         with:
           subject-path: ${{ env.DIST }}/*
 
-      - name: Upload release assets
+      # Immutable releases freeze assets on publish, so the release is created
+      # as a draft, populated, and only then published.
+      - name: Upload release assets and publish
         run: |
           set -euo pipefail
           tag="${{ steps.tag.outputs.product }}/${{ steps.tag.outputs.version }}"
           if ! gh release view "$tag" >/dev/null 2>&1; then
-            gh release create "$tag" --verify-tag \
+            gh release create "$tag" --verify-tag --draft \
               --title "$tag" --generate-notes
           fi
           gh release upload "$tag" "$DIST"/* --clobber
+          gh release edit "$tag" --draft=false --latest=false
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
