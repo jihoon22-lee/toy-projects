@@ -9,28 +9,33 @@
       "release-type": "simple",
       "extra-files": [
         "src/main.cpp"
-      ]
+      ],
+      "component": "loglens"
     },
     "diskmap": {
       "release-type": "simple",
       "extra-files": [
         "src/main.cpp"
-      ]
+      ],
+      "component": "diskmap"
     },
     "buildscope": {
       "release-type": "simple",
       "extra-files": [
         "CMakeLists.txt"
-      ]
+      ],
+      "component": "buildscope"
     },
     "abilens": {
       "release-type": "simple",
       "extra-files": [
         "include/abilens/model.hpp"
-      ]
+      ],
+      "component": "abilens"
     },
     "envlens": {
-      "release-type": "python"
+      "release-type": "python",
+      "component": "envlens"
     }
   }
 }
