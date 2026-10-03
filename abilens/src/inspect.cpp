@@ -7,6 +7,7 @@
 #include <array>
 #include <cctype>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -31,10 +32,14 @@ constexpr std::uint64_t kDtRpath = 15;
 constexpr std::uint64_t kDtRunpath = 29;
 constexpr std::uint64_t kDtVerneed = 0x6ffffffeU;
 constexpr std::uint64_t kDtVerneednum = 0x6fffffffU;
+constexpr std::uint64_t kDtHash = 4;
+constexpr std::uint64_t kDtSymtab = 6;
+constexpr std::uint64_t kDtGnuHash = 0x6ffffef5U;
 constexpr std::uint64_t kMaxDynamicEntries = 4096;
 constexpr std::uint64_t kMaxVerneedRecords = 4096;
 constexpr std::uint64_t kMaxVernauxRecords = 16384;
 constexpr std::uint64_t kMaxStringTable = 64U * 1024U * 1024U;
+constexpr std::uint64_t kMaxDynamicSymbols = 262144;
 
 void append_unique(std::vector<std::string>& values, const std::string& value) {
     if (!value.empty() && std::find(values.begin(), values.end(), value) == values.end()) {
@@ -214,6 +219,9 @@ struct DynamicInfo {
     std::uint64_t strsz = 0;
     std::uint64_t verneed = 0;
     std::uint64_t verneednum = 0;
+    std::uint64_t symtab = 0;
+    std::uint64_t hash = 0;
+    std::uint64_t gnu_hash = 0;
     bool present = false;
 };
 
@@ -255,6 +263,9 @@ bool read_dynamic(ElfView& view,
                 case kDtStrsz: info.strsz = value; break;
                 case kDtVerneed: info.verneed = value; break;
                 case kDtVerneednum: info.verneednum = value; break;
+                case kDtSymtab: info.symtab = value; break;
+                case kDtHash: info.hash = value; break;
+                case kDtGnuHash: info.gnu_hash = value; break;
                 default: break;
             }
         }
@@ -317,6 +328,111 @@ bool read_verneed(ElfView& view,
         if (vn_next == 0) break;
         record += vn_next;
     }
+    return true;
+}
+
+// Counts dynamic symbol entries from DT_GNU_HASH when present (SysV
+// DT_HASH exposes nchain directly). Returns nullopt when no hash table is
+// available, or reports an error through the view.
+std::optional<std::uint64_t> dynamic_symbol_count(ElfView& view,
+                                                  const std::vector<LoadSegment>& segments,
+                                                  const DynamicInfo& info) {
+    if (info.gnu_hash != 0) {
+        const auto table = vaddr_offset(segments, info.gnu_hash, 16U);
+        if (!table.has_value()) {
+            corrupt(view, "DT_GNU_HASH table is not mapped by PT_LOAD");
+            return std::nullopt;
+        }
+        const std::uint64_t base = *table;
+        const std::uint64_t nbuckets = view.u32(base);
+        const std::uint64_t symoffset = view.u32(base + 4U);
+        const std::uint64_t bloom_size = view.u32(base + 8U);
+        if (nbuckets > kMaxDynamicSymbols || bloom_size > kMaxDynamicSymbols ||
+            symoffset > kMaxDynamicSymbols) {
+            corrupt(view, "DT_GNU_HASH header exceeds the inspection bound");
+            return std::nullopt;
+        }
+        const std::uint64_t word = view.is_64 ? 8U : 4U;
+        const std::uint64_t buckets = base + 16U + bloom_size * word;
+        const std::uint64_t chains = buckets + nbuckets * 4U;
+        if (!range_inside(buckets, nbuckets, 4U, view.bytes.size())) {
+            corrupt(view, "DT_GNU_HASH buckets are outside the file");
+            return std::nullopt;
+        }
+        std::uint64_t count = 0;
+        for (std::uint64_t bucket = 0; bucket < nbuckets; ++bucket) {
+            const std::uint64_t index = view.u32(buckets + bucket * 4U);
+            if (index < symoffset) continue;
+            std::uint64_t cursor = index;
+            for (;;) {
+                if (cursor - symoffset > kMaxDynamicSymbols) {
+                    corrupt(view, "DT_GNU_HASH chain exceeds the inspection bound");
+                    return std::nullopt;
+                }
+                const std::uint64_t cell = chains + (cursor - symoffset) * 4U;
+                if (!range_inside(cell, 1U, 4U, view.bytes.size())) {
+                    corrupt(view, "DT_GNU_HASH chain runs outside the file");
+                    return std::nullopt;
+                }
+                const std::uint64_t hashbits = view.u32(cell);
+                ++cursor;
+                if ((hashbits & 1U) != 0U) break;
+            }
+            count = std::max(count, cursor);
+        }
+        return count;
+    }
+    if (info.hash != 0) {
+        const auto table = vaddr_offset(segments, info.hash, 8U);
+        if (!table.has_value()) {
+            corrupt(view, "DT_HASH table is not mapped by PT_LOAD");
+            return std::nullopt;
+        }
+        const std::uint64_t nchain = view.u32(*table + 4U);
+        if (nchain > kMaxDynamicSymbols) {
+            corrupt(view, "DT_HASH nchain exceeds the inspection bound");
+            return std::nullopt;
+        }
+        return nchain;
+    }
+    return std::nullopt;
+}
+
+// Collects defined dynamic symbol names from DT_SYMTAB. Entries without a
+// resolvable name are skipped; the table itself must be mapped and bounded.
+bool read_symbols(ElfView& view,
+                  const std::vector<LoadSegment>& segments,
+                  const DynamicInfo& info,
+                  std::uint64_t strtab_offset,
+                  std::uint64_t strtab_size,
+                  ElfReport& report) {
+    if (info.symtab == 0) return true;
+    const auto count = dynamic_symbol_count(view, segments, info);
+    if (!view.error.empty()) return false;
+    if (!count.has_value()) {
+        report.diagnostics.push_back(
+            "dynamic symbols: unknown (no DT_HASH or DT_GNU_HASH section)");
+        return true;
+    }
+    const auto symtab = vaddr_offset(segments, info.symtab, 1U);
+    if (!symtab.has_value()) {
+        return corrupt(view, "DT_SYMTAB is not mapped by PT_LOAD");
+    }
+    const std::uint64_t entry_size = view.is_64 ? 24U : 16U;
+    const std::uint64_t shndx_offset = view.is_64 ? 6U : 12U;
+    if (*count > 0U &&
+        !range_inside(*symtab, *count, entry_size, view.bytes.size())) {
+        return corrupt(view, "DT_SYMTAB is outside the file or unreasonably large");
+    }
+    std::set<std::string> unique;
+    for (std::uint64_t index = 1; index < *count; ++index) {
+        const std::uint64_t entry = *symtab + index * entry_size;
+        if (view.u16(entry + shndx_offset) == 0U) continue;
+        const auto name =
+            bounded_string(view, strtab_offset, strtab_size, view.u32(entry));
+        if (name.has_value() && !name->empty()) unique.insert(*name);
+    }
+    report.symbols.assign(unique.begin(), unique.end());
     return true;
 }
 
@@ -426,7 +542,8 @@ ElfReport inspect_elf_buffer(const std::vector<unsigned char>& file,
             const auto value = bounded_string(view, strtab_offset, strtab_size, index);
             if (value.has_value()) append_colon_separated(*value, report.runpath);
         }
-        if (!read_verneed(view, segments, dynamic, strtab_offset, strtab_size, report)) {
+        if (!read_verneed(view, segments, dynamic, strtab_offset, strtab_size, report) ||
+            !read_symbols(view, segments, dynamic, strtab_offset, strtab_size, report)) {
             return failed_report(header, InputStatus::Corrupt, view.error);
         }
     }

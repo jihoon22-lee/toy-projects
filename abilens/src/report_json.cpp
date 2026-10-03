@@ -35,6 +35,32 @@ void require_exact_object(const JsonValue& value,
     }
 }
 
+// Like require_exact_object, but tolerates a bounded count range so additive
+// optional fields stay parseable inside the same schema version.
+template <std::size_t N>
+void require_object(const JsonValue& value,
+                    const char* context,
+                    const std::array<const char*, N>& allowed,
+                    std::size_t min_fields,
+                    std::size_t max_fields) {
+    if (value.kind != JsonValue::Kind::Object) {
+        throw std::runtime_error(std::string("report JSON ") + context + " is not an object");
+    }
+    if (value.object.size() < min_fields || value.object.size() > max_fields) {
+        throw std::runtime_error(std::string("report JSON ") + context +
+                                 " has an unexpected field count");
+    }
+    for (const auto& item : value.object) {
+        const bool known = std::any_of(allowed.begin(), allowed.end(), [&](const char* key) {
+            return item.first == key;
+        });
+        if (!known) {
+            throw std::runtime_error(std::string("report JSON ") + context +
+                                     " contains unknown field: " + item.first);
+        }
+    }
+}
+
 const JsonValue& required_field(const JsonValue& object, const char* name) {
     if (object.kind != JsonValue::Kind::Object) {
         throw std::runtime_error("report JSON value is not an object");
@@ -78,6 +104,15 @@ std::vector<std::string> required_string_array(const JsonValue& object, const ch
         result.push_back(item.scalar);
     }
     return result;
+}
+
+std::vector<std::string> optional_string_array(const JsonValue& object, const char* name) {
+    if (object.kind != JsonValue::Kind::Object) {
+        throw std::runtime_error("report JSON value is not an object");
+    }
+    const auto iterator = object.object.find(name);
+    if (iterator == object.object.end()) return {};
+    return required_string_array(object, name);
 }
 
 InputStatus status_from_name(const std::string& value) {
@@ -227,10 +262,13 @@ void parse_policy(const JsonValue& root, ElfReport& report) {
 
 ElfReport parse_report_json(const std::string& json) {
     const JsonValue root = detail::parse_json(json);
-    require_exact_object(root, "root",
-                         std::array<const char*, 10U>{"schema", "input", "status", "message",
-                                                      "tool", "elf", "dependencies", "abi",
-                                                      "policy", "diagnostics"});
+    // "symbols" is additive within abilens.report/v1: reports written before
+    // the field existed remain valid documents.
+    require_object(root, "root",
+                   std::array<const char*, 11U>{"schema", "input", "status", "message",
+                                                "tool", "elf", "dependencies", "abi",
+                                                "symbols", "policy", "diagnostics"},
+                   10U, 11U);
     if (required_string(root, "schema") != ElfReport::schema) {
         throw std::runtime_error("unsupported AbiLens report schema");
     }
@@ -242,6 +280,7 @@ ElfReport parse_report_json(const std::string& json) {
     parse_elf(root, report);
     parse_dependencies(root, report);
     parse_abi(root, report);
+    report.symbols = optional_string_array(root, "symbols");
     parse_policy(root, report);
     report.diagnostics = required_string_array(root, "diagnostics");
     return report;

@@ -6,61 +6,154 @@
   "additionalProperties": false,
   "allOf": [
     {
-      "if": {"properties": {"status": {"const": "valid"}}},
+      "if": {
+        "properties": {
+          "status": {
+            "const": "valid"
+          }
+        }
+      },
       "then": {
         "properties": {
           "tool": {
             "properties": {
-              "name": {"const": "abilens"},
-              "version": {"pattern": "^[0-9]+(?:\\.[0-9]+)+$"}
+              "name": {
+                "const": "abilens"
+              },
+              "version": {
+                "pattern": "^[0-9]+(?:\\.[0-9]+)+$"
+              }
             }
           }
         }
       }
     }
   ],
-  "required": ["schema", "input", "status", "message", "tool", "elf", "dependencies", "abi", "policy", "diagnostics"],
+  "required": [
+    "schema",
+    "input",
+    "status",
+    "message",
+    "tool",
+    "elf",
+    "dependencies",
+    "symbols",
+    "abi",
+    "policy",
+    "diagnostics"
+  ],
   "properties": {
-    "schema": {"const": "abilens.report/v1"},
-    "input": {"type": "string"},
-    "status": {"enum": ["valid", "non-elf", "corrupt", "unsupported", "unreadable", "tool-error"]},
-    "message": {"type": "string"},
+    "schema": {
+      "const": "abilens.report/v1"
+    },
+    "input": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "valid",
+        "non-elf",
+        "corrupt",
+        "unsupported",
+        "unreadable",
+        "tool-error"
+      ]
+    },
+    "message": {
+      "type": "string"
+    },
     "tool": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version"],
+      "required": [
+        "name",
+        "version"
+      ],
       "properties": {
-        "name": {"type": "string"},
-        "version": {"type": "string", "pattern": "^(?:$|[0-9]+(?:\\.[0-9]+)+)$"}
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^(?:$|[0-9]+(?:\\.[0-9]+)+)$"
+        }
       }
     },
     "elf": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["class", "endian", "type", "machine", "dynamic", "stripped"],
+      "required": [
+        "class",
+        "endian",
+        "type",
+        "machine",
+        "dynamic",
+        "stripped"
+      ],
       "properties": {
-        "class": {"type": "string"},
-        "endian": {"type": "string"},
-        "type": {"type": "string"},
-        "machine": {"type": "string"},
-        "dynamic": {"type": "boolean"},
-        "stripped": {"enum": ["yes", "no", "unknown"]}
+        "class": {
+          "type": "string"
+        },
+        "endian": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "machine": {
+          "type": "string"
+        },
+        "dynamic": {
+          "type": "boolean"
+        },
+        "stripped": {
+          "enum": [
+            "yes",
+            "no",
+            "unknown"
+          ]
+        }
       }
     },
     "dependencies": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["needed", "rpath", "runpath"],
+      "required": [
+        "needed",
+        "rpath",
+        "runpath"
+      ],
       "properties": {
-        "needed": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
-        "rpath": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
-        "runpath": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+        "needed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "rpath": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "runpath": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
       }
     },
     "abi": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["versions", "maximum"],
+      "required": [
+        "versions",
+        "maximum"
+      ],
       "properties": {
         "versions": {
           "type": "array",
@@ -68,22 +161,49 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["namespace", "version", "library"],
+            "required": [
+              "namespace",
+              "version",
+              "library"
+            ],
             "properties": {
-              "namespace": {"enum": ["GLIBC", "GLIBCXX", "CXXABI"]},
-              "version": {"pattern": "^[0-9]+(?:\\.[0-9]+)+$"},
-              "library": {"type": "string"}
+              "namespace": {
+                "enum": [
+                  "GLIBC",
+                  "GLIBCXX",
+                  "CXXABI"
+                ]
+              },
+              "version": {
+                "pattern": "^[0-9]+(?:\\.[0-9]+)+$"
+              },
+              "library": {
+                "type": "string"
+              }
             }
           }
         },
         "maximum": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["GLIBC", "GLIBCXX", "CXXABI"],
+          "required": [
+            "GLIBC",
+            "GLIBCXX",
+            "CXXABI"
+          ],
           "properties": {
-            "GLIBC": {"type": "string", "pattern": "^(?:$|[0-9]+(?:\\.[0-9]+)+)$"},
-            "GLIBCXX": {"type": "string", "pattern": "^(?:$|[0-9]+(?:\\.[0-9]+)+)$"},
-            "CXXABI": {"type": "string", "pattern": "^(?:$|[0-9]+(?:\\.[0-9]+)+)$"}
+            "GLIBC": {
+              "type": "string",
+              "pattern": "^(?:$|[0-9]+(?:\\.[0-9]+)+)$"
+            },
+            "GLIBCXX": {
+              "type": "string",
+              "pattern": "^(?:$|[0-9]+(?:\\.[0-9]+)+)$"
+            },
+            "CXXABI": {
+              "type": "string",
+              "pattern": "^(?:$|[0-9]+(?:\\.[0-9]+)+)$"
+            }
           }
         }
       }
@@ -91,13 +211,39 @@
     "policy": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["applied", "passed", "violations"],
+      "required": [
+        "applied",
+        "passed",
+        "violations"
+      ],
       "properties": {
-        "applied": {"type": "boolean"},
-        "passed": {"type": "boolean"},
-        "violations": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+        "applied": {
+          "type": "boolean"
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "violations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
       }
     },
-    "diagnostics": {"type": "array", "items": {"type": "string"}}
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "symbols": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    }
   }
 }

@@ -10,8 +10,8 @@ The product is intentionally narrow:
 
 - report ELF class, endian, type, machine, dynamic/static state, and stripped
   state where section evidence permits it;
-- collect `DT_NEEDED`, `DT_RPATH`, `DT_RUNPATH`, and typed GLIBC/GLIBCXX/CXXABI
-  version requirements;
+- collect `DT_NEEDED`, `DT_RPATH`, `DT_RUNPATH`, typed GLIBC/GLIBCXX/CXXABI
+  version requirements, and the defined dynamic-symbol export surface;
 - compare a report with another report or compare two binaries;
 - apply a small, documented ABI/dependency policy and emit deterministic JSON.
 
@@ -78,8 +78,10 @@ then comes from the file's own structures: `PT_DYNAMIC` dynamic entries, the
 dynamic string table translated through `PT_LOAD` segments, and version
 requirement records.  Because segment data is authoritative, `DT_NEEDED`,
 `DT_RPATH`, `DT_RUNPATH`, and GLIBC/GLIBCXX/CXXABI requirements are still
-recovered when section headers are stripped; sections are only consulted for
-the `.symtab` strippedness check.  All offsets, counts, sizes, and string
+recovered when section headers are stripped, as is the exported dynamic
+symbol set (from `DT_SYMTAB` bounded by `DT_HASH`/`DT_GNU_HASH`); sections are
+only consulted for the `.symtab` strippedness check.  All offsets, counts,
+sizes, and string
 indices are bounds-checked; out-of-file tables and oversized structures fail
 closed.
 
