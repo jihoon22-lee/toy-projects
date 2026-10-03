@@ -246,6 +246,7 @@ def _normalize_identity(identity: dict[str, Any]) -> dict[str, object]:
         key: _string(identity.get(key), f"identity.{key}")
         for key in (
             "implementation",
+            "environment_kind",
             "version",
             "cache_tag",
             "platform",
@@ -332,7 +333,7 @@ def collect_snapshot(
     variables = _scalar_mapping(sysconfig.get("variables"), "sysconfig.variables")
     public_identity = _normalize_identity(identity)
     return {
-        "schema_version": "envlens.snapshot/v1",
+        "schema_version": "envlens.snapshot/v2",
         "producer": {"name": "envlens", "version": __version__},
         "captured_at": _timestamp(captured_at),
         "redaction": {"policy": "envlens-redaction/v1", "enabled": redact},

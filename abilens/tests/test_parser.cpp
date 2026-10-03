@@ -102,13 +102,16 @@ struct StringTable {
 // whole file 1:1 at vaddr 0 so every virtual address equals its file offset.
 // Dynamic entries: NEEDED libstdc++/libc, RPATH /opt/abi:$ORIGIN/lib, RUNPATH
 // $ORIGIN/plugins; verneed libc→GLIBC_2.34, libstdc++→GLIBCXX_3.4.30 +
-// CXXABI_1.3.13.  Section headers hold one .symtab when requested.
+// CXXABI_1.3.13.  A SysV DT_HASH + DT_SYMTAB exports two defined symbols and
+// one undefined import.  Section headers hold one .symtab when requested.
 std::vector<unsigned char> synthetic_elf(bool with_symtab, bool with_sections) {
     constexpr std::size_t phoff = 0x40;
     constexpr std::size_t dynoff = 0x100;
     constexpr std::size_t stroff = 0x200;
-    constexpr std::size_t vnoff = 0x280;
-    constexpr std::size_t shoff = 0x300;
+    constexpr std::size_t vnoff = 0x300;
+    constexpr std::size_t shoff = 0x380;
+    constexpr std::size_t symoff = 0x440;
+    constexpr std::size_t hashoff = 0x4a0;
     StringTable strtab;
     const std::uint64_t s_libstdcxx = strtab.add("libstdc++.so.6");
     const std::uint64_t s_libc = strtab.add("libc.so.6");
@@ -117,9 +120,12 @@ std::vector<unsigned char> synthetic_elf(bool with_symtab, bool with_sections) {
     const std::uint64_t s_glibc = strtab.add("GLIBC_2.34");
     const std::uint64_t s_glibcxx = strtab.add("GLIBCXX_3.4.30");
     const std::uint64_t s_cxxabi = strtab.add("CXXABI_1.3.13");
+    const std::uint64_t s_export_a = strtab.add("abilens_export_a");
+    const std::uint64_t s_export_b = strtab.add("abilens_export_b");
+    const std::uint64_t s_import = strtab.add("abilens_import_x");
 
     const std::uint16_t shnum = with_sections ? (with_symtab ? 2U : 1U) : 0U;
-    std::vector<unsigned char> file(shoff + (with_sections ? 2U * 64U : 0U), 0U);
+    std::vector<unsigned char> file(0x500, 0U);
 
     // ELF64 header.
     file[0] = 0x7f; file[1] = 'E'; file[2] = 'L'; file[3] = 'F';
@@ -148,9 +154,9 @@ std::vector<unsigned char> synthetic_elf(bool with_symtab, bool with_sections) {
     put32(file, phoff + 56, 2);
     put64(file, phoff + 56 + 8, dynoff);
     put64(file, phoff + 56 + 16, dynoff);
-    put64(file, phoff + 56 + 40, 9U * 16U);
+    put64(file, phoff + 56 + 40, 11U * 16U);
 
-    // Dynamic entries (tag, value) x9 + terminator slot left zero.
+    // Dynamic entries (tag, value) x11 + terminator slot left zero.
     const std::uint64_t dynamics[][2] = {
         {1, s_libstdcxx},   // DT_NEEDED
         {1, s_libc},        // DT_NEEDED
@@ -160,14 +166,29 @@ std::vector<unsigned char> synthetic_elf(bool with_symtab, bool with_sections) {
         {10, 0},            // DT_STRSZ (patched below)
         {0x6ffffffe, vnoff},// DT_VERNEED
         {0x6fffffff, 2},    // DT_VERNEEDNUM
+        {6, symoff},        // DT_SYMTAB
+        {4, hashoff},       // DT_HASH
         {0, 0},             // DT_NULL
     };
-    for (std::size_t i = 0; i < 9U; ++i) {
+    for (std::size_t i = 0; i < 11U; ++i) {
         put64(file, dynoff + i * 16U, dynamics[i][0]);
         put64(file, dynoff + i * 16U + 8U, dynamics[i][1]);
     }
     std::copy(strtab.bytes.begin(), strtab.bytes.end(), file.begin() + stroff);
     put64(file, dynoff + 5U * 16U + 8U, strtab.bytes.size());  // DT_STRSZ
+
+    // SysV DT_HASH: [nbucket][nchain][buckets][chains]; nchain counts dynsym.
+    put32(file, hashoff, 1);          // nbucket
+    put32(file, hashoff + 4, 4);      // nchain = 4 entries
+    put32(file, hashoff + 8, 1);      // bucket[0] -> symbol 1
+
+    // DT_SYMTAB: 24-byte ELF64 entries; shndx 0 marks an undefined import.
+    put32(file, symoff + 24, static_cast<std::uint32_t>(s_import));   // st_name
+    put16(file, symoff + 24 + 6, 0);                                  // SHN_UNDEF
+    put32(file, symoff + 48, static_cast<std::uint32_t>(s_export_a));
+    put16(file, symoff + 48 + 6, 1);                                  // defined
+    put32(file, symoff + 72, static_cast<std::uint32_t>(s_export_b));
+    put16(file, symoff + 72 + 6, 1);                                  // defined
 
     // Verneed record 1: libc.so.6 → GLIBC_2.34.
     put16(file, vnoff, 1);            // vn_version
@@ -212,6 +233,8 @@ abilens::ElfReport test_native_inspector() {
     expect(parsed.runpath.size() == 1U && parsed.runpath.front() == "$ORIGIN/plugins",
            "RUNPATH is parsed");
     expect(parsed.versions.size() == 3U, "typed ABI requirements are parsed");
+    expect(parsed.symbols.size() == 2U && parsed.symbols.front() == "abilens_export_a",
+           "defined dynamic symbols are parsed and sorted");
     expect(parsed.stripped_known && !parsed.stripped, "symtab marks a binary as unstripped");
 
     const abilens::ElfReport stripped =
@@ -332,10 +355,17 @@ void test_diff_contract(const abilens::ElfReport& parsed) {
     abilens::ElfReport changed = parsed;
     changed.needed.push_back("libm.so.6");
     changed.versions.push_back({"GLIBC", "2.35", "libc.so.6"});
+    changed.symbols.push_back("abilens_export_c");
     const abilens::DiffReport diff = abilens::diff_reports(parsed, changed);
     expect(diff.changed && !diff.compatible, "ABI diff marks a raised requirement");
     expect(diff.needed.added.size() == 1U && diff.needed.added.front() == "libm.so.6",
            "dependency additions are reported");
+    expect(diff.symbols.added.size() == 1U &&
+               diff.symbols.added.front() == "abilens_export_c",
+           "exported symbol additions are reported");
+    expect(abilens::serialize_diff(diff).find("\"symbols\":{\"added\":[\"abilens_export_c\"]") !=
+               std::string::npos,
+           "diff JSON carries the symbol axis");
     expect(abilens::serialize_diff(diff) == abilens::serialize_diff(diff),
            "diff JSON is deterministic");
     abilens::DiffReport byte_diff = diff;

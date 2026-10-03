@@ -42,10 +42,16 @@ One malformed distribution does not discard healthy distributions. Its error
 records are retained in that distribution and the overall collection is marked
 `partial` while the command still succeeds.
 
-## The `envlens.snapshot/v1` contract
+## The `envlens.snapshot/v2` contract
 
 The checked-in strict schema is
-[`schemas/envlens-snapshot-v1.schema.json`](schemas/envlens-snapshot-v1.schema.json).
+[`schemas/envlens-snapshot-v2.schema.json`](schemas/envlens-snapshot-v2.schema.json).
+The earlier [`v1`](schemas/envlens-snapshot-v1.schema.json) schema stays
+readable: snapshot inputs on the diff path accept both versions. The v2 change
+is additive — `source.identity.environment_kind` reports whether the selected
+interpreter is a `conda` environment (`conda-meta` present), a `virtualenv`
+(`pyvenv.cfg` or a `prefix`/`base_prefix` split), or the `system` interpreter.
+
 Its top-level fields are:
 
 ```text
@@ -54,7 +60,10 @@ source          environment  distributions  collection
 ```
 
 `source` contains the requested and resolved executable plus `identity` and
-`sysconfig` objects. `environment.variables` contains the captured environment.
+`sysconfig` objects. The probe runs through the requested executable path, so
+a venv or conda interpreter is inspected as itself; `resolved_executable`
+still records the backing real binary. `environment.variables` contains the
+captured environment.
 Each distribution has `metadata`, `entry_points`, `location`, `status` (`ok` or
 `error`), and structured `errors`. `collection` reports `complete` or `partial`,
 the distribution count, and the total error count.

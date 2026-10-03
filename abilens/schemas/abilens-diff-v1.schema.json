@@ -4,37 +4,102 @@
   "title": "AbiLens ELF diff",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "left", "right", "changed", "compatible", "left_status", "right_status", "header_changes", "dependencies", "abi", "diagnostics"],
+  "required": [
+    "schema",
+    "left",
+    "right",
+    "changed",
+    "compatible",
+    "left_status",
+    "right_status",
+    "header_changes",
+    "dependencies",
+    "symbols",
+    "abi",
+    "diagnostics"
+  ],
   "properties": {
-    "schema": {"const": "abilens.diff/v1"},
-    "left": {"type": "string"},
-    "right": {"type": "string"},
-    "changed": {"type": "boolean"},
-    "compatible": {"type": "boolean"},
-    "left_status": {"type": "string"},
-    "right_status": {"type": "string"},
-    "header_changes": {"type": "array", "items": {"type": "string"}},
+    "schema": {
+      "const": "abilens.diff/v1"
+    },
+    "left": {
+      "type": "string"
+    },
+    "right": {
+      "type": "string"
+    },
+    "changed": {
+      "type": "boolean"
+    },
+    "compatible": {
+      "type": "boolean"
+    },
+    "left_status": {
+      "type": "string"
+    },
+    "right_status": {
+      "type": "string"
+    },
+    "header_changes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "dependencies": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["needed", "rpath", "runpath"],
+      "required": [
+        "needed",
+        "rpath",
+        "runpath"
+      ],
       "properties": {
-        "needed": {"$ref": "#/$defs/setDiff"},
-        "rpath": {"$ref": "#/$defs/setDiff"},
-        "runpath": {"$ref": "#/$defs/setDiff"}
+        "needed": {
+          "$ref": "#/$defs/setDiff"
+        },
+        "rpath": {
+          "$ref": "#/$defs/setDiff"
+        },
+        "runpath": {
+          "$ref": "#/$defs/setDiff"
+        }
       }
     },
-    "abi": {"$ref": "#/$defs/setDiff"},
-    "diagnostics": {"type": "array", "items": {"type": "string"}}
+    "abi": {
+      "$ref": "#/$defs/setDiff"
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "symbols": {
+      "$ref": "#/$defs/setDiff"
+    }
   },
   "$defs": {
     "setDiff": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["added", "removed"],
+      "required": [
+        "added",
+        "removed"
+      ],
       "properties": {
-        "added": {"type": "array", "items": {"type": "string"}},
-        "removed": {"type": "array", "items": {"type": "string"}}
+        "added": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "removed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       }
     }
   }

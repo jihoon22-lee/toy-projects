@@ -85,7 +85,9 @@ std::string serialize_report(const ElfReport& report) {
            << json_escape(report.stripped_known ? (report.stripped ? "yes" : "no") : "unknown")
            << "},\"dependencies\":{\"needed\":" << json_string_array(needed)
            << ",\"rpath\":" << json_string_array(rpath)
-           << ",\"runpath\":" << json_string_array(runpath) << "},\"abi\":{\"versions\":[";
+           << ",\"runpath\":" << json_string_array(runpath)
+           << "},\"symbols\":" << json_string_array(sorted_strings(report.symbols))
+           << ",\"abi\":{\"versions\":[";
     for (std::size_t index = 0; index < versions.size(); ++index) {
         if (index != 0U) {
             output << ',';
@@ -124,6 +126,7 @@ void append_elf_text(std::ostringstream& output, const ElfReport& report) {
     append_text_values(output, "NEEDED", report.needed);
     append_text_values(output, "RPATH", report.rpath);
     append_text_values(output, "RUNPATH", report.runpath);
+    output << "  dynamic symbols: " << report.symbols.size() << "\n";
     output << "  ABI maximums: GLIBC=" << maximum_version(report, "GLIBC")
            << " GLIBCXX=" << maximum_version(report, "GLIBCXX")
            << " CXXABI=" << maximum_version(report, "CXXABI") << "\n";
