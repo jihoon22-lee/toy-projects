@@ -1,5 +1,6 @@
 #include "loglens/log_parser.hpp"
 
+#include "loglens/format_plugin.hpp"
 #include "json_line_parser.hpp"
 
 #include <algorithm>
@@ -396,6 +397,58 @@ LogRecord parseLine(const std::string& line, Format format, std::size_t lineNumb
     return record;
 }
 
+LogRecord parsePluginLine(const std::string& line, const FormatPlugin& plugin,
+                          std::size_t lineNumber) {
+    LogRecord record;
+    record.raw = line;
+    record.line_number = lineNumber;
+    record.input_bytes = line.size();
+
+    std::smatch match;
+    if (!std::regex_match(line, match, plugin.pattern)) {
+        record.message = line;
+        return record;
+    }
+    record.parse_status = ParseStatus::Parsed;
+
+    const auto field = [&](std::size_t group) -> std::string {
+        return group != 0 && group < match.size() ? match[group].str() : std::string();
+    };
+    if (plugin.fields.timestamp != 0) {
+        const std::string token = field(plugin.fields.timestamp);
+        if (token.empty()) {
+            addDiagnostic(record, ParseDiagnosticCode::MissingField, "timestamp", 0,
+                          "plugin record has no timestamp capture");
+        } else {
+            const detail::TimestampResult parsed = detail::parseIsoTimestamp(token);
+            if (parsed.valid) {
+                record.timestamp_ms = parsed.value;
+            } else {
+                addDiagnostic(record, parsed.code, "timestamp", 0, parsed.message);
+            }
+        }
+    }
+    if (plugin.fields.level != 0) {
+        const std::string token = field(plugin.fields.level);
+        record.level = parseLevel(token);
+        if (token.empty()) {
+            addDiagnostic(record, ParseDiagnosticCode::MissingField, "level", 0,
+                          "plugin record has no level capture");
+        } else if (record.level == Level::Unknown) {
+            addDiagnostic(record, ParseDiagnosticCode::InvalidField, "level", 0,
+                          "plugin record has an unknown level token");
+        }
+    }
+    if (plugin.fields.source != 0) {
+        record.source = field(plugin.fields.source);
+    }
+    record.message = field(plugin.fields.message);
+    if (record.message.empty()) {
+        record.message = line;
+    }
+    return record;
+}
+
 RecordAssembler::RecordAssembler(Format format, EncodingErrorPolicy encodingPolicy,
                                  std::size_t maxRecordBytes, MultilinePolicy multilinePolicy)
     : format_(format), encoding_error_policy_(encodingPolicy),
@@ -437,7 +490,9 @@ std::vector<RecordDelta> RecordAssembler::consumeCompleteLine(const std::string&
         return deltas;
     }
 
-    pending_record_ = parseLine(line, format_, physicalLine);
+    pending_record_ = format_plugin_ != nullptr
+                          ? parsePluginLine(line, *format_plugin_, physicalLine)
+                          : parseLine(line, format_, physicalLine);
     pending_record_.input_bytes = saturatingAdd(line.size(), omittedBytes);
     pending_record_.omitted_bytes =
         pending_record_.input_bytes - pending_record_.raw.size();
@@ -519,6 +574,12 @@ void RecordAssembler::reset(std::uint64_t generation, std::size_t firstLineNumbe
 }
 
 void RecordAssembler::setFormat(Format format) { format_ = format; }
+
+void RecordAssembler::setFormatPlugin(const FormatPlugin* plugin) {
+    format_plugin_ = plugin;
+}
+
+const FormatPlugin* RecordAssembler::formatPlugin() const { return format_plugin_; }
 
 Format RecordAssembler::format() const { return format_; }
 
