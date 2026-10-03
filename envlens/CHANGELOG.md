@@ -1,13 +1,13 @@
 # Changelog
 
-## Unreleased
+## [0.2.1](https://github.com/jihoon22-lee/toy-projects/compare/envlens/v0.1.2...envlens/v0.2.1) (2026-10-03)
+
+### Implementation details shipped in 0.2.1
 
 - Fix venv execution, relative compilation roots and console return values.
 - Add snapshot v3 origin/platform evidence, PEP standards evaluation, transitive
   extras, dependency paths, import overlap and CI policies.
 - Bound compilation batches and protect report inputs from output aliases.
-
-## [0.2.1](https://github.com/jihoon22-lee/toy-projects/compare/envlens/v0.2.0...envlens/v0.2.1) (2026-10-03)
 
 
 ### Features
@@ -32,7 +32,9 @@
 * **envlens:** record merged validation evidence ([#51](https://github.com/jihoon22-lee/toy-projects/issues/51)) ([371ebe4](https://github.com/jihoon22-lee/toy-projects/commit/371ebe499e628a6dbb786666b0943ddbdd369012))
 * reset documentation around each product's own purpose ([#81](https://github.com/jihoon22-lee/toy-projects/issues/81)) ([e5de21a](https://github.com/jihoon22-lee/toy-projects/commit/e5de21a908a037a24fa98dc609e609c7519cad36))
 
-## [0.2.0](https://github.com/jihoon22-lee/toy-projects/compare/envlens/v0.1.2...envlens/v0.2.0) (2026-10-03)
+## 0.2.0 — unpublished release plan (2026-10-03)
+
+The 0.2.0 tag was not published; this implementation shipped in 0.2.1.
 
 
 ### Features
@@ -46,7 +48,7 @@
 
 * **envlens:** keep standing external requirements from failing diff and check ([02ed1e7](https://github.com/jihoon22-lee/toy-projects/commit/02ed1e709fea7b861be3135d4e238332bb3056ae))
 
-## [0.1.1](https://github.com/jihoon22-lee/toy-projects/compare/envlens/v0.1.0...envlens/v0.1.1) (2026-10-03)
+## [0.1.1](https://github.com/jihoon22-lee/toy-projects/releases/tag/envlens/v0.1.1) (2026-10-03)
 
 
 ### Features
@@ -69,7 +71,7 @@
 * **envlens:** record merged validation evidence ([#51](https://github.com/jihoon22-lee/toy-projects/issues/51)) ([371ebe4](https://github.com/jihoon22-lee/toy-projects/commit/371ebe499e628a6dbb786666b0943ddbdd369012))
 * reset documentation around each product's own purpose ([#81](https://github.com/jihoon22-lee/toy-projects/issues/81)) ([e5de21a](https://github.com/jihoon22-lee/toy-projects/commit/e5de21a908a037a24fa98dc609e609c7519cad36))
 
-## 0.1.0 (unreleased)
+## 0.1.0 — unpublished initial prototype
 
 Baseline: native build, test, and release pipeline established for envlens.
 The `envlens/v0.1.0` tag name is permanently unavailable after an earlier

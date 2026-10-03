@@ -390,7 +390,7 @@ bool MainWindow::saveSessionTo(const QString& path) {
         }
         state.plugin_fingerprint = formatPlugin_->document_fingerprint;
     }
-    const QByteArray filterBytes = filterEdit_->text().toUtf8();
+    const QByteArray filterBytes = activeFilterText_.toUtf8();
     state.filter = std::string(filterBytes.constData(),
                                static_cast<std::size_t>(filterBytes.size()));
     const QByteArray targetBytes = path.toUtf8();

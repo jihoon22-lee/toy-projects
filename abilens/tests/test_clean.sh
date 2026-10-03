@@ -33,6 +33,16 @@ owned=$root/owned
     echo "owned marker was not created" >&2
     exit 1
 }
+ln -s "$owned" "$root/owned-link"
+for alias in "$root/owned-link" "$root/owned-link/" "$root/owned-link/."; do
+    for action in build clean; do
+        if "$guard" "$action" "$alias" >/dev/null 2>&1; then
+            echo "guard unexpectedly accepted symlink OUT: $alias" >&2
+            exit 1
+        fi
+        [ -f "$owned/.abilens-out" ] || exit 1
+    done
+done
 "$guard" clean "$owned"
 [ ! -e "$owned" ] || {
     echo "owned output was not cleaned" >&2

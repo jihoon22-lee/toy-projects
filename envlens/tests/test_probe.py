@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import io
 import os
+import signal
 import stat
 import subprocess
 import sys
 import time
+from contextlib import suppress
 from pathlib import Path
 from unittest.mock import patch
 
@@ -224,6 +226,38 @@ def test_run_bounded_does_not_wait_forever_for_inherited_pipe_fds() -> None:
     assert stdout == b"done\n"
     assert stderr == b""
     assert return_code == 0
+
+
+@pytest.mark.skipif(os.name != "posix", reason="detached POSIX session regression")
+@pytest.mark.parametrize("parent_waits", [False, True])
+def test_detached_descendant_cannot_block_pipe_cleanup(tmp_path: Path, parent_waits: bool) -> None:
+    pid_file = tmp_path / "child.pid"
+    parent = (
+        "import subprocess,sys,time,pathlib; "
+        "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'], "
+        "start_new_session=True); "
+        f"pathlib.Path({str(pid_file)!r}).write_text(str(child.pid)); "
+        "print('done',flush=True); " + ("time.sleep(30)" if parent_waits else "pass")
+    )
+    wrapper = (
+        "import sys,threading; from envlens import probe; "
+        "probe.READER_DRAIN_SECONDS=0.1; "
+        "before=threading.active_count(); "
+        f"command=[sys.executable,'-c',{parent!r}]\n"
+        "try:\n"
+        " result=probe._run_bounded(command,1)\n"
+        " assert result==(b'done\\n',b'',0),result\n"
+        "except probe.ProbeError as error:\n"
+        f" assert {parent_waits!r} and error.code=='probe-timeout'\n"
+        "assert threading.active_count()==before\n"
+    )
+    try:
+        result = subprocess.run([sys.executable, "-c", wrapper], capture_output=True, timeout=5)
+        assert result.returncode == 0, result.stderr.decode()
+    finally:
+        if pid_file.exists():
+            with suppress(ProcessLookupError):
+                os.kill(int(pid_file.read_text()), signal.SIGKILL)
 
 
 @pytest.mark.skipif(not hasattr(os, "environb"), reason="byte environments are POSIX-only")

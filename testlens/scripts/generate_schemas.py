@@ -99,8 +99,19 @@ RUN = obj(
         "executed_at": nullable(DATE),
         "metadata": mapping(S),
         "scope": {"type": "string", "minLength": 1},
-        "complete": B,
-        "declared_complete": B,
+        "complete": {
+            **B,
+            "description": (
+                "Caller-declared coverage without critical collection diagnostics or "
+                "unknown/unnamed test results. A named not-run observation does not itself "
+                "make coverage incomplete. "
+                "The validator additionally checks these cross-field semantics."
+            ),
+        },
+        "declared_complete": {
+            **B,
+            "description": "The caller's --complete assertion before collection-quality checks.",
+        },
         "source_root": nullable(S),
         "expected_shards": arr(S),
         "observed_shards": arr(S),

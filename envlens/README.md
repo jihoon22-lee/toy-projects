@@ -4,9 +4,13 @@ envlens is a pure-Python library and CLI for making deterministic, offline
 inventories of explicitly selected Python interpreters, comparing those
 inventories, and checking a project against configured runtimes.
 
-The package metadata and `--version` output identify the `0.2.0` development
-checkpoint. Releases are published separately using independent `envlens/vX.Y.Z`
-tags; building this checkout does not publish a release.
+The package metadata and `envlens --version` identify the checkout or installed
+version. Published releases use independent `envlens/vX.Y.Z` tags.
+
+Install from this repository with `python3 -m pip install ./envlens`, or run
+`python3 -m pip install .` from the product directory. The examples below use
+the installed `envlens` command. Replace `/path/to/...` and application names
+with the interpreter and project being inspected.
 
 ## Capture a snapshot
 
@@ -106,18 +110,17 @@ Probe execution has bounded failure behavior:
 - the default timeout is 10 seconds (`--timeout-seconds` changes it);
 - probe stdout is capped at 8 MiB and retained stderr is capped at 64 KiB;
 - POSIX probes run in a new session/process group, and Windows probes in a new
-  process group; timeout or inherited-pipe cleanup terminates descendants
+  process group; timeout or inherited-pipe cleanup attempts to terminate descendants
   (`SIGTERM` then bounded `SIGKILL` on POSIX, `taskkill /T /F` on Windows); and
 - missing or non-executable interpreters, nonzero probe exits, timeouts,
   oversized output, malformed protocol JSON, invalid protocol shapes, and
   output failures produce exit status `2` with a concise user-facing error.
 
-The process-group handling prevents a child that inherits stdout/stderr from
-making envlens wait forever, but it is best-effort cleanup rather than an OS
-sandbox. envlens executes the selected interpreter as the current user and does
-not block that interpreter’s filesystem or network access. Inspect unknown
-interpreters without secrets and, when appropriate, inside an externally
-enforced disposable container or VM.
+On POSIX, nonblocking pipe readers stop after the bounded drain interval even
+when a detached descendant holds stdout/stderr open. Such detached processes
+are outside the original process group and may remain running; envlens does
+not claim to terminate them. Interpreter and runtime checks run with the current
+user's permissions.
 
 Snapshot files are written by an atomic same-directory replacement. On POSIX a
 successful file is mode `0600`; symlink and special-file destinations, a
@@ -151,6 +154,10 @@ means the bounded metadata and version evaluator reached a direct conclusion;
 `unknown` is used for partial snapshots, unsupported requirement/marker
 syntax, absent import/wheel evidence, or versions outside the evaluator. No
 resolver, package index, wheel download, or network request is performed.
+Incomplete or ambiguous collection produces an explicit `collection` evidence
+record. A partial snapshot cannot produce an overall `compatible` check or an
+`unchanged` diff, including when no requirements were recovered. A definite
+incompatibility still takes precedence over unknown evidence.
 
 Distributions that declare `Requires-External` metadata (system libraries,
 tools, or headers outside Python packaging) surface as `external-requirement`
@@ -231,7 +238,13 @@ The test suite covers the CLI, atomic I/O, the probe/process boundary,
 redaction, snapshot normalization and schema, snapshot diff, and the
 project/runtime/input boundaries:
 
+Run from `envlens/`; this installs the runtime and development tools into a local
+environment before checking them:
+
 ```sh
+uv venv .venv
+uv pip install --python .venv/bin/python -e . pytest ruff mypy jsonschema
+export PATH="$PWD/.venv/bin:$PATH"
 PYTHONPATH=src python -m pytest tests
 ruff check src tests && ruff format --check src tests
 mypy --strict --python-version 3.10 src/envlens
@@ -273,5 +286,7 @@ envlens diff --before before.json --after after.json --format json --fail-on unk
 
 Runtime checks preserve a virtual environment's executable path, use absolute
 source paths, batch compilation within one timeout, and honor console entry-point
-return values through `SystemExit`. Snapshot/report output cannot replace an input
-snapshot or project file, including symlink/hardlink aliases.
+return values through `SystemExit`. Diff/check output cannot replace input snapshots
+or the supplied project file. Runtime output cannot replace its project metadata,
+enumerated compile sources or selected interpreters; the check runs before execution
+and includes symlink/hardlink aliases. Existing report files can still be replaced.

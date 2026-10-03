@@ -107,6 +107,21 @@ def _base_case(
     }
 
 
+def _diagnose_case(
+    record: Document, raw_status: str, raw_duration: str | None, diagnostics: list[Document]
+) -> None:
+    """Apply the same observation-quality contract to every XML dialect."""
+    if record["status"] == "unknown":
+        diagnostics.append(
+            {"code": "unsupported-status", "message": f"{record['locator']}: {raw_status!r}"}
+        )
+    if not record["name"]:
+        record["status"] = "unknown"
+        diagnostics.append({"code": "missing-name", "message": record["locator"]})
+    if raw_duration is not None and record["duration_seconds"] is None:
+        diagnostics.append({"code": "invalid-duration", "message": record["locator"]})
+
+
 def junit(
     root: Element, source: str, dialect: str, limits: Limits
 ) -> tuple[list[Document], list[Document]]:
@@ -206,15 +221,7 @@ def junit(
                 "runner-target" if dialect == "ctest-junit" else "test-case",
                 limits,
             )
-            if state == "unknown":
-                diagnostics.append(
-                    {"code": "unsupported-status", "message": f"{record['locator']}: {status}"}
-                )
-            if not record["name"]:
-                record["status"] = "unknown"
-                diagnostics.append({"code": "missing-name", "message": record["locator"]})
-            if case.get("time") is not None and duration is None:
-                diagnostics.append({"code": "invalid-duration", "message": record["locator"]})
+            _diagnose_case(record, status, case.get("time"), diagnostics)
             record["properties"] = {**props, **_properties(case)}
             record["source_file"] = case.get("file")
             record["source_line"] = case.get("line")
@@ -302,6 +309,7 @@ def ctest(root: Element, source: str, limits: Limits) -> tuple[list[Document], l
                 "runner-target",
                 limits,
             )
+            _diagnose_case(record, raw_state, measurements.get("Execution Time"), diagnostics)
             record["properties"] = measurements
             record["source_file"] = child_text(test, "Path") or None
             outputs = []

@@ -593,6 +593,7 @@ void MainWindow::applyFilter() {
 bool MainWindow::applyFilterText(const QString& text, const QString& successMessage) {
     if (text.trimmed().isEmpty()) {
         filter_.reset();
+        activeFilterText_.clear();
         timeline_->clearSelection();
         model_->setFilter(nullptr);
         refreshTimeline();
@@ -610,6 +611,7 @@ bool MainWindow::applyFilterText(const QString& text, const QString& successMess
         return false;
     }
     filter_ = candidate;
+    activeFilterText_ = text;
     timeline_->clearSelection();
     model_->setFilter(&filter_.value());
     refreshTimeline();

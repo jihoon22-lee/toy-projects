@@ -1,6 +1,6 @@
 # BuildScope
 
-BuildScope **0.2.0 (development)** investigates C/C++ compilation databases, include evidence and affected translation units. It is one independent C++20/Qt6 product: `buildscope` produces snapshots and queries, `buildscope-cli` validates saved contracts, and `buildscope-gui` provides the desktop explorer. This development checkpoint has not been published.
+BuildScope investigates C/C++ compilation databases, include evidence and affected translation units. It is one independent C++20/Qt6 product: `buildscope` produces snapshots and queries, `buildscope-cli` validates saved contracts, and `buildscope-gui` provides the desktop explorer. Use `buildscope --version` for the installed version.
 
 Normalization and lexical include estimation do not execute commands. Compiler replay occurs only when explicitly selecting `compiler` or selected-unit `delayed` analysis. It runs an allowlisted GCC/Clang preprocessing command without a shell; BuildScope never invokes the recorded build command as a general build.
 
@@ -9,16 +9,22 @@ Normalization and lexical include estimation do not execute commands. Compiler r
 Dependencies: CMake 3.16+, a C++20 compiler, Qt6 Core, Widgets, Concurrent and Test. On Debian/Ubuntu, `build-essential cmake qt6-base-dev` supplies the usual build dependencies. The producer links Qt Core; the GUI additionally links Widgets/Concurrent. Python is not a runtime or test dependency.
 
 ```sh
+# Run from the repository root.
 cmake -S buildscope -B /tmp/buildscope-build -DCMAKE_BUILD_TYPE=Release
 cmake --build /tmp/buildscope-build -j2
 ctest --test-dir /tmp/buildscope-build --output-on-failure
 cmake --install /tmp/buildscope-build --prefix /tmp/buildscope-install
 /tmp/buildscope-install/bin/buildscope --version
+export PATH="/tmp/buildscope-install/bin:$PATH"
 ```
 
 All three executables install under `bin/`. Schemas and examples install under `share/buildscope/`, documentation under `share/doc/buildscope/`, and the desktop entry/icon under `share/applications/` and `share/icons/hicolor/scalable/apps/`. The installed tools work without the source checkout. Runtime Qt libraries must be available on the target Linux system. Version ownership is `CMakeLists.txt`; all executable versions derive from it. Independent release tags use `buildscope/vX.Y.Z`.
 
 ## CLI workflow
+
+These examples use the installed commands above and the compilation database of
+the project being inspected. Replace database/header paths with that project's
+paths. The [quickstart](docs/quickstart.md) provides runnable repository fixtures.
 
 ```sh
 # Default normalized v2 snapshot; no compiler execution.
@@ -63,6 +69,9 @@ A nonzero compiler exit, timeout, cancellation, malformed trace, missing source 
 Snapshots reject duplicate JSON keys, unsupported versions, unknown contract fields, invalid ranges and inconsistent provenance. v4 readers also validate counters against declared limits and refuse a complete analysis with a stop reason or fallback. The schemas under `schemas/` are self-contained. v1 compatibility retains permissive legacy extension behavior; strict v2–v4 validate normalized/state cross-entry consistency.
 
 Normalized records preserve compiler family/name/path, wrappers, ordered define/undefine actions, ordered include paths, language, standard, sysroot, target, directory/source/output path records, invocation form, configuration digest, duplicate annotation and source status. `arguments` is authoritative when both invocation forms exist. Tokenization does not expand environment variables, shell substitution, globs or response files. Configuration digests identify recorded effective invocations; they are not content hashes or relocation-invariant semantic identifiers.
+
+Project-relative include paths remain relative to the project root even when
+classified as `vendor`; classification does not change the search directory.
 
 ## Budgets and replay boundary
 

@@ -1,6 +1,6 @@
 # BuildScope quickstart
 
-BuildScope 0.2.0 (development) supports two workflows:
+BuildScope supports two workflows:
 
 1. The `buildscope` producer executable reads an existing
    `compile_commands.json` and writes a versioned snapshot (or diff report).
@@ -29,6 +29,7 @@ scratch_root="$(mktemp -d /tmp/buildscope-quickstart.XXXXXX)"
 cmake -S "$repo_root/buildscope" -B "$scratch_root/build" \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build "$scratch_root/build" --parallel 2
+export PATH="$scratch_root/build/src/native:$scratch_root/build/src/core:$scratch_root/build/src/gui:$PATH"
 ```
 
 The producer lands at `$scratch_root/build/src/native/buildscope`, the

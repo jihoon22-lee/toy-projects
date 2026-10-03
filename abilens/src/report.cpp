@@ -112,7 +112,10 @@ std::string serialize_report(const ElfReport& report) {
            << "},\"evidence\":" << detail::serialize_evidence(report)
            << ",\"diagnostics\":" << json_string_array(diagnostics) << '}';
     const auto serialized = output.str();
-    if (serialized.size() > 8U * 1024U * 1024U) throw std::runtime_error("report exceeds 8 MiB output budget");
+    if (serialized.size() > detail::kMaxReportBytes) throw std::runtime_error("report exceeds 8 MiB output budget");
+    // Enforce the same structural budget on output as on input. Never emit a
+    // report that a later offline diff rejects solely because of its shape.
+    (void)detail::parse_json(serialized);
     return serialized;
 }
 

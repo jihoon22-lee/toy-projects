@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.1](https://github.com/jihoon22-lee/toy-projects/compare/loglens/v0.2.0...loglens/v0.2.1) (2026-10-03)
+## [0.2.1](https://github.com/jihoon22-lee/toy-projects/compare/loglens/v0.1.2...loglens/v0.2.1) (2026-10-03)
 
 
 ### Features
@@ -30,14 +30,16 @@
 * **loglens:** preserve filtered append indexes ([#19](https://github.com/jihoon22-lee/toy-projects/issues/19)) ([bd1b6cd](https://github.com/jihoon22-lee/toy-projects/commit/bd1b6cdec89c45e0f4283fae84630002271b933e))
 * **loglens:** preserve parser state across file polls ([#14](https://github.com/jihoon22-lee/toy-projects/issues/14)) ([87927b4](https://github.com/jihoon22-lee/toy-projects/commit/87927b4135536d80e5b255816912af7f7c0e5e9b))
 
-## [0.2.0](https://github.com/jihoon22-lee/toy-projects/compare/loglens/v0.1.2...loglens/v0.2.0) (2026-10-03)
+## 0.2.0 — unpublished release plan (2026-10-03)
+
+The 0.2.0 tag was not published; this implementation shipped in 0.2.1.
 
 
 ### Features
 
 * expand eight independent diagnostic tools and verified releases ([#120](https://github.com/jihoon22-lee/toy-projects/issues/120)) ([3a01bb9](https://github.com/jihoon22-lee/toy-projects/commit/3a01bb93c3fee936a335bb9445400b5f469d6a87))
 
-## 0.2.0 — development checkpoint
+### Implementation details shipped in 0.2.1
 
 - Bind triage to file identity, generation and full-record SHA-256; preserve unmatched notes.
 - Save complete investigations with session v2, source/plugin fingerprints and layout; read v1.

@@ -1,5 +1,10 @@
 # Phase 6 — Per-Product Feature Round 1
 
+> **역사적 작업 기록** — 아래 기능 범위, 계획, 테스트 수, 버전 및 Git/배포 상태는
+> 해당 작업 단계에서 기록한 내용이다. 현재 사용법이나 최신 검증·배포 상태를 뜻하지 않는다.
+> 현재 제품별 안내는 [저장소 README](../README.md), 변경 이력은
+> [CHANGELOG](../CHANGELOG.md), 후속 계획은 [ROADMAP](../ROADMAP.md)을 참고한다.
+
 ## Overview
 
 First feature round after the ici decoupling: each product received one real
@@ -50,8 +55,12 @@ independent PRs with the native Merge Gate green.
   UTF-8/control-byte checks, bounds); `source.path` bounded to 4096 bytes.
 - CLI: `--session FILE` loads a session and fills only options the command
   line did not set explicitly (explicit flags win); `--save-session FILE`
-  writes the effective options before scanning. Session `multiline` and
+  wrote the effective options before scanning at this stage. Session `multiline` and
   `max_record_bytes` now reach the CLI assembler, matching the GUI contract.
+
+The write-before-scan behavior and deferred GUI wiring below are historical. The
+[current LogLens guide](../loglens/README.md) documents session v2, GUI plugins/triage,
+and saving only after input validation and scanning succeed.
 
 ### BuildScope — delayed replay (#101)
 
@@ -65,6 +74,12 @@ independent PRs with the native Merge Gate green.
   instead of becoming `unavailable`.
 - `--analysis-unit` without `delayed` is rejected.
 
+The normalized-path matching and estimate-retention statements above describe this
+round's reported contract. Later review found defects in path/glob matching and
+partial replay handling; the subsequent fixes are recorded in the
+[portfolio implementation ledger](2026-10-03-portfolio-expansion.md).
+Current behavior is documented in the [BuildScope guide](../buildscope/README.md).
+
 ### EnvLens — snapshot v2 (3ff1037, pre-existing in main)
 
 - `identity.environment_kind` detects `venv`/`virtualenv`/`conda`/`system`.
@@ -73,7 +88,7 @@ independent PRs with the native Merge Gate green.
   the resolved binary path is kept as metadata.
 - `envlens-snapshot-v2.schema.json` added alongside v1; diff accepts both.
 
-## Verification Results
+## Verification Results at That Checkpoint
 
 - DiskMap: `ctest` 18/18; new `test_storage_cli` cases cover kind sets,
   certain-only, delta bounds (boundary/above), unknown-metric rejection,
@@ -87,7 +102,7 @@ independent PRs with the native Merge Gate green.
 - AbiLens: `make check` + sanitizer variants green (PR #98).
 - All four PRs merged after full native CI + Merge Gate.
 
-## Decisions and Limits
+## Decisions and Limits at That Checkpoint
 
 - All four features are additive to existing contracts; no schema versions
   were bumped except envlens's planned v2.
@@ -97,8 +112,11 @@ independent PRs with the native Merge Gate green.
 - GUI wiring for sessions is intentionally deferred; the persistence layer is
   GUI-independent.
 
-## Next Steps
+## Next Steps Recorded at That Checkpoint
 
 - ROADMAP remainder: DiskMap incremental rescans and cleanup-policy expansion;
   LogLens parser plugins and GUI session save/load; BuildScope streaming load
   for large databases; AbiLens symbol versions, vtable layout, diff policy DSL.
+
+The deferred items above are not a current backlog. Later rounds implemented several
+of them; consult the linked current product guides and ROADMAP before planning work.

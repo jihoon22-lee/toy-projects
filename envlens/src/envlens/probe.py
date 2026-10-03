@@ -255,13 +255,21 @@ def resolve_interpreter(interpreter: str | Path | None) -> tuple[Path, str]:
     return resolved, requested
 
 
-def _drain(stream: BinaryIO, limit: int, chunks: list[bytes]) -> None:
+def _drain(
+    stream: BinaryIO, limit: int, chunks: list[bytes], stop: threading.Event | None = None
+) -> None:
     retained = 0
-    while True:
+    while stop is None or not stop.is_set():
         try:
             chunk = stream.read(64 * 1024)
         except (OSError, ValueError):
             break
+        if chunk is None:
+            # Nonblocking raw pipes return None while a descendant holds the
+            # write end open. Wait interruptibly instead of blocking in read.
+            if stop is not None:
+                stop.wait(0.01)
+            continue
         if not chunk:
             break
         if retained <= limit:
@@ -311,6 +319,7 @@ def _finish_readers(
     process: subprocess.Popen[bytes],
     threads: list[threading.Thread],
     streams: tuple[BinaryIO, BinaryIO],
+    stop: threading.Event,
 ) -> None:
     """Drain ordinary output while placing a hard bound on inherited pipes."""
 
@@ -319,11 +328,17 @@ def _finish_readers(
         thread.join(max(0.0, deadline - time.monotonic()))
     if any(thread.is_alive() for thread in threads):
         _terminate_tree(process)
-        for stream in streams:
-            with suppress(OSError, ValueError):
-                stream.close()
+        stop.set()
         for thread in threads:
             thread.join(0.25)
+    for stream in streams:
+        # Popen uses unbuffered pipes: close never waits for a BufferedReader
+        # lock held by a blocked reader on platforms without nonblocking pipes.
+        if hasattr(stream, "close"):
+            with suppress(OSError, ValueError):
+                stream.close()
+    for thread in threads:
+        thread.join(0.25)
 
 
 def _run_bounded(
@@ -339,6 +354,7 @@ def _run_bounded(
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            bufsize=0,
             shell=False,
             cwd=None if cwd is None else str(cwd),
             env=env,
@@ -353,17 +369,22 @@ def _run_bounded(
     assert process.stderr is not None
     stdout_stream = cast(BinaryIO, process.stdout)
     stderr_stream = cast(BinaryIO, process.stderr)
+    stop = threading.Event()
+    if os.name == "posix":
+        for stream in (stdout_stream, stderr_stream):
+            if hasattr(stream, "fileno"):
+                os.set_blocking(stream.fileno(), False)
     stdout_chunks: list[bytes] = []
     stderr_chunks: list[bytes] = []
     threads = [
         threading.Thread(
             target=_drain,
-            args=(stdout_stream, MAX_PROBE_BYTES, stdout_chunks),
+            args=(stdout_stream, MAX_PROBE_BYTES, stdout_chunks, stop),
             daemon=True,
         ),
         threading.Thread(
             target=_drain,
-            args=(stderr_stream, MAX_STDERR_BYTES, stderr_chunks),
+            args=(stderr_stream, MAX_STDERR_BYTES, stderr_chunks, stop),
             daemon=True,
         ),
     ]
@@ -373,11 +394,11 @@ def _run_bounded(
         return_code = process.wait(timeout=timeout_seconds)
     except subprocess.TimeoutExpired as error:
         _terminate_tree(process)
-        _finish_readers(process, threads, (stdout_stream, stderr_stream))
+        _finish_readers(process, threads, (stdout_stream, stderr_stream), stop)
         raise ProbeError(
             "probe-timeout", f"interpreter exceeded {timeout_seconds} seconds"
         ) from error
-    _finish_readers(process, threads, (stdout_stream, stderr_stream))
+    _finish_readers(process, threads, (stdout_stream, stderr_stream), stop)
     return b"".join(stdout_chunks), b"".join(stderr_chunks), return_code
 
 

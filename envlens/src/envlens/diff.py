@@ -341,6 +341,22 @@ def _compatibility_evidence(
     return evidence
 
 
+def _collection_evidence(snapshot: Mapping[str, Any], name: str) -> list[dict[str, Any]]:
+    if _certainty(snapshot) == "certain":
+        return []
+    return [
+        {
+            "kind": "collection",
+            "name": name,
+            "status": "unknown",
+            "certainty": "unknown",
+            "reason": (
+                "snapshot collection is incomplete or contains ambiguous distribution evidence"
+            ),
+        }
+    ]
+
+
 def _dependency_issues(
     snapshot: Mapping[str, Any],
     project: Mapping[str, Any] | None,
@@ -488,6 +504,8 @@ def compare_snapshots(
     changes = _distribution_changes(old_grouped, new_grouped, evidence_certainty)
     identity = _identity(right)
     compatibility = _compatibility_evidence(new_grouped, identity, project_input)
+    compatibility.extend(_collection_evidence(left, "before snapshot"))
+    compatibility.extend(_collection_evidence(right, "after snapshot"))
     import_evidence, import_changes = _import_comparison(old_grouped, new_grouped)
     dependencies = _dependency_issues(right, project_input)
     summary = {
@@ -536,6 +554,7 @@ def check_compatibility(
 
     value = _snapshot_input(snapshot)
     compatibility = _compatibility_evidence(_group_distributions(value), _identity(value), project)
+    compatibility.extend(_collection_evidence(value, "snapshot"))
     dependencies = _dependency_issues(value, project)
     summary = _evidence_summary(compatibility, dependencies)
     # One snapshot has no baseline, so every external requirement it declares

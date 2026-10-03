@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import venv
@@ -151,3 +152,83 @@ def test_compile_batches_reach_later_syntax_failure(
     )
     assert compile_check["batch_count"] > 1
     assert report["summary"]["status"] == "failed"
+
+
+@pytest.mark.parametrize("command", ["runtime", "smoke", "runtime-check"])
+@pytest.mark.parametrize("alias", ["direct", "symlink", "hardlink"])
+def test_runtime_cli_preserves_project_inputs(tmp_path: Path, command: str, alias: str) -> None:
+    metadata = tmp_path / "pyproject.toml"
+    metadata.write_text('[project]\nname="demo"\nversion="1"\n')
+    source = tmp_path / "demo.py"
+    source.write_text("VALUE = 1\n")
+    for input_path in (metadata, source, Path(sys.executable)):
+        output = input_path
+        if alias != "direct":
+            output = tmp_path / "report.json"
+            if alias == "symlink":
+                output.symlink_to(input_path)
+            else:
+                try:
+                    os.link(input_path, output)
+                except OSError:
+                    continue  # The interpreter may be on a different filesystem.
+        original = input_path.read_bytes()
+        try:
+            with pytest.raises(SystemExit) as error:
+                main([command, "--project-root", str(tmp_path), "--output", str(output)])
+            assert error.value.code == 2
+            assert input_path.read_bytes() == original
+        finally:
+            if alias != "direct":
+                output.unlink()
+
+
+def test_runtime_preserves_explicit_external_inputs(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    metadata = tmp_path / "external.toml"
+    metadata.write_text('[project]\nname="demo"\nversion="1"\n')
+    source = tmp_path / "outside.py"
+    source.write_text("VALUE = 1\n")
+    for target in (metadata, source):
+        with pytest.raises(SystemExit) as error:
+            main(
+                [
+                    "runtime",
+                    "--project-root",
+                    str(project),
+                    "--pyproject",
+                    str(metadata),
+                    "--compile-path",
+                    str(source),
+                    "--output",
+                    str(target),
+                ]
+            )
+        assert error.value.code == 2
+
+
+def test_incomplete_collection_never_becomes_compatible_or_unchanged(tmp_path: Path) -> None:
+    complete = _snapshot([_distribution("demo", "1")])
+    partial = _snapshot([_distribution("demo", "1")], complete=False)
+    partial["distributions"][0].update(
+        status="error",
+        errors=[
+            {
+                "field": "requires_dist",
+                "code": "metadata-error",
+                "type": "OSError",
+                "message": "read failed",
+            }
+        ],
+    )
+    checked = check_compatibility(partial)
+    assert checked["status"] == "unknown"
+    assert any(item["kind"] == "collection" for item in checked["compatibility"])
+    for left, right in ((partial, partial), (partial, complete), (complete, partial)):
+        assert compare_snapshots(left, right)["status"] == "unknown"
+    assert check_compatibility(_snapshot([], complete=False))["status"] == "unknown"
+    path = tmp_path / "partial.json"
+    path.write_text(json.dumps(partial))
+    assert main(["check", str(path), "--fail-on", "unknown"]) == 1
+    assert main(["check", str(path), "--fail-on", "never"]) == 0

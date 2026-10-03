@@ -152,6 +152,7 @@ def test_cli_runtime_forwards_matrix_and_writes_markdown(tmp_path: Path) -> None
         pyproject=None,
         timeout_seconds=10,
         execute_entry_points=True,
+        output_path=output_path,
     )
     assert output_path.read_text(encoding="utf-8").startswith("# EnvLens runtime — PASSED")
 

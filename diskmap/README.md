@@ -5,9 +5,10 @@ analysis, a small console tool exposes it, and a Qt Widgets shell adds the
 treemap and the review workflows. It is built with CMake and targets Qt 6.
 
 The scan is deliberately conservative about what it will claim. Directory
-entries carry a `FileIdentity` of device and file id rather than a path, symlinked
-directories are not followed unless asked, and filesystem boundaries are not
-crossed unless asked. Anything the scan could not resolve is reported as
+entries carry a `FileIdentity` of device and file id alongside their path. Descendant
+symlinked directories are not followed unless asked; an explicitly selected root is
+dereferenced. Scans cross filesystem boundaries by default; `--one-file-system`
+keeps directories on other devices visible without traversing them. Anything the scan could not resolve is reported as
 uncertain instead of being folded into a total.
 
 ## Binaries
@@ -24,7 +25,12 @@ behind an interface that shows what will be touched before anything moves.
 
 ## Build and test
 
+From the repository root, enter the product directory first. The remaining commands
+in this README run from `diskmap/`. Building requires CMake 3.16+, a C++17 compiler,
+and Qt6 Widgets, Concurrent and Test.
+
 ```sh
+cd diskmap
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel 2
 QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
@@ -37,6 +43,11 @@ CTest runs all 19 Qt Test binaries — one per test file.
 ```text
 Usage: diskmap <path> [options]
    or: diskmap --load-snapshot FILE [options]
+  --max-nodes N       retained node budget (default 250000)
+  --max-memory SIZE   tree/listing memory estimate budget (default 256 MiB)
+  --exclude-preset build-caches  skip common build and dependency caches
+  --keep-policy first newest oldest preferred  duplicate keeper policy
+  --keep-under PATH   preferred keeper directory
   --max-depth N       limit scan traversal depth
   --follow-symlinks   follow symlinked directories
   --min-size BYTES    skip files smaller than BYTES
@@ -47,7 +58,7 @@ Usage: diskmap <path> [options]
   --json              emit the tree as JSON instead of text
   --save-snapshot FILE save the scan as a bounded snapshot
   --load-snapshot FILE inspect a saved snapshot without scanning
-  --compare-snapshot FILE compare the scan with a saved snapshot
+  --compare-snapshot FILE compare against a saved snapshot
   --diff-kind KIND    print only these change kinds (repeatable:
                       added removed grown shrunk moved uncertain)
   --diff-min-delta BYTES print only changes of at least BYTES
@@ -56,6 +67,7 @@ Usage: diskmap <path> [options]
   --cleanup-plan      dry-run plan staging certain reclaimable
                       duplicate copies (nothing is moved)
   --help              show this message
+  --version           print the version and exit
 ```
 
 A snapshot comparison classifies each entry as added, removed, grown, shrunk,
@@ -67,14 +79,22 @@ metrics are known. The options combine and apply identically to text and
 JSON output. Duplicate inspection is review-only: it reports evidence and
 never deletes anything.
 
+The following example creates a small temporary tree. Snapshots are written outside
+the scanned tree so later scans do not include the reports themselves.
+
 ```sh
-./build/src/diskmap path/to/tree --save-snapshot before.json
-./build/src/diskmap path/to/tree --compare-snapshot before.json --json
-./build/src/diskmap path/to/tree --duplicates --json
-./build/src/diskmap --load-snapshot before.json --json
-./build/src/diskmap --load-snapshot before.json --duplicates
-./build/src/diskmap --load-snapshot after.json --compare-snapshot before.json
-./build/src/diskmap path/to/tree --cleanup-plan
+diskmap_demo_dir=$(mktemp -d /tmp/diskmap-demo.XXXXXX)
+mkdir -p "$diskmap_demo_dir/tree/originals" "$diskmap_demo_dir/tree/copies"
+printf 'duplicate example\n' > "$diskmap_demo_dir/tree/originals/example.txt"
+cp "$diskmap_demo_dir/tree/originals/example.txt" "$diskmap_demo_dir/tree/copies/example.txt"
+./build/src/diskmap "$diskmap_demo_dir/tree" --save-snapshot "$diskmap_demo_dir/before.json"
+printf 'new entry\n' > "$diskmap_demo_dir/tree/added.txt"
+./build/src/diskmap "$diskmap_demo_dir/tree" --save-snapshot "$diskmap_demo_dir/after.json" --compare-snapshot "$diskmap_demo_dir/before.json" --json
+./build/src/diskmap "$diskmap_demo_dir/tree" --duplicates --json
+./build/src/diskmap --load-snapshot "$diskmap_demo_dir/before.json" --json
+./build/src/diskmap --load-snapshot "$diskmap_demo_dir/before.json" --duplicates
+./build/src/diskmap --load-snapshot "$diskmap_demo_dir/after.json" --compare-snapshot "$diskmap_demo_dir/before.json"
+./build/src/diskmap "$diskmap_demo_dir/tree" --cleanup-plan
 ```
 
 `--cleanup-plan` is a dry run: it runs the duplicate analysis, stages every
@@ -106,7 +126,8 @@ complete structural evidence and a known size metric on the source entry plus
 complete structural evidence on the opposite snapshot. Cleanup and Trash
 paths reject relative `CleanupTarget.path` values before opening a parent
 directory or mutating an entry; final execution revalidates identity, type,
-size/allocation, and known hard-link evidence from the reviewed scan.
+size/allocation, known mtime/ctime and hard-link evidence from the reviewed scan.
+Duplicate cleanup also checks the reviewed content and a surviving copy as described below.
 
 On Linux, snapshot installation takes a nonblocking advisory `flock` on the
 anchored destination parent directory, and Trash move/restore takes one on the
@@ -124,7 +145,7 @@ POSIX permits.
 
 ## Benchmark
 
-`benchmarks/run_benchmark.py` runs a full scan and a cooperative cancellation
+`benchmarks/run_benchmark.py` requires Python 3.10+ and runs a full scan and a cooperative cancellation
 against a deterministic generated source without creating real files. The
 runner's default budgets are full throughput `≥ 100000 entries/s`, full peak
 RSS `≤ 1536 MiB`, full elapsed `≤ 30000 ms`, and cancellation elapsed
@@ -132,7 +153,6 @@ RSS `≤ 1536 MiB`, full elapsed `≤ 30000 ms`, and cancellation elapsed
 when only harness correctness matters.
 
 ```sh
-cd diskmap
 benchmark_root="$(mktemp -d /tmp/diskmap-benchmark.XXXXXX)"
 artifact_dir="$benchmark_root/artifact"
 mkdir -p "$artifact_dir"
@@ -140,7 +160,7 @@ cmake -S . -B "$benchmark_root/build" -DCMAKE_BUILD_TYPE=Release \
   -DDISKMAP_BUILD_BENCHMARKS=ON
 cmake --build "$benchmark_root/build" --parallel 2 \
   --target diskmap-scan-benchmark
-python3.10 benchmarks/run_benchmark.py \
+python3 benchmarks/run_benchmark.py \
   --binary "$benchmark_root/build/benchmarks/diskmap-scan-benchmark" \
   --entries 1000000 --cancel-after 10000 --timeout-seconds 60 \
   --output-dir "$artifact_dir"
@@ -154,11 +174,11 @@ benchmark workflow runs the same harness on Qt6; a typical CI run measured
 
 ## Status
 
-DiskMap is at the **0.2.0 development checkpoint (not published)**. Release history and
-unreleased changes live in [CHANGELOG.md](CHANGELOG.md).
+Run `diskmap --version` for the installed version. The CLI and GUI share the version
+in `include/diskmap/version.hpp`; published release history is in [CHANGELOG.md](CHANGELOG.md).
 
 
-## Storage review and recovery (0.2.0 development checkpoint)
+## Storage review and recovery
 
 The GUI separates **Explore**, **Duplicates**, **Snapshot changes**, and **Cleanup & recovery**.
 Treemap selection and table selection are linked. Color modes group file types or names, expose
@@ -180,7 +200,8 @@ shows potential space only after permanent disposal; DiskMap never permanently d
 The audit does not claim moved bytes as freed bytes.
 
 Each completed backend operation writes a private, fsynced receipt beneath
-`$XDG_DATA_HOME/Trash/.diskmap-receipts/`. The bounded `diskmap.receipt/v1` text records contain
+`$XDG_DATA_HOME/Trash/.diskmap-receipts/` (under `$HOME/.local/share` when `XDG_DATA_HOME` is unset).
+The bounded `diskmap.receipt/v1` text records contain
 status, hexadecimal path/message bytes and the opaque restore token. This is encoding, not encryption.
 Opening the recovery tab, or **Reload Trash history**, reloads durable records and reconciles the
 standard `.trashinfo`/temporary metadata against payload identity. This also recovers moves interrupted
@@ -208,9 +229,9 @@ allocator and analysis overhead are additional. Reaching either budget returns a
 inventory with its reason. Use **Scan limits…** or:
 
 ```sh
-./build/src/diskmap /data --max-nodes 100000 --max-memory "128 MiB" --exclude-preset build-caches
-./build/src/diskmap /data --cleanup-plan --keep-policy newest
-./build/src/diskmap /data --cleanup-plan --keep-policy preferred --keep-under /data/originals
+./build/src/diskmap "$diskmap_demo_dir/tree" --max-nodes 100000 --max-memory "128 MiB" --exclude-preset build-caches
+./build/src/diskmap "$diskmap_demo_dir/tree" --cleanup-plan --keep-policy newest
+./build/src/diskmap "$diskmap_demo_dir/tree" --cleanup-plan --keep-policy preferred --keep-under "$diskmap_demo_dir/tree/originals"
 ```
 
 The build-cache preset excludes `.git`, `node_modules`, `.venv`, `__pycache__`, `build`, and `.cache`.
@@ -229,15 +250,19 @@ Saving over an inventoried source file or a hardlink alias is rejected.
 ## Install and validation
 
 ```sh
-cmake --install build --prefix /desired/prefix
-/desired/prefix/bin/diskmap --version
-QT_QPA_PLATFORM=offscreen /desired/prefix/bin/diskmap-gui --version
-/desired/prefix/bin/diskmap-gui --load-snapshot before.json
+diskmap_install_dir=$(mktemp -d /tmp/diskmap-install.XXXXXX)
+cmake --install build --prefix "$diskmap_install_dir"
+"$diskmap_install_dir/bin/diskmap" --version
+QT_QPA_PLATFORM=offscreen "$diskmap_install_dir/bin/diskmap-gui" --version
+"$diskmap_install_dir/bin/diskmap-gui" --load-snapshot "$diskmap_demo_dir/before.json"
 ```
 
 Installation includes both binaries, schemas, documentation, desktop entry and SVG icon, plus core headers
 and static library. GUI runtime dependencies are Qt6 Widgets/Concurrent and the platform plugin; the install
 tree does not bundle the host's Qt libraries. CLI dependencies are the system C++ runtime and libc.
+With the default install directories, schemas live in `share/diskmap/schemas` and documentation
+in `share/doc/diskmap`. README schema links target the repository layout. Add a custom prefix's
+`bin` directory to `PATH` before using its desktop entry.
 
 The portfolio regression suite exercises real raw-byte filenames, budget termination, legacy/v2 snapshots,
 keeper/ancestor protection, durable Trash/restart/restore, full GUI workflow and cancellation with a responsive

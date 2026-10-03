@@ -118,6 +118,7 @@ private:
     QLabel* status_ = nullptr;
     TimelineWidget* timeline_ = nullptr;
     std::optional<loglens::Filter> filter_;
+    QString activeFilterText_;
     std::vector<loglens::SourceProfile> sourceProfiles_;
     std::vector<loglens::SavedQuery> savedQueries_;
     QString sourceProfilesPath_;

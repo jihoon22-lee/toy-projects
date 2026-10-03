@@ -19,6 +19,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  documentation:
+    name: Documentation and release consistency
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - run: python -m pip install jsonschema==4.25.1 PyYAML==6.0.3
+      - run: python .github/scripts/check_docs.py
+      - run: python .github/scripts/test_release_flow.py
+      - run: python .github/scripts/assemble_pages.py "$RUNNER_TEMP/documentation-site"
+
   loglens:
     name: LogLens build, test and smoke (Qt6)
     runs-on: ubuntu-latest
@@ -866,7 +882,7 @@ jobs:
   merge-gate:
     name: Merge Gate
     if: ${{ always() }}
-    needs: [loglens, diskmap, buildscope, envlens, abilens, tracelens, testlens, servicelens]
+    needs: [loglens, diskmap, buildscope, envlens, abilens, tracelens, testlens, servicelens, documentation]
     runs-on: ubuntu-latest
     permissions: {}
 
@@ -881,6 +897,7 @@ jobs:
           TRACELENS: ${{ needs.tracelens.result }}
           TESTLENS: ${{ needs.testlens.result }}
           SERVICELENS: ${{ needs.servicelens.result }}
+          DOCUMENTATION: ${{ needs.documentation.result }}
         run: |
           set -euo pipefail
           failed=0
@@ -892,7 +909,8 @@ jobs:
             "abilens:$ABILENS" \
             "tracelens:$TRACELENS" \
             "testlens:$TESTLENS" \
-            "servicelens:$SERVICELENS"; do
+            "servicelens:$SERVICELENS" \
+            "documentation:$DOCUMENTATION"; do
             name="${pair%%:*}"
             result="${pair##*:}"
             if [ "$result" != success ]; then

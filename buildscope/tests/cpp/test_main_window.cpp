@@ -55,9 +55,24 @@ class MainWindowTest final : public QObject {
     void failedSnapshotClearsDiffMode();
     void importsDatabaseAsyncAndQueriesImpact();
     void editorArgvAndReopenGeneration();
+    void autoDetectsDiffAsynchronously();
 };
 
 void MainWindowTest::initTestCase() { QApplication::setAttribute(Qt::AA_DontUseNativeDialogs); }
+
+void MainWindowTest::autoDetectsDiffAsynchronously() {
+    buildscope::MainWindow window;
+    window.openInputAsync(QStringLiteral(BUILDSCOPE_SAMPLE_DIFF));
+    QTRY_VERIFY_WITH_TIMEOUT(!window.busy(), 5000);
+    QCOMPARE(window.entryCount(), 4);
+    QVERIFY(window.statusText().contains("buildscope.diff/v1"));
+    auto *tree = findWidget<QTreeView>(&window, "sourceTree");
+    QCOMPARE(tree->model()->columnCount(), buildscope::DiffTreeModel::ColumnCount);
+    window.openInputAsync(QStringLiteral(BUILDSCOPE_V2_SNAPSHOT));
+    QTRY_VERIFY_WITH_TIMEOUT(!window.busy(), 5000);
+    QCOMPARE(window.entryCount(), 2);
+    QVERIFY(window.statusText().contains("buildscope.snapshot/v2"));
+}
 
 void MainWindowTest::cleanup() {
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);

@@ -414,15 +414,21 @@ void test_json_contract(const abilens::ElfReport& parsed) {
            "invalid path bytes are escaped into valid JSON");
     expect(abilens::parse_report_json(byte_json).input == "artifact-\xc3\xbf.so",
            "escaped invalid bytes decode to their Unicode code point");
-    std::string too_many_nodes = "[";
-    for (unsigned int index = 0; index < 50001U; ++index) {
+    std::string too_many_nodes = "{\"unused\":[";
+    for (unsigned int index = 0; index < 60000U; ++index) {
         if (index != 0U) {
             too_many_nodes.push_back(',');
         }
-        too_many_nodes += "[null]";
+        too_many_nodes += "[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]";
     }
-    too_many_nodes.push_back(']');
-    expect_parse_failure(too_many_nodes, "large shallow JSON is rejected by the node bound");
+    too_many_nodes += "]}";
+    try {
+        (void)abilens::parse_report_json(too_many_nodes);
+        expect(false, "large shallow JSON must hit the node bound");
+    } catch (const std::runtime_error& error) {
+        expect(std::string(error.what()).find("node bound") != std::string::npos,
+               "large shallow JSON is rejected by the node bound before schema validation");
+    }
 }
 
 void test_diff_contract(const abilens::ElfReport& parsed) {

@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.1](https://github.com/jihoon22-lee/toy-projects/compare/diskmap/v0.2.0...diskmap/v0.2.1) (2026-10-03)
+## [0.2.1](https://github.com/jihoon22-lee/toy-projects/compare/diskmap/v0.1.1...diskmap/v0.2.1) (2026-10-03)
 
 
 ### Features
@@ -24,14 +24,15 @@
 
 * remove DiskMap's swappable read-range params and pin AbiLens thresholds ([#64](https://github.com/jihoon22-lee/toy-projects/issues/64)) ([bd949c1](https://github.com/jihoon22-lee/toy-projects/commit/bd949c156df29fd6850604364a2126b0b2917df3))
 
-## [0.2.0](https://github.com/jihoon22-lee/toy-projects/compare/diskmap/v0.1.1...diskmap/v0.2.0) (2026-10-03)
+## 0.2.0 planned checkpoint (2026-10-03)
 
+This checkpoint was not published as a tag. Its implementation shipped in 0.2.1.
 
 ### Features
 
 * expand eight independent diagnostic tools and verified releases ([#120](https://github.com/jihoon22-lee/toy-projects/issues/120)) ([3a01bb9](https://github.com/jihoon22-lee/toy-projects/commit/3a01bb93c3fee936a335bb9445400b5f469d6a87))
 
-## 0.2.0 — development checkpoint (unreleased)
+### Storage workbench details
 
 - Preserve duplicate survivors with explicit keeper policies, ancestor protection and fresh content proofs.
 - Revalidate mtime/ctime before cleanup; persist Trash receipts and reconstruct recovery after restart.

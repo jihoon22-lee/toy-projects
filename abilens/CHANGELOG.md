@@ -1,14 +1,14 @@
 # Changelog
 
-## Unreleased
+## [0.2.1](https://github.com/jihoon22-lee/toy-projects/compare/abilens/v0.1.2...abilens/v0.2.1) (2026-10-03)
+
+### Implementation details shipped in 0.2.1
 
 - Add report/diff v2 with tri-state compatibility, rich symbol evidence, ordered
   loader paths, SONAME/interpreter/build ID, root-confined sysroot candidates and
   optional bounded libdw aggregate layout analysis.
 - Fix unknown symbol policies, removed exports and ELF32 symbol offsets.
 - Add CI failure policies and complete install layout.
-
-## [0.2.1](https://github.com/jihoon22-lee/toy-projects/compare/abilens/v0.2.0...abilens/v0.2.1) (2026-10-03)
 
 
 ### Features
@@ -27,7 +27,9 @@
 * derive asserted versions from a single source of truth ([#93](https://github.com/jihoon22-lee/toy-projects/issues/93)) ([6c9517d](https://github.com/jihoon22-lee/toy-projects/commit/6c9517d3cd1179fd4f4f4bd53cae214dcbfb130f))
 * remove DiskMap's swappable read-range params and pin AbiLens thresholds ([#64](https://github.com/jihoon22-lee/toy-projects/issues/64)) ([bd949c1](https://github.com/jihoon22-lee/toy-projects/commit/bd949c156df29fd6850604364a2126b0b2917df3))
 
-## [0.2.0](https://github.com/jihoon22-lee/toy-projects/compare/abilens/v0.1.2...abilens/v0.2.0) (2026-10-03)
+## 0.2.0 — unpublished release plan (2026-10-03)
+
+The 0.2.0 tag was not published; this implementation shipped in 0.2.1.
 
 
 ### Features

@@ -1,6 +1,6 @@
 # TestLens
 
-TestLens 0.1.0 is a local CLI and Python library for test result collection, comparison,
+TestLens is a local CLI and Python library for test result collection, comparison,
 observed failure frequency and offline interactive reports. Original test names,
 parameter IDs, observations and source digests remain available behind each conclusion.
 It does not execute tests, contact a service, or diagnose a test as definitely flaky.
@@ -10,8 +10,12 @@ It does not execute tests, contact a service, or diagnose a test as definitely f
 Requires Python 3.10+. Runtime dependencies are `defusedxml` and `jsonschema`.
 
 ```bash
-python -m pip install ./testlens
-# From this project directory:
+# From the repository root, in a POSIX shell:
+cd testlens
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install .
+testlens --version
 testlens collect examples/baseline.xml --project demo --run-id baseline \
   --dialect pytest --complete --executed-at 2026-01-01T00:00:00Z --output baseline.json
 testlens collect examples/current.xml --project demo --run-id current \
@@ -24,30 +28,33 @@ testlens validate current.json
 ```
 
 The example diff intentionally returns exit code 1 under `--fail-on new-failure`.
-Open `report.html` in any modern browser. Results, changes, history and input quality
-are searchable; rows are paginated; expandable details include original XML locators
-and source verification status. Reports work without a server or network. Input-quality
-verification occurs at report generation, not automatically after the HTML is opened.
+Open `report.html` in any modern browser. Results, changes and history support text
+search and pagination. The input-quality tab lists collection diagnostics and source
+verification details; observation details include original XML locators. Reports work
+without a server or network. Input-quality verification occurs at report generation, not automatically after the HTML is opened.
 
 ## Collect existing runners
 
-Use unique output paths for concurrent runner invocations.
+Run each example in the producing project directory after building/installing that runner.
+These are alternative collection paths, not one sequential script. Use unique output paths
+for concurrent runner invocations.
 
 ```bash
 # Existing CMake projects: CMake 3.21+; one result per CTest registered target.
-QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-junit results.xml
-testlens collect results.xml --dialect ctest-junit --project diskmap \
+QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-junit "$PWD/ctest-results.xml"
+testlens collect ctest-results.xml --dialect ctest-junit --project diskmap \
   --run-id BUILD_ID --scope ctest --output run.json
-# Finer-grained Qt case results are a separate collection scope.
-QT_QPA_PLATFORM=offscreen ./build/tests/test_example -o qt-results.xml,junitxml
+# DiskMap example: finer-grained Qt results are a separate collection scope.
+QT_QPA_PLATFORM=offscreen ./build/tests/test_format -o qt-results.xml,junitxml
 testlens collect qt-results.xml --dialect qt --project diskmap \
   --scope qt-cases --run-id BUILD_ID --output qt-run.json
 # pytest default xunit2 and xunit1/legacy JUnit reports are supported.
 python -m pytest --junitxml=pytest-results.xml
 testlens collect pytest-results.xml --dialect pytest --project envlens \
   --run-id BUILD_ID --output pytest-run.json
-# Existing dashboard artifacts, no execution required:
-testlens collect build/Testing/TAG/Test.xml --dialect ctest \
+# Latest existing CTest dashboard artifact, no execution required:
+dashboard_tag=$(head -n 1 build/Testing/TAG)
+testlens collect "build/Testing/$dashboard_tag/Test.xml" --dialect ctest \
   --project demo --run-id BUILD_ID --output dashboard-run.json
 ```
 
@@ -73,23 +80,25 @@ map and records the applied mapping.
 Each XML source has a digest, path, size and dialect. Each observation has an XML
 element locator, messages, duration, source ID, properties and original source location
 when supplied. Output truncation is explicit. XML line numbers are not fabricated.
-CTest compressed/base64 output is not decoded in v0.1: an `encoded-output` diagnostic
+CTest compressed/base64 output is not decoded: an `encoded-output` diagnostic
 preserves that limitation; test status and other measurements remain available.
 
 Repeated identical input content is deduplicated. Repeated test identities are ambiguous
 and become unknown unless every observation has a unique contiguous positive integer
-`testlens.attempt` property (1..N). This is an explicit user/exporter contract, not an
+JUnit `testlens.attempt` property (1..N). This is an explicit user/exporter contract, not an
 inference from XML order. The highest attempt supplies final status/duration; any-attempt
-failure is separately tracked. `testlens.shard` identifies shards, but equal identities
+failure is separately tracked. A JUnit `testlens.shard` property identifies shards, but equal identities
 in different shards are still ambiguous unless the explicit attempt contract is met.
-Expected shards can be declared by repeating `--expected-shard`.
+Expected shards can be declared by repeating `--expected-shard`. CTest dashboard measurements
+remain observation properties; they are not interpreted as JUnit retry/shard metadata.
 
 ## Coverage, comparison and history
 
 Valid XML does not prove the entire run was collected. `collect` defaults to unconfirmed
 coverage. `--complete` is the caller's declaration that all results in the named `--scope`
 were supplied. Parser errors, counts inconsistent with actual cases, ambiguous identities,
-suite errors, missing expected shards and manifest mismatches override that declaration.
+suite errors, unsupported/missing result statuses, missing/empty test names, missing expected
+shards and manifest mismatches override that declaration.
 An optional `--manifest manifest.json` contains `{"test_ids": ["normalized-id", ...]}`
 and records its digest. Missing results are always reported as absent observations,
 never silently relabeled passed or deleted.
@@ -97,6 +106,19 @@ never silently relabeled passed or deleted.
 States: passed, failed, error, skipped, not-run, unknown. Explicit xfail/xpass evidence
 is preserved when present; a generic skip does not prove expected failure. Suite setup
 errors remain diagnostics. Skipping a previously failed test is not recovery.
+
+CTest dashboard `Status` values `passed`, `failed` and `notrun` map to passed, failed and
+not-run (case-insensitive). Any other value, including a missing/empty attribute, becomes
+unknown with an `unsupported-status` diagnostic. A missing/empty `Name` becomes unknown
+with a `missing-name` diagnostic. Both prevent `complete=true`, even when an end marker
+is present. Thus `collect --complete --fail-on incomplete` returns 1 while still emitting
+the incomplete run and its evidence. A named `notrun` record is a valid observed result;
+it does not make otherwise complete coverage incomplete, and is excluded from failure-rate
+denominators. Complete coverage does not mean every test ran or passed. Invalid durations
+remain null with an `invalid-duration` diagnostic without changing a known outcome.
+
+Previously saved runs that incorrectly mark unknown or unnamed results as complete are
+rejected by `validate`; recollect their original XML to obtain corrected diagnostics.
 
 Diff categories: new-failure (passed to failed/error), new-test-failure, persistent-failure,
 recovered, missing, added, status-changed, unchanged. Durations retain runner measurement
@@ -118,7 +140,9 @@ frequencies, not statistical proof of flakiness or causal analysis.
 
 ## CLI policy and output
 
-All analysis commands accept `--format json|text`, `--output`, `--verbose` and `--fail-on`.
+`collect`, `diff` and `history` accept `--format json|text`, `--output`, `--verbose` and
+`--fail-on`. `report` always writes HTML to its required `--output` path; `validate` takes
+a document path and reports whether it passes schema and semantic checks.
 No policy is enabled by default. Collect supports failure,error,incomplete; diff also
 supports new-failure,new-test-failure,missing,slowdown; history supports incomplete.
 Unknown or inapplicable policies are errors. Exit codes: **0** analysis completed and
@@ -161,8 +185,9 @@ uv run python scripts/clean_install_e2e.py
 uv run python scripts/benchmark.py --cases 10000
 ```
 
-Artifacts: `dist/testlens-0.1.0-py3-none-any.whl`, `dist/testlens-0.1.0.tar.gz`.
-`testlens/v0.1.0` is the independent product tag convention. Product tests require no
+Artifacts: `dist/testlens-<version>-py3-none-any.whl`, `dist/testlens-<version>.tar.gz`,
+where `<version>` is the package version reported by `testlens --version`.
+`testlens/v<version>` is the independent product tag convention. Product tests require no
 existing sibling build and emit standard pytest JUnit with `--junitxml=...` if requested.
 Use runner output collection even when the runner fails; retain the original exit status
 in CI rather than replacing it with the collection command's status. Root CI, release
@@ -175,9 +200,12 @@ Official format references: [CTest](https://cmake.org/cmake/help/latest/manual/c
 
 ## Verification record
 
-The initial implementation was validated on 2026-10-03: 47 pytest cases, Ruff check and
-format, strict mypy, wheel/sdist build, and a clean installed-wheel command sequence all
-passed. Fixtures include actual Qt 6.10.2 results from DiskMap, BuildScope and LogLens,
+The regression suite covers core and CLI collection, strict persistence, comparison,
+history, report escaping and output collisions. CTest regressions specifically cover
+unsupported/missing statuses, missing/empty names, corrected incomplete-policy exit codes,
+rejection of previous invalid completion claims, and legitimate named `notrun` results.
+The development checks above include Ruff check/format, strict mypy, wheel/sdist build
+and a clean installed-wheel command sequence. Fixtures include actual Qt 6.10.2 results from DiskMap, BuildScope and LogLens,
 actual EnvLens pytest output, and CTest JUnit/dashboard output for those executables.
 An optional Playwright smoke covered tabs, search, filters, expandable failure evidence,
 light/dark/mobile layouts and absence of network requests.

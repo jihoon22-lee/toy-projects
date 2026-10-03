@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -77,7 +78,37 @@ def main():
             env=env,
         )
         assert "__DATA__" not in (scratch / "report.html").read_text()
-        print("Clean wheel install: collect → validate → diff/policy → history → HTML passed")
+        for test_element, expected in [
+            ('<Test Status="interrupted"><Name>test</Name></Test>', 1),
+            ('<Test Status="passed"/>', 1),
+            ('<Test Status="notrun"><Name>disabled</Name></Test>', 0),
+        ]:
+            (scratch / "Test.xml").write_text(
+                "<Site><Testing>"
+                + test_element
+                + "<EndDateTime>today</EndDateTime></Testing></Site>"
+            )
+            output = checked(
+                command
+                + [
+                    "collect",
+                    "Test.xml",
+                    "--dialect",
+                    "ctest",
+                    "--project",
+                    "demo",
+                    "--run-id",
+                    "ctest",
+                    "--complete",
+                    "--fail-on",
+                    "incomplete",
+                ],
+                expected=expected,
+                cwd=scratch,
+                env=env,
+            )
+            assert json.loads(output)["complete"] == (expected == 0)
+        print("Clean wheel install: collect/CTest policy → validate → diff → history → HTML passed")
 
 
 if __name__ == "__main__":

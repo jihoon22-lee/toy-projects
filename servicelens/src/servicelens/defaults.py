@@ -39,7 +39,8 @@ def add_service_defaults(name: str, unit: dict[str, Any], maximum: int) -> None:
         )
     service_type = settings.get("Service.Type", {})
     value = service_type.get("value", "")
-    if not value and settings.get("Service.BusName", {}).get("value"):
+    bus_name = settings.get("Service.BusName", {})
+    if not value and bus_name.get("status") == "known" and bus_name.get("value"):
         value = "dbus"
     if service_type.get("status", "known") == "known" and value == "dbus":
         edges.extend(

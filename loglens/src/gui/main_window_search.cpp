@@ -95,7 +95,7 @@ void MainWindow::startWholeFileSearch() {
     loglens::FileSearchOptions options;
     options.path = currentPath_.toStdString();
     options.text = wholeSearchEdit_->text().toStdString();
-    options.filter = filter_ ? filterEdit_->text().toStdString() : std::string();
+    options.filter = activeFilterText_.toStdString();
     const auto profile = profileFromControls();
     options.format = profile.format;
     options.multiline = profile.multiline;

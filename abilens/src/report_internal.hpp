@@ -12,6 +12,10 @@
 namespace abilens {
 namespace detail {
 
+constexpr std::size_t kMaxReportBytes = 8U * 1024U * 1024U;
+constexpr std::size_t kMaxReportNodes = 1000000U;
+constexpr std::size_t kMaxReportContainerItems = 262144U;
+
 std::string trim(std::string value);
 std::vector<std::uint64_t> version_parts(const std::string& value);
 bool version_less(const std::string& left, const std::string& right);

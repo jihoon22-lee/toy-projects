@@ -235,7 +235,10 @@ void MainWindow::openInputAsync(const QString &path, bool database) {
             else {
                 workflow_->raw = result.raw;
                 workflow_->inputPath = path;
-                applySnapshot(std::move(result.snapshot), path);
+                if (result.isDiff)
+                    applyDiffReport(std::move(result.diff), path);
+                else
+                    applySnapshot(std::move(result.snapshot), path);
             }
             updateBusy(false);
             emit workFinished(result.error.isEmpty());

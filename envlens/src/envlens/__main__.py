@@ -251,6 +251,7 @@ def main(argv: list[str] | None = None) -> int:
                 pyproject=args.pyproject,
                 timeout_seconds=args.timeout_seconds,
                 execute_entry_points=args.execute_entry_points,
+                output_path=args.output,
             )
             _emit_report(
                 report,

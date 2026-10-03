@@ -520,6 +520,7 @@ def run_runtime_checks(
     pyproject: str | Path | None = None,
     timeout_seconds: int = 10,
     execute_entry_points: bool = False,
+    output_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Run bounded checks for every configured interpreter.
 
@@ -542,6 +543,25 @@ def run_runtime_checks(
         pyproject=pyproject,
         timeout_seconds=timeout_seconds,
     )
+    if output_path is not None and Path(output_path) != Path("-"):
+        destination = Path(output_path)
+        inputs = [
+            Path(str(prepared.project_info["path"])),
+            *prepared.source_files,
+            *(Path(value) for value in prepared.interpreters),
+        ]
+        for source in inputs:
+            try:
+                same_file = (
+                    destination.exists() and source.exists() and destination.samefile(source)
+                )
+            except OSError:
+                same_file = False
+            if same_file or destination.resolve() == source.resolve():
+                raise RuntimeCheckError(
+                    "invalid-output",
+                    "output must not replace project metadata, source or interpreter",
+                )
     interpreter_results: list[dict[str, Any]] = []
     for configured_value in prepared.interpreters:
         requested = str(configured_value)
