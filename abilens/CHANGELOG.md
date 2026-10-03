@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/jihoon22-lee/toy-projects/compare/abilens/v0.2.1...abilens/v0.2.2) (2026-10-03)
+
+
+### Bug Fixes
+
+* resolve review findings and reconcile product documentation ([#124](https://github.com/jihoon22-lee/toy-projects/issues/124)) ([6918cfb](https://github.com/jihoon22-lee/toy-projects/commit/6918cfb99ebe6e614ca6809ba94bb99bc9cd5c62))
+
 ## [0.2.1](https://github.com/jihoon22-lee/toy-projects/compare/abilens/v0.1.2...abilens/v0.2.1) (2026-10-03)
 
 ### Implementation details shipped in 0.2.1

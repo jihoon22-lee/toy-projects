@@ -8,6 +8,13 @@
 - Correct boolean aliases, duration and octal handling, Delegate controller unions,
   and specifier expansion boundaries. Keep the existing v1 snapshot schema.
 
+## [0.1.1](https://github.com/jihoon22-lee/toy-projects/compare/servicelens/v0.1.0...servicelens/v0.1.1) (2026-10-03)
+
+
+### Bug Fixes
+
+* resolve review findings and reconcile product documentation ([#124](https://github.com/jihoon22-lee/toy-projects/issues/124)) ([6918cfb](https://github.com/jihoon22-lee/toy-projects/commit/6918cfb99ebe6e614ca6809ba94bb99bc9cd5c62))
+
 ## 0.1.0 (2026-10-03)
 
 - Add opt-in system-service DefaultDependencies and Type=dbus dependency rules,

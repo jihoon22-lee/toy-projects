@@ -1,6 +1,6 @@
 """Offline, deterministic Python environment snapshots and checks."""
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 from envlens.diff import (
     DiffError,
