@@ -1,5 +1,7 @@
 """Offline, deterministic Python environment snapshots and checks."""
 
+__version__ = "0.1.0"
+
 from envlens.diff import (
     DiffError,
     check_compatibility,
@@ -59,4 +61,3 @@ __all__ = [
     "run_smoke",
     "write_snapshot",
 ]
-__version__ = "0.1.0"

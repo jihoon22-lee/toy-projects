@@ -12,12 +12,13 @@ from unittest.mock import patch
 import pytest
 
 from envlens import __main__ as cli
+from envlens import __version__
 
 
 def _snapshot(version: str) -> dict[str, object]:
     return {
         "schema_version": "envlens.snapshot/v1",
-        "producer": {"name": "envlens", "version": "0.1.0"},
+        "producer": {"name": "envlens", "version": __version__},
         "captured_at": "2026-09-03T00:00:00Z",
         "redaction": {"policy": "envlens-redaction/v1", "enabled": True},
         "source": {
