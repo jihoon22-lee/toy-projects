@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(buildscope VERSION 0.1.0 LANGUAGES CXX)  # x-release-please-version
+project(buildscope VERSION 0.2.0 LANGUAGES CXX)  # x-release-please-version
 
 option(BUILDSCOPE_BUILD_BENCHMARKS "Build the 100k-entry model benchmark" OFF)
 
