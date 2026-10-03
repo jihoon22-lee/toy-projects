@@ -151,6 +151,7 @@ DiffReport diff_reports(const ElfReport& left, const ElfReport& right) {
     result.runpath = make_set_diff(left.runpath, right.runpath);
     result.abi = make_set_diff(abi_keys(left), abi_keys(right));
     result.symbols = make_set_diff(left.symbols, right.symbols);
+    result.vtables = make_set_diff(left.vtables, right.vtables);
     const bool both_valid = left.status == InputStatus::Valid &&
                             right.status == InputStatus::Valid;
     if (left.status != right.status) result.header_changes.push_back("input status changed");
@@ -163,7 +164,8 @@ DiffReport diff_reports(const ElfReport& left, const ElfReport& right) {
     }
     result.changed = !result.header_changes.empty() || set_changed(result.needed) ||
                      set_changed(result.rpath) || set_changed(result.runpath) ||
-                     set_changed(result.abi) || set_changed(result.symbols);
+                     set_changed(result.abi) || set_changed(result.symbols) ||
+                     set_changed(result.vtables);
     if (left.policy.passed != right.policy.passed) {
         result.diagnostics.push_back("policy result changed");
         result.changed = true;
@@ -197,6 +199,8 @@ std::string serialize_diff(const DiffReport& diff) {
     append_set_json(output, diff.abi);
     output << ",\"symbols\":";
     append_set_json(output, diff.symbols);
+    output << ",\"vtables\":";
+    append_set_json(output, diff.vtables);
     output << ",\"diagnostics\":[";
     for (std::size_t index = 0; index < diff.diagnostics.size(); ++index) {
         if (index != 0U) {
@@ -246,6 +250,22 @@ std::string render_diff_text(const DiffReport& diff) {
             break;
         }
         output << "  - SYMBOL: " << diff.symbols.removed[index] << "\n";
+    }
+    for (std::size_t index = 0; index < diff.vtables.added.size(); ++index) {
+        if (index == kMaxSymbolLines) {
+            output << "  + VTABLE: ... and "
+                   << (diff.vtables.added.size() - kMaxSymbolLines) << " more\n";
+            break;
+        }
+        output << "  + VTABLE: " << diff.vtables.added[index] << "\n";
+    }
+    for (std::size_t index = 0; index < diff.vtables.removed.size(); ++index) {
+        if (index == kMaxSymbolLines) {
+            output << "  - VTABLE: ... and "
+                   << (diff.vtables.removed.size() - kMaxSymbolLines) << " more\n";
+            break;
+        }
+        output << "  - VTABLE: " << diff.vtables.removed[index] << "\n";
     }
     for (const std::string& diagnostic : diff.diagnostics) {
         output << "  note: " << diagnostic << "\n";

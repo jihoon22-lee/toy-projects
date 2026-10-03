@@ -85,6 +85,7 @@ struct ElfReport {
     std::vector<std::string> runpath;
     std::vector<VersionRequirement> versions;
     std::vector<std::string> symbols;
+    std::vector<std::string> vtables;
     std::vector<std::string> diagnostics;
     PolicyEvaluation policy;
 };
@@ -108,6 +109,7 @@ struct DiffReport {
     SetDiff runpath;
     SetDiff abi;
     SetDiff symbols;
+    SetDiff vtables;
     std::vector<std::string> header_changes;
     std::vector<std::string> diagnostics;
 };

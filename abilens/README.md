@@ -87,7 +87,12 @@ symbol set (from `DT_SYMTAB` bounded by `DT_HASH`/`DT_GNU_HASH`); sections are
 only consulted for the `.symtab` strippedness check.  When the binary carries
 `DT_VERDEF`/`DT_VERSYM` version definitions, exported symbols are reported
 with their version identity (`name@version`) — a renamed or rebased version
-node therefore shows as a removed/added symbol in the diff.  All offsets,
+node therefore shows as a removed/added symbol in the diff.  Dynamic symbols
+whose mangled name starts with `_ZTV` additionally populate the report's
+`vtables` list and the diff's `vtables` set: Itanium-ABI vtables are the
+runtime contract downstream subclasses bind to, so their gain or loss is
+surfaced separately (as `+/- VTABLE:` lines in text diffs) rather than
+buried in the flat symbol set.  All offsets,
 counts,
 sizes, and string
 indices are bounds-checked; out-of-file tables and oversized structures fail

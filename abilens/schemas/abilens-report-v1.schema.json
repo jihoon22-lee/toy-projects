@@ -40,7 +40,8 @@
     "symbols",
     "abi",
     "policy",
-    "diagnostics"
+    "diagnostics",
+    "vtables"
   ],
   "properties": {
     "schema": {
@@ -239,6 +240,13 @@
       }
     },
     "symbols": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "vtables": {
       "type": "array",
       "items": {
         "type": "string"
