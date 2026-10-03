@@ -127,6 +127,20 @@ def _distribution_dependency_issues(
         )
         if issue is not None:
             issues.append(issue)
+    external = metadata.get("requires_external")
+    if isinstance(external, list):
+        for item in external[:MAX_REQUIREMENTS]:
+            issues.append(
+                {
+                    "kind": "external-requirement",
+                    "name": normalized,
+                    "requirement": str(item),
+                    "installed": [],
+                    "certainty": "unknown",
+                    "source": str(distribution.get("name", normalized)),
+                    "reason": "external requirement cannot be verified offline",
+                }
+            )
     return issues
 
 

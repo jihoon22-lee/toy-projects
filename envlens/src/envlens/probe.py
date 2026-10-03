@@ -62,6 +62,15 @@ def distribution_record(distribution):
         requirements = []
         errors.append(error_record("requires_dist", error))
 
+    external_requirements = []
+    try:
+        if metadata is not None:
+            external_requirements = sorted(
+                {str(value) for value in (metadata.get_all("Requires-External") or [])}
+            )
+    except Exception as error:
+        errors.append(error_record("requires_external", error))
+
     entry_points = []
     try:
         for entry_point in distribution.entry_points:
@@ -136,6 +145,8 @@ def distribution_record(distribution):
     }
     if wheel_tags:
         metadata_record["wheel_tags"] = sorted(set(wheel_tags))
+    if external_requirements:
+        metadata_record["requires_external"] = external_requirements
     result = {
         "name": metadata_value("Name"),
         "version": metadata_value("Version"),
