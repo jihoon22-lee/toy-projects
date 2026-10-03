@@ -20,6 +20,36 @@ bool policy_applied(const Policy& policy) {
            policy.forbid_rpath || policy.forbid_runpath;
 }
 
+// A rule containing `@` names one version definition; a bare rule names the
+// symbol itself, so it matches `name` and every `name@version` identity.
+bool symbol_rule_matches(const std::string& rule, const std::string& symbol) {
+    if (rule.find('@') != std::string::npos) return symbol == rule;
+    return symbol.size() >= rule.size() && symbol.compare(0U, rule.size(), rule) == 0 &&
+           (symbol.size() == rule.size() || symbol[rule.size()] == '@');
+}
+
+void append_symbol_violations(const ElfReport& report, const Policy& policy,
+                              std::vector<std::string>& violations) {
+    if (policy.forbidden_symbols.empty() && policy.required_symbols.empty()) return;
+    if (!report.symbols_known) {
+        violations.push_back("exported symbols are unknown (report predates symbol "
+                             "evidence); symbol rules cannot be evaluated");
+        return;
+    }
+    for (const std::string& symbol : report.symbols) {
+        const bool forbidden = std::any_of(
+            policy.forbidden_symbols.begin(), policy.forbidden_symbols.end(),
+            [&](const std::string& rule) { return symbol_rule_matches(rule, symbol); });
+        if (forbidden) violations.push_back("forbidden exported symbol: " + symbol);
+    }
+    for (const std::string& required : policy.required_symbols) {
+        const bool present = std::any_of(
+            report.symbols.begin(), report.symbols.end(),
+            [&](const std::string& symbol) { return symbol_rule_matches(required, symbol); });
+        if (!present) violations.push_back("required exported symbol missing: " + required);
+    }
+}
+
 void append_identity_violations(const ElfReport& report, const Policy& policy,
                                 std::vector<std::string>& violations) {
     if (!policy.expected_class.empty() && report.header.elf_class != policy.expected_class) {
@@ -190,19 +220,12 @@ PolicyEvaluation evaluate_policy(const ElfReport& report, const Policy& policy) 
             result.violations.push_back("RUNPATH entry is forbidden: " + value);
         }
     }
-    for (const std::string& symbol : report.symbols) {
-        if (std::find(policy.forbidden_symbols.begin(), policy.forbidden_symbols.end(),
-                      symbol) != policy.forbidden_symbols.end()) {
-            result.violations.push_back("forbidden exported symbol: " + symbol);
-        }
-    }
-    for (const std::string& required : policy.required_symbols) {
-        if (std::find(report.symbols.begin(), report.symbols.end(), required) ==
-            report.symbols.end()) {
-            result.violations.push_back("required exported symbol missing: " + required);
-        }
-    }
-    if (policy.forbid_stripped && report.stripped_known && report.stripped) {
+    append_symbol_violations(report, policy, result.violations);
+    // Fail closed: without section headers the rule cannot be shown to hold.
+    if (policy.forbid_stripped && !report.stripped_known) {
+        result.violations.push_back(
+            "stripped status is unknown (policy requires a verifiable .symtab)");
+    } else if (policy.forbid_stripped && report.stripped) {
         result.violations.push_back("binary is stripped (policy requires .symtab)");
     }
     append_dependency_violations(report, policy, result.violations);
