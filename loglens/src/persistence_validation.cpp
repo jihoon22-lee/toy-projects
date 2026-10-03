@@ -1,6 +1,7 @@
 #include "persistence_validation.hpp"
 
 #include "loglens/filter_expr.hpp"
+#include "loglens/log_record.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -75,16 +76,17 @@ bool validUtf8(std::string_view text) {
     return true;
 }
 
-bool validLabel(const std::string& value, const char* label,
-                PersistenceError& error) {
+bool validBoundedText(const std::string& value, const char* label,
+                      std::size_t maxBytes, PersistenceError& error) {
     if (value.empty()) {
         setPersistenceError(error, PersistenceErrorCode::InvalidValue,
                             std::string(label) + " must not be empty");
         return false;
     }
-    if (value.size() > kMaxPersistedNameBytes) {
+    if (value.size() > maxBytes) {
         setPersistenceError(error, PersistenceErrorCode::LimitExceeded,
-                            std::string(label) + " exceeds 128-byte limit");
+                            std::string(label) + " exceeds " + std::to_string(maxBytes)
+                                + "-byte limit");
         return false;
     }
     if (!validUtf8(value)) {
@@ -98,6 +100,38 @@ bool validLabel(const std::string& value, const char* label,
                                 std::string(label) + " contains a control byte");
             return false;
         }
+    }
+    return true;
+}
+
+bool validLabel(const std::string& value, const char* label,
+                PersistenceError& error) {
+    return validBoundedText(value, label, kMaxPersistedNameBytes, error);
+}
+
+bool validFilterExpression(const std::string& expression, const char* label,
+                           PersistenceError& error) {
+    if (expression.empty()) {
+        setPersistenceError(error, PersistenceErrorCode::InvalidQuery,
+                            std::string(label) + " must not be empty");
+        return false;
+    }
+    if (expression.size() > kMaxFilterQueryBytes) {
+        setPersistenceError(error, PersistenceErrorCode::LimitExceeded,
+                            std::string(label) + " exceeds 4096-byte limit");
+        return false;
+    }
+    if (!validUtf8(expression)) {
+        setPersistenceError(error, PersistenceErrorCode::InvalidQuery,
+                            std::string(label) + " must be valid UTF-8");
+        return false;
+    }
+    ParseError parseError;
+    if (!Filter::parse(expression, parseError)) {
+        setPersistenceError(error, PersistenceErrorCode::InvalidQuery,
+                            std::string(label) + " is invalid: " + parseError.message,
+                            parseError.position);
+        return false;
     }
     return true;
 }
@@ -170,27 +204,46 @@ bool validSavedQuery(const SavedQuery& query, PersistenceError& error) {
     if (!validLabel(query.name, "query name", error)) {
         return false;
     }
-    if (query.expression.empty()) {
-        setPersistenceError(error, PersistenceErrorCode::InvalidQuery,
-                            "saved query expression must not be empty");
+    return validFilterExpression(query.expression, "saved query expression", error);
+}
+
+bool validSession(const SessionState& state, PersistenceError& error) {
+    if (!state.name.empty() && !validLabel(state.name, "session name", error)) {
         return false;
     }
-    if (query.expression.size() > kMaxFilterQueryBytes) {
+    if (!validBoundedText(state.source_path, "session source path",
+                          kMaxSessionPathBytes, error)) {
+        return false;
+    }
+    if (!validFormat(state.format)) {
+        setPersistenceError(error, PersistenceErrorCode::InvalidValue,
+                            "session format is not supported");
+        return false;
+    }
+    if (std::string_view(multilinePolicyName(state.multiline)) == "unknown") {
+        setPersistenceError(error, PersistenceErrorCode::InvalidValue,
+                            "session multiline policy is not supported");
+        return false;
+    }
+    if (state.max_record_bytes == 0
+        || state.max_record_bytes > kMaxRecordBytes) {
         setPersistenceError(error, PersistenceErrorCode::LimitExceeded,
-                            "saved query expression exceeds 4096-byte limit");
+                            "session max_record_bytes is outside the supported range");
         return false;
     }
-    if (!validUtf8(query.expression)) {
-        setPersistenceError(error, PersistenceErrorCode::InvalidQuery,
-                            "saved query expression must be valid UTF-8");
+    if (!state.filter.empty()
+        && !validFilterExpression(state.filter, "session filter", error)) {
         return false;
     }
-    ParseError parseError;
-    if (!Filter::parse(query.expression, parseError)) {
-        setPersistenceError(error, PersistenceErrorCode::InvalidQuery,
-                            "saved query expression is invalid: " + parseError.message,
-                            parseError.position);
-        return false;
+    if (!state.level.empty()) {
+        if (!validLabel(state.level, "session level", error)) {
+            return false;
+        }
+        if (parseLevel(state.level) == Level::Unknown) {
+            setPersistenceError(error, PersistenceErrorCode::InvalidValue,
+                                "session level name is unknown");
+            return false;
+        }
     }
     return true;
 }

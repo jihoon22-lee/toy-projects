@@ -95,10 +95,11 @@ available in `raw` and malformed components are not copied into `source`.
 ## Persistent profiles and saved queries
 
 The core persistence API in `include/loglens/persistence.hpp` stores source
-profiles and filter queries without depending on the GUI.  A missing optional
-file is a successful empty load (`found == false`); a present file must match
-its complete versioned schema.  The current schemas are
-`loglens.source-profiles/v1` and `loglens.saved-queries/v1`.
+profiles, filter queries, and investigation sessions without depending on the
+GUI.  A missing optional file is a successful empty load (`found == false`);
+a present file must match its complete versioned schema.  The current schemas
+are `loglens.source-profiles/v1`, `loglens.saved-queries/v1`, and
+`loglens.session/v1`.
 
 Source profiles use the exact shape below.  `format` is one of the canonical
 values `auto`, `iso`, `syslog`, `jsonl`, or `raw`; `multiline` is either
@@ -118,6 +119,32 @@ semantics as a CLI or GUI query.
 {"schema":"loglens.saved-queries/v1","queries":[
   {"name":"timeouts","expression":"level>=WARN AND message~timeout"}
 ]}
+```
+
+An investigation session (`loglens.session/v1`) bundles the source and the
+active query of one investigation into a single document, so a run can be
+saved and reproduced later.  Only `source.path` is required; `format`,
+`multiline`, `max_record_bytes`, `name`, `filter`, and `level` default the
+same way as the console flags.  `level` accepts the same spellings as
+`--level`, and `filter` reuses `Filter::parse()` validation.  Source paths
+are bounded to 4096 UTF-8 bytes.
+
+```json
+{"schema":"loglens.session/v1","name":"billing outage",
+ "source":{"path":"/var/log/app.log","format":"syslog",
+           "multiline":"fold-continuations","max_record_bytes":65536},
+ "filter":"level>=WARN AND message~timeout","level":"warn"}
+```
+
+The console tool consumes the same document: `--session FILE` loads a session
+and fills in any option the command line did not set explicitly, while
+`--save-session FILE` writes the effective options as a session before
+scanning.  A missing `--session` file or an invalid session fails the run.
+
+```sh
+loglens app.log --level ERROR --save-session errors.session.json
+loglens --session errors.session.json
+loglens --session errors.session.json --level INFO   # flag overrides session
 ```
 
 Object fields and JSON keys are strict: unknown or duplicate fields, duplicate

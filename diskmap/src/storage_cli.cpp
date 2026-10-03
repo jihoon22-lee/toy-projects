@@ -302,13 +302,70 @@ void printDuplicateText(const diskmap::DuplicateAnalysis& analysis, std::ostream
 
 } // namespace
 
+bool changeVisible(const diskmap::SnapshotChange& change,
+                   const SnapshotDiffFilter& filter) {
+    if (filter.certain_only && !change.certain) {
+        return false;
+    }
+    if (!filter.kinds.empty() && filter.kinds.count(change.kind) == 0) {
+        return false;
+    }
+    if (filter.min_delta_bytes > 0) {
+        const bool before_known = !change.has_before || change.before_metric.known;
+        const bool after_known = !change.has_after || change.after_metric.known;
+        if (!before_known || !after_known) {
+            return false;
+        }
+        const std::uint64_t before = change.has_before ? change.before_metric.bytes : 0;
+        const std::uint64_t after = change.has_after ? change.after_metric.bytes : 0;
+        const std::uint64_t delta = before > after ? before - after : after - before;
+        if (delta < filter.min_delta_bytes) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool filterActive(const SnapshotDiffFilter& filter) {
+    return filter.certain_only || !filter.kinds.empty() || filter.min_delta_bytes > 0;
+}
+
 void printSnapshotDiff(const diskmap::SnapshotDiff& diff,
                        bool json,
-                       std::ostream& out) {
+                       std::ostream& out,
+                       const SnapshotDiffFilter& filter) {
+    diskmap::SnapshotDiff shown = diff;
+    if (filterActive(filter)) {
+        shown.changes.clear();
+        for (const diskmap::SnapshotChange& change : diff.changes) {
+            if (changeVisible(change, filter)) shown.changes.push_back(change);
+        }
+    }
     if (json) {
-        printSnapshotDiffJson(diff, out);
+        printSnapshotDiffJson(shown, out);
     } else {
-        printSnapshotDiffText(diff, out);
+        if (filterActive(filter)) {
+            out << "Snapshot comparison: " << shown.changes.size() << " change(s) shown of "
+                << diff.changes.size() << ", "
+                << (diff.complete ? "exact evidence" : "conservative evidence") << "\n";
+            for (const diskmap::SnapshotChange& change : shown.changes) {
+                const std::string before = change.has_before
+                                               ? change.before_key.normalized_path
+                                               : "(absent)";
+                const std::string after = change.has_after
+                                              ? change.after_key.normalized_path
+                                              : "(absent)";
+                out << "  " << changeName(change.kind) << "  "
+                    << (change.certain ? "certain" : "candidate") << "  " << before
+                    << " -> " << after;
+                if (!change.reason.empty()) {
+                    out << "  [" << change.reason << ']';
+                }
+                out << '\n';
+            }
+        } else {
+            printSnapshotDiffText(shown, out);
+        }
     }
 }
 

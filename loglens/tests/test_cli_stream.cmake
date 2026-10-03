@@ -158,6 +158,53 @@ if(composed_filter_position EQUAL -1)
     message(FATAL_ERROR "combined option diagnostic did not use --filter byte offsets:\n${composed_filter_error}")
 endif()
 
+# A saved session must round-trip: save the effective options, then reload
+# them without explicit flags. An explicit flag overrides the session value.
+set(session_file "${CMAKE_CURRENT_BINARY_DIR}/loglens-session.json")
+execute_process(
+    COMMAND "${LOGLENS}" "${INPUT}" --level ERROR --format auto
+            --save-session "${session_file}"
+    RESULT_VARIABLE save_result
+    OUTPUT_QUIET
+    ERROR_VARIABLE save_error
+)
+if(NOT save_result EQUAL 0)
+    message(FATAL_ERROR "loglens --save-session failed (${save_result}): ${save_error}")
+endif()
+
+execute_process(
+    COMMAND "${LOGLENS}" --session "${session_file}"
+    RESULT_VARIABLE session_result
+    OUTPUT_VARIABLE session_output
+    ERROR_VARIABLE session_error
+)
+file(REMOVE "${session_file}")
+if(NOT session_result EQUAL 0)
+    message(FATAL_ERROR "loglens --session failed (${session_result}): ${session_error}")
+endif()
+foreach(expected IN ITEMS
+        "3  ERROR  api  upstream timeout contacting billing"
+        "8  ERROR  db  deadlock detected on tx 77")
+    string(FIND "${session_output}" "${expected}" session_position)
+    if(session_position EQUAL -1)
+        message(FATAL_ERROR "missing session-filtered output '${expected}':\n${session_output}")
+    endif()
+endforeach()
+string(FIND "${session_output}" "6  INFO  api" session_info_position)
+if(NOT session_info_position EQUAL -1)
+    message(FATAL_ERROR "session --level ERROR leaked an INFO record:\n${session_output}")
+endif()
+
+execute_process(
+    COMMAND "${LOGLENS}" --session "${CMAKE_CURRENT_BINARY_DIR}/missing-session.json"
+    RESULT_VARIABLE missing_session_result
+    OUTPUT_QUIET
+    ERROR_VARIABLE missing_session_error
+)
+if(missing_session_result EQUAL 0)
+    message(FATAL_ERROR "a missing session file was accepted")
+endif()
+
 execute_process(
     COMMAND "${LOGLENS}" "${INPUT}" --level BOGUS
     RESULT_VARIABLE invalid_level_result

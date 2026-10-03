@@ -256,6 +256,65 @@ void testDuplicateReports() {
     CHECK(contains(renderedJson, "\\u0001"));
 }
 
+void testSnapshotDiffFilters() {
+    SnapshotDiff diff;
+    diff.complete = true;
+    diff.changes.push_back(
+        change(SnapshotChangeKind::Added, {}, "/added", true, "added reason"));
+    diff.changes.push_back(
+        change(SnapshotChangeKind::Removed, "/removed", {}, false, "removed reason"));
+    diff.changes.push_back(change(SnapshotChangeKind::Grown, "/grown", "/grown", true, {}));
+    diff.changes.push_back(
+        change(SnapshotChangeKind::Uncertain, "/maybe", "/maybe", false, "unclear"));
+
+    diskmap_cli::SnapshotDiffFilter kinds;
+    kinds.kinds = {SnapshotChangeKind::Added, SnapshotChangeKind::Removed};
+    std::ostringstream kindText;
+    diskmap_cli::printSnapshotDiff(diff, false, kindText, kinds);
+    CHECK(contains(kindText.str(), "2 change(s) shown of 4"));
+    CHECK(contains(kindText.str(), "/added"));
+    CHECK(!contains(kindText.str(), "/grown"));
+    std::ostringstream kindJson;
+    diskmap_cli::printSnapshotDiff(diff, true, kindJson, kinds);
+    CHECK(contains(kindJson.str(), "\"kind\":\"added\""));
+    CHECK(contains(kindJson.str(), "\"kind\":\"removed\""));
+    CHECK(!contains(kindJson.str(), "\"kind\":\"grown\""));
+
+    diskmap_cli::SnapshotDiffFilter certain;
+    certain.certain_only = true;
+    std::ostringstream certainText;
+    diskmap_cli::printSnapshotDiff(diff, false, certainText, certain);
+    CHECK(contains(certainText.str(), "2 change(s) shown of 4"));
+    CHECK(!contains(certainText.str(), "/removed"));
+    CHECK(!contains(certainText.str(), "/maybe"));
+
+    // Deltas: added 22, removed 11, grown 11, uncertain |22 - 11| = 11.
+    diskmap_cli::SnapshotDiffFilter delta;
+    delta.min_delta_bytes = 11;
+    std::ostringstream deltaText;
+    diskmap_cli::printSnapshotDiff(diff, false, deltaText, delta);
+    CHECK(contains(deltaText.str(), "4 change(s) shown of 4"));
+    delta.min_delta_bytes = 12;
+    std::ostringstream smaller;
+    diskmap_cli::printSnapshotDiff(diff, false, smaller, delta);
+    CHECK(contains(smaller.str(), "1 change(s) shown of 4"));
+    CHECK(contains(smaller.str(), "/added"));
+    delta.min_delta_bytes = 23;
+    std::ostringstream tooBig;
+    diskmap_cli::printSnapshotDiff(diff, false, tooBig, delta);
+    CHECK(contains(tooBig.str(), "0 change(s) shown of 4"));
+
+    // An unknown metric can never prove a minimum delta.
+    SnapshotDiff unknownMetric;
+    unknownMetric.changes.push_back(
+        change(SnapshotChangeKind::Grown, "/g", "/g", true, {}, true, false));
+    diskmap_cli::SnapshotDiffFilter anyDelta;
+    anyDelta.min_delta_bytes = 1;
+    std::ostringstream hidden;
+    diskmap_cli::printSnapshotDiff(unknownMetric, true, hidden, anyDelta);
+    CHECK(contains(hidden.str(), "\"changes\":[]"));
+}
+
 } // namespace
 
 class TestStorageCli : public QObject
@@ -269,6 +328,7 @@ private slots:
 void TestStorageCli::run() {
     testEmptyReports();
     testSnapshotReports();
+    testSnapshotDiffFilters();
     testDuplicateReports();
 }
 
