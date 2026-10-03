@@ -3,6 +3,7 @@
 #include <QByteArray>
 #include <QComboBox>
 #include <QDir>
+#include <QFileDialog>
 #include <QFileInfo>
 #include <QLineEdit>
 #include <QObject>
@@ -298,4 +299,74 @@ void MainWindow::saveSavedQuery() {
     savedQueries_ = std::move(next);
     rebuildSavedQueries(utf8String(candidate.name));
     updateStatus(tr("Saved query '%1'").arg(utf8String(candidate.name)));
+}
+
+void MainWindow::saveSessionToFile() {
+    if (currentPath_.isEmpty()) {
+        updateStatus(tr("Open a log before saving a session"));
+        return;
+    }
+    const QString path = QFileDialog::getSaveFileName(
+        this, tr("Save session"), currentPath_,
+        tr("LogLens sessions (*.session.json);;All files (*)"));
+    if (path.isEmpty()) {
+        return;
+    }
+    loglens::SessionState state;
+    const QByteArray nameBytes = QFileInfo(path).completeBaseName().toUtf8();
+    state.name = std::string(nameBytes.constData(),
+                             static_cast<std::size_t>(nameBytes.size()));
+    const QByteArray pathBytes = currentPath_.toUtf8();
+    state.source_path =
+        std::string(pathBytes.constData(), static_cast<std::size_t>(pathBytes.size()));
+    state.format = selectedFormat();
+    state.multiline = selectedMultilinePolicy();
+    state.max_record_bytes = static_cast<std::size_t>(maxRecordBytes_->value());
+    const QByteArray filterBytes = filterEdit_->text().toUtf8();
+    state.filter = std::string(filterBytes.constData(),
+                               static_cast<std::size_t>(filterBytes.size()));
+    loglens::PersistenceError error;
+    if (!loglens::saveSession(path.toStdString(), state, error)) {
+        showPersistenceError(tr("save session"), error);
+        return;
+    }
+    updateStatus(tr("Session saved to %1").arg(QFileInfo(path).fileName()));
+}
+
+void MainWindow::openSessionFile() {
+    const QString path = QFileDialog::getOpenFileName(
+        this, tr("Open session"), QString(),
+        tr("LogLens sessions (*.session.json);;All files (*)"));
+    if (path.isEmpty()) {
+        return;
+    }
+    const loglens::SessionLoadResult result = loglens::loadSession(path.toStdString());
+    if (!result.ok()) {
+        showPersistenceError(tr("load session"), result.error);
+        return;
+    }
+    if (!result.found) {
+        updateStatus(tr("Session file not found"));
+        return;
+    }
+    const loglens::SessionState& state = result.state;
+    setProfileControls(loglens::SourceProfile{state.name, state.format, state.multiline,
+                                            state.max_record_bytes});
+    QString filter = utf8String(state.filter);
+    if (!state.level.empty()) {
+        const QString levelExpr =
+            QStringLiteral("level>=") + utf8String(state.level);
+        filter = filter.isEmpty() ? levelExpr
+                                  : levelExpr + QStringLiteral(" AND ") + filter;
+    }
+    if (!filter.isEmpty()) {
+        filterEdit_->setText(filter);
+        applyFilterText(filter);
+    }
+    if (state.source_path.empty()) {
+        updateStatus(tr("Session '%1' loaded without a source path")
+                         .arg(utf8String(state.name)));
+        return;
+    }
+    openPath(utf8String(state.source_path));
 }

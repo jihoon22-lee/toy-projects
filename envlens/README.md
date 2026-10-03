@@ -150,6 +150,12 @@ means the bounded metadata and version evaluator reached a direct conclusion;
 syntax, absent import/wheel evidence, or versions outside the evaluator. No
 resolver, package index, wheel download, or network request is performed.
 
+Distributions that declare `Requires-External` metadata (system libraries,
+tools, or headers outside Python packaging) surface as `external-requirement`
+dependency records with `certainty: "unknown"` — envlens reports them as
+unverifiable evidence rather than silently dropping the declaration or
+treating it as a failure.
+
 ## Check one environment
 
 `check` evaluates a single snapshot's compatibility and dependency evidence

@@ -285,6 +285,15 @@
                   "minLength": 1,
                   "maxLength": 65536
                 }
+              },
+              "requires_external": {
+                "type": "array",
+                "maxItems": 100000,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 65536
+                }
               }
             }
           },

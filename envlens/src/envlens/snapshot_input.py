@@ -133,6 +133,12 @@ def validate_snapshot(snapshot: Any) -> dict[str, Any]:
             f"distribution[{index}].requires_dist",
             MAX_REQUIREMENTS,
         )
+        if "requires_external" in metadata:
+            _array(
+                metadata.get("requires_external"),
+                f"distribution[{index}].requires_external",
+                MAX_REQUIREMENTS,
+            )
         _array(
             distribution.get("entry_points"),
             f"distribution[{index}].entry_points",
