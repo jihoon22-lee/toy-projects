@@ -33,7 +33,7 @@ jobs:
       - name: Assemble documentation sources
         run: |
           set -euo pipefail
-          site="$RUNNER_TEMP/pages-src"
+          site="$GITHUB_WORKSPACE/.pages-src"
           mkdir -p "$site"
           cp README.md "$site/index.md"
           for product in loglens diskmap buildscope envlens abilens; do
