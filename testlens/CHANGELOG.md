@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased
+## [0.1.1](https://github.com/jihoon22-lee/toy-projects/compare/testlens/v0.1.0...testlens/v0.1.1) (2026-10-03)
 
-### Fixed
+
+### Bug Fixes
 
 - Diagnose unsupported/missing CTest statuses and missing/empty test names, mark those
   observations unknown and incomplete, and make `--fail-on incomplete` return 1.
@@ -10,11 +11,6 @@
   legitimate named CTest `notrun` observations as complete coverage.
 - Align runner examples, CLI option documentation and retry/shard support descriptions
   with current behavior; remove duplicate release headings and fixed-version usage examples.
-
-## [0.1.1](https://github.com/jihoon22-lee/toy-projects/compare/testlens/v0.1.0...testlens/v0.1.1) (2026-10-03)
-
-
-### Bug Fixes
 
 * resolve review findings and reconcile product documentation ([#124](https://github.com/jihoon22-lee/toy-projects/issues/124)) ([6918cfb](https://github.com/jihoon22-lee/toy-projects/commit/6918cfb99ebe6e614ca6809ba94bb99bc9cd5c62))
 
