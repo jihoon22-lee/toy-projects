@@ -55,8 +55,9 @@ struct Policy {
     std::string max_cxxabi;
     bool forbid_absolute_rpath = false;
     std::vector<std::string> forbidden_needed;
-    // Exported-symbol rules compare against the same name@version identities
-    // the report emits, so a rule can pin a specific version definition.
+    // Exported-symbol rules match the name@version identities the report
+    // emits. A rule containing `@` pins one version definition exactly; a bare
+    // name matches the symbol under any version (or none).
     std::vector<std::string> forbidden_symbols;
     std::vector<std::string> required_symbols;
     bool forbid_stripped = false;
@@ -86,6 +87,11 @@ struct ElfReport {
     std::vector<VersionRequirement> versions;
     std::vector<std::string> symbols;
     std::vector<std::string> vtables;
+    // False only for reports loaded from JSON written before the field
+    // existed: an absent axis is unknown evidence, not an empty set. A report
+    // without "vtables" also predates name@version symbol identities.
+    bool symbols_known = true;
+    bool vtables_known = true;
     std::vector<std::string> diagnostics;
     PolicyEvaluation policy;
 };

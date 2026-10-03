@@ -61,9 +61,14 @@ Supported keys are `expected_class`, `expected_machine`, `max_glibc`,
 `forbid_runpath`, `forbid_stripped`, `forbidden_needed`,
 `forbidden_symbols`, and `required_symbols` (the three `forbidden_*`/
 `required_*` keys take comma-separated lists).  Symbol rules compare against
-the report's exported identities, so `required_symbols=init@MYAPP_1.0`
-pins a specific version definition.  Version values are numeric,
-for example `max_glibc=2.31`.
+the report's exported identities: a rule containing `@`, such as
+`required_symbols=init@MYAPP_1.0`, pins one version definition exactly, while
+a bare name such as `forbidden_symbols=debug_dump` matches that symbol under
+any version (or none).  Rules fail closed when the evidence is missing:
+`forbid_stripped=true` is a violation when strippedness is unknown (no
+section headers), and symbol rules are a violation against a saved report
+that predates exported-symbol evidence.  Version values are numeric, for
+example `max_glibc=2.31`.
 
 ```sh
 build/bin/abilens inspect --policy policy.conf --json build/bin/abilens
@@ -92,7 +97,13 @@ whose mangled name starts with `_ZTV` additionally populate the report's
 `vtables` list and the diff's `vtables` set: Itanium-ABI vtables are the
 runtime contract downstream subclasses bind to, so their gain or loss is
 surfaced separately (as `+/- VTABLE:` lines in text diffs) rather than
-buried in the flat symbol set.  All offsets,
+buried in the flat symbol set.  Version names are decoration on symbols the
+report already has: a malformed `DT_VERDEF`/`DT_VERSYM` table keeps the
+input valid, reports unqualified symbol names, and records a
+`symbol versions unavailable` diagnostic.  A saved report from before
+version identities existed (no `vtables` field) can still be diffed: symbols
+are compared by name, the vtable axis is skipped, and a diagnostic says so,
+instead of every versioned symbol reading as removed and re-added.  All offsets,
 counts,
 sizes, and string
 indices are bounds-checked; out-of-file tables and oversized structures fail

@@ -4,6 +4,7 @@
 #include "abilens/inspect.hpp"
 #include "abilens/report.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
@@ -257,6 +258,29 @@ abilens::ElfReport test_native_inspector() {
         abilens::inspect_elf_buffer(corrupt, synthetic_header());
     expect(misclassified.status == abilens::InputStatus::Corrupt,
            "out-of-bounds dynamic metadata fails closed");
+
+    // DT_VERDEF pointing at a record that runs past EOF: version names are
+    // decoration, so the binary stays Valid with unqualified symbols.
+    std::vector<unsigned char> bad_verdef = synthetic_elf(true, true);
+    put64(bad_verdef, 0x40 + 56 + 40, 13U * 16U);        // PT_DYNAMIC grows by two
+    put64(bad_verdef, 0x100 + 10U * 16U, 0x6ffffffcU);    // DT_VERDEF
+    put64(bad_verdef, 0x100 + 10U * 16U + 8U, 0x4f0U);    // 20-byte record crosses EOF
+    put64(bad_verdef, 0x100 + 11U * 16U, 0x6ffffffdU);    // DT_VERDEFNUM
+    put64(bad_verdef, 0x100 + 11U * 16U + 8U, 1U);
+    const abilens::ElfReport degraded =
+        abilens::inspect_elf_buffer(bad_verdef, synthetic_header());
+    expect(degraded.status == abilens::InputStatus::Valid,
+           "malformed version definitions do not fail the whole inspection");
+    expect(degraded.needed.size() == 2U && degraded.versions.size() == 3U,
+           "dependencies survive malformed version definitions");
+    expect(degraded.symbols == parsed.symbols,
+           "symbols fall back to unqualified names");
+    expect(std::any_of(degraded.diagnostics.begin(), degraded.diagnostics.end(),
+                       [](const std::string& note) {
+                           return note.find("symbol versions unavailable") !=
+                                  std::string::npos;
+                       }),
+           "malformed version definitions are reported as a diagnostic");
     return parsed;
 }
 
@@ -281,6 +305,40 @@ std::filesystem::path test_policy(const abilens::ElfReport& parsed) {
     satisfied.required_symbols = {"abilens_export_a", "abilens_export_b"};
     expect(abilens::evaluate_policy(parsed, satisfied).passed,
            "required_symbols accepts present exports");
+
+    abilens::ElfReport versioned = parsed;
+    versioned.symbols = {"abilens_export_a@LIB_1", "abilens_export_b@LIB_2"};
+    abilens::Policy bare_names;
+    bare_names.required_symbols = {"abilens_export_a", "abilens_export_b@LIB_2"};
+    expect(abilens::evaluate_policy(versioned, bare_names).passed,
+           "bare rules match any version; qualified rules match exactly");
+    abilens::Policy wrong_version;
+    wrong_version.required_symbols = {"abilens_export_b@LIB_1"};
+    expect(abilens::evaluate_policy(versioned, wrong_version).violations.size() == 1U,
+           "a qualified rule does not match another version");
+    abilens::Policy forbid_bare;
+    forbid_bare.forbidden_symbols = {"abilens_export_a", "abilens_export"};
+    const abilens::PolicyEvaluation forbid_eval =
+        abilens::evaluate_policy(versioned, forbid_bare);
+    expect(forbid_eval.violations.size() == 1U &&
+               forbid_eval.violations.front() ==
+                   "forbidden exported symbol: abilens_export_a@LIB_1",
+           "bare forbidden rules catch versioned exports without prefix matches");
+    abilens::ElfReport legacy_symbols = parsed;
+    legacy_symbols.symbols_known = false;
+    expect(!abilens::evaluate_policy(legacy_symbols, satisfied).passed,
+           "symbol rules fail closed when symbols are unknown");
+
+    abilens::Policy no_strip;
+    no_strip.forbid_stripped = true;
+    expect(abilens::evaluate_policy(parsed, no_strip).passed,
+           "forbid_stripped accepts a binary with .symtab");
+    abilens::ElfReport strip_unknown = parsed;
+    strip_unknown.stripped_known = false;
+    const abilens::PolicyEvaluation unknown_eval =
+        abilens::evaluate_policy(strip_unknown, no_strip);
+    expect(!unknown_eval.passed && unknown_eval.violations.size() == 1U,
+           "forbid_stripped fails closed when strippedness is unknown");
     const std::filesystem::path invalid_policy =
         temporary_file("invalid-policy", std::string("max_glibc=2.31") +
                                              static_cast<char>(0xff) + "\n");
@@ -380,6 +438,40 @@ void test_diff_contract(const abilens::ElfReport& parsed) {
            "diff JSON carries the symbol axis");
     expect(abilens::serialize_diff(diff) == abilens::serialize_diff(diff),
            "diff JSON is deterministic");
+
+    // A report written before 0.1.1 has no "vtables" field and unqualified
+    // symbols; diffing it against a current report must not invent churn.
+    abilens::ElfReport current = parsed;
+    current.symbols = {"_ZTV3Foo@LIB_1", "abilens_export_a@LIB_1",
+                       "abilens_export_b@LIB_1"};
+    current.vtables = {"_ZTV3Foo@LIB_1"};
+    abilens::ElfReport legacy_base = parsed;
+    legacy_base.symbols.push_back("_ZTV3Foo");
+    std::sort(legacy_base.symbols.begin(), legacy_base.symbols.end());
+    const std::string legacy_json =
+        replace_once(abilens::serialize_report(legacy_base), ",\"vtables\":[]", "");
+    const abilens::ElfReport legacy = abilens::parse_report_json(legacy_json);
+    expect(legacy.symbols_known && !legacy.vtables_known,
+           "a report without vtables is marked as predating versioned symbols");
+    const abilens::DiffReport legacy_diff = abilens::diff_reports(legacy, current);
+    expect(!legacy_diff.changed && legacy_diff.symbols.added.empty() &&
+               legacy_diff.symbols.removed.empty() && legacy_diff.vtables.added.empty(),
+           "legacy reports compare symbols by name and skip the vtable axis");
+    expect(!legacy_diff.diagnostics.empty(), "the reduced comparison is disclosed");
+    abilens::ElfReport renamed = current;
+    renamed.symbols = {"_ZTV3Foo@LIB_1", "abilens_export_a@LIB_1"};
+    expect(abilens::diff_reports(legacy, renamed).symbols.removed ==
+               std::vector<std::string>{"abilens_export_b"},
+           "real removals still surface against a legacy report");
+    const std::string symbolless_json =
+        replace_once(legacy_json, ",\"symbols\":[\"_ZTV3Foo\",\"abilens_export_a\","
+                                  "\"abilens_export_b\"]",
+                     "");
+    const abilens::DiffReport symbolless_diff =
+        abilens::diff_reports(abilens::parse_report_json(symbolless_json), current);
+    expect(!symbolless_diff.changed && symbolless_diff.symbols.added.empty(),
+           "reports without symbol evidence do not read as every symbol added");
+
     abilens::DiffReport byte_diff = diff;
     byte_diff.left = std::string("left-") + static_cast<char>(0xfe);
     expect(abilens::serialize_diff(byte_diff).find("left-\\u00fe") != std::string::npos,

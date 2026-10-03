@@ -86,6 +86,36 @@ void append_set_json(std::ostringstream& output, const SetDiff& diff) {
     output << '}';
 }
 
+std::vector<std::string> unversioned_symbols(const std::vector<std::string>& symbols) {
+    std::vector<std::string> result;
+    result.reserve(symbols.size());
+    for (const std::string& symbol : symbols) {
+        result.push_back(symbol.substr(0U, symbol.find('@')));
+    }
+    return result;
+}
+
+// Reports written before an axis existed carry no evidence for it, so the
+// axis is compared at the precision both sides share instead of reading the
+// absent field as "everything was added".
+void diff_symbol_axes(const ElfReport& left, const ElfReport& right, DiffReport& result) {
+    if (!left.symbols_known || !right.symbols_known) {
+        result.diagnostics.push_back(
+            "symbols not compared: a report predates exported-symbol evidence");
+        return;
+    }
+    if (!left.vtables_known || !right.vtables_known) {
+        result.symbols = make_set_diff(unversioned_symbols(left.symbols),
+                                       unversioned_symbols(right.symbols));
+        result.diagnostics.push_back(
+            "symbols compared by name and vtables not compared: a report predates "
+            "versioned symbol identities");
+        return;
+    }
+    result.symbols = make_set_diff(left.symbols, right.symbols);
+    result.vtables = make_set_diff(left.vtables, right.vtables);
+}
+
 bool set_changed(const SetDiff& diff) {
     return !diff.added.empty() || !diff.removed.empty();
 }
@@ -150,8 +180,7 @@ DiffReport diff_reports(const ElfReport& left, const ElfReport& right) {
     result.rpath = make_set_diff(left.rpath, right.rpath);
     result.runpath = make_set_diff(left.runpath, right.runpath);
     result.abi = make_set_diff(abi_keys(left), abi_keys(right));
-    result.symbols = make_set_diff(left.symbols, right.symbols);
-    result.vtables = make_set_diff(left.vtables, right.vtables);
+    diff_symbol_axes(left, right, result);
     const bool both_valid = left.status == InputStatus::Valid &&
                             right.status == InputStatus::Valid;
     if (left.status != right.status) result.header_changes.push_back("input status changed");

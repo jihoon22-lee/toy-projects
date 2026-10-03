@@ -281,6 +281,8 @@ ElfReport parse_report_json(const std::string& json) {
     parse_elf(root, report);
     parse_dependencies(root, report);
     parse_abi(root, report);
+    report.symbols_known = root.object.count("symbols") != 0U;
+    report.vtables_known = root.object.count("vtables") != 0U;
     report.symbols = optional_string_array(root, "symbols");
     report.vtables = optional_string_array(root, "vtables");
     parse_policy(root, report);
