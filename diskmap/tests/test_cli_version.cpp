@@ -4,7 +4,7 @@
 // The exact number lives in main.cpp; here we assert the shape and the
 // exit.
 
-#include "assert.hpp"
+#include "check.hpp"
 
 #include <array>
 #include <cstdio>
@@ -20,7 +20,7 @@ struct CommandResult {
     int exitCode = -1;
 };
 
-CommandResult run(const std::string& command) {
+CommandResult runCommand(const std::string& command) {
     CommandResult result;
     std::FILE* pipe = ::popen(command.c_str(), "r");
     if (pipe == nullptr) {
@@ -39,13 +39,24 @@ CommandResult run(const std::string& command) {
 
 } // namespace
 
-int main() {
+class TestCliVersion : public QObject
+{
+    Q_OBJECT
+
+private slots:
+    void run();
+};
+
+void TestCliVersion::run() {
     const std::string binary = DISKMAP_BINARY;
 
     // No path argument: --version must answer anyway.
-    const CommandResult version = run(binary + " --version 2>&1");
+    const CommandResult version = runCommand(binary + " --version 2>&1");
     CHECK_EQ(version.exitCode, 0);
     CHECK(std::regex_match(version.output, std::regex("diskmap [0-9]+\\.[0-9]+\\.[0-9]+\n")));
 
-    return testSummary();
 }
+
+QTEST_GUILESS_MAIN(TestCliVersion)
+
+#include "test_cli_version.moc"

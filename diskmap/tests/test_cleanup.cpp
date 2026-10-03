@@ -1,6 +1,6 @@
 // Safety and identity contracts for cleanup staging and revalidation.
 
-#include "assert.hpp"
+#include "check.hpp"
 #include "diskmap/cleanup.hpp"
 
 #include <chrono>
@@ -418,7 +418,15 @@ void testTemporaryFilesystemRevalidation(const std::filesystem::path& root) {
 
 } // namespace
 
-int main() {
+class TestCleanup : public QObject
+{
+    Q_OBJECT
+
+private slots:
+    void run();
+};
+
+void TestCleanup::run() {
     testCleanupReasonNamesAndEvidence();
 
     ScopedTempDirectory temp;
@@ -593,5 +601,8 @@ int main() {
                           CleanupSkipReason::ProtectedRoot));
     }
 
-    return testSummary();
 }
+
+QTEST_GUILESS_MAIN(TestCleanup)
+
+#include "test_cleanup.moc"

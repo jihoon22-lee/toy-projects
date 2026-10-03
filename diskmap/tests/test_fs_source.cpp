@@ -2,7 +2,7 @@
 // adapter.  The fixture deliberately exercises lstat/stat differences,
 // rather than treating every directory entry as a followed file.
 
-#include "assert.hpp"
+#include "check.hpp"
 #include "diskmap/fs_source.hpp"
 
 #include <chrono>
@@ -156,11 +156,11 @@ void checkPosixStat(const FsMetadata& metadata, const fs::path& path, bool follo
 #endif
 }
 
-int runTests() {
+void runTests() {
     ScopedTempDirectory temp;
     CHECK(temp.valid());
     if (!temp.valid()) {
-        return 0;
+        return;
     }
 
     const fs::path base = temp.path();
@@ -467,12 +467,22 @@ int runTests() {
     // ScopedTempDirectory performs the only cleanup after this function
     // returns.  In particular, no cleanup path calls canonical(), status(),
     // or another operation that follows a fixture symlink.
-    return 0;
 }
 
 } // namespace
 
-int main() {
+class TestFsSource : public QObject
+{
+    Q_OBJECT
+
+private slots:
+    void run();
+};
+
+void TestFsSource::run() {
     runTests();
-    return testSummary();
 }
+
+QTEST_GUILESS_MAIN(TestFsSource)
+
+#include "test_fs_source.moc"

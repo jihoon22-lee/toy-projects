@@ -1,7 +1,7 @@
 // Linux-only recoverable Trash tests.  Every fixture lives below one private
 // temporary directory and the API is exercised without Qt or a shell.
 
-#include "assert.hpp"
+#include "check.hpp"
 #include "diskmap/cleanup.hpp"
 #include "diskmap/fs_source.hpp"
 #include "diskmap/trash.hpp"
@@ -83,7 +83,6 @@ std::uint64_t deviceFor(const fs::path& path) {
 #else
     (void)path;
 #endif
-    return 0;
 }
 
 bool writeFile(const fs::path& path, const std::string& contents) {
@@ -1780,15 +1779,22 @@ void testDeterministicRollbackRecovery(const fs::path& root) {
 
 } // namespace
 
-int main() {
+class TestTrash : public QObject
+{
+    Q_OBJECT
+
+private slots:
+    void run();
+};
+
+void TestTrash::run() {
 #if !defined(__linux__)
-    std::printf("SKIP recoverable Trash tests: Linux backend is unavailable\n");
-    return 0;
+    QSKIP("recoverable Trash tests: Linux backend is unavailable");
 #else
     ScopedTempDirectory temp;
     CHECK(temp.valid());
     if (!temp.valid()) {
-        return testSummary();
+        return;
     }
 
     testStatusTokensAndEnvironment(temp.path());
@@ -1804,6 +1810,10 @@ int main() {
     testStaleIncompleteAndBoundedPlans(temp.path());
     testSymlinkMovesLinkOnly(temp.path());
     testMultiTargetPartialOutcome(temp.path());
-    return testSummary();
+    return;
 #endif
 }
+
+QTEST_GUILESS_MAIN(TestTrash)
+
+#include "test_trash.moc"

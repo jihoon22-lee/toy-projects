@@ -1,4 +1,4 @@
-#include "assert.hpp"
+#include "check.hpp"
 
 #include "diskmap/duplicates.hpp"
 #include "diskmap/fs_source.hpp"
@@ -1233,7 +1233,15 @@ void testSystemReadRaceRefusals() {
 
 } // namespace
 
-int main() {
+class TestDuplicates : public QObject
+{
+    Q_OBJECT
+
+private slots:
+    void run();
+};
+
+void TestDuplicates::run() {
     testIssueNamesAndOptionValidation();
     testKnownHashes();
     testFakeDuplicateAndStreaming();
@@ -1250,5 +1258,8 @@ int main() {
     testBoundsAndSymlinks();
     testRealFiles();
     testSystemReadRaceRefusals();
-    return testSummary();
 }
+
+QTEST_GUILESS_MAIN(TestDuplicates)
+
+#include "test_duplicates.moc"

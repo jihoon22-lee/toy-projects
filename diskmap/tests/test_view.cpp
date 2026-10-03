@@ -1,6 +1,6 @@
 // Qt-free tests for the DiskMap explorer view projection.
 
-#include "assert.hpp"
+#include "check.hpp"
 #include "fake_fs.hpp"
 #include "diskmap/scanner.hpp"
 #include "diskmap/view.hpp"
@@ -111,7 +111,15 @@ const FsNode* findByName(const std::vector<const FsNode*>& nodes, const std::str
 
 } // namespace
 
-int main() {
+class TestView : public QObject
+{
+    Q_OBJECT
+
+private slots:
+    void run();
+};
+
+void TestView::run() {
     // --- metric selection and logical completeness -----------------------
     {
         FsNode root = makeDirectory("root", "/tmp/root", {
@@ -667,5 +675,8 @@ int main() {
                  std::string("/tmp/Space Dir/자료 root/Résumé.txt"));
     }
 
-    return testSummary();
 }
+
+QTEST_GUILESS_MAIN(TestView)
+
+#include "test_view.moc"

@@ -9,7 +9,7 @@
 //     its siblings (a defining property of the squarified algorithm,
 //     independent of how tiles get grouped into rows).
 
-#include "assert.hpp"
+#include "check.hpp"
 #include "diskmap/fs_node.hpp"
 #include "diskmap/treemap.hpp"
 
@@ -217,7 +217,15 @@ void checkAreaProportional(const std::vector<Tile>& tiles, const FsNode& parent,
 
 } // namespace
 
-int main() {
+class TestTreemap : public QObject
+{
+    Q_OBJECT
+
+private slots:
+    void run();
+};
+
+void TestTreemap::run() {
     // --- empty children: no tiles at all ---
     {
         const FsNode root = makeDir("root", {});
@@ -595,5 +603,8 @@ int main() {
         }
     }
 
-    return testSummary();
 }
+
+QTEST_GUILESS_MAIN(TestTreemap)
+
+#include "test_treemap.moc"

@@ -1,7 +1,7 @@
 // Tests for diskmap::FsNode helpers (src/core/fs_node.hpp / fs_node.cpp):
 // aggregateSizes, sortBySizeDesc, findChild, countNodes, topFiles.
 
-#include "assert.hpp"
+#include "check.hpp"
 #include "fake_fs.hpp"
 #include "diskmap/fs_node.hpp"
 
@@ -85,7 +85,15 @@ void clearOwnedChain(FsNode& root) {
 
 } // namespace
 
-int main() {
+class TestFsNode : public QObject
+{
+    Q_OBJECT
+
+private slots:
+    void run();
+};
+
+void TestFsNode::run() {
     // --- identity and node metadata model: link and target facts coexist ---
     {
         const FileIdentity first{17, 23, true};
@@ -445,5 +453,8 @@ int main() {
         clearOwnedChain(deepRoot);
     }
 
-    return testSummary();
 }
+
+QTEST_GUILESS_MAIN(TestFsNode)
+
+#include "test_fs_node.moc"
