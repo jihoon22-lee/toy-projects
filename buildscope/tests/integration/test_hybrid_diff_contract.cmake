@@ -22,12 +22,17 @@ if(NOT producer_result EQUAL 1)
         "stdout: ${producer_output}\nstderr: ${producer_error}")
 endif()
 
-execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E compare_files "${OUTPUT}" "${EXPECTED}"
-    RESULT_VARIABLE comparison_result
-)
-if(NOT comparison_result EQUAL 0)
-    message(FATAL_ERROR "generated diff is not byte-identical to the contract fixture")
+# The contract fixture pins producer.version to the release that authored it;
+# normalize the producer version out of both documents before comparing so a
+# version bump does not invalidate the semantic contract.
+file(READ "${OUTPUT}" _generated_diff)
+file(READ "${EXPECTED}" _expected_diff)
+string(REGEX REPLACE "\"version\": \"[0-9][^\"]*\"" "\"version\": \"normal\""
+    _generated_diff "${_generated_diff}")
+string(REGEX REPLACE "\"version\": \"[0-9][^\"]*\"" "\"version\": \"normal\""
+    _expected_diff "${_expected_diff}")
+if(NOT _generated_diff STREQUAL _expected_diff)
+    message(FATAL_ERROR "generated diff is not identical to the contract fixture")
 endif()
 
 execute_process(
