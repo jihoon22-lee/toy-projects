@@ -8,6 +8,11 @@ name: release
 on:
   push:
     tags: ["*/v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Product release tag to build, e.g. loglens/v0.1.0"
+        required: true
 
 permissions:
   contents: write
@@ -15,7 +20,9 @@ permissions:
   attestations: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  # GitHub drops push events when more than three tags arrive in one push,
+  # so workflow_dispatch is the manual path for building an existing tag.
+  group: release-${{ inputs.tag || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -30,11 +37,12 @@ jobs:
         id: tag
         run: |
           set -euo pipefail
-          product="${GITHUB_REF_NAME%%/*}"
-          version="${GITHUB_REF_NAME#*/}"
+          tag="${{ inputs.tag || github.ref_name }}"
+          product="${tag%%/*}"
+          version="${tag#*/}"
           case "$product" in
             loglens|diskmap|buildscope|abilens|envlens) ;;
-            *) echo "::error::tag ${GITHUB_REF_NAME} is not a product release"; exit 1 ;;
+            *) echo "::error::tag ${tag} is not a product release"; exit 1 ;;
           esac
           echo "product=$product" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -43,7 +51,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Install Qt6
         if: contains(fromJSON('["loglens","diskmap","buildscope"]'), steps.tag.outputs.product)
