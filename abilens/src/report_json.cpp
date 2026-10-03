@@ -108,13 +108,13 @@ void parse_tool(const JsonValue& root, ElfReport& report) {
     report.tool.name = required_string(tool, "name");
     report.tool.version = required_string(tool, "version");
     if (!report.tool.version.empty() && !valid_abi_version(report.tool.version)) {
-        throw std::runtime_error("invalid readelf tool version in report JSON");
+        throw std::runtime_error("invalid tool version in report JSON");
     }
-    if (report.status == InputStatus::Valid && report.tool.name != "GNU readelf") {
-        throw std::runtime_error("valid report does not identify GNU readelf");
+    if (report.status == InputStatus::Valid && report.tool.name != "abilens") {
+        throw std::runtime_error("valid report does not identify the abilens analyzer");
     }
     if (report.status == InputStatus::Valid && !valid_abi_version(report.tool.version)) {
-        throw std::runtime_error("valid report has no numeric GNU readelf version");
+        throw std::runtime_error("valid report has no numeric abilens version");
     }
 }
 
