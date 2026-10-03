@@ -148,3 +148,74 @@ def test_json_numeric_overflow_rejected(tmp_path):
 def test_malformed_schema_type_is_clean_error():
     with pytest.raises(InputError, match="Unsupported schema"):
         validate({"schema": []})
+
+
+@pytest.mark.parametrize(
+    "test_element,expected_code,expected_status,expected_diagnostics",
+    [
+        (
+            '<Test Status="interrupted"><Name>test</Name></Test>',
+            1,
+            "unknown",
+            ["unsupported-status"],
+        ),
+        ("<Test><Name>test</Name></Test>", 1, "unknown", ["unsupported-status"]),
+        ('<Test Status="passed"/>', 1, "unknown", ["missing-name"]),
+        ('<Test Status="notrun"><Name>disabled</Name></Test>', 0, "not-run", []),
+    ],
+)
+def test_cli_ctest_completeness_policy(
+    tmp_path, capsys, test_element, expected_code, expected_status, expected_diagnostics
+):
+    source = tmp_path / "Test.xml"
+    source.write_text(
+        "<Site><Testing>" + test_element + "<EndDateTime>today</EndDateTime></Testing></Site>"
+    )
+    output = tmp_path / "run.json"
+    assert (
+        main(
+            [
+                "collect",
+                str(source),
+                "--dialect",
+                "ctest",
+                "--project",
+                "demo",
+                "--run-id",
+                "ctest",
+                "--complete",
+                "--fail-on",
+                "incomplete",
+                "--output",
+                str(output),
+            ]
+        )
+        == expected_code
+    )
+    result = load_json(output)
+    assert result["complete"] == (expected_code == 0)
+    assert result["tests"][0]["status"] == expected_status
+    assert [d["code"] for d in result["diagnostics"]] == expected_diagnostics
+    assert ("Policy violations: incomplete" in capsys.readouterr().err) == (expected_code == 1)
+    validate(result)
+
+
+@pytest.mark.parametrize(
+    "xml",
+    [
+        '<Site><Testing><Test Status="interrupted"><Name>test</Name></Test>'
+        "<EndDateTime>today</EndDateTime></Testing></Site>",
+        '<Site><Testing><Test Status="passed"/><EndDateTime>today</EndDateTime></Testing></Site>',
+    ],
+)
+def test_previously_misclassified_ctest_complete_snapshot_is_rejected(make_run, xml):
+    run = make_run(xml, dialect="ctest")
+    run["complete"] = True
+    run["diagnostics"] = []
+    if not run["tests"][0]["name"]:
+        # The older CTest adapter retained passed even when Name was absent.
+        run["tests"][0]["status"] = "passed"
+        run["tests"][0]["attempts"][0]["status"] = "passed"
+        run["summary"] = {"passed": 1}
+    with pytest.raises(InputError, match="Invalid completion claim"):
+        validate(run)

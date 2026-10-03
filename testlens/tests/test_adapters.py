@@ -196,3 +196,47 @@ def test_unknown_status_marks_incomplete(make_run):
     run = make_run('<testsuite><testcase name="x" status="interrupted"/></testsuite>')
     assert run["tests"][0]["status"] == "unknown"
     assert not run["complete"]
+
+
+@pytest.mark.parametrize("status_attribute", ['Status="interrupted"', 'Status=""', ""])
+def test_ctest_unknown_or_missing_status_is_incomplete(make_run, status_attribute):
+    run = make_run(
+        f"<Site><Testing><Test {status_attribute}><Name>test</Name></Test>"
+        "<EndDateTime>today</EndDateTime></Testing></Site>",
+        dialect="ctest",
+    )
+    assert run["declared_complete"]
+    assert not run["complete"]
+    assert run["tests"][0]["status"] == "unknown"
+    diagnostic = next(d for d in run["diagnostics"] if d["code"] == "unsupported-status")
+    assert "Testing/Test[1]" in diagnostic["message"]
+    assert diagnostic["source_id"] == run["sources"][0]["id"]
+    validate(run)
+
+
+@pytest.mark.parametrize("name_element", ["", "<Name/>"])
+@pytest.mark.parametrize("status", ["passed", "failed", "notrun"])
+def test_ctest_missing_or_empty_name_is_incomplete(make_run, name_element, status):
+    run = make_run(
+        f'<Site><Testing><Test Status="{status}">{name_element}</Test>'
+        "<EndDateTime>today</EndDateTime></Testing></Site>",
+        dialect="ctest",
+    )
+    assert not run["complete"]
+    assert run["tests"][0]["name"] == ""
+    assert run["tests"][0]["status"] == "unknown"
+    assert [d["code"] for d in run["diagnostics"]] == ["missing-name"]
+    assert run["diagnostics"][0]["source_id"] == run["sources"][0]["id"]
+    validate(run)
+
+
+def test_ctest_notrun_is_a_complete_observation(make_run):
+    run = make_run(
+        '<Site><Testing><Test Status="notrun"><Name>disabled</Name></Test>'
+        "<EndDateTime>today</EndDateTime></Testing></Site>",
+        dialect="ctest",
+    )
+    assert run["complete"]
+    assert run["summary"] == {"not-run": 1}
+    assert run["diagnostics"] == []
+    validate(run)

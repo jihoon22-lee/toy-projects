@@ -54,10 +54,12 @@
       "minLength": 1
     },
     "complete": {
-      "type": "boolean"
+      "type": "boolean",
+      "description": "Caller-declared coverage without critical collection diagnostics or unknown/unnamed test results. A named not-run observation does not itself make coverage incomplete. The validator additionally checks these cross-field semantics."
     },
     "declared_complete": {
-      "type": "boolean"
+      "type": "boolean",
+      "description": "The caller's --complete assertion before collection-quality checks."
     },
     "source_root": {
       "anyOf": [

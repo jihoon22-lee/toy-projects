@@ -1,6 +1,11 @@
 # Portfolio implementation ledger
 
-Baseline: `e40ae22`. The coordinator implemented EnvLens/AbiLens and shared integration.
+> **역사적 작업 기록** — 아래 기능 범위, 계획, 테스트 수, 버전 및 Git/배포 상태는
+> 해당 작업 단계에서 기록한 내용이다. 현재 사용법이나 최신 검증·배포 상태를 뜻하지 않는다.
+> 현재 제품별 안내는 [저장소 README](../README.md), 변경 이력은
+> [CHANGELOG](../CHANGELOG.md), 후속 계획은 [ROADMAP](../ROADMAP.md)을 참고한다.
+
+Historical implementation baseline: `e40ae22`. The coordinator implemented EnvLens/AbiLens and shared integration.
 After all three new products passed acceptance, their owners completed
 BuildScope, LogLens and DiskMap as authorized.
 Root CI, release configuration and documentation remain coordinator-owned.
@@ -41,11 +46,11 @@ Root CI, release configuration and documentation remain coordinator-owned.
 - [x] Current README/ROADMAP/product docs, versions and compatibility notes.
 - [x] Final source, schema, installed-product, sanitizer and GUI validation.
 
-Only validated work is marked complete. Detailed commands/results are appended
-as implementation checkpoints finish.
+The checkmarks record acceptance at the implementation checkpoint below. They do not
+claim that later independent reviews found no defects or that later patches are deployed.
 
 
-## Validated integration checkpoint
+## Historical validated integration checkpoint
 
 - EnvLens: 131 tests on Python 3.10 and 3.14; Ruff and strict mypy. Venv symlink,
   relative compilation, later-batch syntax errors, console return values,
@@ -65,7 +70,7 @@ as implementation checkpoints finish.
   been executed by this local implementation task.
 
 
-## Final existing-product acceptance
+## Existing-product acceptance at that checkpoint
 
 | Product | Normal checks | Instrumented / installed checks |
 |---|---|---|
@@ -92,13 +97,24 @@ embedded Python parsing, all schema metaschemas and generated documentation link
 passed locally.
 
 Versions: existing five products 0.2.0 development; new three products 0.1.0.
-The release manifest keeps existing published baselines. Source changes remain
-unstaged and uncommitted. No GitHub workflow, release or Pages deployment was
-started by this task. Existing local historical tags were not modified.
+The release manifest keeps existing published baselines. At that local checkpoint, source changes were
+unstaged and uncommitted. No GitHub workflow, release or Pages deployment had been
+started within that local implementation phase. Existing local historical tags were not modified.
 
-Known supported boundaries are product-specific and documented: compiler/scan
+The implementation recorded these product-specific boundaries: compiler/scan
 budgets are cooperative, LogLens source fingerprints use identity and a 64KiB
 prefix while notes hash whole records, AbiLens loader results are candidates and
 DWARF public API reachability stays unknown, ServiceLens implements a documented
 systemd subset, and TestLens reports observed failure frequencies without declaring
 flakiness automatically.
+
+
+## Subsequent publication status at this documentation audit
+
+The earlier five products were subsequently published at **0.2.1** and the three new
+products at **0.1.0**. The earlier uncommitted/unpublished statements above describe the
+local implementation checkpoint, not this later state. Nine subsequently reported
+functional defects are being corrected for a further patch release; this historical
+ledger does not record that pending release as successful. Current commands, supported
+contracts and verification procedures belong to the product READMEs linked from the
+repository README.

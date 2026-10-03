@@ -209,7 +209,8 @@ IncludeRoots includeRoots(const QJsonObject &entry, const std::filesystem::path 
         const std::filesystem::path raw =
             record.value(QStringLiteral("path")).toString().toStdString();
         std::filesystem::path root;
-        if (record.value(QStringLiteral("scope")).toString() == QLatin1String("project")) {
+        const auto scope = record.value(QStringLiteral("scope")).toString();
+        if (scope == QLatin1String("project") || scope == QLatin1String("vendor")) {
             root = projectRoot / raw;
         } else {
             root = raw.is_absolute() ? raw : cwd / raw;

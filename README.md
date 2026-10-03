@@ -45,7 +45,7 @@ Qt를 쓰는 프로젝트는 아래 배치를 따른다. 공용 파서·모델�
 ```
 <project>/
 ├── CMakeLists.txt        빌드 정의
-├── include/<project>/    헤더는 전부 여기. 코어와 GUI 모두
+├── include/<project>/    다른 계층·소비자에 공개하는 코어/GUI 헤더
 │   └── gui/              Qt6 셸의 헤더
 ├── src/                  구현
 │   ├── main.cpp          CLI 드라이버
@@ -53,9 +53,8 @@ Qt를 쓰는 프로젝트는 아래 배치를 따른다. 공용 파서·모델�
 └── tests/                각각 자체 실행 파일이 되는 테스트
 ```
 
-**헤더는 예외 없이 `include/<project>/` 아래에 둔다.** GUI 를 라이브러리로 분리한 뒤로는
-테스트가 그 헤더를 직접 include 하므로, `src/` 밖에서 쓰이는 헤더는 공개 헤더다.
-`gui/` 하위를 두되 접두사(`loglens/`, `diskmap/`)는 유지한다. `-Iinclude` 하나로
+공개 헤더는 `include/<project>/` 아래에 두고, 구현 내부 헤더는 해당 `src/` 계층에 둔다.
+GUI 헤더는 제품에 따라 `gui/` 하위를 쓰며 접두사(`loglens/`, `diskmap/`)를 유지한다. `-Iinclude` 하나로
 `#include "loglens/gui/log_model.hpp"` 와 `#include "loglens/log_parser.hpp"` 가 같은
 모양이 된다.
 
@@ -83,7 +82,8 @@ GUI 테스트는 `QT_QPA_PLATFORM=offscreen`으로 헤드리스로 돌린다.
 
 ## 빌드와 테스트
 
-각 제품은 자체 빌드·테스트 명령을 가진다. CI는 같은 명령을 그대로 실행한다.
+각 제품은 자체 빌드·테스트 명령을 가진다. CI는 여기에 sanitizer·설치·패키지 검증을 더한다.
+아래 연속 예제는 저장소 루트에서 시작한다.
 
 ```bash
 # loglens — CMake/Qt6
@@ -105,7 +105,12 @@ QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
 
 # envlens — pytest + ruff + mypy
 cd ../envlens
-uv run pytest && uvx ruff check . && uv run mypy src
+uv venv .venv
+uv pip install --python .venv/bin/python -e . pytest ruff mypy jsonschema
+PYTHONPATH=src .venv/bin/python -m pytest
+.venv/bin/ruff check src tests
+.venv/bin/ruff format --check src tests
+.venv/bin/mypy src
 
 # abilens — Make
 cd ../abilens
@@ -114,24 +119,26 @@ make -j"$(nproc)" && make check
 
 ## GUI 빌드
 
+각 예제는 저장소 루트에서 독립적으로 실행한다. `[경로]`는 실제 파일·디렉터리로 바꾸거나 생략한다.
+
 ```bash
 # loglens (CMake)
-cd loglens
-cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release
-cmake --build build/gui --parallel
-./build/gui/src/gui/loglens-gui [경로]
+cmake -S loglens -B loglens/build/gui -DCMAKE_BUILD_TYPE=Release
+cmake --build loglens/build/gui --parallel
+./loglens/build/gui/src/gui/loglens-gui [경로]
 
 # diskmap (CMake/Qt6)
-cd diskmap
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel 2
-./build/src/gui/diskmap-gui [경로]
+cmake -S diskmap -B diskmap/build -DCMAKE_BUILD_TYPE=Release
+cmake --build diskmap/build --parallel 2
+./diskmap/build/src/gui/diskmap-gui [경로]
 ```
 
 GUI에 경로를 주면 폴더 선택 대화상자를 건너뛰고 바로 스캔·로드하므로,
 `QT_QPA_PLATFORM=offscreen` 헤드리스 스모크 실행이 가능하다.
 
 ## 신규 제품 검증
+
+저장소 루트에서 실행한다.
 
 ```bash
 cmake -S tracelens -B tracelens/build/verify -DCMAKE_BUILD_TYPE=Release
@@ -142,7 +149,7 @@ QT_QPA_PLATFORM=offscreen ctest --test-dir tracelens/build/verify --output-on-fa
 (cd servicelens && uv sync --locked --group dev && uv run pytest && uv build)
 ```
 
-CI의 Merge Gate는 8개 독립 제품 게이트를 모두 요구한다. native 릴리스는
+CI의 Merge Gate는 8개 독립 제품 게이트와 문서 정합성 검사를 모두 요구한다. native 릴리스는
 설치 디렉터리 전체를 패키징하며, Python 제품은 wheel/sdist와 깨끗한 환경의
 설치를 검증한다. release-please가 만든 PR은 CI를 명시적으로 시작하고, 릴리스 출력의 정확한 SHA로
 artifact workflow를 직접 호출한다. 태그가 아직 없는 draft도 빌드할 수 있으며,

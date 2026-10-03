@@ -39,7 +39,7 @@ int main(int argc, char **argv) {
   };
   option("format", "inspect output: text or json", "format", "text");
   option("output", "Atomic output file (default stdout)", "path");
-  option("strict", "Exit 3 when evidence is partial");
+  option("strict", "inspect/events/diff: exit 3 when evidence is partial");
   option("max-bytes", "Input byte budget", "N", "1073741824");
   option("max-events", "Logical event budget", "N", "1000000");
   option("max-ms", "Analysis time budget; zero disables", "N", "0");
@@ -50,16 +50,16 @@ int main(int argc, char **argv) {
   option("max-pending", "Unfinished call limit", "N", "65536");
   option("max-diagnostics", "Retained diagnostic limit", "N", "1000");
   option("max-syscalls", "Syscall and errno cardinality limit", "N", "4096");
-  option("top", "Slow-call evidence limit", "N", "1000");
-  option("pid", "Filter numeric PID/TID", "N");
-  option("syscall", "Filter exact syscall", "name");
-  option("errno", "Filter exact errno", "name");
-  option("min-duration-ns", "Filter minimum explicit duration", "N");
-  option("path", "Filter observed path substring", "text");
-  option("limit", "Maximum emitted matching events", "N", "100");
-  option("line", "One-based source line", "N", "1");
-  option("context", "Source lines before and after", "N", "3");
-  option("source-id", "Snapshot source index", "N", "0");
+  option("top", "Slow-call evidence limit; zero disables", "N", "1000");
+  option("pid", "events: filter numeric PID/TID", "N");
+  option("syscall", "events: filter exact syscall", "name");
+  option("errno", "events: filter exact errno", "name");
+  option("min-duration-ns", "events: filter minimum explicit duration", "N");
+  option("path", "events: filter observed path substring", "text");
+  option("limit", "events: maximum emitted matches (scan continues)", "N", "100");
+  option("line", "source: one-based source line", "N", "1");
+  option("context", "source: lines before and after (0-100)", "N", "3");
+  option("source-id", "source: zero-based snapshot source index", "N", "0");
   p.process(app);
   try {
     auto pos = p.positionalArguments();

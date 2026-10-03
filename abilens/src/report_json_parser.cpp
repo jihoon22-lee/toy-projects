@@ -11,7 +11,7 @@ public:
     explicit JsonParser(const std::string& input) : input_(input) {}
 
     JsonValue parse() {
-        if (input_.size() > 8U * 1024U * 1024U) {
+        if (input_.size() > kMaxReportBytes) {
             throw std::runtime_error("report JSON exceeds the 8 MiB bound");
         }
         JsonValue value = parse_value();
@@ -28,8 +28,8 @@ private:
     std::size_t depth_ = 0;
     std::size_t node_count_ = 0;
     static constexpr std::size_t kMaxNestingDepth = 64U;
-    static constexpr std::size_t kMaxNodes = 100000U;
-    static constexpr std::size_t kMaxContainerItems = 65536U;
+    static constexpr std::size_t kMaxNodes = kMaxReportNodes;
+    static constexpr std::size_t kMaxContainerItems = kMaxReportContainerItems;
 
     void enter_container() {
         if (depth_ >= kMaxNestingDepth) {

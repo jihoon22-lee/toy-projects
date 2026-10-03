@@ -56,6 +56,7 @@ class AnalysisWorkflowTest : public QObject {
     void cliRoundTrip();
     void ambiguousDirectiveLineStaysUnknown();
     void relocatedSnapshotKeepsDatabaseRelativeDirectory();
+    void vendorRootsRemainRelativeToProject();
 };
 void AnalysisWorkflowTest::partialCompilerKeepsSeparateFallback() {
     QTemporaryDir dir;
@@ -86,6 +87,34 @@ void AnalysisWorkflowTest::partialCompilerKeepsSeparateFallback() {
     QCOMPARE(buildscope::parseSnapshot(QJsonDocument(old)).schemaVersion,
              QString("buildscope.snapshot/v3"));
     QVERIFY(!analysis(old).contains("fallback"));
+}
+
+void AnalysisWorkflowTest::vendorRootsRemainRelativeToProject() {
+    QTemporaryDir dir;
+    QDir().mkpath(dir.filePath("build"));
+    QDir().mkpath(dir.filePath("src"));
+    QDir().mkpath(dir.filePath("vendor"));
+    write(dir.filePath("src/main.cpp"), "#include <api.hpp>\nint value = VENDOR_VALUE;\n");
+    write(dir.filePath("vendor/api.hpp"), "#define VENDOR_VALUE 7\n");
+    const QJsonArray db{QJsonObject{
+        {"directory", dir.filePath("build")}, {"file", "../src/main.cpp"},
+        {"arguments", QJsonArray{QStringLiteral(BUILDSCOPE_TEST_COMPILER), "-I../vendor",
+                                  "-c", "../src/main.cpp"}}}};
+    const auto database = dir.filePath("build/compile_commands.json");
+    write(database, QJsonDocument(db).toJson());
+    for (const auto &mode : {QStringLiteral("estimate"), QStringLiteral("compiler")}) {
+        auto snapshot = loadCompilationDatabase(database, dir.path());
+        AnalysisControl control;
+        annotateSnapshotControlled(snapshot, dir.path(), mode, control);
+        const auto result = analysis(snapshot);
+        QVERIFY(result.value("complete").toBool());
+        const auto edge = result.value("edges").toArray().first().toObject();
+        QCOMPARE(edge.value("resolved").toString(), QString("vendor/api.hpp"));
+        QCOMPARE(edge.value("classification").toString(), QString("vendor"));
+        const auto parsed = buildscope::parseSnapshot(QJsonDocument(snapshot));
+        const auto impact = buildscope::includeImpact(parsed, "vendor/api.hpp");
+        QCOMPARE(impact.value("translation_units").toArray().size(), 1);
+    }
 }
 void AnalysisWorkflowTest::budgetsCancellationAndMutation() {
     QTemporaryDir dir;

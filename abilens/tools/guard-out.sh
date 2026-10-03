@@ -17,6 +17,11 @@ requested=$2
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 project_root=$(CDPATH= cd -- "$script_dir/.." && pwd -P)
+lexical=$(realpath -ms -- "$requested")
+[ ! -L "$lexical" ] || {
+    echo "refusing symlink OUT: $requested" >&2
+    exit 1
+}
 canonical=$(realpath -m -- "$requested")
 marker="$canonical/.abilens-out"
 

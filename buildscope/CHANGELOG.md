@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.1](https://github.com/jihoon22-lee/toy-projects/compare/buildscope/v0.2.0...buildscope/v0.2.1) (2026-10-03)
+## [0.2.1](https://github.com/jihoon22-lee/toy-projects/compare/buildscope/v0.1.2...buildscope/v0.2.1) (2026-10-03)
 
 
 ### Features
@@ -22,14 +22,16 @@
 * **buildscope:** accept a UTF-8 BOM in streamed compile databases ([8930062](https://github.com/jihoon22-lee/toy-projects/commit/8930062707c24ab4a80af96e7ba6505db01cebf4))
 * **release:** make BuildScope publication fail closed ([#41](https://github.com/jihoon22-lee/toy-projects/issues/41)) ([fda8b5f](https://github.com/jihoon22-lee/toy-projects/commit/fda8b5fb068b68c04c8c40e297812fbe79cee3da))
 
-## [0.2.0](https://github.com/jihoon22-lee/toy-projects/compare/buildscope/v0.1.2...buildscope/v0.2.0) (2026-10-03)
+## 0.2.0 — unpublished release plan (2026-10-03)
+
+The 0.2.0 tag was not published; this implementation shipped in 0.2.1.
 
 
 ### Features
 
 * expand eight independent diagnostic tools and verified releases ([#120](https://github.com/jihoon22-lee/toy-projects/issues/120)) ([3a01bb9](https://github.com/jihoon22-lee/toy-projects/commit/3a01bb93c3fee936a335bb9445400b5f469d6a87))
 
-## 0.2.0 (development)
+### Implementation details shipped in 0.2.1
 
 - Add snapshot v4 with explicit completeness, bounded analysis-run metadata and separate lexical fallback for partial compiler traces; retain v1–v3 readers and legacy projections.
 - Add monotonic per-unit/global time, byte, file, edge and unit budgets, cancellable compiler process groups, and partial-evidence retention.
@@ -37,7 +39,7 @@
 - Fix growing-source reads, response-file arguments used as option values, normalized unit selection and incorrect include-location matching; accept safe optimization flags.
 - Add source-mutation, cancellation, compiler-failure, relocation, schema and offscreen GUI regressions; install desktop/icon assets and sanitizer support.
 
-This development checkpoint has not been published.
+These features were published in 0.2.1.
 
 ## [0.1.2](https://github.com/jihoon22-lee/toy-projects/compare/buildscope/v0.1.1...buildscope/v0.1.2) (2026-10-03)
 

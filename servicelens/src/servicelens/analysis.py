@@ -13,6 +13,7 @@ from .defaults import add_service_defaults
 from .fs import RootFS
 from .model import SEMANTICS, SNAPSHOT, VERSION, InputError, Limits, diagnostic
 from .resolver import SYSTEM_PATHS, resolve_unit, validate_name
+from .scalars import ENUM_DIRECTIVES, supports_specifiers, validate_scalar
 from .syntax import environment_file, parse_unit, words
 
 DEPENDENCIES = {
@@ -188,7 +189,12 @@ def _interpret(fs: RootFS, name: str, resolved: dict[str, Any]) -> dict[str, Any
                     "origins": [_origin(record)],
                 }
                 continue
-            expanded, unresolved = specifiers(raw, name)
+            # Boolean/numeric/enum handlers do not apply systemd specifiers.
+            expanded, unresolved = (
+                (raw, [])
+                if scalar and not supports_specifiers(dotted, raw)
+                else specifiers(raw, name)
+            )
             status = "unknown" if unresolved else "known"
             if unresolved:
                 issues.append(
@@ -225,45 +231,76 @@ def _interpret(fs: RootFS, name: str, resolved: dict[str, Any]) -> dict[str, Any
                 continue
             previous = settings.get(dotted)
             if scalar:
-                enumerations = {
-                    "Service.Type": {
-                        "simple",
-                        "exec",
-                        "forking",
-                        "oneshot",
-                        "dbus",
-                        "notify",
-                        "notify-reload",
-                        "idle",
-                    },
-                    "Service.Restart": {
-                        "no",
-                        "on-success",
-                        "on-failure",
-                        "on-abnormal",
-                        "on-watchdog",
-                        "on-abort",
-                        "always",
-                    },
-                }
-                if dotted in enumerations and expanded not in enumerations[dotted]:
-                    status = "unknown"
+                if unresolved:
+                    settings[dotted] = {
+                        "kind": "scalar",
+                        "value": expanded,
+                        "status": "unknown",
+                        "origins": [_origin(record)],
+                    }
+                    entry.update(action="replace", status="unknown")
+                    continue
+                try:
+                    prior_scalar = (
+                        previous["value"]
+                        if previous and isinstance(previous["value"], str)
+                        else None
+                    )
+                    scalar_value = validate_scalar(dotted, expanded, prior_scalar)
+                except InputError:
+                    entry.update(action="invalid", status="unknown")
                     issues.append(
                         diagnostic(
-                            "invalid-enum",
-                            "Unrecognized setting value",
+                            "invalid-enum" if dotted in ENUM_DIRECTIVES else "invalid-scalar",
+                            "Invalid directive value; no replacement value accepted",
                             severity="error",
                             path=path,
                             line=record["line"],
                         )
                     )
+                    # An invalid assignment cannot replace an earlier valid value.
+                    # Keep the prior candidate and its origin, with unknown evidence.
+                    settings[dotted] = {
+                        "kind": "scalar",
+                        "value": previous["value"] if previous else raw,
+                        "status": "unknown",
+                        "origins": previous["origins"] if previous else [_origin(record)],
+                    }
+                    continue
+                if scalar_value.invalid_members:
+                    issues.append(
+                        diagnostic(
+                            "invalid-scalar",
+                            "Invalid delegation controller; recognized controllers retained",
+                            severity="error",
+                            path=path,
+                            line=record["line"],
+                        )
+                    )
+                scalar_status = (
+                    "unknown"
+                    if scalar_value.invalid_members
+                    or (
+                        scalar_value.action == "union"
+                        and previous
+                        and previous["status"] == "unknown"
+                    )
+                    else "known"
+                )
                 settings[dotted] = {
                     "kind": "scalar",
-                    "value": expanded,
-                    "status": status,
-                    "origins": [_origin(record)],
+                    "value": scalar_value.value,
+                    "status": scalar_status,
+                    "origins": (
+                        (previous["origins"] if previous else []) + [_origin(record)]
+                        if scalar_value.action == "union"
+                        else [_origin(record)]
+                    ),
                 }
-                entry.update(action="replace", status=status)
+                entry.update(
+                    action="invalid" if scalar_value.invalid_members else scalar_value.action,
+                    status=scalar_status,
+                )
             elif dependency:
                 if not expanded:
                     entry.update(action="ignored-empty-dependency", status=status)
@@ -453,7 +490,11 @@ def _interpret(fs: RootFS, name: str, resolved: dict[str, Any]) -> dict[str, Any
                             unknown = True
                     arguments.append(token)
                 existence = "unknown"
-                if executable.startswith("/") and not settings.get("Service.RootDirectory"):
+                root_directory = settings.get("Service.RootDirectory")
+                root_directory_unset = not root_directory or (
+                    root_directory["status"] == "known" and not root_directory["value"]
+                )
+                if executable.startswith("/") and root_directory_unset:
                     try:
                         existence = "present" if fs.exists(executable) else "missing-at-capture"
                     except (OSError, InputError):

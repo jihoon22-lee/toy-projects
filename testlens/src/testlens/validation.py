@@ -77,6 +77,7 @@ def validate(document: Document, expected: str | None = None) -> None:
             raise InputError("Run summary does not agree with tests")
         if document["complete"] and (
             not document["declared_complete"]
+            or any(t["status"] == "unknown" or not t["name"] for t in tests)
             or bool(aggregate_issues)
             or (
                 bool(document["expected_shards"])

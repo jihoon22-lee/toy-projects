@@ -1,6 +1,6 @@
 # ServiceLens
 
-ServiceLens 0.1.0 explains Linux systemd configuration **on disk**, including unit selection,
+ServiceLens explains Linux systemd configuration **on disk**, including unit selection,
 drop-ins, setting provenance, environment files, explicit dependencies and offline differences.
 It never starts services, executes unit commands, calls generators, contacts D-Bus, or claims that
 the running daemon has reloaded the files it reads.
@@ -8,6 +8,8 @@ the running daemon has reloaded the files it reads.
 ## Install and use
 
 Python 3.10+ on Linux. There are no runtime package dependencies.
+Use `servicelens --version` for the installed version; [pyproject.toml](pyproject.toml) owns the
+package version and [CHANGELOG.md](CHANGELOG.md) records release changes.
 
 ```bash
 python -m pip install .
@@ -28,7 +30,7 @@ Depth means the number of dependency hops after the requested unit (minimum 1).
 
 Text output leads with source, coverage and diagnostics. `--format json` preserves machine-readable
 information. `explain --key Section.Directive` shows every assignment, its source line, and its
-replace/append/reset/ignored action. `graph` emits Graphviz DOT with distinct ordering edges;
+replace/append/union/reset/invalid/ignored action. `graph` emits Graphviz DOT with distinct ordering edges;
 Graphviz is not needed to generate it. Missing referenced units produce partial evidence.
 
 Inspect/explain/graph/snapshot return 0 when a report was produced, including a partial report.
@@ -71,6 +73,19 @@ and exec interfaces. A higher systemd version is not automatically declared supp
   Explicit ordering cycles are reported separately from legal requirement cycles.
   `[Install]` declarations describe installation intent, not active or enabled daemon state.
 
+Scalar validation follows each supported directive's systemd-255 parser. Boolean aliases such as
+`true`, `on`, `y` and `1` normalize to `yes` (and the corresponding false aliases to `no`). Durations
+accept compound and fractional spans and `infinity`; `UMask` accepts octal permissions through
+`07777`. Enums, user/group names, paths, bus names and standard I/O targets have directive-specific
+validation. Specifiers are expanded only for directives that support them.
+
+Empty assignments are also directive-specific: user/group and path directives reset, while empty
+booleans, durations, enums and modes are invalid. `Delegate` accepts booleans or controller lists;
+repeated lists accumulate and an empty assignment resets them. Invalid assignments produce error
+diagnostics, an `invalid` ledger action and an unknown setting. If a prior valid value exists it
+remains visible as a candidate with its original provenance, never as confirmed effective state.
+Omitted scalar settings are not filled with assumed runtime defaults.
+
 [Official service defaults](https://github.com/systemd/systemd/blob/v255/man/systemd.service.xml),
 [official unit semantics](https://github.com/systemd/systemd/blob/v255/man/systemd.unit.xml) and
 [official execution/environment semantics](https://github.com/systemd/systemd/blob/v255/man/systemd.exec.xml)
@@ -95,12 +110,13 @@ distinguishes value, origin, structure and evidence changes. List order is prese
 rejects duplicate keys, unknown schemas/properties, invalid types, inconsistent partial flags and
 oversized documents. Schemas are installed with the wheel and checked against the implementation.
 
-All input files are read through a root directory descriptor. Absolute image links are resolved in
+Unit and environment input files are read through a root directory descriptor. Absolute image links are resolved in
 the image; traversal outside the root, link loops, special files, excessive bytes/entries/directives,
 and inputs changing while read produce explicit diagnostics. Reads follow bounded symlinks then
 open directory components without following newly inserted links. This is not an atomic filesystem
 snapshot: changes between separate file reads can still affect the collected configuration. Use a
-read-only filesystem snapshot for a consistent image.
+read-only filesystem snapshot for a consistent image. JSON snapshot inputs to `diff` and `check`
+are read from the caller-provided host paths.
 
 Snapshot output uses a mode-0600 temporary file, fsync and atomic replacement. Output aliases of
 collected input files, including hardlinks and symlinks, are refused by the CLI. Existing snapshot
@@ -118,6 +134,7 @@ print(check(snapshot))
 
 `inspect` returns a plain JSON-compatible snapshot. `save` validates its schema before writing;
 library callers should pass their input paths through `inputs=` to enforce output collision checks.
+Pass `include_defaults=True` to `inspect` to enable the same default dependency rules as the CLI.
 
 ## Development and packaging
 
@@ -133,6 +150,6 @@ uv build
 Wheel and sdist are independent of other repository products. Tests use temporary rootfs fixtures;
 they do not need root, a running systemd daemon, network access or service manipulation. Optional
 `systemd-analyze verify` tests run only against benign fixture commands and do not activate units;
-  enable them with `SERVICELENS_SYSTEMD_VERIFY=1 uv run pytest tests/test_systemd_optional.py`.
-Initial release tag: `servicelens/v0.1.0`. CI should run these commands from `servicelens/` and publish
-`dist/servicelens-0.1.0-py3-none-any.whl` and `dist/servicelens-0.1.0.tar.gz` when explicitly released.
+enable them with `SERVICELENS_SYSTEMD_VERIFY=1 uv run pytest tests/test_systemd_optional.py`.
+Release tags use `servicelens/vX.Y.Z`. CI should run these commands from `servicelens/` and publish
+the matching wheel and source archive from `dist/` when explicitly released.

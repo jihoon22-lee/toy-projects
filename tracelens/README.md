@@ -1,35 +1,41 @@
 # TraceLens
 
-TraceLens 0.1.0 (development) investigates **saved Linux strace text**. A Qt-free C++20 core parses and aggregates evidence; a CLI exports versioned snapshots and streaming events; an optional Qt6 desktop app provides process, syscall, error, path and source views. It never starts a tracer, executes traced commands, attaches to a process or uploads evidence.
+TraceLens investigates **saved Linux strace text**. A Qt-free C++20 core parses and aggregates evidence; a CLI exports versioned snapshots and streaming events; an optional Qt6 desktop app provides process, syscall, error, path and source views. It never starts a tracer, executes traced commands, attaches to a process or uploads evidence. Release history is in [CHANGELOG.md](CHANGELOG.md).
 
 ## Build and run
 
 Linux dependencies: CMake 3.22+, C++20 compiler, Qt6 Core; GUI additionally needs Qt6 Widgets and Concurrent. Tests need Python 3 (standard library only). On Debian/Ubuntu the usual packages are `build-essential cmake qt6-base-dev python3`. The parser library itself does not link Qt.
 
+Run the following commands from the repository root:
+
 ```sh
 cmake -S tracelens -B /tmp/tracelens-build -DCMAKE_BUILD_TYPE=Release
 cmake --build /tmp/tracelens-build -j2
 ctest --test-dir /tmp/tracelens-build --output-on-failure
-/tmp/tracelens-build/tracelens-gui saved.strace
+/tmp/tracelens-build/tracelens-gui tracelens/tests/fixtures/mixed.strace
 ```
 
 Use `-DTRACELENS_BUILD_GUI=OFF` for CLI-only builds. `-DBUILD_TESTING=OFF` removes the Python/test dependency. Build directories should stay outside the product source tree.
 
+These examples use the checked-in fixtures and write outputs to a temporary directory. Replace the fixture paths with your saved traces for an actual investigation.
+
 ```sh
-tracelens inspect run.strace
-tracelens inspect run.strace --format json --output run.snapshot.json
-tracelens inspect run.201 run.202 --format json
-tracelens events run.strace --errno ENOENT --limit 100 --output errors.jsonl
-tracelens events run.strace --pid 201 --syscall openat --min-duration-ns 1000
-tracelens source run.strace --line 42 --context 3
-tracelens source run.snapshot.json --source-id 0 --line 42 --context 0
-tracelens diff before.snapshot.json after.snapshot.json --output diff.json
-tracelens inspect run.strace --max-bytes 10485760 --max-events 100000 --strict
+export PATH="/tmp/tracelens-build:$PATH"
+trace_demo_dir=$(mktemp -d /tmp/tracelens-demo.XXXXXX)
+tracelens inspect tracelens/tests/fixtures/mixed.strace
+tracelens inspect tracelens/tests/fixtures/mixed.strace --format json --output "$trace_demo_dir/before.json"
+tracelens inspect tracelens/tests/fixtures/split.201 tracelens/tests/fixtures/split.202 --format json --output "$trace_demo_dir/after.json"
+tracelens events tracelens/tests/fixtures/mixed.strace --errno ENOENT --limit 100 --output "$trace_demo_dir/errors.jsonl"
+tracelens events tracelens/tests/fixtures/mixed.strace --pid 100 --syscall openat --min-duration-ns 1000
+tracelens source tracelens/tests/fixtures/mixed.strace --line 5 --context 3
+tracelens source "$trace_demo_dir/before.json" --source-id 0 --line 5 --context 0
+tracelens diff "$trace_demo_dir/before.json" "$trace_demo_dir/after.json" --output "$trace_demo_dir/diff.json"
+tracelens inspect tracelens/tests/fixtures/mixed.strace --max-bytes 10485760 --max-events 100000 --strict
 ```
 
 `source` recognizes snapshots by their `.json` extension. It validates inode/device, modification time, observed size and SHA-256 of exact source bytes before presenting evidence. Source replacement, modification or a partial fingerprint is an explicit error; saved byte positions are never silently applied to another file. Verification hashes the original file and may take time on large traces. Output uses atomic same-directory replacement; input paths, symlink aliases and hardlink aliases are rejected. Duplicate input identities are also rejected.
 
-Exit codes: **0** successful observation/export (possibly partial), **2** command, input, schema or output failure, **3** partial evidence under `--strict`, **130** analysis cancelled by SIGINT/SIGTERM. Partial event exports include their reason and source manifests in a final JSONL footer. `--limit` bounds emitted matches, while scanning continues for exact matching counts within the analysis budgets.
+Exit codes: **0** successful observation/export (possibly partial), **1** option-parser errors such as an unknown option or missing option value, **2** command, input, schema or output failure, **3** partial evidence under `--strict`, **130** `inspect`/`events` analysis cancelled by SIGINT/SIGTERM. Event exports include counts, partial-result reasons and source manifests in a final JSONL footer. `--limit` bounds emitted matches, while scanning continues for exact matching counts within the analysis budgets. PID/syscall/errno/path/duration filters and `--limit` apply to `events`; `inspect` aggregates the whole observed input. `source --context` accepts 0–100 lines before and after the target.
 
 ## Evidence contract
 
@@ -78,9 +84,9 @@ Keyboard controls: **Ctrl+O** open, **Ctrl+S** save snapshot, **Ctrl+D** compare
 
 ## Interchange and comparison
 
-The checked-in JSON Schemas describe `tracelens.snapshot/v1`, `tracelens.event/v1`, `tracelens.events-end/v1` and `tracelens.diff/v1`. Offsets, lengths, counters, TIDs and nanoseconds are decimal strings, preserving unsigned 64-bit values across JSON consumers. Source indices are small JSON integers. Snapshot imports reject duplicate keys, unsupported versions, invalid integer encodings and invalid evidence ranges. Snapshots store aggregates and bounded slow-call evidence, not the complete event stream. Output ordering is deterministic for the same source files, metadata, selection order and limits; modification timestamps and file identities deliberately distinguish changed source evidence.
+The checked-in JSON Schemas describe [tracelens.snapshot/v1](schemas/snapshot-v1.schema.json), [tracelens.event/v1](schemas/event-v1.schema.json), [tracelens.events-end/v1](schemas/events-end-v1.schema.json) and [tracelens.diff/v1](schemas/diff-v1.schema.json). Offsets, lengths, counters, TIDs and nanoseconds are decimal strings, preserving unsigned 64-bit values across JSON consumers. Source indices are small JSON integers. Snapshot imports reject duplicate keys, unsupported versions, invalid integer encodings and invalid evidence ranges. Snapshots store aggregates and bounded slow-call evidence, not the complete event stream. Output ordering is deterministic for the same source files, metadata, selection order and limits; modification timestamps and file identities deliberately distinguish changed source evidence.
 
-Diff compares **syscall, errno and exact observed-path** axes. It records before/after source manifests, signed count/error/known-duration/total-duration deltas and coverage cautions. It never naively matches numeric PIDs between sessions. Added/removed keys have an empty before/after object. Different workloads, tracing options and sample durations may explain differences; the output does not label them performance regressions.
+Diff compares **syscall, errno and exact observed-path** axes. It records before/after source manifests, signed call-count/error-count/timed-call-count/total-duration deltas and coverage cautions. It never naively matches numeric PIDs between sessions. Added keys have an empty `before` object; removed keys have an empty `after` object. Different workloads, tracing options and sample durations may explain differences; the output does not label them performance regressions.
 
 ## Verification and measurement
 
@@ -105,4 +111,4 @@ cmake --install /tmp/tracelens-build --prefix /tmp/tracelens-install
 cpack --config /tmp/tracelens-build/CPackConfig.cmake -B /tmp/tracelens-packages
 ```
 
-The installation contains `bin/tracelens`, optional `bin/tracelens-gui`, schemas under `share/tracelens/schemas`, documentation under the CMake GNUInstallDirs documentation directory, and optional desktop entry/icon under `share/applications` and `share/icons/hicolor/scalable/apps`. TGZ packages are platform binaries and require the matching Qt6 runtime libraries; they do not bundle Qt. Version ownership is `CMakeLists.txt`; a generated header supplies application/banner metadata. Independent future release tags use `tracelens/vX.Y.Z`. No release has been published.
+The installation contains `bin/tracelens`, optional `bin/tracelens-gui`, schemas under `share/tracelens/schemas`, documentation under the CMake GNUInstallDirs documentation directory (by default `share/doc/TraceLens`), and optional desktop entry/icon under `share/applications` and `share/icons/hicolor/scalable/apps`. Fixtures and benchmark scripts remain in the source repository. Installed schemas are under the data directory above; the relative schema links in this README are for the repository layout. TGZ packages are platform binaries and require the matching Qt6 runtime libraries; they do not bundle Qt. For a custom installation prefix, add its `bin` directory to `PATH` before launching the desktop entry. Version ownership is `CMakeLists.txt`; a generated header supplies application/banner metadata. Independent release tags use `tracelens/vX.Y.Z`.

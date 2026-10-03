@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""Check tracked documentation links, schema references and product version ownership.
+
+This complements the review of prose and executable examples; it does not infer
+that a documented feature works merely because a link or schema is valid.
+"""
+
+import json
+from pathlib import Path
+import re
+import subprocess
+import sys
+import tomllib
+from urllib.parse import unquote, urlsplit
+
+from jsonschema.validators import validator_for
+
+ROOT = Path(__file__).resolve().parents[2]
+PRODUCTS = (
+    "abilens", "buildscope", "diskmap", "envlens", "loglens", "servicelens",
+    "testlens", "tracelens",
+)
+
+
+def tracked_files() -> list[Path]:
+    result = subprocess.check_output(["git", "ls-files", "-z"], cwd=ROOT)
+    return [ROOT / name.decode() for name in result.split(b"\0") if name]
+
+
+def local_links(document: Path, errors: list[str]) -> None:
+    # Examples may contain illustrative Markdown. Only rendered prose links
+    # participate in the repository link contract.
+    prose = re.sub(r"(?ms)^\s*(```|~~~).*?^\s*\1\s*$", "", document.read_text())
+    links = re.findall(r"\[[^\]]*\]\((?:<([^>]+)>|([^\s)]+))(?:\s+\"[^\"]*\")?\)", prose)
+    references = re.findall(r"(?m)^\s*\[[^\]]+\]:\s*(\S+)", prose)
+    for href in [first or second for first, second in links] + references:
+        parts = urlsplit(href)
+        if parts.scheme or parts.netloc or not parts.path or href.startswith("/"):
+            continue
+        target = (document.parent / unquote(parts.path)).resolve()
+        if not target.is_relative_to(ROOT) or not target.exists():
+            errors.append(f"{document.relative_to(ROOT)}: missing local link {href}")
+    if document.name == "README.md" or document.parent.name == "docs":
+        if re.search(r"not (?:yet )?published|current development version|development checkpoint", prose, re.I):
+            errors.append(f"{document.relative_to(ROOT)}: stale development/release status")
+
+
+def schema_references(value: object, root: dict, path: Path, errors: list[str]) -> None:
+    if isinstance(value, dict):
+        reference = value.get("$ref")
+        if isinstance(reference, str) and reference.startswith("#/"):
+            current = root
+            try:
+                for part in reference[2:].split("/"):
+                    current = current[unquote(part).replace("~1", "/").replace("~0", "~")]
+            except (KeyError, TypeError):
+                errors.append(f"{path.relative_to(ROOT)}: unresolved schema reference {reference}")
+        for child in value.values():
+            schema_references(child, root, path, errors)
+    elif isinstance(value, list):
+        for child in value:
+            schema_references(child, root, path, errors)
+
+
+def match_version(path: str, pattern: str) -> str:
+    match = re.search(pattern, (ROOT / path).read_text(), re.I)
+    if not match:
+        raise ValueError(f"cannot read version from {path}")
+    return match[1]
+
+
+def versions(errors: list[str]) -> None:
+    manifest = json.loads((ROOT / ".release-please-manifest.json").read_text())
+    for product in PRODUCTS:
+        package = ROOT / product / "pyproject.toml"
+        if package.exists():
+            version = tomllib.loads(package.read_text())["project"]["version"]
+            source = f"{product}/src/{product}/"
+            if product == "servicelens":
+                module_version = match_version(source + "model.py", r'VERSION = "([^"]+)"')
+            else:
+                module_version = match_version(source + "__init__.py", r'__version__ = "([^"]+)"')
+            if version != module_version:
+                errors.append(f"{product}: package and module versions disagree")
+            lock = ROOT / product / "uv.lock"
+            if lock.exists() and lock in tracked_files():
+                entries = tomllib.loads(lock.read_text())["package"]
+                own = next(item for item in entries if item["name"] == product)
+                if own["version"] != version:
+                    errors.append(f"{product}: lockfile version disagrees with package")
+        elif product in {"diskmap", "abilens"}:
+            header = "version.hpp" if product == "diskmap" else "model.hpp"
+            version = match_version(f"{product}/include/{product}/{header}",
+                                    r'k(?:AbiLens)?Version = "([^"]+)"')
+        else:
+            version = match_version(f"{product}/CMakeLists.txt",
+                                    rf'project\({product}\s+VERSION\s+(\S+)')
+        if version != manifest[product]:
+            errors.append(f"{product}: source version {version} differs from release manifest {manifest[product]}")
+        changelog = (ROOT / product / "CHANGELOG.md").read_text()
+        if not re.search(rf"^## (?:\[)?{re.escape(version)}(?:\]|\s|$)", changelog, re.M):
+            errors.append(f"{product}: CHANGELOG has no entry for {version}")
+
+
+def main() -> int:
+    errors: list[str] = []
+    paths = tracked_files()
+    documents = [path for path in paths if path.suffix == ".md"]
+    schemas = [path for path in paths if path.name.endswith(".schema.json")]
+    for path in documents:
+        local_links(path, errors)
+    for path in schemas:
+        try:
+            schema = json.loads(path.read_text())
+            validator_for(schema).check_schema(schema)
+            schema_references(schema, schema, path, errors)
+        except Exception as error:
+            errors.append(f"{path.relative_to(ROOT)}: {error}")
+    versions(errors)
+    for error in errors:
+        print(error, file=sys.stderr)
+    if errors:
+        return 1
+    print(f"Documentation: {len(documents)} Markdown files, {len(schemas)} schemas, "
+          f"{len(PRODUCTS)} product versions passed")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

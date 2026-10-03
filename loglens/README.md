@@ -1,7 +1,7 @@
 # LogLens
 
-Development checkpoint: **0.2.0** (not yet published). The CMake project version generates
-the shared CLI/GUI version header.
+The CMake project version generates the shared CLI/GUI version header; use
+`loglens --version` to identify an installed build. Releases use `loglens/vX.Y.Z` tags.
 
 LogLens is a log viewer, parser, and investigation workbench for Linux. A
 Qt-free core turns raw log bytes into structured records with honest
@@ -11,10 +11,13 @@ comparison, and byte-preserving export.
 
 ## Build and test
 
+Run these commands from `loglens/`:
+
 ```sh
 cmake -S . -B build/gui -DCMAKE_BUILD_TYPE=Release
 cmake --build build/gui --parallel 2
 QT_QPA_PLATFORM=offscreen ctest --test-dir build/gui --output-on-failure
+export PATH="$PWD/build/gui:$PWD/build/gui/src/gui:$PATH"
 ```
 
 LogLens targets Qt 6.
@@ -199,6 +202,10 @@ selected/baseline/comparison time windows, follow/load mode, notes/highlights, d
 geometry, table columns and the active investigation tab. CLI round trips preserve GUI
 state; CLI output remains a one-shot snapshot and honors retained search/time restrictions.
 
+Session saves and whole-file searches use the last successfully applied structured
+filter. Editing the filter box or rejecting an invalid expression leaves that
+active filter intact; press **Apply** to change the investigation.
+
 Object fields and JSON keys are strict: unknown or duplicate fields, duplicate
 names, malformed JSON, invalid enum/number values, invalid filter expressions,
 and an unknown schema version are rejected without returning partial data.
@@ -337,8 +344,9 @@ The focused investigation tests cover timeline mouse interaction, UTF-8
 highlight rendering (including byte-to-UTF-16 offset conversion), triage
 CRUD/migration and persistence, bookmark/annotation display, byte-preserving
 export, diagnostic rendering, comparison navigation, and empty/error paths.
-The focused suite is `18/18` under Qt6, and the native TSan partition is
-`41/41 PASS`.
+The current CTest suite includes 20 targets. The older investigation checkpoint
+measured `18/18` under Qt6 and `41/41 PASS` in its native TSan partition; those
+historical counts do not describe the expanded suite.
 
 ## loglens 스트림 계약
 
@@ -454,7 +462,7 @@ cmake -S . -B build/benchmark-qt6 -DCMAKE_BUILD_TYPE=Release \
   -DLOGLENS_BUILD_BENCHMARKS=ON
 cmake --build build/benchmark-qt6 --parallel \
   --target loglens-bench-generate loglens-bench-core loglens-bench-gui
-QT_QPA_PLATFORM=offscreen python3.10 benchmarks/run_benchmark.py \
+QT_QPA_PLATFORM=offscreen python3 benchmarks/run_benchmark.py \
   --build-dir build/benchmark-qt6 \
   --scratch /tmp/loglens-benchmark-qt6 \
   --artifact-dir /tmp/loglens-benchmark-artifacts/qt6 \

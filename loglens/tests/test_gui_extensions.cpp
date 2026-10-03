@@ -45,6 +45,7 @@ private slots:
     void sessionRestoresPluginInvestigationAndLayout();
     void wholeFileSearchIsSeparateAndCancellable();
     void compactLayoutAndThemeKeepTextReadable();
+    void savedAndWholeFileFiltersUseAppliedState();
 };
 
 void TestGuiExtensions::replacingSourceArchivesNotes() {
@@ -191,6 +192,46 @@ void TestGuiExtensions::compactLayoutAndThemeKeepTextReadable() {
     const auto screenshot = qEnvironmentVariable("LOGLENS_GUI_SCREENSHOT");
     if (!screenshot.isEmpty())
         QVERIFY(window.grab().save(screenshot));
+}
+
+void TestGuiExtensions::savedAndWholeFileFiltersUseAppliedState() {
+    QTemporaryDir directory;
+    const auto path = directory.filePath("app.log");
+    const auto session = directory.filePath("filter.session.json");
+    put(path, "2026-01-01T00:00:00Z ERROR [api] needle error\n"
+              "2026-01-01T00:00:01Z INFO [api] needle info\n");
+    MainWindow window(nullptr, options(directory));
+    window.findChild<QCheckBox *>("followCheckBox")->setChecked(false);
+    window.openPath(path);
+    QTRY_COMPARE(model(window)->rowCount(), 2);
+    auto *edit = window.findChild<QLineEdit *>("filterEdit");
+    edit->setText("level>=ERROR");
+    QVERIFY(QMetaObject::invokeMethod(&window, "applyFilter"));
+    QCOMPARE(model(window)->rowCount(), 1);
+    for (const auto &draft : {QString("level>=INFO"), QString("invalid filter")}) {
+        edit->setText(draft);
+        if (draft == "invalid filter")
+            QVERIFY(QMetaObject::invokeMethod(&window, "applyFilter"));
+        QVERIFY(window.saveSessionTo(session));
+        QCOMPARE(loglens::loadSession(session.toStdString()).state.filter,
+                 std::string("level>=ERROR"));
+        window.findChild<QLineEdit *>("wholeFileSearchEdit")->setText("needle");
+        window.startWholeFileSearch();
+        QTRY_VERIFY(window.findChild<QLabel *>("wholeFileSearchStatus")
+                        ->text().contains("snapshot complete"));
+        QCOMPARE(window.findChild<QTreeWidget *>("wholeFileSearchResults")
+                     ->topLevelItemCount(), 1);
+        QCOMPARE(model(window)->rowCount(), 1);
+        QTRY_VERIFY(window.findChild<QThread *>("wholeFileSearchThread") == nullptr);
+    }
+    QVERIFY(window.openSession(session));
+    QTRY_COMPARE(model(window)->rowCount(), 1);
+    QCOMPARE(model(window)->recordAt(0)->level, loglens::Level::Error);
+    edit->clear();
+    QVERIFY(QMetaObject::invokeMethod(&window, "applyFilter"));
+    QVERIFY(window.saveSessionTo(session));
+    QVERIFY(loglens::loadSession(session.toStdString()).state.filter.empty());
+    QCOMPARE(model(window)->rowCount(), 2);
 }
 
 QTEST_MAIN(TestGuiExtensions)

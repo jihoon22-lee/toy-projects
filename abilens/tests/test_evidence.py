@@ -124,6 +124,19 @@ with tempfile.TemporaryDirectory(prefix="abilens-evidence-") as tmp:
     inspected = invoke("inspect", "--json", "--sysroot", sysroot, consumer)
     resolution = next(item for item in inspected["evidence"]["resolutions"] if item["needed"] == "libfixture.so")
     assert resolution["status"] == "unresolved"
+    # A real library with enough exported symbols to cross the old 100k JSON
+    # node limit must still produce a reusable offline report.
+    many_source = root / "many.c"
+    many_source.write_text("\n".join(f"int exported_{index};" for index in range(15000)))
+    many_library = root / "many.so"
+    subprocess.run(["cc", "-shared", "-fPIC", str(many_source), "-o", str(many_library)], check=True)
+    many_report = invoke("inspect", "--json", many_library)
+    many_saved = root / "many.json"
+    many_saved.write_text(json.dumps(many_report))
+    assert len(many_report["evidence"]["symbol_evidence"]) == 15000
+    same = invoke("diff", "--json", many_saved, many_saved)
+    assert not same["changed"] and same["compatibility"] == "compatible"
+    assert invoke("diff", "--json", many_saved, many_library)["compatibility"] == "compatible"
     (sysroot / "lib/libfixture.so").unlink()
     (sysroot / "lib/libfixture.so").symlink_to(left)
     inspected = invoke("inspect", "--json", "--sysroot", sysroot, consumer)
