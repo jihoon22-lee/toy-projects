@@ -172,6 +172,12 @@ loglens --session errors.session.json
 loglens --session errors.session.json --level INFO   # flag overrides session
 ```
 
+The GUI reads and writes the same session document.  The source bar offers
+**Open session…**, which restores the source, format, multiline, and record
+limit controls, applies any saved `filter`/`level` as the filter expression,
+and reopens the file; **Save session** writes the current source and filter
+as a session document.
+
 Object fields and JSON keys are strict: unknown or duplicate fields, duplicate
 names, malformed JSON, invalid enum/number values, invalid filter expressions,
 and an unknown schema version are rejected without returning partial data.

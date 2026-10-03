@@ -146,6 +146,14 @@ MainWindow::MainWindow(QWidget* parent, MainWindowOptions options)
     saveProfileButton->setObjectName(QStringLiteral("saveSourceProfileButton"));
     saveProfileButton->setAccessibleName(tr("Save source profile"));
     profileBar->addWidget(saveProfileButton);
+    auto* openSessionButton = new QPushButton(tr("Open session…"), central);
+    openSessionButton->setObjectName(QStringLiteral("openSessionButton"));
+    openSessionButton->setAccessibleName(tr("Open investigation session"));
+    profileBar->addWidget(openSessionButton);
+    auto* saveSessionButton = new QPushButton(tr("Save session"), central);
+    saveSessionButton->setObjectName(QStringLiteral("saveSessionButton"));
+    saveSessionButton->setAccessibleName(tr("Save investigation session"));
+    profileBar->addWidget(saveSessionButton);
     layout->addLayout(profileBar);
 
     auto* queryBar = new QHBoxLayout();
@@ -248,6 +256,8 @@ MainWindow::MainWindow(QWidget* parent, MainWindowOptions options)
     connect(filterEdit_, &QLineEdit::returnPressed, this, &MainWindow::applyFilter);
     connect(applyProfileButton, &QPushButton::clicked, this, &MainWindow::applySourceProfile);
     connect(saveProfileButton, &QPushButton::clicked, this, &MainWindow::saveSourceProfile);
+    connect(openSessionButton, &QPushButton::clicked, this, &MainWindow::openSessionFile);
+    connect(saveSessionButton, &QPushButton::clicked, this, &MainWindow::saveSessionToFile);
     connect(applyQueryButton, &QPushButton::clicked, this, &MainWindow::applySavedQuery);
     connect(saveQueryButton, &QPushButton::clicked, this, &MainWindow::saveSavedQuery);
     connect(timeline_, &TimelineWidget::rangeSelected, this,
