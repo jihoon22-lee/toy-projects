@@ -1,0 +1,194 @@
+{
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "testlens.history/v1"
+    },
+    "producer": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "const": "testlens"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "additionalProperties": false
+    },
+    "run_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "window": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "period": {
+      "type": "object",
+      "properties": {
+        "start": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "end": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ],
+      "additionalProperties": false
+    },
+    "complete": {
+      "type": "boolean"
+    },
+    "tests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "observations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "run_id": {
+                  "type": "string"
+                },
+                "executed_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "status": {
+                  "enum": [
+                    "passed",
+                    "failed",
+                    "error",
+                    "skipped",
+                    "not-run",
+                    "unknown"
+                  ]
+                },
+                "any_failure": {
+                  "type": "boolean"
+                },
+                "duration_seconds": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "run_complete": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "run_id",
+                "executed_at",
+                "status",
+                "any_failure",
+                "duration_seconds",
+                "run_complete"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "executed_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "failure_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "any_failure_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "failure_rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "any_failure_rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "excluded_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "missing_count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "observations",
+          "executed_count",
+          "failure_count",
+          "any_failure_count",
+          "failure_rate",
+          "any_failure_rate",
+          "excluded_count",
+          "missing_count"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "interpretation": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "producer",
+    "run_ids",
+    "window",
+    "period",
+    "complete",
+    "tests",
+    "interpretation"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "testlens.history/v1"
+}

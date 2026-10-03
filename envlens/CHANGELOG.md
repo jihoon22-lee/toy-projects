@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Fix venv execution, relative compilation roots and console return values.
+- Add snapshot v3 origin/platform evidence, PEP standards evaluation, transitive
+  extras, dependency paths, import overlap and CI policies.
+- Bound compilation batches and protect report inputs from output aliases.
+
 ## [0.1.2](https://github.com/jihoon22-lee/toy-projects/compare/envlens/v0.1.1...envlens/v0.1.2) (2026-10-03)
 
 

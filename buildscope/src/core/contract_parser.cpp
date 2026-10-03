@@ -1,7 +1,7 @@
 #include "contract_parser.hpp"
 
-#include <QJsonArray>
 #include <QHash>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QSet>
 
@@ -20,7 +20,7 @@ bool isOneOf(const QString &value, const QStringList &allowed) {
     return allowed.contains(value);
 }
 
-}  // namespace
+} // namespace
 
 void rejectUnknownKeys(const QJsonObject &object, const QStringList &allowed,
                        const QString &location) {
@@ -54,8 +54,8 @@ QString stringValue(const QJsonObject &object, const QString &key, const QString
     return value.toString();
 }
 
-QString requiredEnumString(const QJsonObject &object, const QString &key, const QString &location,
-                           const QStringList &allowed) {
+QString requiredEnumString(const QJsonObject &object, const QString &key,
+                           const QString &location, const QStringList &allowed) {
     const auto value = requiredString(object, key, location);
     if (!isOneOf(value, allowed)) {
         throw ContractError(location + "." + key + " is unsupported: " + value);
@@ -81,8 +81,7 @@ QString optionalString(const QJsonObject &object, const QString &key, const QStr
     return value.toString();
 }
 
-QStringList optionalArguments(const QJsonObject &object, const QString &location,
-                              bool v2) {
+QStringList optionalArguments(const QJsonObject &object, const QString &location, bool v2) {
     const auto value = object.value(QStringLiteral("arguments"));
     if (value.isNull() || value.isUndefined()) {
         return {};
@@ -115,9 +114,7 @@ QStringList optionalArguments(const QJsonObject &object, const QString &location
     return arguments;
 }
 
-bool isPresent(const QJsonValue &value) {
-    return !value.isNull() && !value.isUndefined();
-}
+bool isPresent(const QJsonValue &value) { return !value.isNull() && !value.isUndefined(); }
 
 bool requiredBool(const QJsonObject &object, const QString &key, const QString &location) {
     const auto value = object.value(key);
@@ -198,14 +195,13 @@ ParsedRawEntry parseRawEntry(const QJsonValue &value, qsizetype index, bool norm
                           {QStringLiteral("arguments"), QStringLiteral("command"),
                            QStringLiteral("diagnostics"), QStringLiteral("directory"),
                            QStringLiteral("file"), QStringLiteral("include_analysis"),
-                           QStringLiteral("normalized"),
-                           QStringLiteral("output"), QStringLiteral("state")},
+                           QStringLiteral("normalized"), QStringLiteral("output"),
+                           QStringLiteral("state")},
                           location);
-        auto required = QStringList{
-            QStringLiteral("arguments"), QStringLiteral("command"),
-            QStringLiteral("diagnostics"), QStringLiteral("directory"),
-            QStringLiteral("file"),      QStringLiteral("normalized"),
-            QStringLiteral("output"),    QStringLiteral("state")};
+        auto required = QStringList{QStringLiteral("arguments"),   QStringLiteral("command"),
+                                    QStringLiteral("diagnostics"), QStringLiteral("directory"),
+                                    QStringLiteral("file"),        QStringLiteral("normalized"),
+                                    QStringLiteral("output"),      QStringLiteral("state")};
         if (v3) {
             required.append(QStringLiteral("include_analysis"));
         } else if (object.contains(QStringLiteral("include_analysis"))) {
@@ -229,10 +225,10 @@ ParsedRawEntry parseRawEntry(const QJsonValue &value, qsizetype index, bool norm
     entry.hasCommand = isPresent(object.value(QStringLiteral("command")));
     if ((!normalized && entry.hasArguments == entry.hasCommand) ||
         (normalized && !entry.hasArguments && !entry.hasCommand)) {
-        throw ContractError(location + " must contain " +
-                            (normalized ? QStringLiteral("at least one")
-                                        : QStringLiteral("exactly one")) +
-                            QStringLiteral(" of arguments or command"));
+        throw ContractError(
+            location + " must contain " +
+            (normalized ? QStringLiteral("at least one") : QStringLiteral("exactly one")) +
+            QStringLiteral(" of arguments or command"));
     }
     return entry;
 }
@@ -241,10 +237,11 @@ int schemaGeneration(const QString &schemaVersion) {
     const bool v1 = schemaVersion == QString::fromLatin1(kSnapshotSchemaV1);
     const bool v2 = schemaVersion == QString::fromLatin1(kSnapshotSchemaV2);
     const bool v3 = schemaVersion == QString::fromLatin1(kSnapshotSchemaV3);
-    if (!v1 && !v2 && !v3) {
+    const bool v4 = schemaVersion == QString::fromLatin1(kSnapshotSchemaV4);
+    if (!v1 && !v2 && !v3 && !v4) {
         throw ContractError("root.schema_version is unsupported: " + schemaVersion);
     }
-    return v3 ? 3 : (v2 ? 2 : 1);
+    return v4 ? 4 : (v3 ? 3 : (v2 ? 2 : 1));
 }
 
 void validateV2Root(const QJsonObject &root, bool v2) {
@@ -266,8 +263,8 @@ void parseProducer(const QJsonObject &root, bool v2, Snapshot &snapshot) {
         rejectUnknownKeys(producerObject, {QStringLiteral("name"), QStringLiteral("version")},
                           "root.producer");
     }
-    const auto producerName = requiredString(producerObject, QStringLiteral("name"),
-                                             "root.producer");
+    const auto producerName =
+        requiredString(producerObject, QStringLiteral("name"), "root.producer");
     if (producerName != QStringLiteral("buildscope")) {
         throw ContractError("root.producer.name is unsupported: " + producerName);
     }
@@ -365,10 +362,15 @@ void validateV2EntrySets(const Snapshot &snapshot) {
     }
 }
 
-void parseEntriesInto(Snapshot &snapshot, const QJsonArray &entryArray, int generation) {
+void parseEntriesInto(Snapshot &snapshot, const QJsonArray &entryArray, int generation,
+                      std::atomic_bool *cancel) {
     snapshot.entries.reserve(entryArray.size());
     for (qsizetype index = 0; index < entryArray.size(); ++index) {
-        if (generation == 3) {
+        if (cancel && cancel->load())
+            throw ContractError("snapshot parsing cancelled");
+        if (generation == 4) {
+            snapshot.entries.append(parseV4Entry(entryArray.at(index), index));
+        } else if (generation == 3) {
             snapshot.entries.append(parseV3Entry(entryArray.at(index), index));
         } else if (generation == 2) {
             snapshot.entries.append(parseV2Entry(entryArray.at(index), index));
@@ -381,20 +383,68 @@ void parseEntriesInto(Snapshot &snapshot, const QJsonArray &entryArray, int gene
     }
 }
 
-Snapshot parseSnapshotDocument(const QJsonDocument &document) {
+Snapshot parseSnapshotDocument(const QJsonDocument &document, std::atomic_bool *cancel) {
     if (!document.isObject()) {
         throw ContractError("snapshot root must be an object");
     }
-    const auto root = document.object();
+    auto root = document.object();
     Snapshot snapshot;
     snapshot.schemaVersion = requiredString(root, QStringLiteral("schema_version"), "root");
     const int generation = schemaGeneration(snapshot.schemaVersion);
     const bool normalized = generation >= 2;
+    if (generation == 4) {
+        if (!root.value("analysis_run").isObject())
+            throw ContractError("root.analysis_run is required for v4");
+        snapshot.analysisRun = root.take("analysis_run").toObject();
+        const auto &run = snapshot.analysisRun;
+        rejectUnknownKeys(run,
+                          {"mode", "cancelled", "units_attempted", "files_read", "source_bytes",
+                           "edges_recorded", "limits"},
+                          "root.analysis_run");
+        requiredEnumString(run, "mode", "root.analysis_run",
+                           {"estimate", "compiler", "delayed"});
+        requiredBool(run, "cancelled", "root.analysis_run");
+        for (auto key : {"units_attempted", "files_read", "edges_recorded"})
+            requiredInteger(run, key, "root.analysis_run");
+        bool numeric = false;
+        const auto count = run.value("source_bytes").toString().toULongLong(&numeric);
+        if (!numeric || QString::number(count) != run.value("source_bytes").toString())
+            throw ContractError(
+                "root.analysis_run.source_bytes must be an unsigned decimal string");
+        if (!run.value("limits").isObject())
+            throw ContractError("root.analysis_run.limits must be an object");
+        const auto limits = run.value("limits").toObject();
+        rejectUnknownKeys(limits,
+                          {"units", "total_ms", "unit_ms", "total_source_bytes",
+                           "unit_source_bytes", "total_files", "unit_files", "total_edges",
+                           "unit_edges", "trace_bytes"},
+                          "root.analysis_run.limits");
+        for (auto key : {"units", "total_ms", "unit_ms", "total_files", "unit_files",
+                         "total_edges", "unit_edges"})
+            if (requiredInteger(limits, key, "root.analysis_run.limits") < 1)
+                throw ContractError("analysis limits must be positive");
+        for (auto key : {"total_source_bytes", "unit_source_bytes", "trace_bytes"}) {
+            bool ok = false;
+            const auto text = limits.value(key).toString();
+            const auto n = text.toULongLong(&ok);
+            if (!ok || n == 0 || QString::number(n) != text)
+                throw ContractError("analysis byte limits must be positive decimal strings");
+        }
+        if(count>limits.value("total_source_bytes").toString().toULongLong())
+            throw ContractError("analysis source bytes exceed declared limit");
+        if (requiredInteger(run, "units_attempted", "root.analysis_run") >
+                requiredInteger(limits, "units", "root.analysis_run.limits") ||
+            requiredInteger(run, "files_read", "root.analysis_run") >
+                requiredInteger(limits, "total_files", "root.analysis_run.limits") ||
+            requiredInteger(run, "edges_recorded", "root.analysis_run") >
+                requiredInteger(limits, "total_edges", "root.analysis_run.limits"))
+            throw ContractError("analysis counters exceed declared limits");
+    }
     validateV2Root(root, normalized);
     parseProducer(root, normalized, snapshot);
     const auto sourceObject = parseSource(root, normalized, snapshot);
-    parseEntriesInto(snapshot, parseEntries(root, sourceObject), generation);
+    parseEntriesInto(snapshot, parseEntries(root, sourceObject), generation, cancel);
     return snapshot;
 }
 
-}  // namespace buildscope::detail
+} // namespace buildscope::detail

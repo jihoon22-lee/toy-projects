@@ -2,6 +2,7 @@
 
 #include <QMainWindow>
 #include <QModelIndex>
+#include <QStringList>
 
 #include <memory>
 #include <optional>
@@ -18,12 +19,14 @@ class CompilationEntryView;
 class CompilationTreeModel;
 class DiffTreeModel;
 struct DiffUnit;
+struct Snapshot;
+struct DiffReport;
 class StatusFilterProxyModel;
 
 class MainWindow final : public QMainWindow {
     Q_OBJECT
 
-public:
+  public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow() override;
 
@@ -31,8 +34,20 @@ public:
     bool loadDiff(const QString &path);
     int entryCount() const;
     QString statusText() const;
+    void openInputAsync(const QString &path, bool database = false);
+    void openDiffAsync(const QString &path);
+    void analyzeAsync(const QString &mode = QStringLiteral("estimate"),
+                      const QStringList &units = {});
+    bool busy() const;
+    void cancelWork();
+    void setEditorArguments(const QStringList &arguments);
+    QStringList editorArgumentsFor(const QString &path, qsizetype line) const;
+    void setRootMappings(const QStringList &specifications);
 
-private slots:
+  signals:
+    void workFinished(bool success);
+
+  private slots:
     void chooseSnapshot();
     void chooseDiff();
     void showSelection(const QModelIndex &index);
@@ -41,8 +56,19 @@ private slots:
     void openIncludeLocation();
     void showCompilationCommand();
 
-private:
+  private:
     void clearDetails(const QString &message);
+    void setupWorkflow();
+    void scheduleFilter(const QString &text);
+    void applySnapshot(Snapshot snapshot, const QString &path);
+    void applyDiffReport(DiffReport report, const QString &path);
+    void updateBusy(bool busy);
+    void showImpactAsync();
+    void chooseBudgets();
+    void chooseRootMapping();
+    void chooseEditor();
+    struct Workflow;
+    std::shared_ptr<Workflow> workflow_;
     void setDiffMode(bool enabled);
     void showDiffUnit(const DiffUnit &unit, std::optional<qsizetype> selectedChange);
     void showEntry(const CompilationEntryView &view);
@@ -56,4 +82,4 @@ private:
     qsizetype selectedIncludeLine_ = 0;
 };
 
-}  // namespace buildscope
+} // namespace buildscope

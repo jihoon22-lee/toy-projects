@@ -3,11 +3,13 @@
 #include "abilens/elf.hpp"
 #include "abilens/inspect.hpp"
 #include "input_internal.hpp"
+#include "evidence_internal.hpp"
 #include "report_internal.hpp"
 
 #include <algorithm>
 #include <array>
 #include <sstream>
+#include <stdexcept>
 
 namespace abilens {
 
@@ -18,7 +20,7 @@ using detail::maximum_version;
 using detail::sorted_strings;
 using detail::version_less;
 
-ElfReport inspect_file(const std::filesystem::path& path, const Policy& policy) {
+ElfReport inspect_file(const std::filesystem::path& path, const Policy& policy, const InspectOptions& options) {
     ElfReport report;
     report.input = path.generic_string();
     const detail::OpenInput input(path);
@@ -35,6 +37,8 @@ ElfReport inspect_file(const std::filesystem::path& path, const Policy& policy) 
     report = detail::inspect_elf_input(input, check.header);
     report.input = path.generic_string();
     if (report.status == InputStatus::Valid) {
+        detail::inspect_dwarf(input, report, options);
+        detail::resolve_loader(report, options);
         report.policy = evaluate_policy(report, policy);
         if (!report.policy.passed) {
             report.message = "ELF evidence verified; policy violations were found";
@@ -46,8 +50,8 @@ ElfReport inspect_file(const std::filesystem::path& path, const Policy& policy) 
 
 std::string serialize_report(const ElfReport& report) {
     const std::vector<std::string> needed = sorted_strings(report.needed);
-    const std::vector<std::string> rpath = sorted_strings(report.rpath);
-    const std::vector<std::string> runpath = sorted_strings(report.runpath);
+    const std::vector<std::string>& rpath = report.rpath;
+    const std::vector<std::string>& runpath = report.runpath;
     std::vector<VersionRequirement> versions = report.versions;
     std::sort(versions.begin(), versions.end(), [](const VersionRequirement& left,
                                                    const VersionRequirement& right) {
@@ -86,9 +90,10 @@ std::string serialize_report(const ElfReport& report) {
            << "},\"dependencies\":{\"needed\":" << json_string_array(needed)
            << ",\"rpath\":" << json_string_array(rpath)
            << ",\"runpath\":" << json_string_array(runpath)
-           << "},\"symbols\":" << json_string_array(sorted_strings(report.symbols))
-           << ",\"vtables\":" << json_string_array(sorted_strings(report.vtables))
-           << ",\"abi\":{\"versions\":[";
+           << '}';
+    if (report.symbols_known) output << ",\"symbols\":" << json_string_array(sorted_strings(report.symbols));
+    if (report.vtables_known) output << ",\"vtables\":" << json_string_array(sorted_strings(report.vtables));
+    output << ",\"abi\":{\"versions\":[";
     for (std::size_t index = 0; index < versions.size(); ++index) {
         if (index != 0U) {
             output << ',';
@@ -104,8 +109,11 @@ std::string serialize_report(const ElfReport& report) {
            << "}},\"policy\":{\"applied\":" << json_bool(report.policy.applied)
            << ",\"passed\":" << json_bool(report.policy.passed)
            << ",\"violations\":" << json_string_array(policy_violations)
-           << "},\"diagnostics\":" << json_string_array(diagnostics) << '}';
-    return output.str();
+           << "},\"evidence\":" << detail::serialize_evidence(report)
+           << ",\"diagnostics\":" << json_string_array(diagnostics) << '}';
+    const auto serialized = output.str();
+    if (serialized.size() > 8U * 1024U * 1024U) throw std::runtime_error("report exceeds 8 MiB output budget");
+    return serialized;
 }
 
 namespace {
@@ -127,6 +135,8 @@ void append_elf_text(std::ostringstream& output, const ElfReport& report) {
     append_text_values(output, "NEEDED", report.needed);
     append_text_values(output, "RPATH", report.rpath);
     append_text_values(output, "RUNPATH", report.runpath);
+    output << "  SONAME: " << report.soname << "\n  interpreter: " << report.interpreter
+           << "\n  build ID: " << report.build_id << "\n  DWARF: " << report.dwarf_status << "\n";
     output << "  dynamic symbols: " << report.symbols.size() << "\n";
     output << "  vtable symbols: " << report.vtables.size() << "\n";
     output << "  ABI maximums: GLIBC=" << maximum_version(report, "GLIBC")

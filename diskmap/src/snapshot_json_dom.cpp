@@ -55,6 +55,7 @@ private:
     }
 
     JsonValue parseValue(std::size_t depth) {
+        if (limits_.cancelled && limits_.cancelled()) fail("operation cancelled");
         if (depth > max_depth_) {
             fail("JSON nesting exceeds configured bound");
         }

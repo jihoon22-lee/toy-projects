@@ -24,6 +24,7 @@ struct FormatFieldMap {
 struct FormatPlugin {
     std::string name;
     std::string pattern_text;
+    std::string document_fingerprint; // SHA-256 of the exact document compiled by the loader
     std::regex pattern;
     FormatFieldMap fields;
 };

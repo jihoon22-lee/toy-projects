@@ -248,6 +248,20 @@ def _normalize_distribution(value: Any, homes: tuple[str, ...], *, redact: bool)
             }
         )
         normalized["metadata"]["requires_external"] = requires_external
+    if "origin" in raw:
+        origin = _object(raw["origin"], "distribution.origin")
+        normalized["origin"] = {
+            key: _redact_if_enabled(_string(origin.get(key, ""), f"origin.{key}"), homes, redact)
+            for key in ("url", "vcs", "revision", "hash")
+        }
+        normalized["origin"]["redacted"] = any(
+            normalized["origin"][key] != origin.get(key, "")
+            for key in ("url", "vcs", "revision", "hash")
+        )
+        for key in ("editable", "available"):
+            if not isinstance(origin.get(key), bool):
+                raise SnapshotError("invalid-probe-schema", f"origin.{key} must be boolean")
+            normalized["origin"][key] = origin[key]
     return normalized
 
 
@@ -295,6 +309,20 @@ def _normalize_identity(identity: dict[str, Any]) -> dict[str, object]:
             "invalid-probe-schema", "identity.version_info must match sys.version_info"
         )
     public_identity["version_info"] = version_info
+    for key in (
+        "libc_name",
+        "libc_version",
+        "platform_system",
+        "platform_release",
+        "platform_version",
+        "macos_version",
+    ):
+        if key in identity:
+            public_identity[key] = _string(identity[key], f"identity.{key}")
+    if "free_threaded" in identity:
+        if not isinstance(identity["free_threaded"], bool):
+            raise SnapshotError("invalid-probe-schema", "identity.free_threaded must be boolean")
+        public_identity["free_threaded"] = identity["free_threaded"]
     return public_identity
 
 
@@ -358,7 +386,7 @@ def collect_snapshot(
     variables = _scalar_mapping(sysconfig.get("variables"), "sysconfig.variables")
     public_identity = _normalize_identity(identity)
     return {
-        "schema_version": "envlens.snapshot/v2",
+        "schema_version": "envlens.snapshot/v3",
         "producer": {"name": "envlens", "version": __version__},
         "captured_at": _timestamp(captured_at),
         "redaction": {"policy": "envlens-redaction/v1", "enabled": redact},

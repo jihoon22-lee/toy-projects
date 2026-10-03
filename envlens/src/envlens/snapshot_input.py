@@ -86,7 +86,8 @@ def load_snapshot(source: str | os.PathLike[str] | TextIO) -> dict[str, Any]:
         if stat.st_size > MAX_INPUT_BYTES:
             raise DiffError("snapshot-too-large", "snapshot exceeds 16 MiB")
         try:
-            data = path.read_bytes()
+            with path.open("rb") as stream_file:
+                data = stream_file.read(MAX_INPUT_BYTES + 1)
         except OSError as error:
             raise DiffError("snapshot-read-failed", str(error)) from error
         if len(data) > MAX_INPUT_BYTES:
@@ -116,9 +117,14 @@ def validate_snapshot(snapshot: Any) -> dict[str, Any]:
     """
 
     value = _object(snapshot, "snapshot")
-    if value.get("schema_version") not in {"envlens.snapshot/v1", "envlens.snapshot/v2"}:
-        raise DiffError("unsupported-snapshot", "expected envlens.snapshot/v1 or v2")
+    if value.get("schema_version") not in {
+        "envlens.snapshot/v1",
+        "envlens.snapshot/v2",
+        "envlens.snapshot/v3",
+    }:
+        raise DiffError("unsupported-snapshot", "expected envlens.snapshot/v1, v2 or v3")
     distributions = _array(value.get("distributions"), "snapshot.distributions", MAX_DISTRIBUTIONS)
+    requirement_count = 0
     for index, raw in enumerate(distributions):
         distribution = _object(raw, f"snapshot.distributions[{index}]")
         _string(distribution.get("name"), f"distribution[{index}].name")
@@ -126,6 +132,14 @@ def validate_snapshot(snapshot: Any) -> dict[str, Any]:
         if normalized is not None:
             _string(normalized, f"distribution[{index}].normalized_name")
         _string(distribution.get("version"), f"distribution[{index}].version")
+        if "origin" in distribution:
+            origin = _object(distribution["origin"], f"distribution[{index}].origin")
+            for key in ("url", "vcs", "revision", "hash"):
+                if key in origin:
+                    _string(origin[key], f"distribution[{index}].origin.{key}")
+            for key in ("available", "editable", "redacted"):
+                if key in origin and not isinstance(origin[key], bool):
+                    raise DiffError("invalid-snapshot", f"origin.{key} must be boolean")
         metadata = _object(distribution.get("metadata"), f"distribution[{index}].metadata")
         _string(metadata.get("requires_python"), f"distribution[{index}].requires_python")
         _array(
@@ -133,11 +147,17 @@ def validate_snapshot(snapshot: Any) -> dict[str, Any]:
             f"distribution[{index}].requires_dist",
             MAX_REQUIREMENTS,
         )
+        requirement_count += len(metadata["requires_dist"])
         if "requires_external" in metadata:
             _array(
                 metadata.get("requires_external"),
                 f"distribution[{index}].requires_external",
                 MAX_REQUIREMENTS,
+            )
+        requirement_count += len(metadata.get("requires_external", []))
+        if requirement_count > MAX_REQUIREMENTS:
+            raise DiffError(
+                "snapshot-field-too-large", "total requirements exceed evaluation budget"
             )
         _array(
             distribution.get("entry_points"),

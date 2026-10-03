@@ -33,6 +33,8 @@ struct StorageJsonLimits {
 bool parseStorageJson(std::string_view input, const StorageJsonLimits& limits,
                       StorageJsonNode& root, StorageJsonError& error);
 
+std::string serializeStorageJson(const StorageJsonNode &value);
+
 const StorageJsonNode* findStorageJsonField(
     const StorageJsonNode& object, std::string_view name);
 

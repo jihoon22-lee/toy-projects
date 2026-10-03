@@ -252,7 +252,7 @@ std::uint64_t allocatedBytes(const struct stat& status) {
 
 TrashStatus validateStat(const CleanupTarget& target,
                          const struct stat& status,
-                         std::string& message) {
+                         std::string& message, bool afterMove) {
     const FileIdentity identity{static_cast<std::uint64_t>(status.st_dev),
                                 static_cast<std::uint64_t>(status.st_ino), true};
     if (!target.identity.valid || identity != target.identity) {
@@ -271,6 +271,17 @@ TrashStatus validateStat(const CleanupTarget& target,
         || (target.hard_link_count_known
             && static_cast<std::uint64_t>(status.st_nlink) != target.hard_link_count)) {
         message = "filesystem size or hard-link evidence changed after cleanup review";
+        return TrashStatus::RevalidationFailed;
+    }
+    const auto timestamp = [](const timespec& value) {
+        constexpr std::int64_t scale = 1000000000;
+        if (value.tv_sec > (std::numeric_limits<std::int64_t>::max() - value.tv_nsec) / scale) return std::numeric_limits<std::int64_t>::max();
+        if (value.tv_sec < std::numeric_limits<std::int64_t>::min() / scale) return std::numeric_limits<std::int64_t>::min();
+        return static_cast<std::int64_t>(value.tv_sec) * scale + value.tv_nsec;
+    };
+    if ((target.modified_time_known && timestamp(status.st_mtim) != target.modified_ns)
+        || (!afterMove && target.changed_time_known && timestamp(status.st_ctim) != target.changed_ns)) {
+        message = "filesystem contents or change time changed after cleanup review";
         return TrashStatus::RevalidationFailed;
     }
     return TrashStatus::Ready;

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -95,6 +96,7 @@ def _dependency_lines(report: Mapping[str, Any]) -> list[str]:
         f"certainty={_value(item, 'certainty', 'unknown')}] "
         f"{_value(item, 'name', '<unknown>')} {_value(item, 'requirement')}: "
         f"{_value(item, 'reason')}"
+        + (" via " + " → ".join(item["dependency_path"]) if item.get("dependency_path") else "")
         for item in entries
         if isinstance(item, dict)
     )
@@ -116,6 +118,17 @@ def _import_change_lines(report: Mapping[str, Any]) -> list[str]:
     return lines
 
 
+def _suggestion_lines(report: Mapping[str, Any]) -> list[str]:
+    suggestions = report.get("runtime_suggestions", [])
+    if not isinstance(suggestions, list) or not suggestions:
+        return []
+    lines = ["", "Suggested runtime checks (not executed):"]
+    for item in suggestions:
+        if isinstance(item, dict) and isinstance(item.get("argv"), list):
+            lines.append("  " + shlex.join(str(argument) for argument in item["argv"]))
+    return lines
+
+
 def _diff_text(report: Mapping[str, Any]) -> str:
     summary = _mapping(report.get("summary"))
     lines = [
@@ -124,9 +137,10 @@ def _diff_text(report: Mapping[str, Any]) -> str:
         _summary_line(summary),
     ]
     lines.extend(_change_lines(report))
-    lines.extend(_compatibility_lines(report))
     lines.extend(_dependency_lines(report))
+    lines.extend(_compatibility_lines(report))
     lines.extend(_import_change_lines(report))
+    lines.extend(_suggestion_lines(report))
     return "\n".join(lines) + "\n"
 
 
@@ -203,8 +217,9 @@ def _check_text(report: Mapping[str, Any]) -> str:
             for key in ("compatibility_issues", "compatibility_unknown", "dependency_issues")
         ),
     ]
-    lines.extend(_compatibility_lines(report))
     lines.extend(_dependency_lines(report))
+    lines.extend(_compatibility_lines(report))
+    lines.extend(_suggestion_lines(report))
     return "\n".join(lines) + "\n"
 
 
@@ -380,12 +395,23 @@ def dumps_report(report: Mapping[str, Any], *, pretty: bool = False) -> str:
     return value + "\n"
 
 
-def render_report(report: Mapping[str, Any], *, format: str = "text", pretty: bool = False) -> str:
+def render_report(
+    report: Mapping[str, Any], *, format: str = "text", pretty: bool = False, verbose: bool = False
+) -> str:
     """Render a report in ``text``, ``json``, or ``markdown`` format."""
 
     normalized = format.lower()
     if normalized in {"json", "js"}:
         return dumps_report(report, pretty=pretty)
+    if not verbose and isinstance(report.get("compatibility"), list):
+        report = {
+            **report,
+            "compatibility": [
+                item
+                for item in report["compatibility"]
+                if isinstance(item, Mapping) and item.get("status") != "compatible"
+            ],
+        }
     if normalized in {"markdown", "md"}:
         return render_markdown(report)
     if normalized in {"text", "txt"}:

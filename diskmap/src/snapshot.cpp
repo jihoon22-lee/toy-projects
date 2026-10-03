@@ -50,10 +50,27 @@ void appendSnapshotError(FsNode& node, const std::string& message) {
 }
 
 FsNode copyShallow(const FsNode& source) {
-    FsNode result = source;
-    result.children.clear();
-    // This is an in-memory worker generation, not persisted evidence.
-    result.scan_generation = 0;
+    // Never copy the children and clear them afterwards: doing so deep-copies
+    // unbounded descendants before a snapshot node/depth budget can apply.
+    FsNode result;
+    result.name = source.name;
+    result.path = source.path;
+    result.is_dir = source.is_dir;
+    result.size = source.size;
+    result.logical_size_known = source.logical_size_known;
+    result.allocated_size = source.allocated_size;
+    result.allocated_size_known = source.allocated_size_known;
+    result.reclaimable_size = source.reclaimable_size;
+    result.reclaimable_size_known = source.reclaimable_size_known;
+    result.metadata = source.metadata;
+    result.has_target_metadata = source.has_target_metadata;
+    result.target_metadata = source.target_metadata;
+    result.followed = source.followed;
+    result.cycle_skipped = source.cycle_skipped;
+    result.mount_boundary_skipped = source.mount_boundary_skipped;
+    result.complete = source.complete;
+    result.error = source.error;
+    // scan_generation and children deliberately remain at their defaults.
     return result;
 }
 
@@ -67,6 +84,7 @@ void copyChildren(const FsNode& source,
                   FsNode& result,
                   std::size_t depth,
                   SnapshotCopyContext& context) {
+    checkSnapshotCancellation(context.limits);
     result.children.reserve(std::min(source.children.size(),
                                      context.limits.max_nodes - context.nodes));
     for (const FsNode& child : source.children) {
@@ -81,6 +99,7 @@ void copyChildren(const FsNode& source,
 FsNode copyBoundedSnapshotNode(const FsNode& source,
                                std::size_t depth,
                                SnapshotCopyContext& context) {
+    checkSnapshotCancellation(context.limits);
     ++context.nodes;
     FsNode result = copyShallow(source);
     if (!source.is_dir && !source.children.empty()) {
@@ -153,6 +172,40 @@ bool validUtf8Sequence(const std::string& value, std::size_t index, std::size_t&
     return true;
 }
 
+std::string bytesHex(const std::string& value) {
+    static constexpr char hex[] = "0123456789abcdef";
+    std::string result;
+    result.reserve(value.size() * 2);
+    for (unsigned char byte : value) {
+        result += hex[byte >> 4]; result += hex[byte & 15];
+    }
+    return result;
+}
+std::string bytesFromHex(const std::string& value) {
+    if (value.size() % 2) throw SnapshotError("invalid byte encoding");
+    std::string result;
+    const auto digit = [](char c) -> unsigned {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        throw SnapshotError("noncanonical byte encoding");
+    };
+    for (std::size_t i = 0; i < value.size(); i += 2) {
+        const auto byte = (digit(value[i]) << 4) | digit(value[i + 1]);
+        if (!byte) throw SnapshotError("NUL is not a filesystem path byte");
+        result += static_cast<char>(byte);
+    }
+    return result;
+}
+std::string displayBytes(const std::string& value) {
+    if (isValidUtf8(value)) return value;
+    std::string result;
+    for (unsigned char byte : value) {
+        if (byte >= 32 && byte < 127 && byte != '\\') result += static_cast<char>(byte);
+        else result += "\\x" + bytesHex(std::string(1, static_cast<char>(byte)));
+    }
+    return result;
+}
+
 bool isValidUtf8(const std::string& value) {
     for (std::size_t index = 0; index < value.size();) {
         const unsigned char first = static_cast<unsigned char>(value[index]);
@@ -190,7 +243,10 @@ SnapshotTreeValidation validateSnapshotTree(const FsNode& root,
     std::set<std::string> paths;
     std::vector<ValidationFrame> stack{{&root, 0}};
     while (!stack.empty()) {
+        checkSnapshotCancellation(limits);
         const ValidationFrame frame = stack.back();
+        if (frame.node->name.find('\0') != std::string::npos || frame.node->path.native().find('\0') != std::string::npos)
+            throw SnapshotError("NUL is not a filesystem name byte");
         stack.pop_back();
         if (frame.depth > limits.max_depth) {
             throw SnapshotError("snapshot tree exceeds configured depth bound");

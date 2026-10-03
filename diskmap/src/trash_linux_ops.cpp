@@ -291,7 +291,7 @@ TrashReceipt finalizeTrashMove(const TrashDirectories& directories,
                              TrashStatus::RevalidationFailed,
                              errnoMessage("cannot verify the moved Trash target"));
     }
-    if (validateStat(target, movedStatus, error) != TrashStatus::Ready) {
+    if (validateStat(target, movedStatus, error, true) != TrashStatus::Ready) {
         return rollbackMoved(directories, source, token, tempName, metadata,
                              TrashStatus::RevalidationFailed, error);
     }
@@ -367,6 +367,10 @@ TrashReceipt moveOneToTrash(const CleanupTarget& target,
     }
     notifyTrashMutationTestHook(TrashMutationTestPoint::BeforePayloadMove,
                                 source.original, directories.root / "files" / token);
+    if (!verifyCleanupProofs(target, error)) {
+        ::unlinkat(directories.info.get(), tempName.c_str(), 0);
+        return trashFailure(TrashStatus::RevalidationFailed, source.original, error);
+    }
     if (renameNoReplace(source.parent.get(), source.name.c_str(),
                         directories.files.get(), token.c_str()) != 0) {
         const int value = errno;
@@ -441,9 +445,14 @@ std::vector<TrashReceipt> movePlanToTrashLinux(const CleanupPlan& plan,
     }
     std::uint64_t sequence = 0;
     for (const CleanupTarget& target : plan.targets) {
+        if (options.cancelled && options.cancelled()) {
+            receipts.push_back(trashFailure(TrashStatus::Cancelled, target.path, "Cancelled between files; completed moves remain recoverable"));
+            break;
+        }
         const std::string token = nextToken(sequence++);
-        receipts.push_back(moveOneToTrash(target, plan.scan_generation,
-                                          directories, token));
+        auto receipt = moveOneToTrash(target, plan.scan_generation, directories, token);
+        if (!recordTrashReceipt(directories, receipt, error)) receipt.message += "; audit persistence failed: " + error;
+        receipts.push_back(std::move(receipt));
     }
     return receipts;
 }

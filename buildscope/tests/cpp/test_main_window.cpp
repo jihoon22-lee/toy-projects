@@ -2,21 +2,21 @@
 
 #include <QApplication>
 #include <QEvent>
-#include <QFileDialog>
 #include <QFile>
+#include <QFileDialog>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QTableWidget>
 #include <QTabWidget>
+#include <QTableWidget>
 #include <QTemporaryDir>
+#include <QTimer>
 #include <QTreeView>
 #include <QTreeWidget>
-#include <QTimer>
 #include <QtTest>
 
 #include "buildscope/compilation_model.hpp"
@@ -24,21 +24,21 @@
 
 namespace {
 
-template <typename Widget>
-Widget *findWidget(QObject *root, const char *name) {
+template <typename Widget> Widget *findWidget(QObject *root, const char *name) {
     return root->findChild<Widget *>(QString::fromLatin1(name));
 }
 
 void processGuiEvents() {
+    QTest::qWait(180);
     QApplication::processEvents();
 }
 
-}  // namespace
+} // namespace
 
 class MainWindowTest final : public QObject {
     Q_OBJECT
 
-private slots:
+  private slots:
     void initTestCase();
     void cleanup();
     void generatedQtArtifactsAreLinked();
@@ -53,11 +53,11 @@ private slots:
     void reportsMalformedV2ValidationLocation();
     void loadsDiffReportAndShowsIssuesFirstDetails();
     void failedSnapshotClearsDiffMode();
+    void importsDatabaseAsyncAndQueriesImpact();
+    void editorArgvAndReopenGeneration();
 };
 
-void MainWindowTest::initTestCase() {
-    QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
-}
+void MainWindowTest::initTestCase() { QApplication::setAttribute(Qt::AA_DontUseNativeDialogs); }
 
 void MainWindowTest::cleanup() {
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
@@ -104,7 +104,7 @@ void MainWindowTest::openButtonLoadsSelectedSnapshot() {
 
     QTest::mouseClick(button, Qt::LeftButton);
 
-    QCOMPARE(window.entryCount(), 2);
+    QTRY_COMPARE(window.entryCount(), 2);
 }
 
 void MainWindowTest::destroysThroughWidgetPointer() {
@@ -135,14 +135,15 @@ void MainWindowTest::loadsV2SnapshotAndBuildsTree() {
     QCOMPARE(missing.data(Qt::DisplayRole).toString(), QStringLiteral("src/missing.cpp (1)"));
     QCOMPARE(present.data(buildscope::NodeKindRole).toInt(),
              static_cast<int>(buildscope::CompilationNodeKind::Source));
-    QCOMPARE(missing.data(buildscope::SourceStatusRole).toString(),
-             QStringLiteral("missing"));
-    QCOMPARE(model->data(model->index(0, buildscope::CompilationTreeModel::StatusColumn),
-                         Qt::DisplayRole)
+    QCOMPARE(missing.data(buildscope::SourceStatusRole).toString(), QStringLiteral("missing"));
+    QCOMPARE(model
+                 ->data(model->index(0, buildscope::CompilationTreeModel::StatusColumn),
+                        Qt::DisplayRole)
                  .toString(),
              QStringLiteral("present"));
-    QCOMPARE(model->data(model->index(1, buildscope::CompilationTreeModel::StatusColumn),
-                         Qt::DisplayRole)
+    QCOMPARE(model
+                 ->data(model->index(1, buildscope::CompilationTreeModel::StatusColumn),
+                        Qt::DisplayRole)
                  .toString(),
              QStringLiteral("missing"));
     QCOMPARE(model->rowCount(present), 1);
@@ -194,14 +195,17 @@ void MainWindowTest::populatesV2DetailsAutomatically() {
     QCOMPARE(target->text(), QStringLiteral("buildscope-app · x86_64-linux-gnu"));
     QCOMPARE(compiler->text(), QStringLiteral("c++"));
     QCOMPARE(standard->text(), QStringLiteral("c++20"));
-    QCOMPARE(configuration->text(),
-             QStringLiteral("sha256:1111111111111111111111111111111111111111111111111111111111111111"));
+    QCOMPARE(configuration->text(), QStringLiteral("111111111111…"));
+    QCOMPARE(configuration->toolTip(),
+             QStringLiteral(
+                 "sha256:1111111111111111111111111111111111111111111111111111111111111111"));
     QCOMPARE(invocationSource->text(), QStringLiteral("Invocation source: arguments"));
 
     const auto structured = arguments->toPlainText();
-    QCOMPARE(structured,
-             QStringLiteral(
-                 R"(["/usr/bin/c++","-DFEATURE=hello world","-std=c++20","-Iinclude","-c","src/main.cpp"])"));
+    QCOMPARE(
+        structured,
+        QStringLiteral(
+            R"(["/usr/bin/c++","-DFEATURE=hello world","-std=c++20","-Iinclude","-c","src/main.cpp"])"));
     QCOMPARE(rawCommand->toPlainText(),
              QStringLiteral(
                  "/usr/bin/c++ -DFEATURE='hello world' -std=c++20 -Iinclude -c src/main.cpp"));
@@ -340,7 +344,8 @@ void MainWindowTest::filtersV2SourcesAndStructuredFields() {
     filter->setText(QStringLiteral("missing"));
     processGuiEvents();
     QCOMPARE(tree->model()->rowCount(), 1);
-    QCOMPARE(tree->model()->index(0, buildscope::CompilationTreeModel::SourceColumn)
+    QCOMPARE(tree->model()
+                 ->index(0, buildscope::CompilationTreeModel::SourceColumn)
                  .data(buildscope::SourcePathRole)
                  .toString(),
              QStringLiteral("src/missing.cpp"));
@@ -348,7 +353,8 @@ void MainWindowTest::filtersV2SourcesAndStructuredFields() {
     filter->setText(QStringLiteral("src/main.cpp"));
     processGuiEvents();
     QCOMPARE(tree->model()->rowCount(), 1);
-    QCOMPARE(tree->model()->index(0, buildscope::CompilationTreeModel::SourceColumn)
+    QCOMPARE(tree->model()
+                 ->index(0, buildscope::CompilationTreeModel::SourceColumn)
                  .data(buildscope::SourcePathRole)
                  .toString(),
              QStringLiteral("src/main.cpp"));
@@ -356,7 +362,8 @@ void MainWindowTest::filtersV2SourcesAndStructuredFields() {
     filter->setText(QStringLiteral("FEATURE"));
     processGuiEvents();
     QCOMPARE(tree->model()->rowCount(), 1);
-    QCOMPARE(tree->model()->index(0, buildscope::CompilationTreeModel::SourceColumn)
+    QCOMPARE(tree->model()
+                 ->index(0, buildscope::CompilationTreeModel::SourceColumn)
                  .data(buildscope::SourcePathRole)
                  .toString(),
              QStringLiteral("src/main.cpp"));
@@ -413,7 +420,8 @@ void MainWindowTest::loadsDiffReportAndShowsIssuesFirstDetails() {
     QVERIFY(diffTab != nullptr);
     QCOMPARE(tree->model()->rowCount(), 4);
     QCOMPARE(tree->model()->columnCount(), buildscope::DiffTreeModel::ColumnCount);
-    QCOMPARE(tree->model()->index(0, buildscope::DiffTreeModel::SourceColumn)
+    QCOMPARE(tree->model()
+                 ->index(0, buildscope::DiffTreeModel::SourceColumn)
                  .data(Qt::DisplayRole)
                  .toString(),
              QStringLiteral("src/move.cpp → renamed/move.cpp"));
@@ -421,8 +429,7 @@ void MainWindowTest::loadsDiffReportAndShowsIssuesFirstDetails() {
     QCOMPARE(changes->item(0, 0)->text(), QStringLiteral("moved"));
     QCOMPARE(tabs->currentWidget(), diffTab);
 
-    const auto changed =
-        tree->model()->index(2, buildscope::DiffTreeModel::SourceColumn);
+    const auto changed = tree->model()->index(2, buildscope::DiffTreeModel::SourceColumn);
     tree->setCurrentIndex(changed);
     processGuiEvents();
     QCOMPARE(changes->rowCount(), 8);
@@ -448,6 +455,69 @@ void MainWindowTest::failedSnapshotClearsDiffMode() {
     auto *tree = findWidget<QTreeView>(&window, "sourceTree");
     QVERIFY(tree != nullptr);
     QCOMPARE(tree->model()->columnCount(), buildscope::CompilationTreeModel::ColumnCount);
+}
+
+void MainWindowTest::importsDatabaseAsyncAndQueriesImpact() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QFile source(dir.filePath("unit.cpp"));
+    QVERIFY(source.open(QIODevice::WriteOnly));
+    source.write("#include \"api.hpp\"\n");
+    source.close();
+    QFile header(dir.filePath("api.hpp"));
+    QVERIFY(header.open(QIODevice::WriteOnly));
+    header.write("#pragma once\n");
+    header.close();
+    QJsonArray db{QJsonObject{{"directory", dir.path()},
+                              {"file", "unit.cpp"},
+                              {"arguments", QJsonArray{"c++", "-c", "unit.cpp"}}}};
+    QFile file(dir.filePath("compile_commands.json"));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write(QJsonDocument(db).toJson());
+    file.close();
+    buildscope::MainWindow window;
+    window.resize(1280, 800);
+    window.show();
+    window.openInputAsync(file.fileName(), true);
+    QTRY_VERIFY_WITH_TIMEOUT(!window.busy(), 5000);
+    QCOMPARE(window.entryCount(), 1);
+    QVERIFY(window.statusText().contains("v4"));
+    if (!qEnvironmentVariableIsEmpty("BUILDSCOPE_TEST_SCREENSHOT"))
+        window.grab().save(qEnvironmentVariable("BUILDSCOPE_TEST_SCREENSHOT"));
+    auto *headerEdit = findWidget<QLineEdit>(&window, "impactHeaderEdit");
+    auto *button = findWidget<QPushButton>(&window, "impactButton");
+    QVERIFY(headerEdit);
+    QVERIFY(button);
+    headerEdit->setText("api.hpp");
+    QTest::mouseClick(button, Qt::LeftButton);
+    QTRY_VERIFY(!window.busy());
+    QVERIFY(findWidget<QPlainTextEdit>(&window, "impactEvidenceEdit")
+                ->toPlainText()
+                .contains("unit.cpp"));
+    window.analyzeAsync("estimate");
+    window.cancelWork();
+    QTRY_VERIFY(!window.busy());
+    QVERIFY(window.statusText().contains("cancelled"));
+}
+void MainWindowTest::editorArgvAndReopenGeneration() {
+    buildscope::MainWindow window;
+    window.setEditorArguments({"/usr/bin/editor", "--goto", "{file}:{line}"});
+    window.setRootMappings({"/old/project=/new tree/project"});
+    QCOMPARE(window.editorArgumentsFor("/old/project/a;$(touch sentinel).cpp", 42),
+             QStringList({"/usr/bin/editor", "--goto",
+                          "/new tree/project/a;$(touch sentinel).cpp:42"}));
+    QVERIFY_EXCEPTION_THROWN(window.setEditorArguments({"editor", "no-file-placeholder"}),
+                             buildscope::ContractError);
+    window.openInputAsync(QStringLiteral(BUILDSCOPE_SAMPLE_SNAPSHOT));
+    window.openInputAsync(QStringLiteral(BUILDSCOPE_V2_SNAPSHOT));
+    QTRY_VERIFY_WITH_TIMEOUT(!window.busy(), 5000);
+    QVERIFY(window.statusText().contains("v2"));
+    QCOMPARE(window.entryCount(), 2);
+    auto *filter = findWidget<QLineEdit>(&window, "filterEdit");
+    filter->setText("missing");
+    filter->setText("FEATURE");
+    QTest::qWait(200);
+    QCOMPARE(findWidget<QTreeView>(&window, "sourceTree")->model()->rowCount(), 1);
 }
 
 QTEST_MAIN(MainWindowTest)

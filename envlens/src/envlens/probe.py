@@ -157,6 +157,23 @@ def distribution_record(distribution):
     }
     if import_names:
         result["import_names"] = sorted(import_names)
+    try:
+        direct_text = distribution.read_text("direct_url.json") or ""
+        if len(direct_text) > 65536:
+            raise ValueError("direct_url metadata exceeds 65536 characters")
+        direct = json.loads(direct_text) if direct_text else {}
+        vcs = direct.get("vcs_info", {})
+        archive = direct.get("archive_info", {})
+        result["origin"] = {
+            "url": str(direct.get("url", "")),
+            "editable": bool(direct.get("dir_info", {}).get("editable", False)),
+            "vcs": str(vcs.get("vcs", "")),
+            "revision": str(vcs.get("commit_id", "")),
+            "hash": str(archive.get("hash", "")),
+            "available": bool(direct_text),
+        }
+    except Exception as error:
+        errors.append(error_record("origin", error))
     return result
 
 prefix_path = pathlib.Path(sys.prefix)
@@ -183,6 +200,13 @@ payload = {
         "exec_prefix": sys.exec_prefix,
         "compiler": platform.python_compiler(),
         "user_home": str(pathlib.Path.home()),
+        "libc_name": platform.libc_ver()[0],
+        "libc_version": platform.libc_ver()[1],
+        "platform_system": platform.system(),
+        "platform_release": platform.release(),
+        "platform_version": platform.version(),
+        "macos_version": platform.mac_ver()[0],
+        "free_threaded": bool(sysconfig.get_config_var("Py_GIL_DISABLED")),
     },
     "sysconfig": {
         "paths": {str(key): scalar(value) for key, value in sysconfig.get_paths().items()},
@@ -304,7 +328,7 @@ def _finish_readers(
 
 def _run_bounded(
     command: list[str],
-    timeout_seconds: int,
+    timeout_seconds: float,
     *,
     cwd: str | Path | None = None,
     env: dict[str, str] | None = None,

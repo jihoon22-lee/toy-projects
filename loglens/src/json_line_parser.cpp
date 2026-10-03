@@ -1,4 +1,5 @@
 #include "json_line_parser.hpp"
+#include <algorithm>
 #include "json_string_parser.hpp"
 
 #include "loglens/log_parser.hpp"
@@ -437,6 +438,28 @@ LogRecord parseJsonLine(const std::string& line) {
     record.parse_status = record.diagnostics.empty() ? ParseStatus::Parsed
                                                      : ParseStatus::Partial;
     const std::vector<JsonMember>& fields = reader.rootMembers();
+    std::size_t fieldBytes = 0;
+    for (const auto &field : fields) {
+        if (field.value.kind == JsonKind::Object || field.value.kind == JsonKind::Array ||
+            field.value.kind == JsonKind::Null)
+            continue;
+        const bool ambiguous = std::any_of(
+            record.diagnostics.begin(), record.diagnostics.end(), [&](const auto &diagnostic) {
+                return diagnostic.code == ParseDiagnosticCode::DuplicateField &&
+                       diagnostic.field == field.name;
+            });
+        if (ambiguous)
+            continue;
+        const auto bytes = field.name.size() + field.value.text.size();
+        if (field.name.size() > 128 || field.value.text.size() > 4096 ||
+            fieldBytes + bytes > 64 * 1024 || record.fields.size() >= 128) {
+            addDiagnostic(record, ParseDiagnosticCode::LimitExceeded, field.name, field.offset,
+                          "structured field retention limit exceeded");
+            continue;
+        }
+        fieldBytes += bytes;
+        record.fields.emplace(field.name, field.value.text);
+    }
 
     const JsonMember* timestamp = findJsonField(fields, "ts");
     if (timestamp == nullptr) {

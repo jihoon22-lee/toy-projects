@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.16)
-project(buildscope VERSION 0.1.2 LANGUAGES CXX)  # x-release-please-version
+project(buildscope VERSION 0.2.0 LANGUAGES CXX)  # x-release-please-version
+
+option(BUILDSCOPE_SANITIZE "Enable address and undefined behavior sanitizers" OFF)
+if(BUILDSCOPE_SANITIZE)
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address,undefined)
+endif()
 
 option(BUILDSCOPE_BUILD_BENCHMARKS "Build the 100k-entry model benchmark" OFF)
 
@@ -21,11 +27,13 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 find_package(QT NAMES Qt6 REQUIRED COMPONENTS Core Widgets Test)
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets Test)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets Test Concurrent)
 message(STATUS "buildscope: using Qt6 ${QT6_VERSION}")
 
 add_library(buildscope_contract STATIC
     src/core/compilation_model.cpp
+    src/core/impact.cpp
+    include/buildscope/impact.hpp
     src/core/contract.cpp
     src/core/contract_json_guard.hpp
     src/core/contract_json_guard.cpp
@@ -44,8 +52,13 @@ add_library(buildscope_contract STATIC
 )
 target_include_directories(buildscope_contract PUBLIC include)
 target_link_libraries(buildscope_contract PUBLIC Qt${QT_VERSION_MAJOR}::Core)
+target_compile_definitions(buildscope_contract PUBLIC BUILDSCOPE_VERSION="${PROJECT_VERSION}")
 
 add_library(buildscope_native STATIC
+    src/native/native_analysis.cpp
+    src/native/native_analysis.hpp
+    src/native/native_relocation.cpp
+    src/native/native_relocation.hpp
     src/native/canonical_json.cpp
     src/native/canonical_json.hpp
     src/native/native_command.cpp
@@ -93,12 +106,14 @@ set_target_properties(buildscope PROPERTIES
 add_library(buildscope_gui STATIC
     src/gui/diff_window.cpp
     src/gui/main_window.cpp
+    src/gui/workflow.cpp
+    src/gui/workflow.hpp
     include/buildscope/main_window.hpp
     resources/buildscope.qrc
     ui/main_window.ui
 )
 target_include_directories(buildscope_gui PUBLIC include)
-target_link_libraries(buildscope_gui PUBLIC buildscope_contract Qt${QT_VERSION_MAJOR}::Widgets)
+target_link_libraries(buildscope_gui PUBLIC buildscope_native Qt${QT_VERSION_MAJOR}::Widgets Qt6::Concurrent)
 
 add_executable(buildscope-gui
     src/gui/main.cpp
@@ -114,9 +129,13 @@ install(TARGETS buildscope buildscope-cli buildscope-gui
 )
 install(FILES
     README.md
+    CHANGELOG.md
     docs/quickstart.md
     DESTINATION "${CMAKE_INSTALL_DOCDIR}"
 )
+install(FILES docs/quickstart.md DESTINATION "${CMAKE_INSTALL_DOCDIR}/docs")
+install(FILES packaging/buildscope.desktop DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
+install(FILES resources/icons/buildscope.svg DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps")
 install(DIRECTORY examples/
     DESTINATION "${CMAKE_INSTALL_DATADIR}/buildscope/examples"
 )
@@ -210,3 +229,9 @@ if(BUILDSCOPE_BUILD_BENCHMARKS)
     )
     set_tests_properties(buildscope_model_benchmark_100k PROPERTIES LABELS benchmark)
 endif()
+
+add_executable(test_analysis_workflow tests/cpp/test_analysis_workflow.cpp)
+target_link_libraries(test_analysis_workflow PRIVATE buildscope_native Qt6::Test)
+target_compile_definitions(test_analysis_workflow PRIVATE BUILDSCOPE_TEST_COMPILER="${CMAKE_CXX_COMPILER}" BUILDSCOPE_TEST_PRODUCER="$<TARGET_FILE:buildscope>")
+add_dependencies(test_analysis_workflow buildscope)
+add_test(NAME test_analysis_workflow COMMAND test_analysis_workflow)

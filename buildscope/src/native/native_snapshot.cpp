@@ -246,12 +246,13 @@ void forEachDatabaseElement(const QByteArray &raw, Visit &&visit) {
 
 }  // namespace
 
-QJsonObject loadCompilationDatabase(const QString &path, const QString &projectRoot) {
+QJsonObject loadCompilationDatabase(const QString &path, const QString &projectRoot,
+                                    const QList<RootMapping> &mappings, std::atomic_bool *cancel) {
     QByteArray raw;
     QString resolvedPath;
     try {
         resolvedPath = QFileInfo(path).absoluteFilePath();
-        raw = readBoundedRegular(path, kMaxDatabaseBytes);
+        raw = readBoundedRegular(path, kMaxDatabaseBytes, cancel);
     } catch (const SnapshotIoError &error) {
         throw SnapshotError(QStringLiteral("cannot read compilation database: %1")
                                 .arg(QString::fromStdString(error.what())));
@@ -271,6 +272,7 @@ QJsonObject loadCompilationDatabase(const QString &path, const QString &projectR
     // (duplicate keys, non-standard constants) and parsed inside its own
     // byte range, bounded by the largest single entry instead of the file.
     forEachDatabaseElement(raw, [&](const QByteArray &element) {
+        if(cancel && cancel->load()) throw SnapshotError(QStringLiteral("compilation database import cancelled"));
         if (index >= kMaxEntries) {
             throw SnapshotError(
                 QStringLiteral("compilation database exceeds %1 entry limit")
@@ -294,8 +296,15 @@ QJsonObject loadCompilationDatabase(const QString &path, const QString &projectR
                     .arg(index)
                     .arg(parseError.errorString()));
         }
-        entries.append(snapshotEntry(document.array().first(), index, root,
-                                     databaseParent));
+        const auto original=document.array().first();
+        const auto effective=mappings.isEmpty()?original:QJsonValue(relocateInvocation(original.toObject(),mappings));
+        auto entry=snapshotEntry(effective,index,root,databaseParent);
+        if(!mappings.isEmpty()) {
+            auto diagnostics=entry.value("diagnostics").toArray();
+            for(const auto &mapping:mappings) diagnostics.append(QJsonObject{{"code","explicit-root-relocation"},{"severity","info"},{"message",mapping.from+" → "+mapping.to}});
+            entry.insert("diagnostics",diagnostics);
+        }
+        entries.append(entry);
         ++index;
     });
     annotateEntrySets(entries);
@@ -364,6 +373,24 @@ QString dumpsSnapshot(const QJsonObject &snapshot, bool pretty) {
 }
 
 QJsonObject snapshotForSchema(QJsonObject snapshot, const QString &schema) {
+    if(schema=="v4") {
+        if(snapshot.value("schema_version")!="buildscope.snapshot/v4") throw SnapshotError(QStringLiteral("v4 snapshots require controlled include analysis"));
+        return snapshot;
+    }
+    if(snapshot.value("schema_version")=="buildscope.snapshot/v4") {
+        auto entries=snapshot.value("entries").toArray();
+        for(qsizetype i=0;i<entries.size();++i) {
+            auto entry=entries[i].toObject(); auto analysis=entry.value("include_analysis").toObject();
+            if(analysis.value("fallback").isObject()) {
+                auto diagnostics=analysis.value("diagnostics").toArray();
+                diagnostics.append(QJsonObject{{"code","legacy-fallback-omitted"},{"message","v3 cannot retain the separate estimate; use v4."},{"severity","warning"}});
+                analysis.insert("diagnostics",diagnostics);
+            }
+            analysis.remove("complete");analysis.remove("stop_reason");analysis.remove("fallback");
+            entry.insert("include_analysis",analysis);entries[i]=entry;
+        }
+        snapshot.insert("entries",entries);snapshot.remove("analysis_run");snapshot.insert("schema_version",kSchemaV3);
+    }
     if (schema == QLatin1String("v3")) {
         if (snapshot.value(QStringLiteral("schema_version")).toString() != kSchemaV3) {
             throw SnapshotError(QStringLiteral("v3 snapshots require include analysis"));

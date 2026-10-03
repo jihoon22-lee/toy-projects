@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0 — development checkpoint
+
+- Bind triage to file identity, generation and full-record SHA-256; preserve unmatched notes.
+- Save complete investigations with session v2, source/plugin fingerprints and layout; read v1.
+- Support GUI format plugins, JSON correlation queries and related-record navigation.
+- Add bounded cancellable full-file streaming search separate from retained rows.
+- Compact source settings, improve palette contrast and label/annotate the timeline.
+- Validate CLI/plugin/source input before session side effects; install independent binaries, schemas and desktop assets.
+
 ## [0.1.2](https://github.com/jihoon22-lee/toy-projects/compare/loglens/v0.1.1...loglens/v0.1.2) (2026-10-03)
 
 

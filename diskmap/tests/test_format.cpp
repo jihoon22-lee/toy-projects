@@ -25,19 +25,19 @@ void TestFormat::run() {
     CHECK_EQ(humanBytes(0), std::string("0 B"));
     CHECK_EQ(humanBytes(1), std::string("1 B"));
     CHECK_EQ(humanBytes(500), std::string("500 B"));
-    CHECK_EQ(humanBytes(1023), std::string("1023 B")); // just under the KB boundary
+    CHECK_EQ(humanBytes(1023), std::string("1023 B")); // just under the KiB boundary
 
-    CHECK_EQ(humanBytes(1024), std::string("1.0 KB"));      // exact boundary
-    CHECK_EQ(humanBytes(1536), std::string("1.5 KB"));      // 1024 * 1.5
-    CHECK_EQ(humanBytes(1024ull * 1024), std::string("1.0 MB"));
-    CHECK_EQ(humanBytes(1500000), std::string("1.4 MB"));   // non-exact rounding
-    CHECK_EQ(humanBytes(1024ull * 1024 * 1024), std::string("1.0 GB"));
-    CHECK_EQ(humanBytes(1024ull * 1024 * 1024 * 1024), std::string("1.0 TB"));
-    CHECK_EQ(humanBytes(2ull * 1024 * 1024 * 1024 * 1024 * 1024), std::string("2.0 PB"));
+    CHECK_EQ(humanBytes(1024), std::string("1.0 KiB"));      // exact boundary
+    CHECK_EQ(humanBytes(1536), std::string("1.5 KiB"));      // 1024 * 1.5
+    CHECK_EQ(humanBytes(1024ull * 1024), std::string("1.0 MiB"));
+    CHECK_EQ(humanBytes(1500000), std::string("1.4 MiB"));   // non-exact rounding
+    CHECK_EQ(humanBytes(1024ull * 1024 * 1024), std::string("1.0 GiB"));
+    CHECK_EQ(humanBytes(1024ull * 1024 * 1024 * 1024), std::string("1.0 TiB"));
+    CHECK_EQ(humanBytes(2ull * 1024 * 1024 * 1024 * 1024 * 1024), std::string("2.0 PiB"));
 
-    // PB is the top unit: even far beyond it, the unit stays "PB" (the loop
+    // PiB is the top unit: even far beyond it, the unit stays "PiB" (the loop
     // stops advancing once it reaches the last table entry).
-    CHECK_EQ(humanBytes(std::numeric_limits<std::uint64_t>::max()), std::string("16384.0 PB"));
+    CHECK_EQ(humanBytes(std::numeric_limits<std::uint64_t>::max()), std::string("16384.0 PiB"));
 
     // --- formatPercent: 0..1 ratio -> one-decimal percentage ---
     CHECK_EQ(formatPercent(0.0), std::string("0.0%"));

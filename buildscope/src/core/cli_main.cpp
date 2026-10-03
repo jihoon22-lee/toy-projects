@@ -9,6 +9,7 @@ int main(int argc, char *argv[]) {
     const auto arguments = app.arguments();
     QTextStream output(stdout);
     QTextStream error(stderr);
+    if(arguments.size()==2 && arguments.at(1)=="--version") { output<<"buildscope-cli " BUILDSCOPE_VERSION "\n";return 0; }
     const auto diffMode = arguments.size() == 3 && arguments.at(1) == QLatin1String("--diff");
     if (arguments.size() != 2 && !diffMode) {
         error << "usage: buildscope-cli SNAPSHOT.json\n"

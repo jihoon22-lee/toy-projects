@@ -8,8 +8,19 @@ namespace loglens {
 
 namespace {
 
-enum class Op : std::uint8_t { And, Or, Not, LevelAtLeast, LevelEquals, SourceEquals,
-                               SourceContains, MessageContains, MessageExcludes };
+enum class Op : std::uint8_t {
+    And,
+    Or,
+    Not,
+    LevelAtLeast,
+    LevelEquals,
+    SourceEquals,
+    SourceContains,
+    MessageContains,
+    MessageExcludes,
+    FieldEquals,
+    FieldContains
+};
 
 bool isAsciiSpace(unsigned char byte) {
     return byte == ' ' || byte == '\t' || byte == '\n' || byte == '\r' || byte == '\f'
@@ -51,6 +62,7 @@ struct Filter::Node {
     std::vector<NodePtr> children;
     Level level = Level::Unknown;
     std::string text;
+    std::string field;
 };
 
 namespace {
@@ -88,6 +100,13 @@ bool evalPredicate(const Node& node, const LogRecord& record) {
         case Op::SourceContains: return containsInsensitive(record.source, node.text);
         case Op::MessageContains: return containsInsensitive(record.message, node.text);
         case Op::MessageExcludes: return !containsInsensitive(record.message, node.text);
+        case Op::FieldEquals:
+        case Op::FieldContains: {
+            const auto value = record.fields.find(node.field);
+            return value != record.fields.end() &&
+                   (node.op == Op::FieldEquals ? value->second == node.text
+                                               : containsInsensitive(value->second, node.text));
+        }
         default: return false;
     }
 }
@@ -456,6 +475,25 @@ private:
                                                       "source supports '==' or '~'",
                                                       Op::SourceEquals, Op::SourceContains};
             return makeTextPredicate(tokens, sourceSpec);
+        }
+        if (tokens.field.compare(0, 6, "field.") == 0 || tokens.field == "request_id" ||
+            tokens.field == "trace_id" || tokens.field == "span_id" ||
+            tokens.field == "correlation_id" || tokens.field == "thread_id" ||
+            tokens.field == "thread") {
+            if (tokens.op != "==" && tokens.op != "~")
+                return failAt(tokens.opRange.begin, tokens.opRange.end,
+                              "structured fields support '==' or '~'");
+            auto node = makeNode(tokens.fieldRange.begin, tokens.valueRange.end);
+            if (!node)
+                return nullptr;
+            node->field =
+                tokens.field.compare(0, 6, "field.") == 0 ? tokens.field.substr(6) : tokens.field;
+            if (node->field.empty())
+                return failAt(tokens.fieldRange.begin, tokens.fieldRange.end,
+                              "structured field name is empty");
+            node->text = tokens.value;
+            node->op = tokens.op == "==" ? Op::FieldEquals : Op::FieldContains;
+            return node;
         }
         if (tokens.field != "message") {
             return failAt(tokens.fieldRange.begin, tokens.fieldRange.end,

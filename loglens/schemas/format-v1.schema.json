@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "const": "loglens.format/v1"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "pattern": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 8192
+    },
+    "fields": {
+      "type": "object",
+      "properties": {
+        "timestamp": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "level": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "source": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "message": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "kind",
+    "name",
+    "pattern",
+    "fields"
+  ],
+  "additionalProperties": true
+}

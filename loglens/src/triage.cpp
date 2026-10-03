@@ -1,4 +1,7 @@
 #include "loglens/triage.hpp"
+#include "loglens/evidence.hpp"
+#include <tuple>
+#include <filesystem>
 
 #include "persistence_io.hpp"
 #include "storage_json.hpp"
@@ -17,7 +20,8 @@
 namespace loglens {
 namespace {
 
-constexpr char kSchema[] = "loglens.triage/v1";
+constexpr char kSchema[] = "loglens.triage/v2";
+constexpr char kV1Schema[] = "loglens.triage/v1";
 constexpr char kLegacySchema[] = "loglens.triage/v0";
 
 void setError(PersistenceError& error, PersistenceErrorCode code,
@@ -160,6 +164,16 @@ bool validateEntry(const TriageEntry& value, PersistenceError& error) {
                  "triage entry path, line, or annotation is outside the supported bounds");
         return false;
     }
+    const bool validDigest =
+        value.record_fingerprint.empty() ||
+        (value.record_fingerprint.size() == 64 &&
+         std::all_of(
+             value.record_fingerprint.begin(), value.record_fingerprint.end(),
+             [](unsigned char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }));
+    if (!validDigest || value.source_identity.size() > 128) {
+        setError(error, PersistenceErrorCode::InvalidValue, "invalid triage evidence");
+        return false;
+    }
     if (!value.bookmarked && value.annotation.empty()) {
         setError(error, PersistenceErrorCode::InvalidValue,
                  "empty unbookmarked triage entries are not persisted");
@@ -195,22 +209,37 @@ bool parseRule(const detail::StorageJsonNode& node, NamedHighlightRule& value,
     return validateRule(value, error);
 }
 
-bool parseEntry(const detail::StorageJsonNode& node, TriageEntry& value,
-                PersistenceError& error) {
-    if (!onlyFields(node, {"source_path", "line_number", "bookmarked", "annotation"})
-        || !getString(node, "source_path", value.source_path, error)
-        || !getInteger(node, "line_number", value.line_number, error)
-        || !getBoolean(node, "bookmarked", value.bookmarked, error)
-        || !getString(node, "annotation", value.annotation, error)) {
+bool parseEntry(const detail::StorageJsonNode &node, TriageEntry &value, PersistenceError &error,
+                bool v1) {
+    if (!onlyFields(node, {"source_path", "line_number", "bookmarked", "annotation",
+                           "source_identity", "generation", "record_fingerprint"}) ||
+        !getString(node, "source_path", value.source_path, error) ||
+        !getInteger(node, "line_number", value.line_number, error) ||
+        !getBoolean(node, "bookmarked", value.bookmarked, error) ||
+        !getString(node, "annotation", value.annotation, error)) {
         setError(error, PersistenceErrorCode::Malformed,
                  "triage entry has an invalid shape");
         return false;
+    }
+    if (v1 && !onlyFields(node, {"source_path", "line_number", "bookmarked", "annotation"})) {
+        setError(error, PersistenceErrorCode::Malformed,
+                 "v1 note contains unsupported evidence fields");
+        return false;
+    }
+    if (!v1) {
+        std::size_t generation = 0;
+        if (!getString(node, "source_identity", value.source_identity, error) ||
+            !getInteger(node, "generation", generation, error) ||
+            !getString(node, "record_fingerprint", value.record_fingerprint, error))
+            return false;
+        value.generation = generation;
     }
     return validateEntry(value, error);
 }
 
 struct TriageDocument {
     bool legacy = false;
+    bool v1 = false;
     const detail::StorageJsonNode* rules = nullptr;
     const detail::StorageJsonNode* entries = nullptr;
 };
@@ -221,7 +250,8 @@ bool parseDocumentShape(const detail::StorageJsonNode& root,
     std::string schema;
     if (!getString(root, "schema", schema, error)) return false;
     document.legacy = schema == kLegacySchema;
-    if (!document.legacy && schema != kSchema) {
+    document.v1 = schema == kV1Schema;
+    if (!document.legacy && !document.v1 && schema != kSchema) {
         setError(error, PersistenceErrorCode::UnsupportedVersion,
                  "unsupported triage schema '" + schema + "'");
         return false;
@@ -265,12 +295,13 @@ bool appendRules(const detail::StorageJsonNode& rules, bool legacy,
     return true;
 }
 
-bool appendEntries(const detail::StorageJsonNode* entries,
-                   TriageState& state, PersistenceError& error) {
+bool appendEntries(const detail::StorageJsonNode *entries, TriageState &state,
+                   PersistenceError &error, bool v1) {
     if (entries == nullptr) return true;
     for (const auto& node : entries->array) {
         TriageEntry value;
-        if (!parseEntry(node, value, error)) return false;
+        if (!parseEntry(node, value, error, v1))
+            return false;
         state.entries.push_back(std::move(value));
     }
     return true;
@@ -320,7 +351,10 @@ std::string serialize(const TriageState& state) {
         output << "{\"source_path\":" << escaped(item.source_path)
                << ",\"line_number\":" << item.line_number
                << ",\"bookmarked\":" << (item.bookmarked ? "true" : "false")
-               << ",\"annotation\":" << escaped(item.annotation) << '}';
+               << ",\"annotation\":" << escaped(item.annotation)
+               << ",\"source_identity\":" << escaped(item.source_identity)
+               << ",\"generation\":" << item.generation
+               << ",\"record_fingerprint\":" << escaped(item.record_fingerprint) << '}';
     }
     output << "]}\n";
     return output.str();
@@ -329,6 +363,15 @@ std::string serialize(const TriageState& state) {
 } // namespace
 
 const char* triageSchemaName() { return kSchema; }
+std::string serializeTriageState(const TriageState &state) { return serialize(state); }
+bool matchesTriageEntry(const TriageEntry &entry, const std::string &sourcePath,
+                        const std::string &identity, std::uint64_t generation,
+                        const LogRecord &record) {
+    return !identity.empty() && !entry.record_fingerprint.empty() &&
+           entry.source_path == sourcePath && entry.line_number == record.line_number &&
+           entry.source_identity == identity && entry.generation == generation &&
+           entry.record_fingerprint == recordFingerprint(record);
+}
 
 bool validateTriageState(const TriageState& state, PersistenceError& error) {
     error = PersistenceError{};
@@ -347,9 +390,12 @@ bool validateTriageState(const TriageState& state, PersistenceError& error) {
             return false;
         }
     }
-    std::set<std::pair<std::string, std::size_t>> identities;
+    std::set<std::tuple<std::string, std::size_t, std::string, std::uint64_t, std::string>>
+        identities;
     for (const auto& entry : state.entries) {
-        const auto identity = std::make_pair(entry.source_path, entry.line_number);
+        const auto identity =
+            std::make_tuple(entry.source_path, entry.line_number, entry.source_identity,
+                            entry.generation, entry.record_fingerprint);
         if (!validateEntry(entry, error) || !identities.insert(identity).second) {
             if (error.ok()) {
                 setError(error, PersistenceErrorCode::DuplicateName,
@@ -368,12 +414,22 @@ TriageLoadResult loadTriageState(const std::string& path) {
         || !result.found) {
         return result;
     }
+    return parseTriageState(bytes);
+}
+
+TriageLoadResult parseTriageState(const std::string &bytes) {
+    TriageLoadResult result;
+    result.found = true;
+    if (bytes.size() > kMaxPersistenceFileBytes) {
+        setError(result.error, PersistenceErrorCode::LimitExceeded, "triage exceeds byte limit");
+        return result;
+    }
     detail::StorageJsonNode root;
     detail::StorageJsonError parse_error;
     detail::StorageJsonLimits limits;
     limits.max_depth = 12;
-    limits.max_nodes = 20 + kMaxHighlightRules * 8 + kMaxTriageEntries * 7;
-    limits.max_object_members = 8;
+    limits.max_nodes = 20 + kMaxHighlightRules * 8 + kMaxTriageEntries * 10;
+    limits.max_object_members = 12;
     limits.max_array_items = kMaxTriageEntries;
     limits.max_string_bytes = kMaxAnnotationBytes + 4096;
     if (!detail::parseStorageJson(bytes, limits, root, parse_error)) {
@@ -383,14 +439,15 @@ TriageLoadResult loadTriageState(const std::string& path) {
     }
     TriageDocument document;
     TriageState parsed_state;
-    if (!parseDocumentShape(root, document, result.error)
-        || !appendRules(*document.rules, document.legacy, parsed_state, result.error)
-        || !appendEntries(document.entries, parsed_state, result.error)) return result;
+    if (!parseDocumentShape(root, document, result.error) ||
+        !appendRules(*document.rules, document.legacy, parsed_state, result.error) ||
+        !appendEntries(document.entries, parsed_state, result.error, document.v1))
+        return result;
     if (!validateTriageState(parsed_state, result.error)) {
         return result;
     }
     result.state = std::move(parsed_state);
-    result.migrated = document.legacy;
+    result.migrated = document.legacy || document.v1;
     return result;
 }
 
@@ -400,6 +457,16 @@ bool saveTriageState(const std::string& path, const TriageState& state,
         return false;
     }
     try {
+        for (const auto &entry : state.entries) {
+            std::error_code ec;
+            if (std::filesystem::equivalent(path, entry.source_path, ec) ||
+                std::filesystem::weakly_canonical(path) ==
+                    std::filesystem::weakly_canonical(entry.source_path)) {
+                setError(error, PersistenceErrorCode::UnsafePath,
+                         "triage output must not replace a source log");
+                return false;
+            }
+        }
         return detail::atomicWritePersistenceFile(path, serialize(state), error);
     } catch (...) {
         setError(error, PersistenceErrorCode::Io,
@@ -472,8 +539,11 @@ bool moveHighlightRule(TriageState& state, std::size_t from, std::size_t to,
 bool setTriageEntry(TriageState& state, TriageEntry entry,
                     PersistenceError& error) {
     error = PersistenceError{};
-    const auto same = [&](const TriageEntry& value) {
-        return value.source_path == entry.source_path && value.line_number == entry.line_number;
+    const auto same = [&](const TriageEntry &value) {
+        return value.source_path == entry.source_path && value.line_number == entry.line_number &&
+               value.source_identity == entry.source_identity &&
+               value.generation == entry.generation &&
+               value.record_fingerprint == entry.record_fingerprint;
     };
     TriageState next = state;
     auto found = std::find_if(next.entries.begin(), next.entries.end(), same);

@@ -71,6 +71,8 @@ void TestGuiTriage::timelinePublishesAndClearsHalfOpenRanges() {
     QCOMPARE(selected.count(), 1);
     QCOMPARE(selected.at(0).at(0).toULongLong(), static_cast<qulonglong>(1000));
     QCOMPARE(selected.at(0).at(1).toULongLong(), static_cast<qulonglong>(61000));
+    timeline.setBuckets({first, second}, 60000);
+    QCOMPARE(cleared.count(), 0);
 
     QTest::mouseClick(&timeline, Qt::RightButton, Qt::NoModifier, QPoint(25, 40));
     QCOMPARE(cleared.count(), 1);

@@ -7,6 +7,8 @@
 #include <QBrush>
 #include <QColor>
 #include <QFont>
+#include <QApplication>
+#include <QPalette>
 
 namespace {
 
@@ -104,6 +106,14 @@ void LogModel::setTimeWindow(std::optional<loglens::TimeWindow> window) {
     }
     rebuildVisible();
     endResetModel();
+}
+
+void LogModel::setSourceIdentity(const std::string &identity) {
+    if (source_identity_ == identity)
+        return;
+    source_identity_ = identity;
+    if (rowCount() > 0)
+        emit dataChanged(index(0, 0), index(rowCount() - 1, ColumnCount - 1));
 }
 
 void LogModel::setTriageState(const loglens::TriageState& state,
@@ -291,9 +301,9 @@ int LogModel::rowForLine(std::size_t lineNumber) const {
 bool LogModel::bookmarkedAt(int row) const {
     const loglens::LogRecord* record = recordAt(row);
     if (record == nullptr) return false;
-    return std::any_of(triage_entries_.begin(), triage_entries_.end(), [&](const auto& entry) {
-        return entry.source_path == source_path_ && entry.line_number == record->line_number
-               && entry.bookmarked;
+    return std::any_of(triage_entries_.begin(), triage_entries_.end(), [&](const auto &entry) {
+        return entry.bookmarked && loglens::matchesTriageEntry(
+                                       entry, source_path_, source_identity_, generation_, *record);
     });
 }
 
@@ -338,7 +348,15 @@ QVariant LogModel::data(const QModelIndex& index, int role) const {
         return columnText(*record, index.column());
     }
     if (role == Qt::ForegroundRole) {
-        return QBrush(colourFor(record->level));
+        const auto palette = QApplication::palette();
+        if (index.column() != ColumnLevel || record->level == loglens::Level::Info ||
+            record->level == loglens::Level::Unknown)
+            return QBrush(palette.color(QPalette::Text));
+        const bool light = palette.color(QPalette::Base).lightnessF() > 0.5;
+        QColor colour = colourFor(record->level);
+        if (light)
+            colour = colour.darker(175);
+        return QBrush(colour);
     }
     if (role == Qt::BackgroundRole) {
         const std::optional<std::string> rowStyle = highlight_rules_.rowStyle();
@@ -357,10 +375,10 @@ QVariant LogModel::data(const QModelIndex& index, int role) const {
     if (role == Qt::ToolTipRole) {
         QString tooltip = QString::fromUtf8(record->raw.data(),
                                             static_cast<int>(record->raw.size()));
-        const auto annotation = std::find_if(
-            triage_entries_.begin(), triage_entries_.end(), [&](const auto& entry) {
-                return entry.source_path == source_path_
-                       && entry.line_number == record->line_number;
+        const auto annotation =
+            std::find_if(triage_entries_.begin(), triage_entries_.end(), [&](const auto &entry) {
+                return loglens::matchesTriageEntry(entry, source_path_, source_identity_,
+                                                   generation_, *record);
             });
         if (annotation != triage_entries_.end() && !annotation->annotation.empty()) {
             tooltip += QStringLiteral("\n\nAnnotation: ")

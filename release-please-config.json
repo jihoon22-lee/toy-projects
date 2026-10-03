@@ -9,14 +9,14 @@
     "loglens": {
       "release-type": "simple",
       "extra-files": [
-        "src/main.cpp"
+        "CMakeLists.txt"
       ],
       "component": "loglens"
     },
     "diskmap": {
       "release-type": "simple",
       "extra-files": [
-        "src/main.cpp"
+        "include/diskmap/version.hpp"
       ],
       "component": "diskmap"
     },
@@ -37,7 +37,40 @@
     "envlens": {
       "release-type": "python",
       "component": "envlens"
+    },
+    "tracelens": {
+      "release-type": "simple",
+      "component": "tracelens",
+      "extra-files": [
+        "CMakeLists.txt"
+      ]
+    },
+    "testlens": {
+      "release-type": "python",
+      "component": "testlens",
+      "extra-files": [
+        {
+          "type": "toml",
+          "path": "uv.lock",
+          "jsonpath": "$.package[?(@.name=='testlens')].version"
+        }
+      ]
+    },
+    "servicelens": {
+      "release-type": "python",
+      "component": "servicelens",
+      "extra-files": [
+        {
+          "type": "toml",
+          "path": "uv.lock",
+          "jsonpath": "$.package[?(@.name=='servicelens')].version"
+        },
+        {
+          "type": "generic",
+          "path": "src/servicelens/model.py"
+        }
+      ]
     }
   },
-  "bump-patch-for-minor-pre-major": true
+  "bump-patch-for-minor-pre-major": false
 }

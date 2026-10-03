@@ -1,15 +1,13 @@
 # BuildScope quickstart
 
-BuildScope has two stages:
+BuildScope 0.2.0 (development) supports two workflows:
 
 1. The `buildscope` producer executable reads an existing
    `compile_commands.json` and writes a versioned snapshot (or diff report).
-2. `buildscope-cli` and `buildscope-gui` load that JSON for terminal
-   or desktop inspection.
+2. `buildscope-cli` validates saved JSON; `buildscope-gui` opens snapshots, diffs or raw databases directly and performs cancellable include analysis.
 
 The producer stage is offline and does not execute compiler commands unless
-`--include-analysis compiler` explicitly opts into the bounded replay policy.
-The consumers read snapshots and diff reports, not a raw compilation database.
+`--include-analysis compiler` or selected-unit `delayed` analysis explicitly opts into the bounded replay policy. The GUI defaults to lexical estimation when importing a raw database.
 
 ## Prerequisites
 
@@ -73,7 +71,7 @@ native_gui="$scratch_root/build/src/gui/buildscope-gui"
 "$native_gui" "$scratch_root/cmake.snapshot.json"
 ```
 
-The GUI also has Open Snapshot and Open Diff actions. On a headless machine,
+The GUI also has Open Snapshot, Import compile DB, Open Diff, Analyze, Budgets and Cancel actions. Import runs in a background worker and produces v4 evidence. On a headless machine,
 use `QT_QPA_PLATFORM=offscreen` only for smoke tests; a normal desktop launch
 uses the platform's default Qt backend.
 
@@ -129,3 +127,18 @@ checked-in `examples/qmake/compile_commands.json` as a deterministic producer
 input, or provide a database from another capture tool. The qmake example is
 compiler-only on purpose, so its small source set can be built with both qmake
 majors without requiring Qt modules.
+
+## Include evidence, impact and relocated builds
+
+```sh
+buildscope build/compile_commands.json --project-root "$PWD" \
+  --include-analysis compiler --analysis-unit-ms 5000 \
+  --analysis-time-budget 30 -o includes.v4.json
+buildscope impact includes.v4.json --header include/api.hpp --pretty
+buildscope relocated/compile_commands.json --project-root "$PWD/relocated" \
+  --map-root "/old/project=$PWD/relocated" --include-analysis estimate -o relocated.json
+```
+
+v4 records incomplete compiler traces and estimates separately. SIGINT/SIGTERM cancellation during analysis exports partial evidence and exits 130. Use explicit `--schema-version v3` only for older consumers that cannot retain the new fallback model. See the README for all per-unit/global budgets and evidence limits.
+
+In the GUI, **Editor argv…** takes a JSON array such as `["code","--goto","{file}:{line}"]`; token boundaries are preserved and no shell is used. **Relocate root…** maps navigation and the next analysis to the chosen local checkout. **Header impact** shows direct includers and translation-unit evidence chains.

@@ -40,11 +40,13 @@ const JsonValue& member(const JsonObject& object, const char* key) {
     return it->second;
 }
 
-void exactKeys(const JsonObject& object, std::initializer_list<const char*> keys) {
+void exactKeys(const JsonObject& object, std::initializer_list<const char*> keys,
+               std::initializer_list<const char*> extras = {}) {
     std::set<std::string> expected;
     for (const char* key : keys) {
         expected.emplace(key);
     }
+    for (const char* key : extras) expected.emplace(key);
     if (object.size() != expected.size()) {
         throw SnapshotError("snapshot contains an unknown or missing key");
     }
@@ -119,13 +121,18 @@ FileIdentity readIdentity(const JsonValue& value) {
     return identity;
 }
 
-FsMetadata readMetadata(const JsonValue& value) {
+FsMetadata readMetadata(const JsonValue& value, bool v2) {
     const JsonObject& object = objectValue(value, "metadata");
     exactKeys(object, {"allocated_size", "allocated_size_known", "complete", "error", "group",
                        "hard_link_count", "hard_link_count_known", "identity", "kind",
                        "logical_size", "modified_ns", "modified_time_known", "owner",
-                       "ownership_known", "permissions", "permissions_known"});
+                       "ownership_known", "permissions", "permissions_known"},
+              v2 ? std::initializer_list<const char*>{"changed_ns", "changed_time_known"} : std::initializer_list<const char*>{});
     FsMetadata metadata;
+    if (v2) {
+        metadata.changed_ns = signedValue(member(object, "changed_ns"), "changed_ns");
+        metadata.changed_time_known = booleanValue(member(object, "changed_time_known"), "changed_time_known");
+    }
     metadata.allocated_size = unsignedValue(member(object, "allocated_size"), "allocated_size");
     metadata.allocated_size_known =
         booleanValue(member(object, "allocated_size_known"), "allocated_size_known");
@@ -152,9 +159,11 @@ FsMetadata readMetadata(const JsonValue& value) {
 struct ParseContext {
     SnapshotLimits limits;
     std::size_t nodes = 0;
+    bool v2 = false;
 };
 
 FsNode readNode(const JsonValue& value, std::size_t depth, ParseContext& context) {
+    detail::checkSnapshotCancellation(context.limits);
     if (depth > context.limits.max_depth) {
         throw SnapshotError("snapshot tree exceeds configured depth bound");
     }
@@ -163,7 +172,7 @@ FsNode readNode(const JsonValue& value, std::size_t depth, ParseContext& context
                        "cycle_skipped", "error", "followed", "has_target_metadata", "is_dir",
                        "logical_size_known", "metadata", "mount_boundary_skipped", "name",
                        "path", "reclaimable_size", "reclaimable_size_known", "size",
-                       "target_metadata"});
+                       "target_metadata"}, context.v2 ? std::initializer_list<const char*>{"name_bytes", "path_bytes"} : std::initializer_list<const char*>{});
     if (context.nodes >= context.limits.max_nodes) {
         throw SnapshotError("snapshot node count exceeds configured bound");
     }
@@ -182,17 +191,24 @@ FsNode readNode(const JsonValue& value, std::size_t depth, ParseContext& context
     node.is_dir = booleanValue(member(object, "is_dir"), "is_dir");
     node.logical_size_known =
         booleanValue(member(object, "logical_size_known"), "logical_size_known");
-    node.metadata = readMetadata(member(object, "metadata"));
+    node.metadata = readMetadata(member(object, "metadata"), context.v2);
     node.mount_boundary_skipped =
         booleanValue(member(object, "mount_boundary_skipped"), "mount_boundary_skipped");
     node.name = stringValue(member(object, "name"), "name");
     node.path = std::filesystem::path(stringValue(member(object, "path"), "path"));
+    if (context.v2) {
+        const auto rawName = detail::bytesFromHex(stringValue(member(object, "name_bytes"), "name_bytes"));
+        const auto rawPath = detail::bytesFromHex(stringValue(member(object, "path_bytes"), "path_bytes"));
+        if (node.name != detail::displayBytes(rawName) || node.path.generic_string() != detail::displayBytes(rawPath))
+            throw SnapshotError("display path disagrees with raw bytes");
+        node.name = rawName; node.path = std::filesystem::path(rawPath);
+    }
     node.reclaimable_size =
         unsignedValue(member(object, "reclaimable_size"), "reclaimable_size");
     node.reclaimable_size_known =
         booleanValue(member(object, "reclaimable_size_known"), "reclaimable_size_known");
     node.size = unsignedValue(member(object, "size"), "size");
-    node.target_metadata = readMetadata(member(object, "target_metadata"));
+    node.target_metadata = readMetadata(member(object, "target_metadata"), context.v2);
     const std::vector<JsonValue>& children = arrayValue(member(object, "children"), "children");
     if (!node.is_dir && !children.empty()) {
         throw SnapshotError("snapshot contains children below a non-directory node");
@@ -217,7 +233,8 @@ Snapshot parseSnapshot(std::string_view json, const SnapshotLimits& inputLimits)
     const JsonValue rootValue = detail::parseJson(json, limits);
     const JsonObject& object = objectValue(rootValue, "snapshot");
     exactKeys(object, {"complete", "node_count", "root", "schema_version", "truncated"});
-    if (stringValue(member(object, "schema_version"), "schema_version") != kSnapshotSchemaV1) {
+    const auto schema = stringValue(member(object, "schema_version"), "schema_version");
+    if (schema != kSnapshotSchemaV1 && schema != kSnapshotSchemaV2) {
         throw SnapshotError("unsupported diskmap snapshot schema");
     }
     const std::uint64_t expectedNodeCount = unsignedValue(member(object, "node_count"), "node_count");
@@ -225,9 +242,9 @@ Snapshot parseSnapshot(std::string_view json, const SnapshotLimits& inputLimits)
         throw SnapshotError("snapshot node count exceeds configured bound");
     }
 
-    ParseContext context{limits};
+    ParseContext context{limits, 0, schema == kSnapshotSchemaV2};
     Snapshot snapshot;
-    snapshot.schema_version = kSnapshotSchemaV1;
+    snapshot.schema_version = schema;
     snapshot.complete = booleanValue(member(object, "complete"), "complete");
     snapshot.truncated = booleanValue(member(object, "truncated"), "truncated");
     snapshot.root = readNode(member(object, "root"), 0, context);

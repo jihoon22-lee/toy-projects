@@ -12,6 +12,7 @@
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QGridLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPalette>
@@ -56,6 +57,34 @@ void MainWindow::setupInvestigationDock() {
     recordDetail_->setReadOnly(true);
     recordDetail_->setPlaceholderText(tr("Select a record to inspect parsed fields and raw evidence."));
     recordLayout->addWidget(recordDetail_, 1);
+    auto *correlationRow = new QHBoxLayout();
+    correlationField_ = new QComboBox(recordTab);
+    correlationField_->setObjectName(QStringLiteral("correlationFieldComboBox"));
+    correlationField_->setMinimumWidth(0);
+    correlationField_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    correlationField_->setMinimumContentsLength(10);
+    auto *correlate = new QPushButton(tr("Show related"), recordTab);
+    correlate->setObjectName(QStringLiteral("showRelatedRecordsButton"));
+    correlationRow->addWidget(correlationField_, 1);
+    correlationRow->addWidget(correlate);
+    recordLayout->addLayout(correlationRow);
+    connect(correlate, &QPushButton::clicked, this, [this] {
+        const auto *record = model_->recordAt(table_->currentIndex().row());
+        if (!record || correlationField_->currentIndex() < 0)
+            return;
+        const auto key = correlationField_->currentData().toString().toStdString();
+        const auto found = record->fields.find(key);
+        if (found == record->fields.end())
+            return;
+        QString value = QString::fromStdString(found->second);
+        value.replace(QStringLiteral("\\"), QStringLiteral("\\\\"));
+        value.replace(QStringLiteral("\""), QStringLiteral("\\\""));
+        const QString expression =
+            QStringLiteral("field.%1==\"%2\"").arg(QString::fromStdString(key), value);
+        searchEdit_->clear();
+        filterEdit_->setText(expression);
+        applyFilterText(expression, tr("Showing records with the same correlation field"));
+    });
     bookmarkBox_ = new QCheckBox(tr("Bookmark this source line"), recordTab);
     bookmarkBox_->setObjectName(QStringLiteral("bookmarkCheckBox"));
     recordLayout->addWidget(bookmarkBox_);
@@ -136,7 +165,7 @@ void MainWindow::setupInvestigationDock() {
     analysisLayout->addWidget(selectedWindowLabel_);
     analysisLayout->addWidget(baselineWindowLabel_);
     analysisLayout->addWidget(comparisonWindowLabel_);
-    auto* windowButtons = new QHBoxLayout();
+    auto *windowButtons = new QGridLayout();
     auto* setBaseline = new QPushButton(tr("Use as baseline"), analysisTab);
     setBaseline->setObjectName(QStringLiteral("setBaselineWindowButton"));
     auto* setComparison = new QPushButton(tr("Use as comparison"), analysisTab);
@@ -145,10 +174,10 @@ void MainWindow::setupInvestigationDock() {
     analyze->setObjectName(QStringLiteral("runWindowAnalysisButton"));
     auto* clear = new QPushButton(tr("Clear range"), analysisTab);
     clear->setObjectName(QStringLiteral("clearTimelineRangeButton"));
-    windowButtons->addWidget(setBaseline);
-    windowButtons->addWidget(setComparison);
-    windowButtons->addWidget(analyze);
-    windowButtons->addWidget(clear);
+    windowButtons->addWidget(setBaseline, 0, 0);
+    windowButtons->addWidget(setComparison, 0, 1);
+    windowButtons->addWidget(analyze, 1, 0);
+    windowButtons->addWidget(clear, 1, 1);
     analysisLayout->addLayout(windowButtons);
     analysisTree_ = new QTreeWidget(analysisTab);
     analysisTree_->setObjectName(QStringLiteral("windowAnalysisTree"));
@@ -160,6 +189,8 @@ void MainWindow::setupInvestigationDock() {
     tabs->addTab(analysisTab, tr("Compare"));
 
     dock->setWidget(tabs);
+    dock->setMinimumWidth(260);
+    tabs->setMinimumWidth(0);
     addDockWidget(Qt::RightDockWidgetArea, dock);
 
     connect(highlightRule_, qOverload<int>(&QComboBox::currentIndexChanged), this,

@@ -4,32 +4,10 @@
 #include <string>
 #include <vector>
 
-#include "loglens/highlight_rules.hpp"
+#include "loglens/triage_types.hpp"
 #include "loglens/persistence.hpp"
 
 namespace loglens {
-
-constexpr std::size_t kMaxHighlightRules = 128;
-constexpr std::size_t kMaxTriageEntries = 8192;
-constexpr std::size_t kMaxHighlightPatternBytes = 1024;
-constexpr std::size_t kMaxAnnotationBytes = 4096;
-
-struct NamedHighlightRule {
-    std::string name;
-    Rule rule;
-};
-
-struct TriageEntry {
-    std::string source_path;
-    std::size_t line_number = 0;
-    bool bookmarked = false;
-    std::string annotation;
-};
-
-struct TriageState {
-    std::vector<NamedHighlightRule> rules;
-    std::vector<TriageEntry> entries;
-};
 
 struct TriageLoadResult {
     bool found = false;
@@ -42,8 +20,14 @@ struct TriageLoadResult {
 
 const char* triageSchemaName();
 
-// Loads v1 and the bounded legacy v0 rule-only shape. Migration is explicit in
-// the result and is persisted as v1 only when the caller chooses to save.
+// Loads v2 and bounded v1/v0 legacy shapes. Unsupported note evidence remains
+// unbound; migration is persisted as v2 only when the caller chooses to save.
+TriageLoadResult parseTriageState(const std::string &bytes);
+std::string serializeTriageState(const TriageState &state);
+bool matchesTriageEntry(const TriageEntry &entry, const std::string &sourcePath,
+                        const std::string &identity, std::uint64_t generation,
+                        const LogRecord &record);
+
 TriageLoadResult loadTriageState(const std::string& path);
 bool saveTriageState(const std::string& path, const TriageState& state,
                      PersistenceError& error);

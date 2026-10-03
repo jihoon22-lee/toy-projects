@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
-project(loglens LANGUAGES CXX)
+project(loglens VERSION 0.2.0 LANGUAGES CXX) # x-release-please-version
+include(GNUInstallDirs)
 
 option(LOGLENS_BUILD_BENCHMARKS "Build opt-in large-file benchmark tools" OFF)
 
@@ -13,6 +14,8 @@ message(STATUS "loglens: using Qt6 ${Qt6_VERSION}")
 
 # The core is Qt-free so it links anywhere; the GUI adds Qt on top.
 add_library(loglens_core STATIC
+    src/file_search.cpp
+    src/evidence.cpp
     src/filter_expr.cpp
     src/format_plugin.cpp
     src/highlight_rules.cpp
@@ -35,7 +38,8 @@ add_library(loglens_core STATIC
     src/triage.cpp
     src/window_analysis.cpp
 )
-target_include_directories(loglens_core PUBLIC include)
+target_include_directories(loglens_core PUBLIC include ${CMAKE_CURRENT_BINARY_DIR}/generated)
+configure_file(include/loglens/version.hpp.in generated/loglens/version.hpp @ONLY)
 
 add_executable(loglens src/main.cpp)
 target_link_libraries(loglens PRIVATE loglens_core)
@@ -183,3 +187,21 @@ register_qt_test(test_gui_triage
     investigationWorkflowPersistsExportsAndNavigates
     emptyAndInvalidInvestigationActionsStaySafe
     diagnosticsAreRenderedAndExported)
+
+install(TARGETS loglens RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(DIRECTORY schemas/ DESTINATION ${CMAKE_INSTALL_DATADIR}/loglens/schemas)
+install(FILES README.md CHANGELOG.md DESTINATION ${CMAKE_INSTALL_DOCDIR})
+install(FILES resources/loglens.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+install(FILES resources/loglens.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+
+add_executable(test_extensions tests/test_extensions.cpp)
+target_link_libraries(test_extensions PRIVATE loglens_core Qt6::Test)
+add_test(NAME test_extensions COMMAND test_extensions)
+
+add_executable(test_gui_extensions tests/test_gui_extensions.cpp)
+target_link_libraries(test_gui_extensions PRIVATE loglens_gui Qt6::Test)
+register_qt_test(test_gui_extensions
+    replacingSourceArchivesNotes
+    sessionRestoresPluginInvestigationAndLayout
+    wholeFileSearchIsSeparateAndCancellable
+    compactLayoutAndThemeKeepTextReadable)

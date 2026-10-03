@@ -221,13 +221,17 @@ def test_compatibility_helpers_cover_unknown_and_wildcard_cases() -> None:
     assert compare_versions("not-a-version", "1.0") is None
 
 
-def test_version_evaluator_is_conservative_for_non_numeric_pep440_forms() -> None:
+def test_version_evaluator_supports_pep440_and_bounds_input() -> None:
     identity = {"version": "3.10.12", "version_info": [3, 10, 12, "final", 0]}
-    for value in ("1.0rc1", "1.0.dev1", "1.0.post1", "1.0+local", "1!1.0"):
-        assert compare_versions(value, "1.0") is None
-    for expression in (">=3.10rc1", ">=3.10.post1", ">=3.10+local", ">=1!3.10"):
-        assert satisfies_requires_python(expression, identity) is None
-    assert satisfies_requires_python("===3.10", identity) is None
+    for value in ("1.0rc1", "1.0.dev1"):
+        assert compare_versions(value, "1.0") == -1
+    for value in ("1.0.post1", "1.0+local", "1!1.0"):
+        assert compare_versions(value, "1.0") == 1
+    assert satisfies_requires_python(">=3.10rc1", identity) is True
+    assert satisfies_requires_python(">=3.10.post1", identity) is True
+    assert satisfies_requires_python(">=3.10+local", identity) is None
+    assert satisfies_requires_python(">=1!3.10", identity) is False
+    assert satisfies_requires_python("===3.10", identity) is False
     assert satisfies_requires_python("~=3", identity) is None
     assert compare_versions("9" * 100_000, "1.0") is None
 
@@ -241,9 +245,10 @@ def test_marker_versions_use_numeric_ordering_and_unknown_unsupported_logic() ->
     }
     assert _marker_matches("python_version < '3.9'", identity) is False
     assert _marker_matches("python_version >= '3.10' and sys_platform == 'linux'", identity)
-    assert _marker_matches("python_version < '3.9' or sys_platform == 'linux'", identity) is None
-    assert _marker_matches("python_version >= '3.10rc1'", identity) is None
-    assert _marker_matches("sys_platform in 'linux,win32'", identity) is None
+    assert _marker_matches("python_version < '3.9' or sys_platform == 'linux'", identity) is True
+    assert _marker_matches("python_version >= '3.10rc1'", identity) is True
+    assert _marker_matches("sys_platform in 'linux,win32'", identity) is True
+    assert _marker_matches("platform_release == 'unrecorded'", identity) is None
 
 
 def test_wheel_matching_is_fail_safe_for_platform_abi_and_compound_tags() -> None:
@@ -262,7 +267,8 @@ def test_wheel_matching_is_fail_safe_for_platform_abi_and_compound_tags() -> Non
     assert _wheel_tag_match("cp310-cp310-win_arm64", windows) is False
     assert _wheel_tag_match("cp310-cp310-manylinux_2_17_x86_64", linux) is None
     assert _wheel_tag_match("cp39-abi3-manylinux_2_17_x86_64", linux) is None
-    assert _wheel_tag_match("cp310.cp311-cp310-linux_x86_64", linux) is None
+    assert _wheel_tag_match("cp310.cp311-cp310-linux_x86_64", linux) is True
+    assert _wheel_tag_match("py39-none-any", linux) is True
     assert _wheel_tag_match("cp310-cp310-macosx_11_0_x86_64", mac) is None
 
 

@@ -484,7 +484,7 @@ void TestMainWindow::timelineRendersEmptyAndPopulatedStates() {
     empty.fill(Qt::black);
     timeline.setBuckets({});
     timeline.render(&empty);
-    QCOMPARE(empty.pixelColor(0, 0), QColor(24, 26, 30));
+    QCOMPARE(empty.pixelColor(0, 0), timeline.palette().color(QPalette::Base));
 
     loglens::Bucket bucket;
     bucket.level_counts[static_cast<std::size_t>(loglens::Level::Error)] = 1;

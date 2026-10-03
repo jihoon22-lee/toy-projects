@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <map>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -21,6 +22,8 @@
 #include "diskmap/trash.hpp"
 
 class QComboBox;
+class QCheckBox;
+class QTabWidget;
 class QHBoxLayout;
 class QLabel;
 class QLineEdit;
@@ -28,6 +31,7 @@ class QPushButton;
 class QTableView;
 class QTableWidget;
 class QTimer;
+class QProgressBar;
 class QUndoStack;
 class QVBoxLayout;
 class QWidget;
@@ -105,6 +109,34 @@ private slots:
     void restoreSelectedTrashItem();
 
 private:
+    struct StorageJobResult {
+        std::shared_ptr<diskmap::Snapshot> snapshot;
+        std::shared_ptr<diskmap::SnapshotDiff> diff;
+        std::vector<diskmap::TrashReceipt> receipts;
+        QString error;
+    };
+    using StorageTask = std::function<StorageJobResult(std::shared_ptr<diskmap::ScanCancellationToken>)>;
+    void startStorageJob(const QString& label, StorageTask task, std::function<void(StorageJobResult)> finish);
+    std::shared_ptr<diskmap::ScanCancellationToken> activeStorageCancellation_;
+    QFutureWatcher<StorageJobResult>* storageWatcher_ = nullptr;
+    QTabWidget* workbenchTabs_ = nullptr;
+    QComboBox* keeperPolicyCombo_ = nullptr;
+    QLineEdit* keeperDirectoryEdit_ = nullptr;
+    QPushButton* keepSelectedButton_ = nullptr;
+    QComboBox* colorCombo_ = nullptr;
+    QComboBox* diffKindCombo_ = nullptr;
+    QCheckBox* diffCertainOnly_ = nullptr;
+    QLineEdit* diffMinimumEdit_ = nullptr;
+    QLineEdit* diffPathEdit_ = nullptr;
+    QLabel* folderSummary_ = nullptr;
+    diskmap::SnapshotDiff snapshotDiff_;
+    diskmap::SizeMetric snapshotDiffMetric_ = diskmap::SizeMetric::Logical;
+    QString snapshotComparePath_;
+    std::map<std::string, diskmap::NodeKey> explicitKeepers_;
+    std::vector<diskmap::NodeKey> selectedKeepers() const;
+    void keepSelectedDuplicate();
+    void refreshSnapshotChanges();
+    void recoverTrashHistory();
     struct ScanProgressState {
         std::atomic<std::size_t> dirs{0};
         std::atomic<std::size_t> files{0};
@@ -124,6 +156,7 @@ private:
     NodeTableModel* tableModel_ = nullptr;
     QTableView* table_ = nullptr;
     QLabel* status_ = nullptr;
+    QProgressBar* operationProgress_ = nullptr;
     QWidget* breadcrumbBar_ = nullptr;
     QHBoxLayout* breadcrumbLayout_ = nullptr;
     QLabel* partialBanner_ = nullptr;

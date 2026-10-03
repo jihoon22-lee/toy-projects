@@ -10,6 +10,7 @@ add_library(loglens_gui STATIC
     highlight_delegate.cpp
     log_load_worker.cpp
     log_model.cpp
+    main_window_search.cpp
     main_window_analysis.cpp
     main_window_investigation.cpp
     main_window.cpp
@@ -27,3 +28,5 @@ target_link_libraries(loglens_gui PUBLIC loglens_core Qt6::Widgets)
 
 add_executable(loglens-gui gui_main.cpp)
 target_link_libraries(loglens-gui PRIVATE loglens_gui)
+
+install(TARGETS loglens-gui RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

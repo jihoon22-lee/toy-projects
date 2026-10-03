@@ -141,6 +141,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="report format (default: text)",
     )
     runtime.add_argument("--pretty", action="store_true", help="indent JSON reports")
+    for command_parser in (diff, check, runtime):
+        command_parser.add_argument(
+            "--fail-on",
+            choices=("default", "never", "incompatible", "unknown", "changed"),
+            default="default",
+            help="CI exit policy; unknown also fails definite incompatibility",
+        )
+        command_parser.add_argument(
+            "--verbose", action="store_true", help="include successful compatibility evidence"
+        )
     return parser
 
 
@@ -150,18 +160,26 @@ def _load_snapshot_argument(path: Path) -> dict[str, Any]:
     return load_snapshot(path)
 
 
-def _emit_report(report: dict[str, Any], *, output: Path, format: str, pretty: bool) -> None:
-    rendered = render_report(report, format=format, pretty=pretty)
+def _emit_report(
+    report: dict[str, Any], *, output: Path, format: str, pretty: bool, verbose: bool = False
+) -> None:
+    rendered = render_report(report, format=format, pretty=pretty, verbose=verbose)
     if output == Path("-"):
         sys.stdout.write(rendered)
     else:
         write_report(rendered, output)
 
 
-def _report_exit_code(report: dict[str, Any]) -> int:
+def _report_exit_code(report: dict[str, Any], policy: str = "default") -> int:
     status = report.get("status")
     if status is None and isinstance(report.get("summary"), dict):
         status = report["summary"].get("status")
+    if policy == "never":
+        return 0
+    if policy == "incompatible":
+        return int(status in {"incompatible", "failed"})
+    if policy == "unknown":
+        return int(status in {"incompatible", "failed", "unknown"})
     return 0 if status in {None, "unchanged", "compatible", "passed"} else 1
 
 
@@ -185,6 +203,19 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 write_snapshot(snapshot, args.output, pretty=args.pretty)
             return 0
+        if args.command in {"diff", "check"} and args.output != Path("-"):
+            sources = [args.before, args.after] if args.command == "diff" else [args.snapshot]
+            if args.project is not None:
+                sources.append(args.project)
+            if any(
+                path != Path("-")
+                and (
+                    args.output.resolve() == path.resolve()
+                    or _same_file_if_present(args.output, path)
+                )
+                for path in sources
+            ):
+                raise DiffError("invalid-output", "output must not replace an input file")
         if args.command == "diff":
             before = _load_snapshot_argument(args.before)
             after = _load_snapshot_argument(args.after)
@@ -195,8 +226,9 @@ def main(argv: list[str] | None = None) -> int:
                 output=args.output,
                 format=args.format,
                 pretty=args.pretty,
+                verbose=args.verbose,
             )
-            return _report_exit_code(report)
+            return _report_exit_code(report, args.fail_on)
         if args.command == "check":
             snapshot = _load_snapshot_argument(args.snapshot)
             project = inspect_pyproject(args.project) if args.project is not None else None
@@ -206,8 +238,9 @@ def main(argv: list[str] | None = None) -> int:
                 output=args.output,
                 format=args.format,
                 pretty=args.pretty,
+                verbose=args.verbose,
             )
-            return _report_exit_code(report)
+            return _report_exit_code(report, args.fail_on)
         if args.command in {"runtime", "smoke", "runtime-check"}:
             report = run_runtime_checks(
                 args.project_root,
@@ -224,8 +257,9 @@ def main(argv: list[str] | None = None) -> int:
                 output=args.output,
                 format=args.format,
                 pretty=args.pretty,
+                verbose=args.verbose,
             )
-            return _report_exit_code(report)
+            return _report_exit_code(report, args.fail_on)
         raise SnapshotError("invalid-command", f"unsupported command {args.command!r}")
     except (
         ProbeError,

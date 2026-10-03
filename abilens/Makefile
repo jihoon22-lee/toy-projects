@@ -2,6 +2,8 @@
 # variant is rooted below OUT, so instrumented builds cannot overwrite a
 # release artifact.
 
+.DEFAULT_GOAL := all
+
 OUT ?= build
 CXX ?= c++
 BASE_CXXFLAGS := -std=c++20 -O2 -g -Wall -Wextra -Wpedantic -Wconversion -Wshadow
@@ -12,7 +14,13 @@ LDLIBS ?=
 
 INCLUDES := -Iinclude
 OUT_GUARD := tools/guard-out.sh
-CORE_SOURCES := src/input.cpp src/elf.cpp src/inspect.cpp src/report.cpp src/report_helpers.cpp src/report_json_parser.cpp src/report_json.cpp src/policy.cpp src/diff.cpp
+WITH_DWARF ?= 0
+ifeq ($(WITH_DWARF),1)
+CPPFLAGS += -DABILENS_HAVE_LIBDW $(shell pkg-config --cflags libdw)
+LDLIBS += $(shell pkg-config --libs libdw) -lelf
+endif
+
+CORE_SOURCES := src/evidence.cpp src/dwarf.cpp src/loader.cpp src/input.cpp src/elf.cpp src/inspect.cpp src/report.cpp src/report_helpers.cpp src/report_json_parser.cpp src/report_json.cpp src/policy.cpp src/diff.cpp
 CORE_OBJECTS := $(CORE_SOURCES:src/%.cpp=$(OUT)/obj/%.o)
 TEST_SOURCES := tests/test_parser.cpp tests/test_integration.cpp
 TEST_OBJECTS := $(TEST_SOURCES:tests/%.cpp=$(OUT)/obj/tests/%.o)
@@ -23,10 +31,20 @@ SHARED_FIXTURE := $(OUT)/lib/libabilens-fixture.so
 PARSER_TEST := $(OUT)/tests/test_parser
 INTEGRATION_TEST := $(OUT)/tests/test_integration
 
-.PHONY: all release test check cli-check coverage sanitize thread-sanitize clean guard-out
+.PHONY: all release test check cli-check coverage sanitize thread-sanitize clean guard-out FORCE
 
 guard-out:
 	$(OUT_GUARD) build "$(OUT)"
+
+# Changing feature/compiler flags in an existing OUT must rebuild its objects.
+FORCE:
+$(OUT)/build-config: FORCE | guard-out
+	@mkdir -p $(OUT)
+	@printf '%s\n' '$(CXX)' '$(CPPFLAGS)' '$(CXXFLAGS)' '$(LDFLAGS)' '$(LDLIBS)' > "$@.tmp"
+	@cmp -s "$@.tmp" "$@" || cp "$@.tmp" "$@"
+	@rm -f "$@.tmp"
+
+$(CORE_OBJECTS) $(TEST_OBJECTS) $(SHARED_FIXTURE): $(OUT)/build-config
 
 all: release
 
@@ -65,6 +83,7 @@ test: $(PARSER_TEST) $(INTEGRATION_TEST) $(SHARED_FIXTURE) $(RELEASE_BIN) tests/
 	cd "$(OUT)/tests" && ./test_parser
 	cd "$(OUT)/tests" && ./test_integration ../lib/libabilens-fixture.so ../bin/abilens
 	tests/test_clean.sh
+	python3 tests/test_evidence.py $(RELEASE_BIN)
 
 cli-check: $(RELEASE_BIN) $(SHARED_FIXTURE) | guard-out
 	@mkdir -p $(OUT)/reports
@@ -90,3 +109,14 @@ clean:
 	$(OUT_GUARD) clean "$(OUT)"
 
 -include $(CORE_OBJECTS:.o=.d) $(TEST_OBJECTS:.o=.d)
+
+PREFIX ?= /usr/local
+DESTDIR ?=
+.PHONY: install
+install: release
+	install -d "$(DESTDIR)$(PREFIX)/bin" "$(DESTDIR)$(PREFIX)/lib" "$(DESTDIR)$(PREFIX)/include/abilens" "$(DESTDIR)$(PREFIX)/share/abilens/schemas" "$(DESTDIR)$(PREFIX)/share/doc/abilens"
+	install -m 755 $(RELEASE_BIN) "$(DESTDIR)$(PREFIX)/bin/abilens"
+	install -m 644 $(STATIC_LIB) "$(DESTDIR)$(PREFIX)/lib/libabilens.a"
+	install -m 644 include/abilens/*.hpp "$(DESTDIR)$(PREFIX)/include/abilens/"
+	install -m 644 schemas/*.json "$(DESTDIR)$(PREFIX)/share/abilens/schemas/"
+	install -m 644 README.md CHANGELOG.md "$(DESTDIR)$(PREFIX)/share/doc/abilens/"

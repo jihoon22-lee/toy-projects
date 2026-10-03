@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "loglens.session/v1"
+    },
+    "name": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "filter": {
+      "type": "string",
+      "maxLength": 4096
+    },
+    "level": {
+      "type": "string"
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "format": {
+          "enum": [
+            "auto",
+            "iso",
+            "syslog",
+            "jsonl",
+            "raw"
+          ]
+        },
+        "multiline": {
+          "enum": [
+            "fold-continuations",
+            "separate-lines"
+          ]
+        },
+        "max_record_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1048576
+        },
+        "format_plugin": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schema",
+    "source"
+  ],
+  "additionalProperties": false
+}

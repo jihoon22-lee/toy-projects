@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "loglens.triage/v2"
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "pattern": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "whole_line": {
+            "type": "boolean"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "style": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "name",
+          "pattern",
+          "whole_line",
+          "priority",
+          "style"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 128
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "source_path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "line_number": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "bookmarked": {
+            "type": "boolean"
+          },
+          "annotation": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "source_identity": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 18446744073709551615
+          },
+          "record_fingerprint": {
+            "type": "string",
+            "pattern": "^(|[a-f0-9]{64})$"
+          }
+        },
+        "required": [
+          "source_path",
+          "line_number",
+          "bookmarked",
+          "annotation",
+          "source_identity",
+          "generation",
+          "record_fingerprint"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 8192
+    }
+  },
+  "required": [
+    "schema",
+    "rules",
+    "entries"
+  ],
+  "additionalProperties": false
+}

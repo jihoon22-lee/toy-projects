@@ -2,7 +2,7 @@
 <ui version="4.0">
  <class>MainWindow</class>
  <widget class="QMainWindow" name="MainWindow">
-  <property name="geometry"><rect><x>0</x><y>0</y><width>1320</width><height>820</height></rect></property>
+  <property name="geometry"><rect><x>0</x><y>0</y><width>1280</width><height>800</height></rect></property>
   <property name="windowTitle"><string>BuildScope — Compilation Explorer</string></property>
   <widget class="QWidget" name="centralWidget">
    <layout class="QVBoxLayout" name="verticalLayout">
@@ -24,7 +24,7 @@
      <widget class="QSplitter" name="explorerSplitter">
       <property name="orientation"><enum>Qt::Horizontal</enum></property>
       <widget class="QTreeView" name="sourceTree">
-       <property name="minimumSize"><size><width>520</width><height>0</height></size></property>
+       <property name="minimumSize"><size><width>320</width><height>0</height></size></property>
        <property name="alternatingRowColors"><bool>true</bool></property>
        <property name="rootIsDecorated"><bool>true</bool></property>
        <property name="uniformRowHeights"><bool>true</bool></property>

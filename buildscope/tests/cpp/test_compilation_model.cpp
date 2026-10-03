@@ -218,10 +218,10 @@ void CompilationModelTest::normalizedGroupingExposesTreeContract() {
              QStringLiteral("missing"));
     QCOMPARE(displayData(sharedFirst, buildscope::CompilationTreeModel::ConfigurationColumn)
                  .toString(),
-             QStringLiteral("sha256:aaaaaaaaaaaa…"));
+             QStringLiteral("aaaaaaaaaaaa…"));
     QCOMPARE(displayData(sharedSecond, buildscope::CompilationTreeModel::ConfigurationColumn)
                  .toString(),
-             QStringLiteral("sha256:bbbbbbbbbbbb…"));
+             QStringLiteral("bbbbbbbbbbbb…"));
     QVERIFY(sharedSecond.data(Qt::ToolTipRole).toString().contains(QStringLiteral("FEATURE")));
     QVERIFY(sharedSecond.data(buildscope::SearchTextRole).toString().contains(
         QStringLiteral("Wshadow")));
@@ -261,7 +261,7 @@ void CompilationModelTest::normalizedGroupingExposesTreeContract() {
              QStringLiteral("present"));
     QCOMPARE(displayData(otherIndex, buildscope::CompilationTreeModel::ConfigurationColumn)
                  .toString(),
-             QStringLiteral("sha256:aaaaaaaaaaaa…"));
+             QStringLiteral("aaaaaaaaaaaa…"));
     const auto otherEntryIndex = model.entryIndex(otherIndex);
     QVERIFY(otherEntryIndex.has_value());
     QCOMPARE(*otherEntryIndex, qsizetype(2));

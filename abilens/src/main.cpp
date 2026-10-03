@@ -18,6 +18,8 @@ constexpr std::size_t kReportInputLimit = 8U * 1024U * 1024U;
 
 struct Options {
     bool json = false;
+    std::string fail_on = "default";
+    abilens::InspectOptions inspection;
     std::string policy_path;
     std::vector<std::string> positional;
 };
@@ -26,6 +28,8 @@ void usage(std::ostream& output) {
     output << "Usage:\n"
            << "  abilens inspect [--json|--format text|json] [--policy FILE] ELF\n"
            << "  abilens diff [--json|--format text|json] REPORT_OR_ELF REPORT_OR_ELF\n"
+           << "  options: --fail-on default|never|incompatible|unknown|changed\n"
+           << "           --sysroot DIR --origin /target/dir --library-path /target/lib --dwarf\n"
            << "  abilens --version\n";
 }
 
@@ -61,6 +65,18 @@ Options parse_options(int argc, char** argv, int first) {
             set_format(options, required_argument(argc, argv, index, "--format", "text or json"));
         } else if (token.rfind("--format=", 0U) == 0U) {
             set_format(options, token.substr(9U));
+        } else if (token == "--dwarf") {
+            options.inspection.dwarf = true;
+        } else if (token == "--sysroot") {
+            options.inspection.sysroot = required_argument(argc, argv, index, "--sysroot", "a directory");
+        } else if (token == "--origin") {
+            options.inspection.origin = required_argument(argc, argv, index, "--origin", "a target path");
+        } else if (token == "--library-path") {
+            options.inspection.library_paths.push_back(required_argument(argc, argv, index, "--library-path", "a target path"));
+            if (options.inspection.library_paths.size() > 128) throw std::runtime_error("too many library paths");
+        } else if (token == "--fail-on") {
+            options.fail_on = required_argument(argc, argv, index, "--fail-on", "a policy");
+            if (options.fail_on != "default" && options.fail_on != "never" && options.fail_on != "incompatible" && options.fail_on != "unknown" && options.fail_on != "changed") throw std::runtime_error("invalid --fail-on policy");
         } else if (token == "--policy") {
             options.policy_path = required_argument(argc, argv, index, "--policy", "a file");
         } else if (token == "--help" || token == "-h") {
@@ -117,7 +133,7 @@ bool starts_as_json(const std::filesystem::path& path) {
     return false;
 }
 
-abilens::ElfReport load_report_or_binary(const std::string& value) {
+abilens::ElfReport load_report_or_binary(const std::string& value, const abilens::InspectOptions& options) {
     const std::filesystem::path path(value);
     if (starts_as_json(path)) {
         abilens::ElfReport report = abilens::parse_report_json(read_bounded_text(path));
@@ -126,7 +142,7 @@ abilens::ElfReport load_report_or_binary(const std::string& value) {
         }
         return report;
     }
-    return abilens::inspect_file(path);
+    return abilens::inspect_file(path, {}, options);
 }
 
 int inspect_command(const Options& options) {
@@ -139,7 +155,7 @@ int inspect_command(const Options& options) {
         policy = abilens::load_policy_file(options.policy_path);
     }
     const abilens::ElfReport report =
-        abilens::inspect_file(std::filesystem::path(options.positional.front()), policy);
+        abilens::inspect_file(std::filesystem::path(options.positional.front()), policy, options.inspection);
     if (options.json) {
         std::cout << abilens::serialize_report(report) << '\n';
     } else {
@@ -148,6 +164,8 @@ int inspect_command(const Options& options) {
     if (report.status != abilens::InputStatus::Valid) {
         return 3;
     }
+    if (options.fail_on == "never") return 0;
+    if (options.fail_on == "unknown" && options.inspection.dwarf && report.dwarf_status != "complete") return 2;
     return report.policy.passed ? 0 : 2;
 }
 
@@ -159,13 +177,18 @@ int diff_command(const Options& options) {
     if (!options.policy_path.empty()) {
         throw std::runtime_error("--policy is valid only for inspect");
     }
-    const abilens::ElfReport left = load_report_or_binary(options.positional[0]);
-    const abilens::ElfReport right = load_report_or_binary(options.positional[1]);
+    const abilens::ElfReport left = load_report_or_binary(options.positional[0], options.inspection);
+    const abilens::ElfReport right = load_report_or_binary(options.positional[1], options.inspection);
     const abilens::DiffReport diff = abilens::diff_reports(left, right);
     if (options.json) {
         std::cout << abilens::serialize_diff(diff) << '\n';
     } else {
         std::cout << abilens::render_diff_text(diff);
+    }
+    if (left.status == abilens::InputStatus::Valid && right.status == abilens::InputStatus::Valid) {
+        if (options.fail_on == "changed") return diff.changed ? 2 : 0;
+        if (options.fail_on == "unknown") return diff.compatible ? 0 : 2;
+        if (options.fail_on == "incompatible") return diff.compatibility == "incompatible" ? 2 : 0;
     }
     return (left.status == abilens::InputStatus::Valid &&
             right.status == abilens::InputStatus::Valid)

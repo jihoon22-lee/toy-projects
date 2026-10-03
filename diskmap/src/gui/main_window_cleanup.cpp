@@ -81,7 +81,7 @@ private:
 
 void MainWindow::stageSelectedRows() {
     if (!document_ || documentIsSnapshot_ || activeCancellation_
-        || activeDuplicateCancellation_ || table_->selectionModel() == nullptr) {
+        || activeDuplicateCancellation_ || activeStorageCancellation_ || table_->selectionModel() == nullptr) {
         return;
     }
     std::vector<diskmap::NodeKey> after = stagedCleanupKeys_;
@@ -100,7 +100,7 @@ void MainWindow::stageSelectedRows() {
 }
 
 void MainWindow::clearCleanupStaging() {
-    if (stagedCleanupKeys_.empty() || activeCancellation_) {
+    if (stagedCleanupKeys_.empty() || activeCancellation_ || activeStorageCancellation_) {
         return;
     }
     stageCleanupKeysWithUndo({}, tr("Clear cleanup staging"));
@@ -131,7 +131,9 @@ void MainWindow::refreshCleanupReview() {
         cleanupSummary_->setText(tr("No items staged"));
         return;
     }
-    cleanupPlan_ = diskmap::planCleanup(*document_, stagedCleanupKeys_);
+    diskmap::CleanupPolicy policy;
+    for (const auto& [hash, keeper] : explicitKeepers_) { (void)hash; policy.protected_roots.emplace_back(keeper.normalized_path); }
+    cleanupPlan_ = diskmap::planCleanup(*document_, stagedCleanupKeys_, policy, &duplicateAnalysis_);
     const std::size_t rows = cleanupPlan_.targets.size()
                              + cleanupPlan_.rejected.size();
     cleanupReviewTable_->setRowCount(static_cast<int>(rows));
@@ -154,7 +156,7 @@ void MainWindow::refreshCleanupReview() {
             : tr("at least %1 (incomplete hard-link evidence)")
                   .arg(bytesText(cleanupPlan_.reclaimable_bytes));
     cleanupSummary_->setText(
-        tr("Dry run: %1 ready, %2 rejected · reclaimable %3 · nothing has moved")
+        tr("Dry run: %1 ready, %2 rejected · potential after disposal %3 · Trash does not free payload bytes · nothing has moved")
             .arg(cleanupPlan_.targets.size())
             .arg(cleanupPlan_.rejected.size())
             .arg(reclaimable));
@@ -180,79 +182,90 @@ void MainWindow::appendCleanupAudit(const diskmap::TrashReceipt& receipt) {
 
 void MainWindow::executeCleanup() {
     refreshCleanupReview();
-    if (!document_ || documentIsSnapshot_ || activeCancellation_
-        || activeDuplicateCancellation_ || cleanupPlan_.targets.empty()
-        || !cleanupServices_.confirm(cleanupPlan_)) {
-        updateControlState();
-        return;
-    }
-
-    std::vector<diskmap::TrashReceipt> receipts;
-    try {
-        receipts = cleanupServices_.move(cleanupPlan_);
-    } catch (const std::exception& error) {
-        diskmap::TrashReceipt receipt;
-        receipt.status = diskmap::TrashStatus::IoError;
-        receipt.message = std::string("trash backend failed: ") + error.what();
-        receipts.push_back(std::move(receipt));
-    } catch (...) {
-        diskmap::TrashReceipt receipt;
-        receipt.status = diskmap::TrashStatus::IoError;
-        receipt.message = "trash backend failed with an unknown exception";
-        receipts.push_back(std::move(receipt));
-    }
-    if (receipts.empty()) {
-        diskmap::TrashReceipt receipt;
-        receipt.status = diskmap::TrashStatus::IoError;
-        receipt.message = "trash backend returned no target audit records";
-        receipts.push_back(std::move(receipt));
-    }
-
-    std::size_t moved = 0;
-    for (const diskmap::TrashReceipt& receipt : receipts) {
-        appendCleanupAudit(receipt);
-        if (receipt.status == diskmap::TrashStatus::Moved) {
-            ++moved;
+    if (!document_ || documentIsSnapshot_ || activeCancellation_ || activeDuplicateCancellation_
+        || activeStorageCancellation_ || cleanupPlan_.targets.empty() || !cleanupServices_.confirm(cleanupPlan_)) return;
+    const auto plan = cleanupPlan_;
+    const auto mover = cleanupServices_.move;
+    startStorageJob(tr("Moving reviewed files to Trash"), [plan, mover](auto cancellation) {
+        StorageJobResult result;
+        for (const auto& target : plan.targets) {
+            if (cancellation->isCancelled()) {
+                diskmap::TrashReceipt receipt;
+                receipt.status = diskmap::TrashStatus::Cancelled;
+                receipt.original_path = target.path;
+                receipt.message = "Cancelled between files; completed moves remain recoverable";
+                result.receipts.push_back(std::move(receipt));
+                break;
+            }
+            diskmap::CleanupPlan single;
+            single.targets.push_back(target); single.scan_generation = plan.scan_generation;
+            try {
+                auto receipts = mover(single);
+                if (receipts.empty()) {
+                    diskmap::TrashReceipt receipt; receipt.message = "Trash backend returned no audit record";
+                    receipt.original_path = target.path; result.receipts.push_back(std::move(receipt));
+                }
+                result.receipts.insert(result.receipts.end(), std::make_move_iterator(receipts.begin()), std::make_move_iterator(receipts.end()));
+            } catch (const std::exception& error) {
+                diskmap::TrashReceipt receipt; receipt.message = error.what(); receipt.original_path = target.path;
+                result.receipts.push_back(std::move(receipt));
+            }
         }
-        if (!receipt.restore_token.empty()) {
-            restoreTokenCombo_->addItem(pathText(receipt.original_path),
-                                        QString::fromStdString(
-                                            receipt.restore_token));
+        return result;
+    }, [this](auto result) {
+        std::size_t moved = 0;
+        for (const auto& receipt : result.receipts) {
+            appendCleanupAudit(receipt);
+            if (receipt.status == diskmap::TrashStatus::Moved) ++moved;
+            if (!receipt.restore_token.empty()) restoreTokenCombo_->addItem(pathText(receipt.original_path), QString::fromStdString(receipt.restore_token));
         }
-    }
-    cleanupUndo_->clear();
-    setStagedCleanupKeys({});
-    status_->setText(tr("Trash audit: %1 of %2 target(s) moved")
-                         .arg(moved)
-                         .arg(receipts.size()));
-    if (!currentScanPath_.isEmpty()) {
-        startScan(currentScanPath_, true);
-    }
+        cleanupUndo_->clear(); setStagedCleanupKeys({});
+        status_->setText(tr("Trash audit: %1 moved; moving to Trash freed 0 bytes").arg(moved));
+        if (!currentScanPath_.isEmpty()) startScan(currentScanPath_, true);
+    });
 }
 
 void MainWindow::restoreSelectedTrashItem() {
     const int index = restoreTokenCombo_->currentIndex();
-    if (index < 0 || activeCancellation_) {
-        return;
-    }
-    const std::string token =
-        restoreTokenCombo_->itemData(index).toString().toStdString();
-    diskmap::TrashReceipt receipt;
-    try {
-        receipt = cleanupServices_.restore(token);
-    } catch (const std::exception& error) {
-        receipt.status = diskmap::TrashStatus::IoError;
-        receipt.message = std::string("restore backend failed: ") + error.what();
-    } catch (...) {
-        receipt.status = diskmap::TrashStatus::IoError;
-        receipt.message = "restore backend failed with an unknown exception";
-    }
-    appendCleanupAudit(receipt);
-    if (receipt.status == diskmap::TrashStatus::Restored) {
-        restoreTokenCombo_->removeItem(index);
-        if (!currentScanPath_.isEmpty()) {
-            startScan(currentScanPath_, true);
+    if (index < 0 || activeCancellation_ || activeDuplicateCancellation_ || activeStorageCancellation_) return;
+    const auto token = restoreTokenCombo_->itemData(index).toString().toStdString();
+    const auto restorer = cleanupServices_.restore;
+    startStorageJob(tr("Restoring Trash item"), [token, restorer](auto cancellation) {
+        StorageJobResult result;
+        if (cancellation->isCancelled()) throw diskmap::SnapshotError("Restore cancelled before execution");
+        result.receipts.push_back(restorer(token)); return result;
+    }, [this, token](auto result) {
+        for (const auto& receipt : result.receipts) {
+            appendCleanupAudit(receipt);
+            if (receipt.status == diskmap::TrashStatus::Restored) {
+                const int index = restoreTokenCombo_->findData(QString::fromStdString(token));
+                if (index >= 0) restoreTokenCombo_->removeItem(index);
+                if (!currentScanPath_.isEmpty()) startScan(currentScanPath_, true);
+            }
         }
-    }
-    updateControlState();
+    });
+}
+
+void MainWindow::recoverTrashHistory() {
+    startStorageJob(tr("Reading durable Trash history"), [](auto cancellation) {
+        diskmap::TrashOptions options;
+        options.cancelled = [cancellation]() { return cancellation->isCancelled(); };
+        StorageJobResult result;
+        std::string error;
+        result.receipts = diskmap::listTrashHistory(options, error);
+        // Missing Trash is an ordinary empty initial history. Other limitations
+        // are presented as audit entries, without preventing exploration.
+        if (!error.empty() && !result.receipts.empty()) {
+            diskmap::TrashReceipt warning; warning.message = error;
+            result.receipts.push_back(std::move(warning));
+        }
+        return result;
+    }, [this](auto result) {
+        cleanupAuditTable_->setRowCount(0); restoreTokenCombo_->clear();
+        for (const auto& receipt : result.receipts) {
+            appendCleanupAudit(receipt);
+            if (!receipt.restore_token.empty()) restoreTokenCombo_->addItem(pathText(receipt.original_path), QString::fromStdString(receipt.restore_token));
+        }
+        status_->setText(tr("Loaded %1 durable Trash record(s); %2 recoverable item(s)").arg(result.receipts.size()).arg(restoreTokenCombo_->count()));
+    });
 }

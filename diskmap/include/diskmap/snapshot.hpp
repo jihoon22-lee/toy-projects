@@ -17,7 +17,8 @@ namespace diskmap {
 // scan generation identifies an in-memory worker result and must never become
 // part of a file that is compared with a later scan.
 inline constexpr const char* kSnapshotSchemaV1 = "diskmap.snapshot/v1";
-inline constexpr const char* kSnapshotSchema = kSnapshotSchemaV1;
+inline constexpr const char* kSnapshotSchemaV2 = "diskmap.snapshot/v2";
+inline constexpr const char* kSnapshotSchema = kSnapshotSchemaV2;
 
 struct SnapshotLimits {
     // A root is always retained, so this must be at least one.
@@ -30,6 +31,7 @@ struct SnapshotLimits {
     std::size_t max_serialized_bytes = 64U * 1024U * 1024U;
     // Each user-controlled path, name, and diagnostic is bounded separately.
     std::size_t max_string_bytes = 1U * 1024U * 1024U;
+    CancellationCheck cancelled;
 };
 
 class SnapshotError final : public std::runtime_error {
@@ -38,7 +40,7 @@ public:
 };
 
 struct Snapshot {
-    std::string schema_version = kSnapshotSchemaV1;
+    std::string schema_version = kSnapshotSchema;
     FsNode root;
     bool complete = true;
     bool truncated = false;
@@ -61,7 +63,7 @@ Snapshot snapshotFromNode(const FsNode& root,
 std::string serializeSnapshot(const Snapshot& snapshot,
                               const SnapshotLimits& limits = SnapshotLimits{});
 
-// Strict v1 parser. Unknown or duplicate keys, malformed JSON, schema
+// Strict v1/v2 parser. Unknown or duplicate keys, malformed JSON, schema
 // mismatches, and bound violations are rejected with SnapshotError.
 Snapshot parseSnapshot(std::string_view json,
                        const SnapshotLimits& limits = SnapshotLimits{});
@@ -106,6 +108,7 @@ struct SnapshotChange {
 
 struct SnapshotDiffOptions {
     SizeMetric metric = SizeMetric::Logical;
+    CancellationCheck cancelled;
 };
 
 struct SnapshotDiff {

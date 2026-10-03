@@ -424,7 +424,34 @@ class TestCleanup : public QObject
 
 private slots:
     void run();
+    void changedDuplicatesAndKeepers();
 };
+
+void TestCleanup::changedDuplicatesAndKeepers() {
+    ScopedTempDirectory temp;
+    QVERIFY(temp.valid());
+    QVERIFY(writeFile(temp.path() / "a", "same"));
+    QVERIFY(writeFile(temp.path() / "b", "same"));
+    diskmap::RealFsSource source;
+    const auto scan = diskmap::scan(source, temp.path(), {});
+    const auto duplicates = diskmap::analyzeDuplicates(scan);
+    QCOMPARE(duplicates.groups.size(), std::size_t(1));
+    const auto& group = duplicates.groups.front();
+    const auto plan = diskmap::planCleanup(scan, {group.entries[1].key}, {}, &duplicates);
+    QCOMPARE(plan.targets.size(), std::size_t(1));
+    QVERIFY(!plan.targets[0].duplicate_proofs.empty());
+    std::string error;
+    QVERIFY(diskmap::verifyCleanupProofs(plan.targets[0], error));
+    const auto all = diskmap::planCleanup(scan, {group.entries[0].key, group.entries[1].key}, {}, &duplicates);
+    QVERIFY(all.targets.empty());
+    QCOMPARE(all.rejected.size(), std::size_t(2));
+    QVERIFY(writeFile(group.entries[1].path, "DIFF"));
+    QVERIFY(!diskmap::verifyCleanupProofs(plan.targets[0], error));
+    QVERIFY(!diskmap::revalidateCleanupTarget(plan.targets[0], source).accepted);
+    QVERIFY(writeFile(group.entries[1].path, "same"));
+    std::filesystem::remove(group.entries[0].path);
+    QVERIFY(!diskmap::verifyCleanupProofs(plan.targets[0], error));
+}
 
 void TestCleanup::run() {
     testCleanupReasonNamesAndEvidence();

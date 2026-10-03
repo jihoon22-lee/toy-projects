@@ -1,5 +1,6 @@
 #include "diskmap/scanner.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <set>
 #include <utility>
@@ -303,8 +304,19 @@ void expandDirectory(WorkItem& item,
         if (entrySkipped(entry, item.path, rootPath, options)) {
             ++result.entries_filtered;
             result.totals_filtered = true;
+            item.node->complete = false;
+            if (item.node->error.empty()) item.node->error = "entries excluded by scan filters";
             continue;
         }
+        const auto cost = sizeof(DirEntry) * 3 + entry.name.size() * 3 + entry.path.native().size() * 3 + 256;
+        if (result.nodes_retained >= options.max_nodes || cost > options.max_memory_bytes - std::min(options.max_memory_bytes, result.estimated_memory_bytes)) {
+            result.budget_exhausted = true;
+            result.budget_reason = "scan resource budget reached";
+            item.node->complete = false;
+            break;
+        }
+        ++result.nodes_retained;
+        result.estimated_memory_bytes += cost;
         FsNode child = makeChildNode(entry, item.path, options);
         if (!child.complete && !child.error.empty()) {
             recordError(result, options,
@@ -418,17 +430,34 @@ bool processWorkItem(const FsSource& source,
                      std::set<IdentityKey>& visited) {
     std::string error;
     const std::vector<DirEntry> entries =
-        source.list(item.path, error, cancellationCheck(cancellation));
+        source.listBounded(item.path, error,
+            options.max_nodes - std::min(options.max_nodes, result.nodes_retained),
+            options.max_memory_bytes - std::min(options.max_memory_bytes, result.estimated_memory_bytes),
+            cancellationCheck(cancellation));
+    if (error == "scan resource budget reached") {
+        result.budget_exhausted = true;
+        result.budget_reason = error;
+    }
     if (cancellationRequested(cancellation)) {
         stack.push_back(std::move(item));
         markCancelled(result, stack);
         return false;
     }
     recordListingOutcome(item, entries, error, options, result);
+    if (result.budget_exhausted) result.fatal_error.clear();
     expandDirectory(item, entries, rootPath, options, rootIdentity, result, stack, visited,
                     cancellation);
     if (cancellationRequested(cancellation)) {
         markCancelled(result, stack);
+        return false;
+    }
+    if (result.budget_exhausted) {
+        result.root.complete = false;
+        result.root.error = result.budget_reason;
+        for (auto& pending : stack) {
+            pending.node->complete = false;
+            pending.node->error = result.budget_reason;
+        }
         return false;
     }
     if (progress && (error.empty() || !entries.empty())) {
@@ -469,6 +498,10 @@ void traverseDirectories(const FsSource& source,
 }
 
 void finalizeTraversal(ScanResult& result, const ProgressFn& progress) {
+    if (result.totals_filtered) {
+        result.root.complete = false;
+        if (result.root.error.empty()) result.root.error = "entries excluded by scan filters";
+    }
     if (result.cancelled) {
         if (progress) {
             progress(result.dirs_scanned, result.files_scanned);
@@ -488,6 +521,14 @@ ScanResult scan(const FsSource& source,
                  const ScanCancellationToken* cancellation) {
     ScanResult result;
     initializeResult(result, rootPath, options);
+    result.estimated_memory_bytes = sizeof(FsNode) + rootPath.native().size() * 3;
+    if (options.max_nodes == 0 || options.max_memory_bytes < result.estimated_memory_bytes) {
+        result.root.complete = false;
+        result.budget_exhausted = true;
+        result.budget_reason = "scan resource budget cannot retain the root";
+        result.root.error = result.budget_reason;
+        return result;
+    }
     if (resolveRoot(source, rootPath, options, progress, cancellation, result)
         == RootDisposition::Complete) {
         return result;

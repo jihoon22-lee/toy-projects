@@ -8,12 +8,22 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/pages.yml"
+      - ".github/scripts/assemble_pages.py"
+      - "README.md"
+      - "ROADMAP.md"
+      - "CHANGELOG.md"
       - "docs/**"
+      - "*/CHANGELOG.md"
+      - "*/schemas/**"
+      - "*/examples/**"
+      - "*/assets/**"
+      - "*/resources/**"
       - "*/README.md"
       - "*/docs/**"
   workflow_dispatch:
 
 permissions:
+  contents: read
   pages: write
   id-token: write
 
@@ -34,20 +44,7 @@ jobs:
         run: |
           set -euo pipefail
           site="$GITHUB_WORKSPACE/.pages-src"
-          mkdir -p "$site"
-          cp README.md "$site/index.md"
-          for product in loglens diskmap buildscope envlens abilens; do
-            mkdir -p "$site/$product/docs"
-            cp "$product/README.md" "$site/$product/index.md"
-            if [ -d "$product/docs" ]; then
-              cp -r "$product/docs/." "$site/$product/docs/"
-            fi
-          done
-          printf '%s\n' \
-            'title: toy-projects' \
-            'description: Product documentation' \
-            'theme: jekyll-theme-cayman' \
-            > "$site/_config.yml"
+          python3 .github/scripts/assemble_pages.py "$site"
           echo "site=$site" >> "$GITHUB_OUTPUT"
         id: site
 

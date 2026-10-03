@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tracelens:event-v1",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "tracelens.event/v1"
+    },
+    "byte_encoding": {
+      "const": "c-escaped"
+    },
+    "kind": {
+      "enum": [
+        "call",
+        "signal",
+        "exit",
+        "notice",
+        "unknown",
+        "incomplete"
+      ]
+    },
+    "tid": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)$",
+      "description": "Unsigned 64-bit integer encoded as a decimal string."
+    },
+    "generation": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)$",
+      "description": "Unsigned 64-bit integer encoded as a decimal string."
+    },
+    "syscall": {
+      "type": "string"
+    },
+    "arguments": {
+      "type": "string"
+    },
+    "result": {
+      "type": "string"
+    },
+    "errno": {
+      "type": "string"
+    },
+    "timestamp": {
+      "type": "string"
+    },
+    "timestamp_kind": {
+      "enum": [
+        "",
+        "clock",
+        "numeric"
+      ]
+    },
+    "diagnostic": {
+      "type": "string"
+    },
+    "start": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "line": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "description": "Unsigned 64-bit integer encoded as a decimal string."
+        },
+        "offset": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "description": "Unsigned 64-bit integer encoded as a decimal string."
+        },
+        "length": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "description": "Unsigned 64-bit integer encoded as a decimal string."
+        }
+      },
+      "required": [
+        "source",
+        "line",
+        "offset",
+        "length"
+      ],
+      "additionalProperties": false
+    },
+    "end": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "line": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$",
+              "description": "Unsigned 64-bit integer encoded as a decimal string."
+            },
+            "offset": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$",
+              "description": "Unsigned 64-bit integer encoded as a decimal string."
+            },
+            "length": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$",
+              "description": "Unsigned 64-bit integer encoded as a decimal string."
+            }
+          },
+          "required": [
+            "source",
+            "line",
+            "offset",
+            "length"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "duration_ns": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "description": "Unsigned 64-bit integer encoded as a decimal string."
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "byte_encoding",
+    "kind",
+    "tid",
+    "generation",
+    "syscall",
+    "arguments",
+    "result",
+    "errno",
+    "timestamp",
+    "timestamp_kind",
+    "diagnostic",
+    "start",
+    "end",
+    "duration_ns",
+    "paths"
+  ],
+  "additionalProperties": false
+}

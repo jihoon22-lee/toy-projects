@@ -10,6 +10,7 @@
 
 #include "fake_source.hpp"
 #include "loglens/gui/log_model.hpp"
+#include "loglens/evidence.hpp"
 #include "loglens/filter_expr.hpp"
 
 using loglens::Level;
@@ -532,7 +533,9 @@ void TestLogModel::triageAndTimelineShareTheVisibleRecordSet() {
 
     loglens::TriageState triage;
     triage.rules.push_back({"Timeout", {"timeout", false, 10, "#ffaa00"}});
-    triage.entries.push_back({"/tmp/app.log", 20, true, "investigate"});
+    triage.entries.push_back(
+        {"/tmp/app.log", 20, true, "investigate", "1:2", 0, loglens::recordFingerprint(second)});
+    model.setSourceIdentity("1:2");
     model.setTriageState(triage, QStringLiteral("/tmp/app.log"));
     QCOMPARE(model.highlightSpansAt(1).size(), static_cast<std::size_t>(1));
     QVERIFY(model.bookmarkedAt(1));

@@ -6,6 +6,7 @@
 #include <QPen>
 #include <QResizeEvent>
 #include <QtGlobal>
+#include "diskmap/snapshot.hpp"
 
 #include "explorer_text.hpp"
 
@@ -134,12 +135,30 @@ void TreemapWidget::paintEvent(QPaintEvent* event) {
             continue;
         }
         const QRectF box = toRect(tile.rect);
-        painter.fillRect(box, tileColor(*tile.node, tile.node == hovered_));
+        QColor color = tileColor(*tile.node, tile.node == hovered_);
+        if (colorMode_ == ColorMode::FileType) {
+            diskmap::FsNode category;
+            category.is_dir = tile.node->is_dir;
+            category.name = tile.node->is_dir ? "directory" : tile.node->path.extension().string();
+            color = tileColor(category, tile.node == hovered_);
+        } else if (colorMode_ == ColorMode::State) {
+            color = uncertain(tile) ? QColor(234, 173, 69) : QColor(105, 180, 140);
+        } else if (colorMode_ == ColorMode::Change) {
+            const auto found = changes_.find(diskmap::nodeKey(*tile.node).normalized_path);
+            color = QColor(145, 153, 161);
+            if (found != changes_.end()) {
+                const auto kind = static_cast<diskmap::SnapshotChangeKind>(found->second);
+                color = kind == diskmap::SnapshotChangeKind::Grown || kind == diskmap::SnapshotChangeKind::Added ? QColor(236, 160, 65)
+                    : kind == diskmap::SnapshotChangeKind::Shrunk ? QColor(103, 173, 220) : QColor(175, 137, 205);
+            }
+        }
+        painter.fillRect(box, color);
         if (uncertain(tile)) {
             painter.fillRect(box, QBrush(QColor(255, 255, 255, 70), Qt::BDiagPattern));
         }
         QPen border(uncertain(tile) ? QColor(255, 193, 92) : QColor(20, 20, 24));
         border.setStyle(uncertain(tile) ? Qt::DashLine : Qt::SolidLine);
+        if (selected_ && diskmap::nodeKey(*tile.node) == *selected_) { border = QPen(QColor(255, 255, 255), 3); }
         painter.setPen(border);
         painter.drawRect(box);
         if (box.width() < kMinLabelWidth || box.height() < kMinLabelHeight) {
@@ -180,9 +199,10 @@ void TreemapWidget::mousePressEvent(QMouseEvent* event) {
         return;
     }
     const diskmap::Tile* tile = tileAt(eventPos(event));
-    if (tile == nullptr || tile->node == nullptr || !tile->node->is_dir) {
-        return;
-    }
+    if (tile == nullptr || tile->node == nullptr) return;
+    setSelectedKey(diskmap::nodeKey(*tile->node));
+    emit nodeSelected(*selected_);
+    if (!tile->node->is_dir) return;
     emit nodeActivated(diskmap::nodeKey(*tile->node));
 }
 
@@ -200,3 +220,7 @@ void TreemapWidget::leaveEvent(QEvent* event) {
     emit hoverCleared();
     update();
 }
+
+void TreemapWidget::setColorMode(ColorMode mode) { colorMode_ = mode; update(); }
+void TreemapWidget::setSelectedKey(std::optional<diskmap::NodeKey> key) { selected_ = std::move(key); update(); }
+void TreemapWidget::setChangeKinds(std::map<std::string, int> changes) { changes_ = std::move(changes); update(); }

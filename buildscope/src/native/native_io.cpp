@@ -165,7 +165,7 @@ void writeAll(int descriptor, const QByteArray &payload) {
 
 }  // namespace
 
-QByteArray readBoundedRegular(const QString &path, qint64 limit) {
+QByteArray readBoundedRegular(const QString &path, qint64 limit, std::atomic_bool *cancel) {
     const QString candidate = absoluteOf(path);
     const QByteArray encoded = candidate.toUtf8();
     struct stat namedBefore {};
@@ -207,6 +207,7 @@ QByteArray readBoundedRegular(const QString &path, qint64 limit) {
         }
         qint64 size = 0;
         while (size <= limit) {
+            if(cancel && cancel->load()) throw SnapshotIoError(QStringLiteral("input read cancelled"));
             QByteArray chunk;
             chunk.resize(static_cast<int>(qMin<qint64>(1024 * 1024, limit + 1 - size)));
             const ssize_t count = ::read(descriptor, chunk.data(), chunk.size());

@@ -43,10 +43,11 @@ def resolve_for_runtime(value: str | Path) -> tuple[str, Path | None]:
     if not path.is_file() or not os.access(path, os.X_OK):
         return "invalid-interpreter", None
     try:
-        resolved, _requested = resolve_interpreter(path)
+        resolve_interpreter(path)
     except ProbeError:
         return "invalid-interpreter", None
-    return "ready", resolved
+    # argv[0] selects the venv. Resolving the symlink here runs its base Python.
+    return "ready", path.absolute()
 
 
 def select_entry_points(

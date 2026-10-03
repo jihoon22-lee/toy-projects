@@ -3,5 +3,8 @@
   "diskmap": "0.1.1",
   "buildscope": "0.1.2",
   "abilens": "0.1.2",
-  "envlens": "0.1.2"
+  "envlens": "0.1.2",
+  "tracelens": "0.0.0",
+  "testlens": "0.0.0",
+  "servicelens": "0.0.0"
 }

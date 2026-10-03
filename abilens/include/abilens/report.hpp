@@ -8,7 +8,7 @@
 namespace abilens {
 
 ElfReport inspect_file(const std::filesystem::path& path,
-                       const Policy& policy = {});
+                       const Policy& policy = {}, const InspectOptions& options = {});
 
 PolicyEvaluation evaluate_policy(const ElfReport& report, const Policy& policy);
 

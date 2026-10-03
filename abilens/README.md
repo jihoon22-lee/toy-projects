@@ -1,10 +1,11 @@
 # AbiLens
 
-AbiLens is a small, dependency-free C++20 command-line inspector for Linux
+AbiLens is a C++20 command-line inspector for Linux
 ELF build artifacts.  It validates the ELF identification and table bounds
 itself, then parses program headers, dynamic tags, version requirements and
 string tables directly from the input bytes.  The artifact is never loaded or
-executed, and no external tool is invoked.
+executed, and no external tool is invoked. The default build has no third-party
+runtime dependency; optional DWARF analysis links elfutils libdw/libelf.
 
 The product is intentionally narrow:
 
@@ -115,8 +116,9 @@ report's `tool` object records the analyzer identity (`abilens`) and its
 version.  Extended ELF table counts and unknown byte orders/classes are
 reported as unsupported.  ABI names outside the numeric GLIBC/GLIBCXX/CXXABI
 forms are not interpreted as floors.  The report schema is deliberately
-versioned and self-contained; see `schemas/abilens-report-v1.schema.json` and
-`schemas/abilens-diff-v1.schema.json`.
+versioned and self-contained; see [`report v2`](schemas/abilens-report-v2.schema.json) and
+[`diff v2`](schemas/abilens-diff-v2.schema.json). Saved report v1 inputs remain readable
+with missing evidence represented as unknown.
 
 Each inspection opens the target once and reads every byte through that
 single descriptor, so the evidence refers to one opened file rather than an
@@ -131,18 +133,68 @@ Output directories are protected by an ownership marker.  A non-empty
 unowned `OUT`, a symlink, the project root, and `/` are refused by the Make
 adapter; `make clean` removes only an explicitly marked output tree.
 
-## Release
+## Evidence and compatibility
 
-`0.1.0` is the first public release. It is published as a native bundle,
-`abilens-0.1.0-linux-x86_64.tar.gz`, containing `bin/abilens`,
-`lib/libabilens.a` and this README. The `lib/libabilens-fixture.so` that
-`make check` builds is an integration fixture and is not shipped.
+Report v2 preserves symbol binding, visibility, type, size and default-version
+status alongside the familiar `name@version` identities. Local/hidden/internal
+symbols are excluded from the exported surface. SONAME, program interpreter and
+GNU build ID are recorded. Loader path order, repetitions and empty components
+are preserved. A missing symbol-count table leaves symbols unknown.
 
-Every release publishes a `SHA256SUMS` covering its assets:
+Diff v2 emits `compatibility: compatible|incompatible|unknown` plus the legacy
+boolean, which is true only for `compatible`. Export removal, data/TLS size or
+symbol type changes, lost default versions, SONAME changes and raised ABI floors
+are incompatible. Binding/visibility changes, missing evidence and unresolved
+loader changes are unknown. Function code-size
+changes and build ID changes alone do not establish an ABI break. Compatibility
+covers the observed axes; it does not prove source-level C++ compatibility.
+
+`--fail-on incompatible`, `unknown`, or `changed` select CI failure criteria
+(exit 2); `never` reports differences without failing. The default preserves the
+previous diff exit behavior. Invalid inputs still exit 3 and usage errors 64.
+
+## Offline loader candidates
 
 ```sh
-sha256sum --check SHA256SUMS
+build/bin/abilens inspect --json --sysroot /images/rootfs \
+  --origin /opt/app/lib --library-path /opt/dependencies/lib app.so
 ```
 
-Releases are cut by pushing an annotated `abilens/v<version>` tag at a `main`
-commit whose CI is green.
+Resolution reads only a supplied rootfs. Linux `openat2(RESOLVE_IN_ROOT)` confines
+absolute symlinks and path traversal; an unsupported kernel leaves candidates
+unresolved. `$ORIGIN` requires the explicit target directory. RUNPATH (or RPATH
+when absent), explicit library directories and standard target directories are
+checked in order. Candidates must match ELF class, byte order and machine. No `ldd`, loader,
+or target binary is executed. This is candidate evidence: `ld.so.cache`, hwcaps,
+environment overrides and transitive RPATH are not simulated.
+
+## Optional DWARF layout analysis
+
+```sh
+# Debian/Ubuntu build dependency: libdw-dev, pkg-config
+make OUT=build/dwarf WITH_DWARF=1 check
+build/dwarf/bin/abilens inspect --dwarf --json library.so
+build/dwarf/bin/abilens diff --dwarf --fail-on unknown before.so after.so
+```
+
+The libdw reader records named aggregate sizes, members, referenced type names,
+member offsets and DWARF4/5 bit fields, including separate DWARF4 type units. Analysis stops at 100,000 DIE visits, 10,000
+layouts, 4 MiB of layout text, depth 128 or five seconds; input is limited to 128 MiB. Compressed debug
+sections are refused. Unsupported location expressions, missing debug data and
+limits remain explicit. Changed type layouts are reported as unknown impact
+because public API reachability is not inferred. The basic build reports
+`unavailable` when `--dwarf` is requested. No debuginfod or external debug lookup
+is performed.
+
+## Install and release
+
+```sh
+make PREFIX=/tmp/abilens-install install
+/tmp/abilens-install/bin/abilens --version
+```
+
+The current development version is 0.2.0. Releases use `abilens/v<version>` and
+contain the installed `bin`, `lib`, public headers, schemas and documentation.
+The test fixture library is not shipped. Native bundles use system runtime
+libraries; `RUNTIME-DEPENDENCIES.txt` describes those required by the build.
+Checksums and provenance are attached before a draft release is published.

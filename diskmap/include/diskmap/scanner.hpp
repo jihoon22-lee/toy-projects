@@ -30,6 +30,9 @@ struct ScanOptions {
     std::vector<std::string> exclude_patterns;
     // Bounds hostile/error-heavy trees without hiding how many errors occurred.
     std::size_t max_errors = 1024;
+    std::size_t max_nodes = 250'000;
+    // Conservative retained-tree/listing estimate, not an operating-system RSS cap.
+    std::size_t max_memory_bytes = 256U * 1024U * 1024U;
     std::uint64_t generation = 0;
 };
 
@@ -46,6 +49,10 @@ struct ScanResult {
     bool totals_filtered = false;
     std::uint64_t generation = 0;
     bool cancelled = false;
+    std::size_t nodes_retained = 1;
+    std::size_t estimated_memory_bytes = 0;
+    bool budget_exhausted = false;
+    std::string budget_reason;
 };
 
 using ProgressFn = std::function<void(std::size_t dirs, std::size_t files)>;

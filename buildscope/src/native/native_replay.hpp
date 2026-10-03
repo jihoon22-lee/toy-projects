@@ -16,6 +16,14 @@ std::tuple<QString, QString> nativeEntryPaths(const QJsonObject &entry,
                                               const QString &projectRoot);
 std::tuple<QStringList, QString, QString> buildTraceCommand(const QJsonObject &entry,
                                                             const QString &projectRoot);
+struct TraceResult {
+    int exitCode = -1;
+    QString text;
+    qint64 durationMs = 0;
+    bool complete = false;
+    QString stopReason;
+};
+TraceResult runTraceControlled(const QStringList &command, const QString &cwd);
 std::tuple<int, QString, qint64> runTrace(const QStringList &command, const QString &cwd);
 
 constexpr qsizetype kMaxTraceBytes = 16 * 1024 * 1024;

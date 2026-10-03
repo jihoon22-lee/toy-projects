@@ -185,9 +185,10 @@ int openTemporaryAt(int parent, const std::string& name) {
     return descriptor;
 }
 
-void writeAndSync(int descriptor, const std::string& content) {
+void writeAndSync(int descriptor, const std::string& content, const SnapshotLimits& limits) {
     std::size_t offset = 0;
     while (offset < content.size()) {
+        detail::checkSnapshotCancellation(limits);
         const ssize_t count = ::write(descriptor, content.data() + offset,
                                       content.size() - offset);
         if (count < 0 && errno == EINTR) {
@@ -300,7 +301,7 @@ void lockSnapshotDirectory(const detail::FileDescriptor& parent) {
 }
 
 void writeSnapshotLinux(const std::string& json,
-                        const fs::path& target) {
+                        const fs::path& target, const SnapshotLimits& limits) {
     std::string error;
     detail::FileDescriptor parent =
         detail::openAbsoluteDirectory(target.parent_path(), error);
@@ -321,7 +322,7 @@ void writeSnapshotLinux(const std::string& json,
     try {
         descriptor = openTemporaryAt(parent.get(), temporary);
         temporaryExists = true;
-        writeAndSync(descriptor, json);
+        writeAndSync(descriptor, json, limits);
         const int closingDescriptor = descriptor;
         descriptor = -1;
         closeDescriptor(closingDescriptor);
@@ -340,6 +341,7 @@ void writeSnapshotLinux(const std::string& json,
         if (!detail::directoryPathMatches(target.parent_path(), parent, error)) {
             throw SnapshotError("snapshot destination directory changed during atomic write");
         }
+        detail::checkSnapshotCancellation(limits);
         installTemporaryAt(parent.get(), parent, target.parent_path(), temporary,
                            targetName, before, installed, preserveTemporary);
         temporaryExists = false;
@@ -428,8 +430,19 @@ void writeSnapshotAtomically(const Snapshot& snapshot,
     const SnapshotLimits limits = detail::checkedSnapshotLimits(inputLimits);
     const std::string json = serializeSnapshot(snapshot, limits);
     const fs::path target = detail::absoluteSnapshotFilePath(input);
+    const auto destination = RealFsSource().inspect(target, false);
+    std::vector<const FsNode*> pending{&snapshot.root};
+    while (!pending.empty()) {
+        detail::checkSnapshotCancellation(limits);
+        const auto* node = pending.back(); pending.pop_back();
+        if (!node->is_dir && (detail::absoluteSnapshotFilePath(node->path) == target
+            || (destination.identity.valid && node->metadata.identity.valid && destination.identity == node->metadata.identity))) {
+            throw SnapshotError("snapshot output aliases an inventoried source file");
+        }
+        for (const auto& child : node->children) pending.push_back(&child);
+    }
 #if defined(__linux__)
-    writeSnapshotLinux(json, target);
+    writeSnapshotLinux(json, target, inputLimits);
 #else
     writeSnapshotPortable(json, target);
 #endif

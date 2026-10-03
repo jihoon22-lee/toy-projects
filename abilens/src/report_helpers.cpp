@@ -16,7 +16,7 @@ std::string trim(std::string value) {
 }
 
 std::vector<std::uint64_t> version_parts(const std::string& value) {
-    if (value.empty()) {
+    if (value.empty() || value.size() > 128) {
         return {};
     }
     std::vector<std::uint64_t> parts;

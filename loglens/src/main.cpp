@@ -1,4 +1,7 @@
 #include "loglens/filter_expr.hpp"
+#include "loglens/file_search.hpp"
+#include "loglens/evidence.hpp"
+#include "loglens/version.hpp"
 #include "loglens/format_plugin.hpp"
 #include "loglens/log_parser.hpp"
 #include "loglens/log_record.hpp"
@@ -17,8 +20,8 @@
 
 namespace {
 
-// The version --version prints. loglens's single version surface.
-constexpr const char* kVersion = "0.1.2";  // x-release-please-version
+// CMake is the single product version source.
+constexpr const char *kVersion = LOGLENS_VERSION;
 
 struct CliOptions {
     std::string path;
@@ -28,6 +31,10 @@ struct CliOptions {
     std::string format_plugin;
     std::string session_load;
     std::string session_save;
+    std::string search_all;
+    std::size_t max_search_results = 1000;
+    std::uint64_t max_scan_bytes = 1024ULL * 1024 * 1024;
+    loglens::SessionState session_state;
     bool filter_set = false;
     bool level_set = false;
     bool format_set = false;
@@ -45,10 +52,19 @@ struct CliOptions {
 struct ActiveFilters {
     std::optional<loglens::Filter> level;
     std::optional<loglens::Filter> expression;
+    std::string search;
+    std::optional<loglens::TimeWindow> window;
 
     bool matches(const loglens::LogRecord& record) const {
-        return (!level || level->matches(record))
-               && (!expression || expression->matches(record));
+        const auto lower = [](unsigned char c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; };
+        const bool textMatch =
+            search.empty() ||
+            std::search(record.raw.begin(), record.raw.end(), search.begin(), search.end(),
+                        [&](char a, char b) { return lower(a) == lower(b); }) != record.raw.end();
+        return textMatch &&
+               (!window || (record.timestamp_ms >= window->begin_ms &&
+                            record.timestamp_ms < window->end_ms)) &&
+               (!level || level->matches(record)) && (!expression || expression->matches(record));
     }
 };
 
@@ -66,6 +82,8 @@ void printUsage(std::ostream& out) {
         << "  --format F      auto|plain|syslog|json|raw (default auto)\n"
         << "  --format-plugin FILE  parse with a loglens.format/v1 plugin\n"
         << "                  (replaces --format; saved with --save-session)\n"
+        << "  --search-all TEXT stream the whole file snapshot independently of retained rows\n"
+        << "  --max-search-results N (default 1000), --max-scan-bytes N (default 1 GiB)\n"
         << "  --stats         print level histogram and top patterns\n"
         << "  --bucket MS     histogram bucket size (default 60000)\n"
         << "  --top N         number of patterns to show (default 10)\n"
@@ -121,6 +139,8 @@ bool applyStringOption(const std::vector<std::string>& args, std::size_t& index,
         target = &options.session_load;
     } else if (arg == "--save-session") {
         target = &options.session_save;
+    } else if (arg == "--search-all") {
+        target = &options.search_all;
     }
     if (target == nullptr) {
         return false;
@@ -131,7 +151,8 @@ bool applyStringOption(const std::vector<std::string>& args, std::size_t& index,
 
 bool applyNumberOption(const std::vector<std::string>& args, std::size_t& index,
                        const std::string& arg, CliOptions& options) {
-    if (arg != "--bucket" && arg != "--top" && arg != "--capacity") {
+    if (arg != "--bucket" && arg != "--top" && arg != "--capacity" &&
+        arg != "--max-search-results" && arg != "--max-scan-bytes") {
         return false;
     }
     std::string raw;
@@ -147,7 +168,14 @@ bool applyNumberOption(const std::vector<std::string>& args, std::size_t& index,
         options.valid = false;
         return true;
     }
-    if (arg == "--bucket") {
+    if (arg == "--max-search-results") {
+        if (value > 10000)
+            options.valid = false;
+        else
+            options.max_search_results = static_cast<std::size_t>(value);
+    } else if (arg == "--max-scan-bytes") {
+        options.max_scan_bytes = value;
+    } else if (arg == "--bucket") {
         options.bucket_ms = value;
     } else if (arg == "--top") {
         if (value > std::numeric_limits<std::size_t>::max()) {
@@ -224,6 +252,8 @@ bool parseFilterArgument(const FilterArgument& argument,
 }
 
 bool initializeFilters(const CliOptions& options, ActiveFilters& filters) {
+    filters.search = options.session_state.search;
+    filters.window = options.session_state.selected_window;
     constexpr std::size_t kLevelPrefixBytes = 7;
     if (!options.level.empty()
         && !parseFilterArgument(
@@ -331,6 +361,7 @@ bool applySessionFile(CliOptions& options) {
         return false;
     }
     const loglens::SessionState& state = session.state;
+    options.session_state = state;
     if (options.path.empty()) {
         options.path = state.source_path;
     }
@@ -351,18 +382,41 @@ bool applySessionFile(CliOptions& options) {
     return true;
 }
 
-bool saveSessionFile(const CliOptions& options) {
+bool saveSessionFile(const CliOptions& options, const std::string& pluginFingerprint) {
     if (options.session_save.empty()) {
         return true;
     }
-    loglens::SessionState state;
+    loglens::SessionState state = options.session_state;
     state.source_path = options.path;
     state.format = resolveFormat(options.format);
     state.format_plugin = options.format_plugin;
+    state.plugin_fingerprint.clear();
     state.multiline = options.multiline;
     state.max_record_bytes = options.max_record_bytes;
     state.filter = options.filter;
     state.level = options.level;
+    const auto evidence = loglens::captureSourceEvidence(state.source_path);
+    if (!evidence.ok()) {
+        std::cerr << "fatal: cannot fingerprint source: " << evidence.error << "\n";
+        return false;
+    }
+    state.source_identity = evidence.identity;
+    state.source_modified = evidence.modified;
+    state.source_fingerprint = evidence.fingerprint;
+    state.fingerprint_bytes = evidence.fingerprint_bytes;
+    state.source_size = evidence.size;
+    if (!state.format_plugin.empty()) {
+        const auto plugin = loglens::captureSourceEvidence(state.format_plugin, 4 * 1024 * 1024);
+        if (!plugin.ok() || plugin.fingerprint_bytes != plugin.size) {
+            std::cerr << "fatal: cannot fingerprint plugin\n";
+            return false;
+        }
+        if (plugin.fingerprint != pluginFingerprint) {
+            std::cerr << "fatal: parser plugin changed after loading; session was not saved\n";
+            return false;
+        }
+        state.plugin_fingerprint = pluginFingerprint;
+    }
     loglens::PersistenceError error;
     if (!loglens::saveSession(options.session_save, state, error)) {
         std::cerr << "fatal: cannot save session '" << options.session_save << "': "
@@ -377,10 +431,15 @@ int run(const CliOptions& options) {
     if (!initializeFilters(options, filters)) {
         return 1;
     }
-    if (!saveSessionFile(options)) {
-        return 1;
+    if (!options.session_load.empty() && !options.session_state.source_fingerprint.empty()) {
+        const auto observed = loglens::captureSourceEvidence(options.path);
+        const auto &saved = options.session_state;
+        if (!observed.ok() || observed.identity != saved.source_identity ||
+            observed.modified != saved.source_modified || observed.size != saved.source_size ||
+            observed.fingerprint != saved.source_fingerprint) {
+            std::cerr << "notice: source evidence differs from the saved investigation\n";
+        }
     }
-
     const loglens::Format format = resolveFormat(options.format);
     loglens::RecordAssembler assembler(format, loglens::EncodingErrorPolicy::PreserveBytes,
                                        options.max_record_bytes, options.multiline);
@@ -398,6 +457,50 @@ int run(const CliOptions& options) {
             return 1;
         }
         assembler.setFormatPlugin(&plugin);
+        if (!options.session_state.plugin_fingerprint.empty()) {
+            const auto evidence =
+                loglens::captureSourceEvidence(options.format_plugin, 4 * 1024 * 1024);
+            if (!evidence.ok() || evidence.fingerprint != options.session_state.plugin_fingerprint)
+                std::cerr << "notice: parser plugin differs from the saved investigation\n";
+        }
+    }
+    if (!options.search_all.empty()) {
+        loglens::FileSearchOptions search;
+        search.path = options.path;
+        search.text = options.search_all;
+        search.filter = options.filter;
+        if (!options.level.empty())
+            search.filter = "level>=" + options.level +
+                            (search.filter.empty() ? "" : " AND (" + search.filter + ")");
+        search.format = format;
+        search.multiline = options.multiline;
+        search.max_record_bytes = options.max_record_bytes;
+        search.max_results = options.max_search_results;
+        search.max_scan_bytes = options.max_scan_bytes;
+        if (!options.format_plugin.empty())
+            search.plugin = std::make_shared<loglens::FormatPlugin>(plugin);
+        const auto result = loglens::searchFile(search);
+        if (!result.error.empty()) {
+            std::cerr << "fatal: " << result.error << "\n";
+            return 1;
+        }
+        if (!saveSessionFile(options, plugin.document_fingerprint))
+            return 1;
+        for (const auto &record : result.records) {
+            if (!filters.matches(record))
+                continue;
+            std::cout << record.line_number << "  " << loglens::levelName(record.level) << "  "
+                      << record.message
+                      << (record.omitted_bytes == 0
+                              ? "  [sha256:" + loglens::recordFingerprint(record) + "]"
+                              : "  [partial record: " + std::to_string(record.omitted_bytes) +
+                                    " bytes omitted]")
+                      << "\n";
+        }
+        std::cout << result.records.size() << " matches; " << result.scanned_bytes << '/'
+                  << result.snapshot_end << " bytes; source " << result.source_identity << "; "
+                  << (result.complete ? "complete" : "partial: search budget reached") << "\n";
+        return result.complete ? 0 : 2;
     }
     loglens::RingBuffer records(options.capacity);
     loglens::FileTailer tailer(options.path);
@@ -426,6 +529,9 @@ int run(const CliOptions& options) {
     // calls flush(), so an append can still complete the same partial line.
     applyDeltas(assembler.flush(), records);
 
+    // All options, plugin parsing and source reads succeeded before any output file is mutated.
+    if (!saveSessionFile(options, plugin.document_fingerprint))
+        return 1;
     if (options.stats) {
         printStats(records, filters, options, std::cout);
     } else {
@@ -456,6 +562,11 @@ int main(int argc, char** argv) {
         return 1;
     }
     if (!applySessionFile(options)) {
+        return 1;
+    }
+    if (options.format != "auto" && options.format != "plain" && options.format != "syslog" &&
+        options.format != "json" && options.format != "raw") {
+        std::cerr << "error: unsupported --format: " << options.format << "\n";
         return 1;
     }
     if (options.path.empty()) {

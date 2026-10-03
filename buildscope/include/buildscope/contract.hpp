@@ -5,6 +5,10 @@
 #include <QVector>
 
 #include <optional>
+#include <memory>
+#include <atomic>
+#include <QJsonObject>
+#include <QJsonDocument>
 #include <stdexcept>
 
 namespace buildscope {
@@ -12,7 +16,8 @@ namespace buildscope {
 inline constexpr auto kSnapshotSchemaV1 = "buildscope.snapshot/v1";
 inline constexpr auto kSnapshotSchemaV2 = "buildscope.snapshot/v2";
 inline constexpr auto kSnapshotSchemaV3 = "buildscope.snapshot/v3";
-inline constexpr auto kSnapshotSchema = kSnapshotSchemaV3;
+inline constexpr auto kSnapshotSchemaV4 = "buildscope.snapshot/v4";
+inline constexpr auto kSnapshotSchema = kSnapshotSchemaV4;
 
 struct SnapshotPath {
     QString path;
@@ -100,6 +105,9 @@ struct SnapshotIncludeEdge {
 };
 
 struct SnapshotIncludeAnalysis {
+    bool complete = true;
+    QString stopReason;
+    std::shared_ptr<SnapshotIncludeAnalysis> fallback;
     QStringList command;
     QVector<SnapshotDiagnostic> diagnostics;
     qsizetype durationMs = 0;
@@ -128,6 +136,7 @@ struct Snapshot {
     QString sourcePath;
     QString projectRoot;
     QVector<SnapshotEntry> entries;
+    QJsonObject analysisRun;
 };
 
 class ContractError final : public std::runtime_error {
@@ -135,7 +144,8 @@ public:
     explicit ContractError(const QString &message);
 };
 
-Snapshot loadSnapshotFile(const QString &path);
+Snapshot loadSnapshotFile(const QString &path, std::atomic_bool *cancel = nullptr);
+Snapshot parseSnapshot(const QJsonDocument &document, std::atomic_bool *cancel = nullptr);
 QString invocationText(const SnapshotEntry &entry);
 
 }  // namespace buildscope

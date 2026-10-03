@@ -5,7 +5,10 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QStatusBar>
+#include <QProgressBar>
 #include <QTimer>
+#include <QTableWidget>
+#include <QTabWidget>
 #include <QUndoStack>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -82,10 +85,19 @@ MainWindow::MainWindow(QWidget* parent,
     auto* central = new QWidget(this);
     auto* layout = new QVBoxLayout(central);
     buildNavigationBar(central, layout);
-    buildFilterPanel(central, layout);
-    buildExplorer(central, layout);
+    workbenchTabs_ = new QTabWidget(central);
+    workbenchTabs_->setObjectName("workbenchTabs");
+    layout->addWidget(workbenchTabs_, 1);
+    auto* explorer = new QWidget(workbenchTabs_);
+    auto* explorerLayout = new QVBoxLayout(explorer);
+    buildFilterPanel(explorer, explorerLayout);
+    buildExplorer(explorer, explorerLayout);
+    workbenchTabs_->addTab(explorer, tr("Explore"));
     buildEvidencePanel(central, layout);
-    buildCleanupPanel(central, layout);
+    auto* cleanup = new QWidget(workbenchTabs_);
+    auto* cleanupLayout = new QVBoxLayout(cleanup);
+    buildCleanupPanel(cleanup, cleanupLayout);
+    workbenchTabs_->addTab(cleanup, tr("Cleanup & recovery"));
     setCentralWidget(central);
 
     if (!cleanupServices_.move) {
@@ -110,7 +122,8 @@ MainWindow::MainWindow(QWidget* parent,
             return QMessageBox::question(
                        this, tr("Move reviewed items to Trash?"),
                        tr("Move %1 reviewed item(s) to recoverable Trash?\n\n"
-                          "Estimated reclaimable storage: %2\n"
+                          "Potential storage after permanent disposal: %2\n"
+                          "Moving to same-filesystem Trash does not free this storage.\n"
                           "Rejected items will not be touched.")
                            .arg(plan.targets.size())
                            .arg(known),
@@ -127,7 +140,12 @@ MainWindow::MainWindow(QWidget* parent,
     status_->setObjectName(QStringLiteral("status"));
     status_->setAccessibleName(tr("Scan status"));
     status_->setTextFormat(Qt::PlainText);
-    statusBar()->addWidget(status_);
+    statusBar()->addWidget(status_, 1);
+    operationProgress_ = new QProgressBar(this);
+    operationProgress_->setObjectName("storageOperationProgress");
+    operationProgress_->setRange(0, 0); operationProgress_->setMaximumWidth(160);
+    operationProgress_->setAccessibleName(tr("Storage operation in progress"));
+    statusBar()->addPermanentWidget(operationProgress_); operationProgress_->hide();
 
     progressTimer_ = new QTimer(this);
     progressTimer_->setInterval(100);
@@ -149,6 +167,9 @@ MainWindow::MainWindow(QWidget* parent,
     });
 
     connectUi();
+    connect(workbenchTabs_, &QTabWidget::currentChanged, this, [this](int index) {
+        if (index == 3 && cleanupAuditTable_->rowCount() == 0) recoverTrashHistory();
+    });
     updateBreadcrumb();
     updateMetricExplanation();
     updatePartialBanner();
@@ -158,6 +179,8 @@ MainWindow::MainWindow(QWidget* parent,
 }
 
 MainWindow::~MainWindow() {
+    if (activeStorageCancellation_) activeStorageCancellation_->cancel();
+    if (storageWatcher_) storageWatcher_->waitForFinished();
     if (activeCancellation_) {
         activeCancellation_->cancel();
     }
@@ -188,7 +211,7 @@ void MainWindow::rescan() {
 }
 
 void MainWindow::cancelScan() {
-    if (!activeCancellation_ && !activeDuplicateCancellation_) {
+    if (!activeCancellation_ && !activeDuplicateCancellation_ && !activeStorageCancellation_) {
         return;
     }
     if (activeCancellation_) {
@@ -197,8 +220,9 @@ void MainWindow::cancelScan() {
     if (activeDuplicateCancellation_) {
         activeDuplicateCancellation_->cancel();
     }
+    if (activeStorageCancellation_) activeStorageCancellation_->cancel();
     status_->setText(activeCancellation_ ? tr("Cancelling scan…")
-                                         : tr("Cancelling duplicate analysis…"));
+                                         : activeStorageCancellation_ ? tr("Cancelling operation at a safe boundary…") : tr("Cancelling duplicate analysis…"));
     updateControlState();
 }
 
@@ -207,6 +231,7 @@ void MainWindow::setScanOptions(const diskmap::ScanOptions& options) {
 }
 
 void MainWindow::startScan(const QString& path, bool restoreNavigation) {
+    if (activeStorageCancellation_) { status_->setText(tr("Wait for the active storage operation")); return; }
     if (path.isEmpty()) {
         status_->setText(tr("Choose a non-empty path to scan"));
         return;

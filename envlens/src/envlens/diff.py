@@ -26,6 +26,7 @@ from envlens.diff_compat import (  # noqa: F401
 from envlens.diff_dependencies import (
     dependency_issues as _dependency_issues_impl,
 )
+from envlens.shadowing import project_shadowing
 from envlens.snapshot_input import (
     MAX_INPUT_BYTES,
     DiffError,
@@ -87,6 +88,8 @@ def _dist_public(distribution: Mapping[str, Any]) -> dict[str, Any]:
         wheel_tags, wheel_available = _dist_wheel_tags(distribution)
         if wheel_available:
             result["wheel_tags"] = wheel_tags
+    if isinstance(distribution.get("origin"), dict):
+        result["origin"] = distribution["origin"]
     return result
 
 
@@ -286,7 +289,26 @@ def _group_changes(
     if not new_items:
         return [("removed", _with_certainty(_dist_public(item), certainty)) for item in old_items]
     version_change = _version_change(normalized, old_items[0], new_items[0], certainty)
-    return [] if version_change is None else [version_change]
+    if version_change is not None:
+        return [version_change]
+    old, new = old_items[0], new_items[0]
+    if old.get("origin") != new.get("origin") or old.get("location") != new.get("location"):
+        return [
+            (
+                "changed",
+                {
+                    "name": str(new.get("name", normalized)),
+                    "normalized_name": normalized,
+                    "from_version": old.get("version", ""),
+                    "to_version": new.get("version", ""),
+                    "before": _dist_public(old),
+                    "after": _dist_public(new),
+                    "certainty": "unknown",
+                    "reason": "installation origin or location changed",
+                },
+            )
+        ]
+    return []
 
 
 def _compatibility_evidence(
@@ -324,7 +346,32 @@ def _dependency_issues(
     project: Mapping[str, Any] | None,
 ) -> list[dict[str, Any]]:
     grouped = _group_distributions(snapshot)
-    return _dependency_issues_impl(project, grouped, _certainty(snapshot), _identity(snapshot))
+    issues = _dependency_issues_impl(project, grouped, _certainty(snapshot), _identity(snapshot))
+    owners: dict[str, set[str]] = {}
+    for name, distributions in grouped.items():
+        for distribution in distributions:
+            for module in _dist_import_names(distribution)[0]:
+                owners.setdefault(module, set()).add(name)
+    for module, projects in sorted(owners.items()):
+        if len(projects) > 1:
+            issues.append(
+                {
+                    "kind": "import-overlap",
+                    "name": module,
+                    "requirement": "",
+                    "installed": sorted(projects),
+                    "source": "import metadata",
+                    "certainty": "unknown",
+                    "dependency_path": [],
+                    "reason": (
+                        "multiple distributions declare this import; namespace sharing "
+                        "or shadowing requires runtime verification"
+                    ),
+                }
+            )
+    if isinstance(project, dict):
+        issues.extend(project_shadowing(project, owners))
+    return issues
 
 
 def _external_requirement_keys(snapshot: Mapping[str, Any]) -> set[tuple[str, str]]:
@@ -397,6 +444,28 @@ def _evidence_summary(
     }
 
 
+def _runtime_suggestions(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    modules = sorted(
+        {
+            str(item["name"])
+            for item in issues
+            if item.get("kind") in {"import-overlap", "project-shadowing"}
+        }
+    )
+    if not issues:
+        return []
+    argv = ["envlens", "runtime", "--project-root", ".", "--interpreter", "<target-python>"]
+    for module in modules[:64]:
+        argv.extend(["--import", module])
+    return [
+        {
+            "argv": argv,
+            "executed": False,
+            "reason": "Opt-in runtime checks can verify imports and project compilation.",
+        }
+    ]
+
+
 def compare_snapshots(
     before: Mapping[str, Any] | str | os.PathLike[str],
     after: Mapping[str, Any] | str | os.PathLike[str],
@@ -437,6 +506,7 @@ def compare_snapshots(
         "import_name_changes": import_changes,
         "compatibility": compatibility,
         "dependencies": dependencies,
+        "runtime_suggestions": _runtime_suggestions(dependencies),
     }
 
 
@@ -476,6 +546,7 @@ def check_compatibility(
         "status": _evidence_status(summary, status_dependencies) or "compatible",
         "compatibility": compatibility,
         "dependencies": dependencies,
+        "runtime_suggestions": _runtime_suggestions(dependencies),
         "summary": summary,
     }
 

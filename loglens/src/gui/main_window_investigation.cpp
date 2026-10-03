@@ -1,9 +1,11 @@
 #include "loglens/gui/main_window.hpp"
 
 #include "loglens/gui/log_model.hpp"
+#include "loglens/evidence.hpp"
 
 #include <QByteArray>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QFileDialog>
 #include <QItemSelectionModel>
 #include <QJsonArray>
@@ -16,6 +18,7 @@
 #include <QTableView>
 
 #include <algorithm>
+#include <filesystem>
 #include <cstddef>
 #include <string>
 
@@ -61,18 +64,21 @@ std::string bytes(const QString& value) {
     return std::string(encoded.constData(), static_cast<std::size_t>(encoded.size()));
 }
 
-const loglens::TriageEntry* findEntry(const loglens::TriageState& state,
-                                     const std::string& sourcePath,
-                                     std::size_t line) {
-    const auto found = std::find_if(state.entries.begin(), state.entries.end(),
-                                    [&](const auto& entry) {
-        return entry.source_path == sourcePath && entry.line_number == line;
-    });
+const loglens::TriageEntry *findEntry(const loglens::TriageState &state,
+                                      const std::string &sourcePath, const std::string &identity,
+                                      std::uint64_t generation, const loglens::LogRecord &record) {
+    const auto found =
+        std::find_if(state.entries.begin(), state.entries.end(), [&](const auto &entry) {
+            return loglens::matchesTriageEntry(entry, sourcePath, identity, generation, record);
+        });
     return found == state.entries.end() ? nullptr : &*found;
 }
 
 bool sameSourcePath(const QString& destination, const QString& source) {
     if (source.isEmpty()) return false;
+    std::error_code ec;
+    if (std::filesystem::equivalent(destination.toStdString(), source.toStdString(), ec))
+        return true;
     const QFileInfo destinationInfo(destination);
     const QFileInfo sourceInfo(source);
     if (destinationInfo.absoluteFilePath() == sourceInfo.absoluteFilePath()) return true;
@@ -129,6 +135,7 @@ QJsonObject recordJson(const loglens::LogRecord& record,
 } // namespace
 
 void MainWindow::refreshRecordDetail() {
+    correlationField_->clear();
     const QModelIndex current = table_->currentIndex();
     const loglens::LogRecord* record = model_->recordAt(current.row());
     const bool available = record != nullptr && !currentPath_.isEmpty();
@@ -160,11 +167,19 @@ void MainWindow::refreshRecordDetail() {
                       .arg(static_cast<qulonglong>(diagnostic.offset))
                       .arg(utf8(diagnostic.message));
     }
+    for (const auto &field : record->fields) {
+        if (field.first == "trace_id" || field.first == "span_id" || field.first == "request_id" ||
+            field.first == "correlation_id" || field.first == "thread_id") {
+            correlationField_->addItem(utf8(field.first) + "=" + utf8(field.second),
+                                       utf8(field.first));
+        }
+        detail += tr("Field %1: %2\n").arg(utf8(field.first), utf8(field.second));
+    }
     detail += tr("\nParsed message:\n%1\n\nRaw evidence:\n%2")
                   .arg(utf8(record->message), utf8(record->raw));
     recordDetail_->setPlainText(detail);
-    const loglens::TriageEntry* entry =
-        findEntry(triageState_, bytes(currentPath_), record->line_number);
+    const loglens::TriageEntry *entry = findEntry(
+        triageState_, bytes(currentPath_), model_->sourceIdentity(), model_->generation(), *record);
     const QSignalBlocker bookmarkBlocker(bookmarkBox_);
     const QSignalBlocker annotationBlocker(annotationEdit_);
     bookmarkBox_->setChecked(entry != nullptr && entry->bookmarked);
@@ -177,19 +192,26 @@ void MainWindow::saveRecordTriage() {
         updateStatus(tr("Select a source record before saving a note"));
         return;
     }
+    if (model_->sourceIdentity().empty() || loglens::recordFingerprint(*record).empty()) {
+        updateStatus(
+            tr("This record lacks complete source evidence; its note cannot be bound safely"));
+        return;
+    }
     loglens::TriageState next = triageState_;
     loglens::PersistenceError error;
-    if (!loglens::setTriageEntry(
-            next,
-            {bytes(currentPath_), record->line_number, bookmarkBox_->isChecked(),
-             bytes(annotationEdit_->text())},
-            error)) {
+    if (!loglens::setTriageEntry(next,
+                                 {bytes(currentPath_), record->line_number,
+                                  bookmarkBox_->isChecked(), bytes(annotationEdit_->text()),
+                                  model_->sourceIdentity(), model_->generation(),
+                                  loglens::recordFingerprint(*record)},
+                                 error)) {
         showPersistenceError(tr("save record triage"), error);
         return;
     }
     if (!writeTriageWorkflow(next, tr("save record triage"))) return;
     triageState_ = std::move(next);
     model_->setTriageState(triageState_, currentPath_);
+    refreshArchivedTriage();
     updateStatus(tr("Saved triage for %1:%2")
                      .arg(currentPath_)
                      .arg(static_cast<qulonglong>(record->line_number)));
@@ -237,8 +259,8 @@ bool MainWindow::exportSelectedRows(const QString& path) {
     for (const QModelIndex& index : selected) {
         const loglens::LogRecord* record = model_->recordAt(index.row());
         if (record == nullptr) continue;
-        const loglens::TriageEntry* triage =
-            findEntry(triageState_, sourcePath, record->line_number);
+        const loglens::TriageEntry *triage = findEntry(
+            triageState_, sourcePath, model_->sourceIdentity(), model_->generation(), *record);
         const QByteArray encoded =
             QJsonDocument(recordJson(*record, triage)).toJson(QJsonDocument::Compact);
         if (recordCount != 0 && !output.append(QByteArrayLiteral(","))) {

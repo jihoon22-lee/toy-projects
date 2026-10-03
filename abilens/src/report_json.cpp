@@ -1,6 +1,7 @@
 #include "abilens/report.hpp"
 
 #include "report_internal.hpp"
+#include "evidence_internal.hpp"
 
 #include <algorithm>
 #include <array>
@@ -88,7 +89,7 @@ bool required_boolean(const JsonValue& object, const char* name) {
     return value.boolean;
 }
 
-std::vector<std::string> required_string_array(const JsonValue& object, const char* name) {
+std::vector<std::string> required_string_array(const JsonValue& object, const char* name, bool unique = true) {
     const JsonValue& value = required_field(object, name);
     if (value.kind != JsonValue::Kind::Array) {
         throw std::runtime_error(std::string("report JSON field is not an array: ") + name);
@@ -98,7 +99,7 @@ std::vector<std::string> required_string_array(const JsonValue& object, const ch
         if (item.kind != JsonValue::Kind::String) {
             throw std::runtime_error(std::string("report JSON array contains a non-string: ") + name);
         }
-        if (std::find(result.begin(), result.end(), item.scalar) != result.end()) {
+        if (unique && std::find(result.begin(), result.end(), item.scalar) != result.end()) {
             throw std::runtime_error(std::string("report JSON array contains a duplicate: ") + name);
         }
         result.push_back(item.scalar);
@@ -182,8 +183,8 @@ void parse_dependencies(const JsonValue& root, ElfReport& report) {
     require_exact_object(dependencies, "dependencies",
                          std::array<const char*, 3U>{"needed", "rpath", "runpath"});
     report.needed = required_string_array(dependencies, "needed");
-    report.rpath = required_string_array(dependencies, "rpath");
-    report.runpath = required_string_array(dependencies, "runpath");
+    report.rpath = required_string_array(dependencies, "rpath", false);
+    report.runpath = required_string_array(dependencies, "runpath", false);
 }
 
 VersionRequirement parse_version_requirement(const JsonValue& item) {
@@ -265,12 +266,12 @@ ElfReport parse_report_json(const std::string& json) {
     // "symbols" and "vtables" are additive within abilens.report/v1: reports
     // written before the fields existed remain valid documents.
     require_object(root, "root",
-                   std::array<const char*, 12U>{"schema", "input", "status", "message",
+                   std::array<const char*, 13U>{"evidence", "schema", "input", "status", "message",
                                                 "tool", "elf", "dependencies", "abi",
                                                 "symbols", "vtables", "policy",
                                                 "diagnostics"},
-                   10U, 12U);
-    if (required_string(root, "schema") != ElfReport::schema) {
+                   10U, 13U);
+    if (required_string(root, "schema") != ElfReport::schema && required_string(root, "schema") != "abilens.report/v1") {
         throw std::runtime_error("unsupported AbiLens report schema");
     }
     ElfReport report;
@@ -285,6 +286,8 @@ ElfReport parse_report_json(const std::string& json) {
     report.vtables_known = root.object.count("vtables") != 0U;
     report.symbols = optional_string_array(root, "symbols");
     report.vtables = optional_string_array(root, "vtables");
+    if (required_string(root, "schema") == ElfReport::schema) detail::parse_evidence(required_field(root, "evidence"), report);
+    else if (root.object.count("evidence")) throw std::runtime_error("v1 cannot carry v2 evidence");
     parse_policy(root, report);
     report.diagnostics = required_string_array(root, "diagnostics");
     return report;

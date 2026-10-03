@@ -56,7 +56,7 @@ void appendJsonEscaped(std::string& output,
 
 class JsonWriter final {
 public:
-    explicit JsonWriter(const SnapshotLimits& limits) : limits_(limits) {
+    explicit JsonWriter(const SnapshotLimits& limits, bool v2) : limits_(limits), v2_(v2) {
         output_.reserve(std::min<std::size_t>(limits.max_serialized_bytes, 4096));
     }
 
@@ -77,7 +77,8 @@ public:
     void string(const std::string& value) {
         std::string encoded;
         encoded.reserve(value.size() + 2);
-        appendJsonEscaped(encoded, value, limits_.max_string_bytes);
+        detail::checkSnapshotCancellation(limits_);
+        appendJsonEscaped(encoded, v2_ ? detail::displayBytes(value) : value, limits_.max_string_bytes);
         raw(encoded);
     }
 
@@ -92,11 +93,13 @@ public:
 
     void signedInteger(std::int64_t value) { raw(std::to_string(value)); }
 
+    bool v2() const { return v2_; }
     const std::string& result() const { return output_; }
 
 private:
     const SnapshotLimits& limits_;
     std::string output_;
+    bool v2_ = false;
 };
 
 const char* kindName(FsKind kind) {
@@ -134,6 +137,10 @@ void writeMetadata(JsonWriter& writer, const FsMetadata& metadata) {
     writer.key("allocated_size_known");
     writer.boolean(metadata.allocated_size_known);
     writer.character(',');
+    if (writer.v2()) {
+        writer.key("changed_ns"); writer.signedInteger(metadata.changed_ns); writer.character(',');
+        writer.key("changed_time_known"); writer.boolean(metadata.changed_time_known); writer.character(',');
+    }
     writer.key("complete");
     writer.boolean(metadata.complete);
     writer.character(',');
@@ -258,8 +265,14 @@ void writeNode(JsonWriter& writer,
     writer.key("name");
     writer.string(node.name);
     writer.character(',');
+    if (writer.v2()) {
+        writer.key("name_bytes"); writer.string(detail::bytesHex(node.name)); writer.character(',');
+    }
     writer.key("path");
     writer.string(node.path.generic_string());
+    if (writer.v2()) {
+        writer.character(','); writer.key("path_bytes"); writer.string(detail::bytesHex(node.path.generic_string()));
+    }
     writer.character(',');
     writer.key("reclaimable_size");
     writer.unsignedInteger(node.reclaimable_size);
@@ -279,7 +292,7 @@ void writeNode(JsonWriter& writer,
 
 std::string serializeSnapshot(const Snapshot& snapshot, const SnapshotLimits& inputLimits) {
     const SnapshotLimits limits = detail::checkedSnapshotLimits(inputLimits);
-    if (snapshot.schema_version != kSnapshotSchemaV1) {
+    if (snapshot.schema_version != kSnapshotSchemaV1 && snapshot.schema_version != kSnapshotSchemaV2) {
         throw SnapshotError("unsupported diskmap snapshot schema");
     }
     const detail::SnapshotTreeValidation validation =
@@ -291,7 +304,7 @@ std::string serializeSnapshot(const Snapshot& snapshot, const SnapshotLimits& in
         throw SnapshotError("complete snapshot contains incomplete evidence");
     }
     const std::size_t nodeCount = validation.nodes;
-    JsonWriter writer(limits);
+    JsonWriter writer(limits, snapshot.schema_version == kSnapshotSchemaV2);
     writer.character('{');
     writer.key("complete");
     writer.boolean(snapshot.complete);

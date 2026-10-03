@@ -30,6 +30,12 @@ struct SnapshotTreeValidation {
 SnapshotTreeValidation validateSnapshotTree(const FsNode& root,
                                             const SnapshotLimits& limits);
 
+inline void checkSnapshotCancellation(const SnapshotLimits& limits) {
+    if (limits.cancelled && limits.cancelled()) throw SnapshotError("operation cancelled");
+}
+std::string bytesHex(const std::string& value);
+std::string bytesFromHex(const std::string& value);
+std::string displayBytes(const std::string& value);
 bool isValidUtf8(const std::string& value);
 
 } // namespace detail
