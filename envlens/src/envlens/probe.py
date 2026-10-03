@@ -148,10 +148,19 @@ def distribution_record(distribution):
         result["import_names"] = sorted(import_names)
     return result
 
+prefix_path = pathlib.Path(sys.prefix)
+if (prefix_path / "conda-meta").is_dir():
+    environment_kind = "conda"
+elif (prefix_path / "pyvenv.cfg").is_file() or sys.prefix != sys.base_prefix:
+    environment_kind = "virtualenv"
+else:
+    environment_kind = "system"
+
 payload = {
     "schema_version": "envlens.probe/v1",
     "identity": {
         "implementation": sys.implementation.name,
+        "environment_kind": environment_kind,
         "version": platform.python_version(),
         "version_info": list(sys.version_info),
         "cache_tag": sys.implementation.cache_tag or "",
@@ -343,7 +352,11 @@ def collect_probe(
     """Execute the fixed probe argv and validate its top-level protocol."""
 
     resolved, requested = resolve_interpreter(interpreter)
-    stdout, stderr, return_code = _run_bounded([str(resolved), "-c", PROBE_SCRIPT], timeout_seconds)
+    # Run the path the user named, not the fully resolved binary: venv and
+    # conda markers (pyvenv.cfg, conda-meta) live next to that argv[0], so
+    # executing the resolved target would silently snapshot the system
+    # interpreter instead of the requested environment.
+    stdout, stderr, return_code = _run_bounded([requested, "-c", PROBE_SCRIPT], timeout_seconds)
     if len(stdout) > MAX_PROBE_BYTES:
         raise ProbeError("probe-output-too-large", "probe JSON exceeds 8 MiB")
     if return_code != 0:

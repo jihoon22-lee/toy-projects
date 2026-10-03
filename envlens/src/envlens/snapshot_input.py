@@ -116,8 +116,8 @@ def validate_snapshot(snapshot: Any) -> dict[str, Any]:
     """
 
     value = _object(snapshot, "snapshot")
-    if value.get("schema_version") != "envlens.snapshot/v1":
-        raise DiffError("unsupported-snapshot", "expected envlens.snapshot/v1")
+    if value.get("schema_version") not in {"envlens.snapshot/v1", "envlens.snapshot/v2"}:
+        raise DiffError("unsupported-snapshot", "expected envlens.snapshot/v1 or v2")
     distributions = _array(value.get("distributions"), "snapshot.distributions", MAX_DISTRIBUTIONS)
     for index, raw in enumerate(distributions):
         distribution = _object(raw, f"snapshot.distributions[{index}]")

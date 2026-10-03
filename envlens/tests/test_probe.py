@@ -49,7 +49,27 @@ def test_collect_probe_passes_fixed_argv_to_bounded_runner(tmp_path: Path) -> No
     assert payload == {"schema_version": "envlens.probe/v1"}
     assert resolved == executable.resolve()
     assert requested == str(executable)
-    assert calls == [([str(executable.resolve()), "-c", probe.PROBE_SCRIPT], 7)]
+    assert calls == [([str(executable), "-c", probe.PROBE_SCRIPT], 7)]
+
+
+def test_collect_probe_runs_the_requested_path_through_a_symlink(tmp_path: Path) -> None:
+    executable = _make_executable(tmp_path)
+    link = tmp_path / "linked-interpreter"
+    link.symlink_to(executable)
+    calls: list[list[str]] = []
+
+    def fake_run(command: list[str], timeout_seconds: int) -> tuple[bytes, bytes, int]:
+        calls.append(command)
+        return _probe_json(), b"", 0
+
+    with patch.object(probe, "_run_bounded", side_effect=fake_run):
+        _payload, resolved, requested = probe.collect_probe(link, timeout_seconds=7)
+
+    # argv[0] keeps the requested name so venv/conda markers next to the
+    # symlink stay visible to the interpreter; resolved is metadata only.
+    assert resolved == executable.resolve()
+    assert requested == str(link)
+    assert calls == [[str(link), "-c", probe.PROBE_SCRIPT]]
 
 
 def test_run_bounded_uses_argv_and_disables_shell() -> None:

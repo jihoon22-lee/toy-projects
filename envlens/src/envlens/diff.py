@@ -138,7 +138,14 @@ def _interpreter_summary(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     if isinstance(identity, dict):
         result["identity"] = {
             key: identity.get(key, "")
-            for key in ("implementation", "version", "cache_tag", "platform", "machine")
+            for key in (
+                "implementation",
+                "environment_kind",
+                "version",
+                "cache_tag",
+                "platform",
+                "machine",
+            )
         }
     return result
 

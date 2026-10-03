@@ -428,7 +428,7 @@ jobs:
 
           from jsonschema import Draft202012Validator, FormatChecker
 
-          schema_path = Path("envlens/schemas/envlens-snapshot-v1.schema.json")
+          schema_path = Path("envlens/schemas/envlens-snapshot-v2.schema.json")
           schema = json.loads(schema_path.read_text(encoding="utf-8"))
           Draft202012Validator.check_schema(schema)
           snapshot = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
@@ -436,7 +436,7 @@ jobs:
               schema,
               format_checker=FormatChecker(),
           ).validate(snapshot)
-          if snapshot.get("schema_version") != "envlens.snapshot/v1":
+          if snapshot.get("schema_version") != "envlens.snapshot/v2":
               raise SystemExit("real snapshot schema version mismatch")
           print("envlens schema metaschema and real snapshot validation: PASS")
           PY
@@ -517,6 +517,7 @@ jobs:
               required_members = (
                   "envlens/py.typed",
                   "envlens/schemas/envlens-snapshot-v1.schema.json",
+                  "envlens/schemas/envlens-snapshot-v2.schema.json",
               )
               for required_member in required_members:
                   if required_member not in names:
@@ -565,11 +566,11 @@ jobs:
               schema_names = sorted(
                   name
                   for name in names
-                  if name.endswith("/schemas/envlens-snapshot-v1.schema.json")
+                  if "/schemas/envlens-snapshot-" in name and name.endswith(".schema.json")
               )
-              if len(schema_names) != 1:
+              if len(schema_names) != 2:
                   raise SystemExit(
-                      "envlens sdist must contain exactly one snapshot schema"
+                      "envlens sdist must contain the v1 and v2 snapshot schemas"
                   )
               pkg_info_names = sorted(
                   name for name in names if name.endswith("/PKG-INFO")
@@ -613,10 +614,10 @@ jobs:
           from importlib.resources import files
           from pathlib import Path
 
-          schema = files("envlens") / "schemas" / "envlens-snapshot-v1.schema.json"
+          schema = files("envlens") / "schemas" / "envlens-snapshot-v2.schema.json"
           Path(sys.argv[1]).write_bytes(schema.read_bytes())
           PY
-          cmp "$wheel_schema" envlens/schemas/envlens-snapshot-v1.schema.json
+          cmp "$wheel_schema" envlens/schemas/envlens-snapshot-v2.schema.json
           "$ENVLENS_PYTHON" - "$wheel_schema" "$artifact_dir/wheel.snapshot.json" <<'PY'
           import json
           import sys
@@ -631,7 +632,7 @@ jobs:
               schema,
               format_checker=FormatChecker(),
           ).validate(snapshot)
-          if snapshot.get("schema_version") != "envlens.snapshot/v1":
+          if snapshot.get("schema_version") != "envlens.snapshot/v2":
               raise SystemExit("clean wheel snapshot schema version mismatch")
           print("clean installed wheel snapshot schema validation: PASS")
           PY
