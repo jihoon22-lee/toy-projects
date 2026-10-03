@@ -1,4 +1,5 @@
 #include "abilens/diff.hpp"
+#include "abilens/model.hpp"
 #include "abilens/elf.hpp"
 #include "abilens/inspect.hpp"
 #include "abilens/report.hpp"
@@ -262,7 +263,8 @@ void test_json_contract(const abilens::ElfReport& parsed) {
     const std::string json = abilens::serialize_report(parsed);
     const abilens::ElfReport round_trip = abilens::parse_report_json(json);
     expect(abilens::serialize_report(round_trip) == json, "report JSON is stable under round trip");
-    expect(round_trip.tool.name == "abilens" && round_trip.tool.version == "0.1.0",
+    expect(round_trip.tool.name == "abilens" &&
+               round_trip.tool.version == abilens::kAbiLensVersion,
            "report preserves the analyzer identity");
     expect_parse_failure(json.substr(0U, json.size() - 1U) +
                              ",\"unexpected\":null}",

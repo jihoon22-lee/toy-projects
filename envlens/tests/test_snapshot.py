@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
+from envlens import __version__
 from envlens import snapshot as snapshot_module
 from envlens.redaction import USER_HOME
 
@@ -404,7 +405,7 @@ def test_real_current_interpreter_smoke_is_structural() -> None:
     )
 
     assert result["schema_version"] == "envlens.snapshot/v1"
-    assert result["producer"] == {"name": "envlens", "version": "0.1.0"}
+    assert result["producer"] == {"name": "envlens", "version": __version__}
     assert result["captured_at"] == "2024-02-03T04:05:06Z"
     assert isinstance(result["source"]["identity"], dict)
     assert isinstance(result["source"]["sysconfig"]["paths"], dict)

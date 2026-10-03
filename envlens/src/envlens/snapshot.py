@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from envlens import __version__
 from envlens.probe import ProbeError, collect_probe
 from envlens.redaction import redact_environment, redact_text, redact_value
 
@@ -332,7 +333,7 @@ def collect_snapshot(
     public_identity = _normalize_identity(identity)
     return {
         "schema_version": "envlens.snapshot/v1",
-        "producer": {"name": "envlens", "version": "0.1.0"},
+        "producer": {"name": "envlens", "version": __version__},
         "captured_at": _timestamp(captured_at),
         "redaction": {"policy": "envlens-redaction/v1", "enabled": redact},
         "source": {

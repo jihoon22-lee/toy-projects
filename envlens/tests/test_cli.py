@@ -13,6 +13,7 @@ from unittest.mock import patch
 import pytest
 
 from envlens import __main__ as cli
+from envlens import __version__
 from envlens.probe import ProbeError
 from envlens.snapshot import SnapshotError
 
@@ -86,7 +87,7 @@ def test_cli_version_exits_successfully() -> None:
         cli.main(["--version"])
 
     assert caught.value.code == 0
-    assert out.getvalue() == "envlens 0.1.0\n"
+    assert out.getvalue() == f"envlens {__version__}\n"
 
 
 def test_cli_reports_probe_errors_as_user_facing_exit_two() -> None:
