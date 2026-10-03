@@ -34,6 +34,9 @@ struct CliOptions {
     std::string load_snapshot;
     std::string compare_snapshot;
     bool duplicates = false;
+    std::vector<std::string> diff_kinds;
+    std::uint64_t diff_min_delta = 0;
+    bool diff_certain_only = false;
     bool help = false;
     bool version = false;
     bool valid = true;
@@ -54,6 +57,10 @@ void printUsage(std::ostream& out) {
         << "  --save-snapshot FILE save the scan as a bounded snapshot\n"
         << "  --load-snapshot FILE inspect a saved snapshot without scanning\n"
         << "  --compare-snapshot FILE compare the scan with a saved snapshot\n"
+        << "  --diff-kind KIND    print only these change kinds (repeatable:\n"
+        << "                      added removed grown shrunk moved uncertain)\n"
+        << "  --diff-min-delta BYTES print only changes of at least BYTES\n"
+        << "  --diff-certain-only print only certain (non-candidate) changes\n"
         << "  --duplicates        inspect duplicate evidence (review-only)\n"
         << "  --help              show this message\n"
         << "  --version           print the version and exit\n";
@@ -142,6 +149,10 @@ bool applyFlag(const std::string& arg, CliOptions& options) {
         options.duplicates = true;
         return true;
     }
+    if (arg == "--diff-certain-only") {
+        options.diff_certain_only = true;
+        return true;
+    }
     return false;
 }
 
@@ -198,6 +209,29 @@ bool applyStringOption(const std::vector<std::string>& args,
             return true;
         }
         options.exclude_patterns.push_back(std::move(pattern));
+        return true;
+    }
+    if (arg == "--diff-kind") {
+        std::string kind;
+        if (!takeStringOption(args, index, kind)) {
+            markInvalid(options, "--diff-kind expects a change kind");
+            return true;
+        }
+        static const char* const kDiffKinds[] = {
+            "added", "removed", "grown", "shrunk", "moved", "uncertain",
+        };
+        if (std::none_of(std::begin(kDiffKinds), std::end(kDiffKinds),
+                         [&](const char* known) { return kind == known; })) {
+            markInvalid(options, "unknown --diff-kind: " + kind);
+            return true;
+        }
+        options.diff_kinds.push_back(std::move(kind));
+        return true;
+    }
+    if (arg == "--diff-min-delta") {
+        if (!takeUint64Option(args, index, options.diff_min_delta)) {
+            markInvalid(options, "--diff-min-delta expects a non-negative integer");
+        }
         return true;
     }
     if (arg == "--save-snapshot") {
@@ -353,6 +387,21 @@ int runLoadedSnapshot(const CliOptions& options) {
     }
 }
 
+diskmap_cli::SnapshotDiffFilter diffFilter(const CliOptions& options) {
+    diskmap_cli::SnapshotDiffFilter filter;
+    for (const std::string& name : options.diff_kinds) {
+        if (name == "added") filter.kinds.insert(diskmap::SnapshotChangeKind::Added);
+        if (name == "removed") filter.kinds.insert(diskmap::SnapshotChangeKind::Removed);
+        if (name == "grown") filter.kinds.insert(diskmap::SnapshotChangeKind::Grown);
+        if (name == "shrunk") filter.kinds.insert(diskmap::SnapshotChangeKind::Shrunk);
+        if (name == "moved") filter.kinds.insert(diskmap::SnapshotChangeKind::Moved);
+        if (name == "uncertain") filter.kinds.insert(diskmap::SnapshotChangeKind::Uncertain);
+    }
+    filter.min_delta_bytes = options.diff_min_delta;
+    filter.certain_only = options.diff_certain_only;
+    return filter;
+}
+
 int runDiskmap(const CliOptions& options) {
     std::optional<diskmap::Snapshot> before;
     if (!options.compare_snapshot.empty()) {
@@ -402,7 +451,8 @@ int runDiskmap(const CliOptions& options) {
         diskmap::SnapshotDiffOptions diffOptions;
         const diskmap::SnapshotDiff diff =
             diskmap::diffSnapshots(*before, current, diffOptions);
-        diskmap_cli::printSnapshotDiff(diff, options.json, std::cout);
+        diskmap_cli::printSnapshotDiff(diff, options.json, std::cout,
+                                       diffFilter(options));
         return 0;
     }
     if (options.duplicates) {
@@ -455,6 +505,13 @@ int main(int argc, char** argv) {
     }
     if (hasLoadedSnapshot && !options.compare_snapshot.empty()) {
         std::cerr << "error: --compare-snapshot requires a live scan path\n";
+        printUsage(std::cerr);
+        return 1;
+    }
+    const bool hasDiffFilter = !options.diff_kinds.empty() ||
+                               options.diff_min_delta > 0 || options.diff_certain_only;
+    if (hasDiffFilter && options.compare_snapshot.empty()) {
+        std::cerr << "error: --diff-* options require --compare-snapshot\n";
         printUsage(std::cerr);
         return 1;
     }
