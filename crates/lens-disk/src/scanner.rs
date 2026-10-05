@@ -119,6 +119,14 @@ impl DiskScanner {
 
             while let Some((parent_id, current_dir, depth)) = stack.pop() {
                 if depth >= self.options.max_depth {
+                    errors.push(format!(
+                        "Depth limit ({}) reached at {:?}; subtree not scanned",
+                        self.options.max_depth, current_dir
+                    ));
+                    if let Some(p) = tree.get_mut(parent_id) {
+                        p.complete = false;
+                        p.error = "depth limit reached".to_string();
+                    }
                     continue;
                 }
 
@@ -230,7 +238,10 @@ impl DiskScanner {
                         };
                         if self.options.one_file_system && check_dev != root_dev {
                             mount_boundary_skipped = true;
-                        } else if !visited_dirs.insert((check_dev, check_ino)) {
+                        } else if !is_symlink && !visited_dirs.insert((check_dev, check_ino)) {
+                            // Only directories that will actually be traversed
+                            // claim their inode; a symlink alias to a real dir
+                            // must not poison the real dir's cycle check.
                             cycle_skipped = true;
                         }
                     }

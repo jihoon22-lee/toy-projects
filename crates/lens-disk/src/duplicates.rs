@@ -34,36 +34,52 @@ impl DuplicateFinder {
         // each inode is hashed at most once.
         use crate::arena::FsKind;
 
-        let mut size_buckets: HashMap<u64, HashMap<(u64, u64), Vec<PathBuf>>> = HashMap::new();
+        // Pass 1: count files by size so only multi-candidate sizes pay the
+        // PathBuf materialization cost.
         let mut file_count_by_size: HashMap<u64, usize> = HashMap::new();
-
         for node in &tree.nodes {
             if node.is_dir || node.metadata.kind == FsKind::Symlink || node.size < self.min_size {
                 continue;
             }
-            let id = (node.metadata.identity.device, node.metadata.identity.inode);
-            let full_path = base_dir.join(&node.rel_path);
             *file_count_by_size.entry(node.size).or_default() += 1;
+        }
+
+        // Pass 2: bucket by size → inode. Filesystems reporting inode 0 get
+        // keyed by path so they fold into singleton buckets instead of one
+        // giant bucket that masks every duplicate.
+        let mut size_buckets: HashMap<u64, HashMap<String, Vec<PathBuf>>> = HashMap::new();
+        for node in &tree.nodes {
+            if node.is_dir || node.metadata.kind == FsKind::Symlink || node.size < self.min_size {
+                continue;
+            }
+            if file_count_by_size.get(&node.size).copied().unwrap_or(0) < 2 {
+                continue;
+            }
+            let id = node.metadata.identity;
+            let key = if id.device == 0 && id.inode == 0 {
+                format!("p:{}", base_dir.join(&node.rel_path).display())
+            } else {
+                format!("i:{}:{}", id.device, id.inode)
+            };
             size_buckets
                 .entry(node.size)
                 .or_default()
-                .entry(id)
+                .entry(key)
                 .or_default()
-                .push(full_path);
+                .push(base_dir.join(&node.rel_path));
         }
 
         let mut groups = Vec::new();
 
         for (size, inode_buckets) in size_buckets {
-            if file_count_by_size.get(&size).copied().unwrap_or(0) < 2 {
-                continue;
-            }
-
             // Step 2: Partial hash (first 4KB) once per unique inode.
-            let mut partial_buckets: HashMap<String, Vec<(u64, u64)>> = HashMap::new();
-            for (id, paths) in &inode_buckets {
+            let mut partial_buckets: HashMap<String, Vec<String>> = HashMap::new();
+            for (key, paths) in &inode_buckets {
                 if let Ok(partial_hash) = Self::compute_partial_hash(&paths[0]) {
-                    partial_buckets.entry(partial_hash).or_default().push(*id);
+                    partial_buckets
+                        .entry(partial_hash)
+                        .or_default()
+                        .push(key.clone());
                 }
             }
 
@@ -73,7 +89,7 @@ impl DuplicateFinder {
                     continue;
                 }
 
-                let mut full_buckets: HashMap<String, Vec<(u64, u64)>> = HashMap::new();
+                let mut full_buckets: HashMap<String, Vec<String>> = HashMap::new();
                 for id in inode_ids {
                     if let Ok(full_hash) = digest_file(&inode_buckets[&id][0]) {
                         full_buckets.entry(full_hash).or_default().push(id);
@@ -106,16 +122,23 @@ impl DuplicateFinder {
             }
         }
 
-        // Sort descending by potential reclaimable bytes
-        groups.sort_by_key(|b| std::cmp::Reverse(b.reclaimable_bytes));
+        // Sort descending by reclaimable bytes, then sha for determinism.
+        groups.sort_by(|a, b| {
+            b.reclaimable_bytes
+                .cmp(&a.reclaimable_bytes)
+                .then_with(|| a.sha256.cmp(&b.sha256))
+        });
 
         Ok(groups)
     }
 
     fn compute_partial_hash(path: &Path) -> std::io::Result<String> {
-        let mut file = File::open(path)?;
-        let mut buffer = [0u8; 4096];
-        let bytes_read = file.read(&mut buffer)?;
-        Ok(digest_bytes(&buffer[..bytes_read]))
+        // `read` may return short reads on FUSE/NFS; loop until EOF or the
+        // 4 KiB window is full so identical files can't land in different
+        // buckets.
+        let file = File::open(path)?;
+        let mut buffer = Vec::with_capacity(4096);
+        file.take(4096).read_to_end(&mut buffer)?;
+        Ok(digest_bytes(&buffer))
     }
 }

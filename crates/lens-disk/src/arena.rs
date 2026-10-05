@@ -142,6 +142,12 @@ impl ArenaTree {
     }
 
     pub fn add_child(&mut self, parent_id: NodeId, child_id: NodeId) {
+        debug_assert!((child_id as usize) < self.nodes.len());
+        // Clear any stale sibling link so re-parenting cannot splice an old
+        // chain (or a cycle) into this parent's list.
+        if let Some(c) = self.nodes.get_mut(child_id as usize) {
+            c.next_sibling = None;
+        }
         let tail = match self.nodes.get(parent_id as usize) {
             Some(p) => p.last_child,
             None => return,
