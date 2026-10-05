@@ -499,6 +499,8 @@ mod tests {
 
 #[cfg(test)]
 mod dyn_tests {
+    use object::Object;
+
     #[test]
     fn test_dynamic_metadata_parsing() {
         // The test binary itself is a dynamically linked ELF with PT_INTERP

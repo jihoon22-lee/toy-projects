@@ -373,17 +373,42 @@ mod tests {
         let tmp = NamedTempFile::new().unwrap();
         create_bundle_archive(tmp.path(), "x", &sample_artifacts(), vec![]).unwrap();
 
-        // Flip a byte inside the archive -> decompression or hash failure.
-        let mut raw = std::fs::read(tmp.path()).unwrap();
-        let idx = raw.len() / 2;
-        raw[idx] ^= 0xFF;
-        std::fs::write(tmp.path(), &raw).unwrap();
-
-        let report = verify_bundle_archive(tmp.path());
-        // Either the archive fails to parse, or it verifies as invalid.
-        if let Ok(rep) = report {
-            assert!(!rep.is_valid);
+        // Rebuild the archive deterministically with one artifact's payload
+        // altered — bit-flipping the compressed stream is unreliable (the
+        // flipped byte can land in tar padding that nothing hashes).
+        let raw = std::fs::read(tmp.path()).unwrap();
+        let mut archive = Archive::new(GzDecoder::new(&raw[..]));
+        let mut rebuilt: Vec<(String, Vec<u8>, tar::Header)> = Vec::new();
+        for entry in archive.entries().unwrap().flatten() {
+            let mut e = entry;
+            let mut data = Vec::new();
+            std::io::Read::read_to_end(&mut e, &mut data).unwrap();
+            let name = e.path().unwrap().to_string_lossy().into_owned();
+            let mut header = Header::new_gnu();
+            header.set_size(data.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            if name == "reports/disk_snapshot.json" {
+                data[0] ^= 0xFF; // tamper the artifact, keep the manifest intact
+            }
+            rebuilt.push((name, data, header));
         }
+        let out = File::create(tmp.path()).unwrap();
+        let gz = GzEncoder::new(out, Compression::default());
+        let mut builder = Builder::new(gz);
+        for (name, data, mut header) in rebuilt {
+            header.set_size(data.len() as u64);
+            header.set_cksum();
+            builder
+                .append_data(&mut header, name, data.as_slice())
+                .unwrap();
+        }
+        builder.into_inner().unwrap().finish().unwrap();
+
+        let report = verify_bundle_archive(tmp.path()).unwrap();
+        assert!(!report.is_valid);
+        assert_eq!(report.tampered_files.len(), 1);
+        assert!(report.tampered_files[0].contains("disk_snapshot"));
     }
 
     #[test]

@@ -191,6 +191,5 @@ pub fn execute_tool(name: &str, args: &Value) -> Result<String, String> {
 }
 
 fn load_sys_units(dir: &Path) -> std::io::Result<BTreeMap<String, SystemdUnit>> {
-    lens_sys::load_units(dir)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+    lens_sys::load_units(dir).map_err(|e| std::io::Error::other(e.to_string()))
 }
