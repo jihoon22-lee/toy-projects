@@ -11,8 +11,8 @@ pub struct ScanOptions {
     pub max_depth: usize,
     pub max_entries: usize,
     pub one_file_system: bool,
-    pub min_size: u64,
     pub exclude_patterns: Vec<String>,
+    /// When true, stat calls for directory entries run on the rayon pool.
     pub parallel: bool,
 }
 
@@ -22,11 +22,27 @@ impl Default for ScanOptions {
             max_depth: 512,
             max_entries: 1_000_000,
             one_file_system: false,
-            min_size: 0,
             exclude_patterns: Vec::new(),
             parallel: false,
         }
     }
+}
+
+/// Result of statting a single directory entry (parallel-friendly).
+struct StatOk {
+    path: PathBuf,
+    name: String,
+    sym_meta: fs::Metadata,
+    target_meta: Option<fs::Metadata>,
+}
+
+enum StatOutcome {
+    Ok(Box<StatOk>),
+    Excluded,
+    Err {
+        path: PathBuf,
+        source: std::io::Error,
+    },
 }
 
 #[derive(Debug)]
@@ -103,6 +119,14 @@ impl DiskScanner {
 
             while let Some((parent_id, current_dir, depth)) = stack.pop() {
                 if depth >= self.options.max_depth {
+                    errors.push(format!(
+                        "Depth limit ({}) reached at {:?}; subtree not scanned",
+                        self.options.max_depth, current_dir
+                    ));
+                    if let Some(p) = tree.get_mut(parent_id) {
+                        p.complete = false;
+                        p.error = "depth limit reached".to_string();
+                    }
                     continue;
                 }
 
@@ -133,51 +157,91 @@ impl DiskScanner {
                 // Deterministic sort by file name
                 entries.sort_by_key(|e| e.file_name());
 
-                for entry in entries {
-                    if scanned_entries >= self.options.max_entries {
-                        truncated = true;
-                        break;
-                    }
-
+                // Stat each entry, optionally on the rayon pool. The serial
+                // path keeps identical semantics; only the syscall latency
+                // is parallelized.
+                let stat_entry = |entry: &fs::DirEntry| -> StatOutcome {
                     let path = entry.path();
                     let name = entry.file_name().to_string_lossy().into_owned();
-
-                    // Check pattern exclusion
                     if self
                         .options
                         .exclude_patterns
                         .iter()
                         .any(|pat| name.contains(pat))
                     {
-                        continue;
+                        return StatOutcome::Excluded;
+                    }
+                    match fs::symlink_metadata(&path) {
+                        Ok(sym_meta) => {
+                            let target = if sym_meta.file_type().is_symlink() {
+                                fs::metadata(&path).ok()
+                            } else {
+                                None
+                            };
+                            StatOutcome::Ok(Box::new(StatOk {
+                                path,
+                                name,
+                                sym_meta,
+                                target_meta: target,
+                            }))
+                        }
+                        Err(e) => StatOutcome::Err { path, source: e },
+                    }
+                };
+                let stats: Vec<StatOutcome> = if self.options.parallel {
+                    use rayon::prelude::*;
+                    entries.par_iter().map(stat_entry).collect()
+                } else {
+                    entries.iter().map(stat_entry).collect()
+                };
+
+                for stat in stats {
+                    if scanned_entries >= self.options.max_entries {
+                        truncated = true;
+                        break;
                     }
 
-                    let sym_meta = match fs::symlink_metadata(&path) {
-                        Ok(m) => m,
-                        Err(e) => {
-                            errors.push(format!("Cannot stat {:?}: {}", path, e));
+                    let (path, name, sym_meta, target) = match stat {
+                        StatOutcome::Ok(stat_ok) => {
+                            let StatOk {
+                                path,
+                                name,
+                                sym_meta,
+                                target_meta,
+                            } = *stat_ok;
+                            (path, name, sym_meta, target_meta)
+                        }
+                        StatOutcome::Excluded => continue,
+                        StatOutcome::Err { path, source } => {
+                            errors.push(format!("Cannot stat {:?}: {}", path, source));
                             continue;
                         }
                     };
 
                     let is_symlink = sym_meta.file_type().is_symlink();
-                    let is_dir = sym_meta.is_dir();
                     let mut cycle_skipped = false;
                     let mut mount_boundary_skipped = false;
                     let mut target_meta: Option<DiskMetadata> = None;
-                    let mut actual_is_dir = is_dir;
+                    let mut actual_is_dir = sym_meta.is_dir();
 
-                    if is_symlink {
-                        if let Ok(target_m) = fs::metadata(&path) {
-                            actual_is_dir = target_m.is_dir();
-                            target_meta = Some(Self::extract_metadata(&target_m));
-                        }
+                    if let Some(target_m) = target {
+                        actual_is_dir = target_m.is_dir();
+                        target_meta = Some(Self::extract_metadata(&target_m));
                     }
 
                     if actual_is_dir {
-                        if self.options.one_file_system && sym_meta.dev() != root_dev {
+                        // For symlinks the traversal boundary is defined by the
+                        // target filesystem, not the link's own inode.
+                        let (check_dev, check_ino) = match &target_meta {
+                            Some(t) => (t.identity.device, t.identity.inode),
+                            None => (sym_meta.dev(), sym_meta.ino()),
+                        };
+                        if self.options.one_file_system && check_dev != root_dev {
                             mount_boundary_skipped = true;
-                        } else if !visited_dirs.insert((sym_meta.dev(), sym_meta.ino())) {
+                        } else if !is_symlink && !visited_dirs.insert((check_dev, check_ino)) {
+                            // Only directories that will actually be traversed
+                            // claim their inode; a symlink alias to a real dir
+                            // must not poison the real dir's cycle check.
                             cycle_skipped = true;
                         }
                     }

@@ -30,6 +30,9 @@ pub struct ParsedUnit {
     pub standard: Option<String>,
     #[serde(default)]
     pub flags: Vec<String>,
+    /// Headers injected via `-include`, treated as includes of the unit file.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub forced_includes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,4 +69,8 @@ pub struct ImpactReport {
     pub target_header: String,
     pub impacted_units: Vec<String>,
     pub total_impacted: usize,
+    /// True when the on-disk include scan hit its file-count bound — the
+    /// transitive graph may be incomplete.
+    #[serde(default)]
+    pub scan_truncated: bool,
 }

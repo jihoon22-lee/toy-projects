@@ -17,7 +17,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.4.2"
+version = "0.4.3"
 edition = "2021"
 authors = ["Jihoon Lee"]
 license = "MIT OR Apache-2.0"
@@ -29,16 +29,18 @@ serde_json = { version = "1.0", features = ["preserve_order"] }
 sha2 = "0.10"
 thiserror = "2.0"
 memmap2 = "0.9"
+memchr = "2.7"
 rayon = "1.10"
 walkdir = "2.5"
 quick-xml = "0.37"
 clap = { version = "4.5", features = ["derive"] }
 object = { version = "0.36", default-features = false, features = ["read_core", "elf"] }
-gimli = { version = "0.31", default-features = false, features = ["read"] }
+gimli = { version = "0.31", features = ["read", "endian-reader"] }
 flate2 = "1.0"
 tar = "0.4"
 regex = "1.11"
 crossterm = "0.28"
 ratatui = "0.29"
+jiff = "0.2"
 cpp_demangle = "0.4"
 rustc-demangle = "0.1"

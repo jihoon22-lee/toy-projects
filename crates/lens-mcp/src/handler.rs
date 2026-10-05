@@ -9,7 +9,7 @@ use lens_core::to_deterministic_pretty;
 use lens_disk::{DiskScanner, DuplicateFinder, ScanOptions, SnapshotV2};
 use lens_env::inspect_venv;
 use lens_log::{parse_line, LogFilter, LogIndexer, LogLevel};
-use lens_sys::{parse_unit_content, OrderingGraph, SystemdUnit};
+use lens_sys::{OrderingGraph, SystemdUnit};
 use lens_trace::TraceAnalyzer;
 
 pub fn execute_tool(name: &str, args: &Value) -> Result<String, String> {
@@ -30,14 +30,16 @@ pub fn execute_tool(name: &str, args: &Value) -> Result<String, String> {
             } else {
                 let children_count = res.tree.children_ids(res.root_id).len();
                 let root = &res.tree.nodes[res.root_id as usize];
-                Ok(serde_json::to_string_pretty(&serde_json::json!({
+                serde_json::to_string_pretty(&serde_json::json!({
                     "path": path_str,
                     "scanned_entries": res.scanned_entries,
                     "logical_bytes": root.size,
                     "allocated_bytes": root.allocated_size,
                     "children_count": children_count,
+                    "complete": res.complete,
+                    "errors": res.errors,
                 }))
-                .unwrap())
+                .map_err(|e| e.to_string())
             }
         }
         "lens_disk_duplicates" => {
@@ -79,23 +81,38 @@ pub fn execute_tool(name: &str, args: &Value) -> Result<String, String> {
                 filter = filter.with_query(q);
             }
             if let Some(lvl) = args.get("min_level").and_then(|v| v.as_str()) {
-                filter = filter.with_min_level(LogLevel::parse(lvl));
+                let parsed = LogLevel::parse(lvl);
+                if parsed == LogLevel::Unknown && !lvl.eq_ignore_ascii_case("unknown") {
+                    return Err(format!(
+                        "Invalid 'min_level' {lvl:?}; expected trace|debug|info|warn|error|fatal"
+                    ));
+                }
+                filter = filter.with_min_level(parsed);
             }
 
+            // The scan is capped at 1000 lines — surface the bound so callers
+            // don't read a partial result as complete.
+            const MAX_SCANNED: usize = 1000;
             let mut matches = Vec::new();
-            for idx in 0..indexer.len().min(1000) {
+            for idx in 0..indexer.len().min(MAX_SCANNED) {
                 if let Some(line) = indexer.get_line(idx) {
                     let record = parse_line(line, idx + 1);
                     if filter.matches(&record) {
                         matches.push(serde_json::json!({
                             "line": record.line_number,
-                            "level": format!("{:?}", record.level),
+                            "level": record.level.as_str(),
                             "raw": record.raw,
                         }));
                     }
                 }
             }
-            Ok(serde_json::to_string_pretty(&matches).unwrap())
+            serde_json::to_string_pretty(&serde_json::json!({
+                "matches": matches,
+                "scanned_lines": indexer.len().min(MAX_SCANNED),
+                "total_lines": indexer.len(),
+                "truncated": indexer.len() > MAX_SCANNED,
+            }))
+            .map_err(|e| e.to_string())
         }
         "lens_trace_analyze" => {
             let path_str = args
@@ -115,12 +132,12 @@ pub fn execute_tool(name: &str, args: &Value) -> Result<String, String> {
             let units = load_sys_units(Path::new(dir_str)).map_err(|e| e.to_string())?;
             let graph = OrderingGraph::build(&units);
             let cycles = graph.find_cycles();
-            Ok(serde_json::to_string_pretty(&serde_json::json!({
+            serde_json::to_string_pretty(&serde_json::json!({
                 "scanned_units": units.len(),
                 "cycle_count": cycles.len(),
                 "cycles": cycles,
             }))
-            .unwrap())
+            .map_err(|e| e.to_string())
         }
         "lens_build_impact" => {
             let file_str = args
@@ -137,13 +154,13 @@ pub fn execute_tool(name: &str, args: &Value) -> Result<String, String> {
             let mut graph = ImpactGraph::new();
             for entry in &entries {
                 let unit = parse_command_entry(entry);
-                if let Ok(src) = fs::read_to_string(&unit.file) {
-                    for inc in lens_build::extract_includes(&src) {
-                        graph.add_unit_include(&unit.file, &inc);
-                    }
-                }
+                graph.add_translation_unit(&unit);
             }
-            let report = graph.compute_impact(header_str);
+            let cwd = std::env::current_dir()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| "/".to_string());
+            let target = lens_build::normalize_path(header_str, &cwd);
+            let report = graph.compute_impact(&target);
             to_deterministic_pretty(&report).map_err(|e| e.to_string())
         }
         "lens_env_check" => {
@@ -152,12 +169,12 @@ pub fn execute_tool(name: &str, args: &Value) -> Result<String, String> {
                 .and_then(|v| v.as_str())
                 .ok_or("Missing 'venv_path' argument")?;
             let venv = inspect_venv(Path::new(path_str)).map_err(|e| e.to_string())?;
-            Ok(serde_json::to_string_pretty(&serde_json::json!({
+            serde_json::to_string_pretty(&serde_json::json!({
                 "python_version": venv.python_version,
                 "packages_count": venv.packages.len(),
                 "missing_dependencies": venv.missing_dependencies,
             }))
-            .unwrap())
+            .map_err(|e| e.to_string())
         }
         "lens_net_inspect" => {
             let proc_dir = args.get("proc_dir").and_then(|v| v.as_str()).map(Path::new);
@@ -191,22 +208,5 @@ pub fn execute_tool(name: &str, args: &Value) -> Result<String, String> {
 }
 
 fn load_sys_units(dir: &Path) -> std::io::Result<BTreeMap<String, SystemdUnit>> {
-    let mut units = BTreeMap::new();
-    if dir.is_dir() {
-        for entry in fs::read_dir(dir)?.flatten() {
-            let p = entry.path();
-            if p.is_file() {
-                if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-                    if name.ends_with(".service") || name.ends_with(".target") {
-                        if let Ok(content) = fs::read_to_string(&p) {
-                            let unit =
-                                parse_unit_content(&content, name, Some(&p.to_string_lossy()));
-                            units.insert(name.to_string(), unit);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    Ok(units)
+    lens_sys::load_units(dir).map_err(|e| std::io::Error::other(e.to_string()))
 }

@@ -33,6 +33,11 @@ def assemble(destination: Path) -> None:
                     for source in tree.rglob('*'):
                         if source.is_file() and not source.is_symlink() and source.stat().st_size <= 4 * 1024 * 1024:
                             copies[source] = destination / source.relative_to(ROOT)
+    # crates/ itself is not a product directory, but its consolidated README
+    # is the canonical crate index for the site.
+    consolidated = CRATES_DIR / 'README.md'
+    if consolidated.is_file():
+        copies[consolidated] = destination / 'crates' / 'index.md'
     repository = os.environ.get('GITHUB_REPOSITORY', 'jihoon22-lee/toy-projects')
     revision = os.environ.get('GITHUB_SHA', 'main')
     for source, target in copies.items():

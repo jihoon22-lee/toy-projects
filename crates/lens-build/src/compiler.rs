@@ -16,6 +16,7 @@ pub fn parse_command_entry(entry: &CompileCommandEntry) -> ParsedUnit {
     let mut output = entry.output.clone();
     let mut standard = None;
     let mut flags = Vec::new();
+    let mut forced_includes = Vec::new();
 
     let mut iter = args.into_iter();
     if let Some(comp) = iter.next() {
@@ -35,6 +36,45 @@ pub fn parse_command_entry(entry: &CompileCommandEntry) -> ParsedUnit {
             }
         } else if let Some(inc) = arg.strip_prefix("-isystem") {
             includes.push(normalize_path(inc, &entry.directory));
+        } else if arg == "-iquote" || arg == "-idirafter" {
+            if let Some(inc) = iter.next() {
+                includes.push(normalize_path(&inc, &entry.directory));
+            }
+        } else if let Some(inc) = arg
+            .strip_prefix("-iquote")
+            .or_else(|| arg.strip_prefix("-idirafter"))
+        {
+            if !inc.is_empty() {
+                includes.push(normalize_path(inc, &entry.directory));
+            }
+        } else if arg == "-include" {
+            if let Some(inc) = iter.next() {
+                forced_includes.push(inc);
+            }
+        } else if let Some(inc) = arg.strip_prefix("-include") {
+            if !inc.is_empty() {
+                forced_includes.push(inc.to_string());
+            } else {
+                flags.push(arg);
+            }
+        } else if arg == "-imacros" {
+            // -imacros works like -include (macro-only forced include);
+            // the header still participates in impact analysis.
+            if let Some(inc) = iter.next() {
+                forced_includes.push(inc);
+            }
+        } else if let Some(inc) = arg.strip_prefix("-imacros") {
+            if !inc.is_empty() {
+                forced_includes.push(inc.to_string());
+            }
+        } else if arg == "-isysroot" {
+            // Consumes a path argument; sysroot prefixing of include paths is
+            // not modelled, but the value must not leak into `flags`.
+            iter.next();
+        } else if let Some(root) = arg.strip_prefix("-isysroot") {
+            if root.is_empty() {
+                flags.push(arg);
+            }
         } else if arg == "-D" {
             if let Some(def) = iter.next() {
                 defines.push(def);
@@ -56,8 +96,10 @@ pub fn parse_command_entry(entry: &CompileCommandEntry) -> ParsedUnit {
         }
     }
 
-    includes.sort();
-    includes.dedup();
+    // Deduplicate while preserving order — `-I` search order is semantic
+    // (first match wins), so sorting would mis-resolve headers shadowed
+    // across multiple include dirs.
+    dedup_preserve(&mut includes);
     defines.sort();
     defines.dedup();
     flags.sort();
@@ -72,7 +114,14 @@ pub fn parse_command_entry(entry: &CompileCommandEntry) -> ParsedUnit {
         output,
         standard,
         flags,
+        forced_includes,
     }
+}
+
+/// Remove duplicates while keeping first-occurrence order.
+fn dedup_preserve(items: &mut Vec<String>) {
+    let mut seen = std::collections::HashSet::new();
+    items.retain(|i| seen.insert(i.clone()));
 }
 
 pub fn split_command_line(cmd: &str) -> Vec<String> {
@@ -131,7 +180,9 @@ pub fn split_command_line(cmd: &str) -> Vec<String> {
     args
 }
 
-fn normalize_path(path: &str, base_dir: &str) -> String {
+/// Normalize `path` against `base_dir` and collapse `.`/`..` components
+/// without touching the filesystem (no symlink resolution).
+pub fn normalize_path(path: &str, base_dir: &str) -> String {
     let p = Path::new(path);
     if p.is_absolute() {
         clean_path(p)
@@ -141,15 +192,20 @@ fn normalize_path(path: &str, base_dir: &str) -> String {
     }
 }
 
-fn clean_path(path: &Path) -> String {
+/// Collapse `.`/`..` components of an already-joined path without touching
+/// the filesystem. `..` never pops past the filesystem root.
+pub(crate) fn clean_path(path: &Path) -> String {
     use std::path::Component;
     let mut components = Vec::new();
     for comp in path.components() {
         match comp {
             Component::CurDir => {}
             Component::ParentDir => {
-                if !components.is_empty() {
-                    components.pop();
+                match components.last() {
+                    Some(Component::RootDir) | None => {} // can't go above /
+                    _ => {
+                        components.pop();
+                    }
                 }
             }
             c => components.push(c),

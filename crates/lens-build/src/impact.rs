@@ -1,5 +1,11 @@
-use crate::model::ImpactReport;
+use crate::model::{ImpactReport, ParsedUnit};
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
+use std::path::Path;
+
+/// Upper bound on files scanned while resolving transitive includes for a
+/// single translation unit — guards against include cycles blowing up the
+/// traversal on pathological trees.
+const MAX_SCANNED_FILES: usize = 4096;
 
 #[derive(Debug, Clone, Default)]
 pub struct ImpactGraph {
@@ -7,6 +13,9 @@ pub struct ImpactGraph {
     pub header_to_units: BTreeMap<String, BTreeSet<String>>,
     /// header -> set of headers it includes
     pub header_to_headers: BTreeMap<String, BTreeSet<String>>,
+    /// True when the on-disk include scan hit MAX_SCANNED_FILES — results
+    /// may be incomplete.
+    pub scan_truncated: bool,
 }
 
 impl ImpactGraph {
@@ -26,6 +35,60 @@ impl ImpactGraph {
             .entry(parent_header.to_string())
             .or_default()
             .insert(included_header.to_string());
+    }
+
+    /// Scan `unit`'s source file on disk, resolve every `#include` against the
+    /// unit's search paths, add direct unit->header edges, then recursively
+    /// scan resolved headers to build the header->header transitive graph.
+    pub fn add_translation_unit(&mut self, unit: &ParsedUnit) {
+        let include_dirs: Vec<&str> = unit.includes.iter().map(|s| s.as_str()).collect();
+        let mut visited: HashSet<String> = HashSet::new();
+        let mut queue: VecDeque<String> = VecDeque::new();
+        queue.push_back(unit.file.clone());
+        visited.insert(unit.file.clone());
+
+        // -include headers behave as if the source included them first.
+        // Per GCC they are searched from the preprocessor's working
+        // directory (compile_commands `directory`), not the source's dir.
+        let compile_dir = Path::new(&unit.directory);
+        for inc in &unit.forced_includes {
+            if let Some(resolved) = resolve_include(inc, true, compile_dir, &include_dirs) {
+                self.add_unit_include(&unit.file, &resolved);
+                if visited.insert(resolved.clone()) {
+                    queue.push_back(resolved);
+                }
+            }
+        }
+
+        let mut scanned = 0usize;
+        while let Some(current) = queue.pop_front() {
+            if scanned >= MAX_SCANNED_FILES {
+                self.scan_truncated = true;
+                break;
+            }
+            let Ok(content) = std::fs::read_to_string(&current) else {
+                continue;
+            };
+            scanned += 1;
+            let anchor = Path::new(&current)
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_default();
+            for inc in extract_includes(&content) {
+                let Some(resolved) = resolve_include(&inc.name, inc.quoted, &anchor, &include_dirs)
+                else {
+                    continue;
+                };
+                if current == unit.file {
+                    self.add_unit_include(&unit.file, &resolved);
+                } else {
+                    self.add_header_include(&current, &resolved);
+                }
+                if visited.insert(resolved.clone()) {
+                    queue.push_back(resolved);
+                }
+            }
+        }
     }
 
     /// Find all translation units impacted by changes to `target_header`.
@@ -77,30 +140,142 @@ impl ImpactGraph {
             target_header: target_header.to_string(),
             impacted_units: impacted_vec,
             total_impacted: total,
+            scan_truncated: self.scan_truncated,
         }
     }
 }
 
-pub fn extract_includes(source_code: &str) -> Vec<String> {
+/// An `#include` directive with its spelling preserved: `quoted` is true for
+/// `"..."` form, false for `<...>` form.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IncludeDirective {
+    pub name: String,
+    pub quoted: bool,
+}
+
+pub fn extract_includes(source_code: &str) -> Vec<IncludeDirective> {
     let mut includes = Vec::new();
+    let mut in_block_comment = false;
 
     for line in source_code.lines() {
+        let line = strip_comments(line, &mut in_block_comment);
         let trimmed = line.trim();
-        if let Some(after_hash) = trimmed.strip_prefix('#') {
-            let after_hash = after_hash.trim();
-            if let Some(rest) = after_hash.strip_prefix("include") {
-                let rest = rest.trim();
-                if (rest.starts_with('"') && rest.ends_with('"'))
-                    || (rest.starts_with('<') && rest.ends_with('>'))
-                {
-                    let inner = &rest[1..rest.len() - 1].trim();
-                    if !inner.is_empty() {
-                        includes.push(inner.to_string());
-                    }
-                }
+        let Some(after_hash) = trimmed.strip_prefix('#') else {
+            continue;
+        };
+        let after_hash = after_hash.trim();
+        let Some(rest) = after_hash
+            .strip_prefix("include_next")
+            .or_else(|| after_hash.strip_prefix("include"))
+        else {
+            continue;
+        };
+        let rest = rest.trim();
+        // Take the first "..." or <...> span — anything after it (trailing
+        // comments were already stripped) is ignored.
+        let (quoted, inner) = if let Some(start) = rest.find('"') {
+            match rest[start + 1..].find('"') {
+                Some(end) => (true, &rest[start + 1..start + 1 + end]),
+                None => continue,
             }
+        } else if let Some(start) = rest.find('<') {
+            match rest[start + 1..].find('>') {
+                Some(end) => (false, &rest[start + 1..start + 1 + end]),
+                None => continue,
+            }
+        } else {
+            continue;
+        };
+        let inner = inner.trim();
+        if !inner.is_empty() {
+            includes.push(IncludeDirective {
+                name: inner.to_string(),
+                quoted,
+            });
         }
     }
 
     includes
+}
+
+/// Remove `//` and `/* ... */` comments from one line, tracking block-comment
+/// state across lines. String and char literals are respected so a `"//"` in
+/// code is not mistaken for a comment.
+fn strip_comments(line: &str, in_block: &mut bool) -> String {
+    let bytes = line.as_bytes();
+    let mut out = String::with_capacity(line.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if *in_block {
+            if i + 1 < bytes.len() && bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                *in_block = false;
+                i += 2;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+        match bytes[i] {
+            b'"' | b'\'' => {
+                let quote = bytes[i];
+                out.push(quote as char);
+                i += 1;
+                while i < bytes.len() && bytes[i] != quote {
+                    if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                        out.push(bytes[i] as char);
+                        out.push(bytes[i + 1] as char);
+                        i += 2;
+                    } else {
+                        out.push(bytes[i] as char);
+                        i += 1;
+                    }
+                }
+                if i < bytes.len() {
+                    out.push(bytes[i] as char);
+                    i += 1;
+                }
+            }
+            b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'/' => break,
+            b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'*' => {
+                *in_block = true;
+                i += 2;
+            }
+            c => {
+                out.push(c as char);
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+/// Resolve an include name to an existing on-disk path. The returned path is
+/// normalized (`./`/`..` collapsed) so the same header reached via different
+/// spellings shares a single graph key.
+///
+/// Quoted includes search `anchor_dir` first (per the C/C++ standard that is
+/// the including file's directory; for `-include` it is the compiler's
+/// working directory), then the `-I`/`-isystem` search dirs; angle-bracket
+/// includes only search the search dirs. Returns `None` when the header
+/// cannot be found — system headers outside the project are expected to
+/// miss.
+fn resolve_include(
+    name: &str,
+    quoted: bool,
+    anchor_dir: &Path,
+    include_dirs: &[&str],
+) -> Option<String> {
+    if quoted {
+        let candidate = anchor_dir.join(name);
+        if candidate.is_file() {
+            return Some(crate::compiler::clean_path(&candidate));
+        }
+    }
+    for dir in include_dirs {
+        let candidate = Path::new(dir).join(name);
+        if candidate.is_file() {
+            return Some(crate::compiler::clean_path(&candidate));
+        }
+    }
+    None
 }

@@ -51,6 +51,21 @@ impl LogFilter {
         self
     }
 
+    /// Match a raw line without constructing a `LogRecordView` when the
+    /// configured filters allow it: the substring check alone can reject, and
+    /// a no-op filter accepts everything without parsing.
+    pub fn matches_line(&self, raw: &str, line_number: usize) -> bool {
+        if let Some(needle_lower) = &self.query_lower {
+            if !contains_insensitive(raw, needle_lower) {
+                return false;
+            }
+        }
+        if self.min_level.is_none() && self.source.is_none() {
+            return true;
+        }
+        self.matches(&crate::parse_line(raw, line_number))
+    }
+
     pub fn matches(&self, record: &LogRecordView) -> bool {
         if let Some(min_lvl) = self.min_level {
             if record.level != LogLevel::Unknown && record.level < min_lvl {

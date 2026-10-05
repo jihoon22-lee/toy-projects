@@ -13,7 +13,6 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 object = { workspace = true }
 gimli = { workspace = true }
-flate2 = { workspace = true }
 cpp_demangle = { workspace = true }
 rustc-demangle = { workspace = true }
 

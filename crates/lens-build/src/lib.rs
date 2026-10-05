@@ -3,9 +3,9 @@ pub mod diff;
 pub mod impact;
 pub mod model;
 
-pub use compiler::{parse_command_entry, split_command_line};
+pub use compiler::{normalize_path, parse_command_entry, split_command_line};
 pub use diff::diff_compilations;
-pub use impact::{extract_includes, ImpactGraph};
+pub use impact::{extract_includes, ImpactGraph, IncludeDirective};
 pub use model::*;
 
 #[cfg(test)]
@@ -71,6 +71,144 @@ mod tests {
     }
 
     #[test]
+    fn test_add_translation_unit_resolves_on_disk_includes() {
+        let root = std::env::temp_dir().join(format!("lensbuild-{}", std::process::id()));
+        let inc_dir = root.join("include");
+        let src_dir = root.join("src");
+        std::fs::create_dir_all(&inc_dir).unwrap();
+        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::write(inc_dir.join("config.h"), "#define X 1\n").unwrap();
+        std::fs::write(src_dir.join("app.h"), "#include \"config.h\"\n").unwrap();
+        std::fs::write(src_dir.join("main.cpp"), "#include \"app.h\"\n").unwrap();
+        std::fs::write(src_dir.join("core.cpp"), "#include <config.h>\n").unwrap();
+
+        let mk = |file: &str, args: Vec<&str>| {
+            let entry = CompileCommandEntry {
+                directory: root.to_string_lossy().into_owned(),
+                file: src_dir.join(file).to_string_lossy().into_owned(),
+                command: None,
+                arguments: Some(
+                    std::iter::once("c++".to_string())
+                        .chain(args.into_iter().map(String::from))
+                        .collect(),
+                ),
+                output: None,
+            };
+            parse_command_entry(&entry)
+        };
+        let inc_arg = format!("-I{}", inc_dir.display());
+        let u_main = mk("main.cpp", vec![inc_arg.as_str()]);
+        let u_core = mk("core.cpp", vec![inc_arg.as_str()]);
+
+        let mut graph = ImpactGraph::new();
+        graph.add_translation_unit(&u_main);
+        graph.add_translation_unit(&u_core);
+
+        // Transitive: config.h -> app.h -> main.cpp; direct: config.h -> core.cpp
+        let config_key = inc_dir.join("config.h").to_string_lossy().into_owned();
+        let report = graph.compute_impact(&config_key);
+        assert_eq!(report.total_impacted, 2);
+        let main_key = src_dir.join("main.cpp").to_string_lossy().into_owned();
+        let core_key = src_dir.join("core.cpp").to_string_lossy().into_owned();
+        assert!(report.impacted_units.contains(&main_key));
+        assert!(report.impacted_units.contains(&core_key));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_include_resolution_normalizes_dotdot_and_preserves_order() {
+        let root = std::env::temp_dir().join(format!("lensbuild-dd-{}", std::process::id()));
+        // Layout: root/proj/inc/a_shadow.h? no — want ../ include from src/.
+        let src = root.join("proj/src");
+        let hdr = root.join("proj");
+        std::fs::create_dir_all(&src).unwrap();
+        // common.h lives next to src/, included as "../common.h"
+        std::fs::write(hdr.join("common.h"), "#define C 1\n").unwrap();
+        std::fs::write(
+            src.join("m.c"),
+            "#include \"../common.h\" // trailing comment\n/*\n#include \"dead.h\"\n*/\n",
+        )
+        .unwrap();
+
+        let entry = CompileCommandEntry {
+            directory: root.to_string_lossy().into_owned(),
+            file: src.join("m.c").to_string_lossy().into_owned(),
+            command: None,
+            arguments: Some(vec!["cc".to_string()]),
+            output: None,
+        };
+        let unit = parse_command_entry(&entry);
+        let mut graph = ImpactGraph::new();
+        graph.add_translation_unit(&unit);
+
+        // The canonical path must be the graph key — a `..`-spelled include
+        // resolves to the same key the CLI's normalized --header produces.
+        let canonical = hdr.join("common.h").to_string_lossy().into_owned();
+        let report = graph.compute_impact(&canonical);
+        assert_eq!(report.total_impacted, 1);
+        // The commented-out include must NOT have produced an edge.
+        assert!(graph.header_to_units.keys().all(|k| !k.contains("dead.h")));
+        // Trailing `//` comment didn't hide the include.
+        assert!(graph.header_to_units.contains_key(&canonical));
+
+        // -I order is preserved (first match wins).
+        let a = root.join("order/a");
+        let b = root.join("order/b");
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        let entry = CompileCommandEntry {
+            directory: root.to_string_lossy().into_owned(),
+            file: src.join("m.c").to_string_lossy().into_owned(),
+            command: None,
+            arguments: Some(vec![
+                "cc".to_string(),
+                format!("-I{}", b.display()),
+                format!("-I{}", a.display()),
+            ]),
+            output: None,
+        };
+        let unit = parse_command_entry(&entry);
+        assert_eq!(
+            unit.includes,
+            vec![
+                b.to_string_lossy().into_owned(),
+                a.to_string_lossy().into_owned()
+            ]
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_extended_include_flags() {
+        // -iquote/-idirafter contribute include dirs (both separate-arg and
+        // joined forms), -imacros contributes a forced include, and
+        // -isysroot consumes its value without leaking into `flags`.
+        let entry = CompileCommandEntry {
+            directory: "/p".to_string(),
+            file: "m.c".to_string(),
+            command: None,
+            arguments: Some(vec![
+                "cc".to_string(),
+                "-iquote".to_string(),
+                "q".to_string(),
+                "-idirafterD".to_string(),
+                "-imacros".to_string(),
+                "pre.h".to_string(),
+                "-isysroot".to_string(),
+                "/sdk".to_string(),
+                "-Wall".to_string(),
+            ]),
+            output: None,
+        };
+        let unit = parse_command_entry(&entry);
+        assert_eq!(unit.includes, vec!["/p/q".to_string(), "/p/D".to_string()]);
+        assert_eq!(unit.forced_includes, vec!["pre.h".to_string()]);
+        assert_eq!(unit.flags, vec!["-Wall".to_string()]);
+    }
+
+    #[test]
     fn test_diff_compilations() {
         let u1 = ParsedUnit {
             file: "/project/src/main.cpp".to_string(),
@@ -81,6 +219,7 @@ mod tests {
             output: Some("main.o".to_string()),
             standard: Some("c++20".to_string()),
             flags: vec!["-O0".to_string()],
+            forced_includes: Vec::new(),
         };
 
         let u2 = ParsedUnit {
@@ -92,6 +231,7 @@ mod tests {
             output: Some("main.o".to_string()),
             standard: Some("c++20".to_string()),
             flags: vec!["-O3".to_string()],
+            forced_includes: Vec::new(),
         };
 
         let diff = diff_compilations(&[u1], &[u2]);

@@ -30,6 +30,12 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Run All Workspace Tests
         run: cargo test --workspace --verbose
+      - name: Install Python Check Dependencies
+        run: pip install jsonschema pyyaml
+      - name: Check Documentation Consistency
+        run: python3 .github/scripts/check_docs.py
+      - name: Test Release Flow Scripts
+        run: python3 .github/scripts/test_release_flow.py
 
   build-release:
     name: Build Release Binaries

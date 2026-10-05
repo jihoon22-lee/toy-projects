@@ -158,7 +158,7 @@ pub fn list_tools() -> Vec<McpTool> {
         McpTool {
             name: "lens_bundle_verify".to_string(),
             description:
-                "Cryptographically verify the SHA-256 integrity and authenticity of a .lens forensic archive against its manifest."
+                "Verify a .lens forensic archive's contents against the SHA-256 checksums in its embedded manifest."
                     .to_string(),
             input_schema: serde_json::json!({
                 "type": "object",

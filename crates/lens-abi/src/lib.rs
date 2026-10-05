@@ -5,16 +5,18 @@
 //! Re-architects and replaces legacy `abilens` with:
 //! - **High-Performance ELF Parser ([`elf::inspect_elf`])**: Zero-copy parsing via `object`.
 //! - **Unbounded Version Namespaces**: Automatically extracts dynamic symbol version definitions beyond `GLIBC*`.
-//! - **3-State Compatibility Engine ([`diff::diff_reports`])**: Evaluates `compatible`, `incompatible`, and `unknown` fail-closed status.
-//! - **Schema V2 ([`model::REPORT_SCHEMA_V2`], [`model::DIFF_SCHEMA_V2`])**: 100% compliant with existing contracts.
+//! - **3-State Compatibility Engine ([`diff::diff_reports`])**: Evaluates `compatible`, `incompatible`, and `uncertain` fail-closed status.
+//! - **DWARF Type Surface ([`dwarf::extract_dwarf_types`])**: Extracts declared type names from `.debug_info` when present.
+//! - **Schemas ([`model::REPORT_SCHEMA_V2`], [`model::DIFF_SCHEMA_V3`])**: report stays `abilens.report/v2`; the diff schema is v3.
 
 pub mod diff;
+pub mod dwarf;
 pub mod elf;
 pub mod model;
 
 pub use diff::diff_reports;
 pub use elf::inspect_elf;
-pub use model::{DiffReport, ElfReport, InputStatus, DIFF_SCHEMA_V2, REPORT_SCHEMA_V2};
+pub use model::{DiffReport, ElfReport, InputStatus, DIFF_SCHEMA_V3, REPORT_SCHEMA_V2};
 
 #[cfg(test)]
 mod tests {
@@ -57,8 +59,34 @@ mod tests {
         let diff = diff_reports(&report_a, &report_b);
         assert!(diff.changed);
         assert!(!diff.compatible);
-        assert_eq!(diff.compatibility, "incompatible");
+        assert_eq!(diff.compatibility, lens_core::Compatibility::Incompatible);
         assert_eq!(diff.symbols.removed, vec!["func_a"]);
         assert_eq!(diff.symbols.added, vec!["func_c"]);
+    }
+
+    #[test]
+    fn test_diff_version_requirements() {
+        let fake = b"\x7fELF\x02\x01\x01\0\0\0\0\0\0\0\0\0\x02\0\x3e\0\x01\0\0\0\0\0\0\0\0\0\0\0";
+        let mut a = inspect_elf("lib_v1.so", fake);
+        a.status = InputStatus::Valid;
+        a.abi.versions = vec![model::VersionRequirement {
+            library: "libc.so.6".to_string(),
+            namespace: "libc.so.6".to_string(),
+            version: "GLIBC_2.17".to_string(),
+        }];
+        let mut b = a.clone();
+        b.abi.versions.push(model::VersionRequirement {
+            library: "libc.so.6".to_string(),
+            namespace: "libc.so.6".to_string(),
+            version: "GLIBC_2.38".to_string(),
+        });
+
+        let diff = diff_reports(&a, &b);
+        assert!(diff.changed);
+        assert_eq!(diff.compatibility, lens_core::Compatibility::Uncertain);
+        assert_eq!(diff.abi.added, vec!["libc.so.6:GLIBC_2.38"]);
+        // status strings share the kebab-case vocabulary of ElfReport.status
+        assert_eq!(diff.left_status, "valid");
+        assert_eq!(diff.schema, "abilens.diff/v3");
     }
 }

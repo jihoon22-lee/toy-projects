@@ -71,6 +71,9 @@ pub struct FsNode {
     pub allocated_size_known: bool,
     pub reclaimable_size_known: bool,
     pub first_child: Option<NodeId>,
+    /// Tail of the child list so `add_child` is O(1) instead of walking
+    /// every sibling for large directories.
+    pub last_child: Option<NodeId>,
     pub next_sibling: Option<NodeId>,
     pub metadata: DiskMetadata,
     pub target_metadata: Option<DiskMetadata>,
@@ -94,6 +97,7 @@ impl FsNode {
             allocated_size_known: true,
             reclaimable_size_known: true,
             first_child: None,
+            last_child: None,
             next_sibling: None,
             metadata: DiskMetadata::default(),
             target_metadata: None,
@@ -138,20 +142,21 @@ impl ArenaTree {
     }
 
     pub fn add_child(&mut self, parent_id: NodeId, child_id: NodeId) {
-        if let Some(parent) = self.nodes.get_mut(parent_id as usize) {
-            match parent.first_child {
-                None => {
-                    parent.first_child = Some(child_id);
-                }
-                Some(first) => {
-                    let mut curr = first;
-                    while let Some(sibling) = self.nodes[curr as usize].next_sibling {
-                        curr = sibling;
-                    }
-                    self.nodes[curr as usize].next_sibling = Some(child_id);
-                }
-            }
+        debug_assert!((child_id as usize) < self.nodes.len());
+        // Clear any stale sibling link so re-parenting cannot splice an old
+        // chain (or a cycle) into this parent's list.
+        if let Some(c) = self.nodes.get_mut(child_id as usize) {
+            c.next_sibling = None;
         }
+        let tail = match self.nodes.get(parent_id as usize) {
+            Some(p) => p.last_child,
+            None => return,
+        };
+        match tail {
+            None => self.nodes[parent_id as usize].first_child = Some(child_id),
+            Some(t) => self.nodes[t as usize].next_sibling = Some(child_id),
+        }
+        self.nodes[parent_id as usize].last_child = Some(child_id);
     }
 
     pub fn children_ids(&self, parent_id: NodeId) -> Vec<NodeId> {
@@ -167,23 +172,37 @@ impl ArenaTree {
     }
 
     /// Aggregates sizes post-order from leaves up to the root.
+    /// Iterative so arbitrarily deep trees cannot overflow the call stack.
     pub fn aggregate_sizes(&mut self, root_id: NodeId) -> u64 {
-        let children = self.children_ids(root_id);
-        let mut total_size = 0u64;
-        let mut total_alloc = 0u64;
-
-        for child_id in children {
-            let child_size = self.aggregate_sizes(child_id);
-            total_size = total_size.saturating_add(child_size);
-            total_alloc = total_alloc.saturating_add(self.nodes[child_id as usize].allocated_size);
+        let mut sizes = vec![0u64; self.nodes.len()];
+        // (node, children_processed)
+        let mut stack: Vec<(NodeId, bool)> = vec![(root_id, false)];
+        while let Some((id, processed)) = stack.pop() {
+            if !processed {
+                stack.push((id, true));
+                let mut child = self.nodes[id as usize].first_child;
+                while let Some(c) = child {
+                    stack.push((c, false));
+                    child = self.nodes[c as usize].next_sibling;
+                }
+                continue;
+            }
+            let mut total_size = 0u64;
+            let mut total_alloc = 0u64;
+            let mut child = self.nodes[id as usize].first_child;
+            while let Some(c) = child {
+                total_size = total_size.saturating_add(sizes[c as usize]);
+                total_alloc = total_alloc.saturating_add(self.nodes[c as usize].allocated_size);
+                child = self.nodes[c as usize].next_sibling;
+            }
+            let node = &mut self.nodes[id as usize];
+            if node.is_dir {
+                node.size = total_size;
+                node.allocated_size = total_alloc;
+            }
+            sizes[id as usize] = node.size;
         }
-
-        let node = &mut self.nodes[root_id as usize];
-        if node.is_dir {
-            node.size = total_size;
-            node.allocated_size = total_alloc;
-        }
-        node.size
+        self.nodes[root_id as usize].size
     }
 
     pub fn len(&self) -> usize {

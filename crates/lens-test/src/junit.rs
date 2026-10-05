@@ -7,74 +7,128 @@ use lens_core::{LensError, Result};
 pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> {
     let mut reader = Reader::from_reader(xml_bytes);
     reader.config_mut().trim_text(true);
+    // Best-effort: a single mismatched end tag must not discard the report.
+    reader.config_mut().check_end_names = false;
 
     let mut buf = Vec::new();
     let mut cases = Vec::new();
     let mut summary = TestSummary::default();
+    let mut properties = std::collections::BTreeMap::new();
+    let mut suite_output = String::new();
 
     let mut current_name = String::new();
     let mut current_classname = String::new();
     let mut current_time = 0.0f64;
     let mut current_status = TestStatus::Passed;
     let mut current_message = None;
+    let mut current_output = String::new();
+    let mut current_body = String::new();
+    // Which element's character data we are accumulating.
+    let mut capture: Option<&'static str> = None;
+    let mut capture_in_case = false;
     let mut in_testcase = false;
+    let mut in_properties = false;
+    // Depth of unclosed elements; a truncated document leaves this > 0 at EOF.
+    let mut open_depth = 0usize;
+
+    // Decode `&quot;`/`&amp;`-style entities: attr.value is the raw bytes.
+    let decoder = reader.decoder();
+    let decode_attr = |attr: &quick_xml::events::attributes::Attribute| -> String {
+        attr.decode_and_unescape_value(decoder)
+            .map(|c| c.into_owned())
+            .unwrap_or_else(|_| String::from_utf8_lossy(&attr.value).into_owned())
+    };
 
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref e)) => match e.name().as_ref() {
-                b"testcase" => {
-                    in_testcase = true;
-                    current_status = TestStatus::Passed;
-                    current_message = None;
-                    current_name.clear();
-                    current_classname.clear();
-                    current_time = 0.0;
+            Ok(Event::Start(ref e)) => {
+                open_depth += 1;
+                match e.name().as_ref() {
+                    b"testcase" => {
+                        in_testcase = true;
+                        current_status = TestStatus::Passed;
+                        current_message = None;
+                        current_output.clear();
+                        current_body.clear();
+                        capture = None;
+                        current_name.clear();
+                        current_classname.clear();
+                        current_time = 0.0;
 
-                    for attr in e.attributes().flatten() {
-                        match attr.key.as_ref() {
-                            b"name" => {
-                                current_name = String::from_utf8_lossy(&attr.value).to_string();
+                        for attr in e.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"name" => current_name = decode_attr(&attr),
+                                b"classname" => current_classname = decode_attr(&attr),
+                                b"time" => {
+                                    if let Ok(s) = std::str::from_utf8(&attr.value) {
+                                        current_time = s.parse::<f64>().unwrap_or(0.0);
+                                    }
+                                }
+                                _ => {}
                             }
-                            b"classname" => {
-                                current_classname =
-                                    String::from_utf8_lossy(&attr.value).to_string();
-                            }
-                            b"time" => {
-                                if let Ok(s) = std::str::from_utf8(&attr.value) {
-                                    current_time = s.parse::<f64>().unwrap_or(0.0);
+                        }
+                    }
+                    b"failure" => {
+                        if in_testcase {
+                            current_status = TestStatus::Failed;
+                            capture = Some("failure");
+                            current_body.clear();
+                            for attr in e.attributes().flatten() {
+                                if attr.key.as_ref() == b"message" {
+                                    current_message = Some(decode_attr(&attr));
                                 }
                             }
-                            _ => {}
                         }
                     }
-                }
-                b"failure" => {
-                    if in_testcase {
-                        current_status = TestStatus::Failed;
-                        for attr in e.attributes().flatten() {
-                            if attr.key.as_ref() == b"message" {
-                                current_message =
-                                    Some(String::from_utf8_lossy(&attr.value).to_string());
+                    b"error" => {
+                        if in_testcase {
+                            current_status = TestStatus::Error;
+                            capture = Some("error");
+                            current_body.clear();
+                            for attr in e.attributes().flatten() {
+                                if attr.key.as_ref() == b"message" {
+                                    current_message = Some(decode_attr(&attr));
+                                }
                             }
                         }
                     }
-                }
-                b"error" => {
-                    if in_testcase {
-                        current_status = TestStatus::Error;
+                    b"skipped" if in_testcase => {
+                        // Never downgrade a failure/error to skipped.
+                        if current_status == TestStatus::Passed {
+                            current_status = TestStatus::Skipped;
+                        }
+                        capture = Some("skipped");
+                        current_body.clear();
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"message" {
-                                current_message =
-                                    Some(String::from_utf8_lossy(&attr.value).to_string());
+                                current_message = Some(decode_attr(&attr));
                             }
                         }
                     }
+                    // Suite- or case-level captured output.
+                    b"system-out" | b"system-err" => {
+                        capture = Some("system");
+                        capture_in_case = in_testcase;
+                        current_body.clear();
+                    }
+                    b"properties" => in_properties = true,
+                    b"property" if in_properties => {
+                        let mut k = None;
+                        let mut v = None;
+                        for attr in e.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"name" => k = Some(decode_attr(&attr)),
+                                b"value" => v = Some(decode_attr(&attr)),
+                                _ => {}
+                            }
+                        }
+                        if let Some(k) = k {
+                            properties.insert(k, v.unwrap_or_default());
+                        }
+                    }
+                    _ => {}
                 }
-                b"skipped" if in_testcase => {
-                    current_status = TestStatus::Skipped;
-                }
-                _ => {}
-            },
+            }
             Ok(Event::Empty(ref e)) => {
                 if e.name().as_ref() == b"testcase" {
                     let mut name = String::new();
@@ -83,10 +137,8 @@ pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> 
 
                     for attr in e.attributes().flatten() {
                         match attr.key.as_ref() {
-                            b"name" => name = String::from_utf8_lossy(&attr.value).to_string(),
-                            b"classname" => {
-                                classname = String::from_utf8_lossy(&attr.value).to_string()
-                            }
+                            b"name" => name = decode_attr(&attr),
+                            b"classname" => classname = decode_attr(&attr),
                             b"time" => {
                                 if let Ok(s) = std::str::from_utf8(&attr.value) {
                                     time = s.parse::<f64>().unwrap_or(0.0);
@@ -113,6 +165,7 @@ pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> 
                         status: TestStatus::Passed,
                         duration_sec: time,
                         message: None,
+                        output: None,
                     });
                 } else if in_testcase {
                     match e.name().as_ref() {
@@ -120,8 +173,7 @@ pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> 
                             current_status = TestStatus::Failed;
                             for attr in e.attributes().flatten() {
                                 if attr.key.as_ref() == b"message" {
-                                    current_message =
-                                        Some(String::from_utf8_lossy(&attr.value).to_string());
+                                    current_message = Some(decode_attr(&attr));
                                 }
                             }
                         }
@@ -129,20 +181,107 @@ pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> 
                             current_status = TestStatus::Error;
                             for attr in e.attributes().flatten() {
                                 if attr.key.as_ref() == b"message" {
-                                    current_message =
-                                        Some(String::from_utf8_lossy(&attr.value).to_string());
+                                    current_message = Some(decode_attr(&attr));
                                 }
                             }
                         }
                         b"skipped" => {
-                            current_status = TestStatus::Skipped;
+                            if current_status == TestStatus::Passed {
+                                current_status = TestStatus::Skipped;
+                            }
+                            for attr in e.attributes().flatten() {
+                                if attr.key.as_ref() == b"message" {
+                                    current_message = Some(decode_attr(&attr));
+                                }
+                            }
                         }
                         _ => {}
                     }
                 }
+                if e.name().as_ref() == b"property" && in_properties {
+                    let mut k = None;
+                    let mut v = None;
+                    for attr in e.attributes().flatten() {
+                        match attr.key.as_ref() {
+                            b"name" => k = Some(decode_attr(&attr)),
+                            b"value" => v = Some(decode_attr(&attr)),
+                            _ => {}
+                        }
+                    }
+                    if let Some(k) = k {
+                        properties.insert(k, v.unwrap_or_default());
+                    }
+                }
+            }
+            Ok(Event::Text(ref e)) => {
+                if capture.is_some() {
+                    // Honor the document's declared encoding and entities.
+                    let raw = decoder
+                        .decode(e)
+                        .map(|c| c.into_owned())
+                        .unwrap_or_else(|_| String::from_utf8_lossy(e).into_owned());
+                    let text = quick_xml::escape::unescape(&raw)
+                        .map(|c| c.into_owned())
+                        .unwrap_or(raw);
+                    current_body.push_str(&text);
+                }
+            }
+            Ok(Event::CData(ref e)) => {
+                if capture.is_some() {
+                    let text = decoder
+                        .decode(e)
+                        .map(|c| c.into_owned())
+                        .unwrap_or_else(|_| String::from_utf8_lossy(e).into_owned());
+                    current_body.push_str(&text);
+                }
             }
             Ok(Event::End(ref e)) => {
-                if e.name().as_ref() == b"testcase" && in_testcase {
+                open_depth = open_depth.saturating_sub(1);
+                // Flush captured character data when a tracked element closes.
+                let name = e.name();
+                let name = name.as_ref();
+                if let Some(kind) = capture.take_if(|k| {
+                    matches!(
+                        (*k, name),
+                        ("failure", b"failure")
+                            | ("error", b"error")
+                            | ("skipped", b"skipped")
+                            | ("system", b"system-out")
+                            | ("system", b"system-err")
+                    )
+                }) {
+                    let body = current_body.trim().to_string();
+                    match kind {
+                        "system" if capture_in_case => {
+                            if !body.is_empty() {
+                                if !current_output.is_empty() {
+                                    current_output.push('\n');
+                                }
+                                current_output.push_str(&body);
+                            }
+                        }
+                        "system" => {
+                            // suite-level <system-out>/<system-err>
+                            if !body.is_empty() {
+                                if !suite_output.is_empty() {
+                                    suite_output.push('\n');
+                                }
+                                suite_output.push_str(&body);
+                            }
+                        }
+                        _ => {
+                            // Use the element body as the message when the
+                            // `message` attribute was absent.
+                            if current_message.is_none() && !body.is_empty() {
+                                current_message = Some(body);
+                            }
+                        }
+                    }
+                }
+                if name == b"properties" {
+                    in_properties = false;
+                }
+                if name == b"testcase" && in_testcase {
                     in_testcase = false;
 
                     let identity = if current_classname.is_empty() {
@@ -167,6 +306,11 @@ pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> 
                         status: current_status,
                         duration_sec: current_time,
                         message: current_message.clone(),
+                        output: if current_output.is_empty() {
+                            None
+                        } else {
+                            Some(current_output.clone())
+                        },
                     });
                 }
             }
@@ -181,24 +325,36 @@ pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> 
         buf.clear();
     }
 
+    // Deterministic content-addressed run id: identical inputs produce
+    // identical ids so reports diff cleanly across machines and time.
+    let run_id = {
+        let mut h = lens_core::IncrementalHasher::new();
+        h.update(project_name.as_bytes());
+        for c in &cases {
+            h.update(c.identity.as_bytes());
+            h.update(&[c.status as u8]);
+        }
+        let digest = h.finish();
+        format!("{}-{}", project_name, &digest[..12])
+    };
+
     Ok(TestRun {
         schema: RUN_SCHEMA_V1.to_string(),
         producer: TestProducer {
             name: "testlens".to_string(),
-            version: "0.3.0".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
         },
-        run_id: format!(
-            "{}-{}",
-            project_name,
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs()
-        ),
+        run_id,
         project: project_name.to_string(),
-        collected_at: "2026-10-05T16:50:00Z".to_string(),
-        complete: true,
+        collected_at: lens_core::time::utc_now_iso(),
+        complete: open_depth == 0,
         summary,
         cases,
+        properties,
+        suite_output: if suite_output.is_empty() {
+            None
+        } else {
+            Some(suite_output)
+        },
     })
 }

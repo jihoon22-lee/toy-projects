@@ -1,10 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::arena::ArenaTree;
-use lens_core::{digest_bytes, digest_file, FileIdentity, Result};
+use lens_core::{digest_bytes, digest_file, Result};
 
 use serde::{Deserialize, Serialize};
 
@@ -27,61 +27,85 @@ impl DuplicateFinder {
 
     /// Finds duplicates across files registered in an ArenaTree.
     pub fn find_in_tree(&self, tree: &ArenaTree, base_dir: &Path) -> Result<Vec<DuplicateGroup>> {
-        // Step 1: Bucket files by size
-        let mut size_buckets: HashMap<u64, Vec<PathBuf>> = HashMap::new();
+        // Step 1: Bucket regular files by size. Symlinks are excluded: their
+        // node size is the link's own, not the target's, so hashing them would
+        // compare the wrong bytes. Hardlinks are folded by (dev, ino) using
+        // the identity already captured during the scan — no extra stat, and
+        // each inode is hashed at most once.
+        use crate::arena::FsKind;
 
+        // Pass 1: count files by size so only multi-candidate sizes pay the
+        // PathBuf materialization cost.
+        let mut file_count_by_size: HashMap<u64, usize> = HashMap::new();
         for node in &tree.nodes {
-            if !node.is_dir && node.size >= self.min_size {
-                let full_path = base_dir.join(&node.rel_path);
-                size_buckets.entry(node.size).or_default().push(full_path);
+            if node.is_dir || node.metadata.kind == FsKind::Symlink || node.size < self.min_size {
+                continue;
             }
+            *file_count_by_size.entry(node.size).or_default() += 1;
+        }
+
+        // Pass 2: bucket by size → inode. Filesystems reporting inode 0 get
+        // keyed by path so they fold into singleton buckets instead of one
+        // giant bucket that masks every duplicate.
+        let mut size_buckets: HashMap<u64, HashMap<String, Vec<PathBuf>>> = HashMap::new();
+        for node in &tree.nodes {
+            if node.is_dir || node.metadata.kind == FsKind::Symlink || node.size < self.min_size {
+                continue;
+            }
+            if file_count_by_size.get(&node.size).copied().unwrap_or(0) < 2 {
+                continue;
+            }
+            let id = node.metadata.identity;
+            let key = if id.device == 0 && id.inode == 0 {
+                format!("p:{}", base_dir.join(&node.rel_path).display())
+            } else {
+                format!("i:{}:{}", id.device, id.inode)
+            };
+            size_buckets
+                .entry(node.size)
+                .or_default()
+                .entry(key)
+                .or_default()
+                .push(base_dir.join(&node.rel_path));
         }
 
         let mut groups = Vec::new();
 
-        // Step 2: Partial hash (first 4KB) for size buckets with >= 2 files
-        for (size, candidates) in size_buckets {
-            if candidates.len() < 2 {
-                continue;
-            }
-
-            let mut partial_buckets: HashMap<String, Vec<PathBuf>> = HashMap::new();
-
-            for path in candidates {
-                if let Ok(partial_hash) = Self::compute_partial_hash(&path) {
-                    partial_buckets.entry(partial_hash).or_default().push(path);
+        for (size, inode_buckets) in size_buckets {
+            // Step 2: Partial hash (first 4KB) once per unique inode.
+            let mut partial_buckets: HashMap<String, Vec<String>> = HashMap::new();
+            for (key, paths) in &inode_buckets {
+                if let Ok(partial_hash) = Self::compute_partial_hash(&paths[0]) {
+                    partial_buckets
+                        .entry(partial_hash)
+                        .or_default()
+                        .push(key.clone());
                 }
             }
 
-            // Step 3: Full SHA-256 for matching partial hashes
-            for (_p_hash, full_candidates) in partial_buckets {
-                if full_candidates.len() < 2 {
+            // Step 3: Full SHA-256 for matching partial hashes.
+            for (_p_hash, inode_ids) in partial_buckets {
+                if inode_ids.len() < 2 {
                     continue;
                 }
 
-                let mut full_buckets: HashMap<String, Vec<PathBuf>> = HashMap::new();
-                for path in full_candidates {
-                    if let Ok(full_hash) = digest_file(&path) {
-                        full_buckets.entry(full_hash).or_default().push(path);
+                let mut full_buckets: HashMap<String, Vec<String>> = HashMap::new();
+                for id in inode_ids {
+                    if let Ok(full_hash) = digest_file(&inode_buckets[&id][0]) {
+                        full_buckets.entry(full_hash).or_default().push(id);
                     }
                 }
 
-                // Step 4: Assemble groups with hard link deduplication
-                for (sha256, files) in full_buckets {
-                    if files.len() < 2 {
+                for (sha256, ids) in full_buckets {
+                    if ids.len() < 2 {
                         continue;
                     }
-
-                    // Count unique inodes to prevent inflating reclaimable space on hardlinks
-                    let mut unique_inodes: HashSet<(u64, u64)> = HashSet::new();
-                    for file in &files {
-                        if let Ok(identity) = FileIdentity::from_path(file) {
-                            unique_inodes.insert((identity.device, identity.inode));
-                        }
-                    }
-
-                    // If all files share the exact same inode, reclaimable is 0!
-                    let distinct_copies = unique_inodes.len().max(1);
+                    let mut files: Vec<PathBuf> = ids
+                        .iter()
+                        .flat_map(|id| inode_buckets[id].iter().cloned())
+                        .collect();
+                    files.sort();
+                    let distinct_copies = ids.len();
                     let reclaimable_bytes = if distinct_copies > 1 {
                         (distinct_copies as u64 - 1) * size
                     } else {
@@ -98,16 +122,23 @@ impl DuplicateFinder {
             }
         }
 
-        // Sort descending by potential reclaimable bytes
-        groups.sort_by_key(|b| std::cmp::Reverse(b.reclaimable_bytes));
+        // Sort descending by reclaimable bytes, then sha for determinism.
+        groups.sort_by(|a, b| {
+            b.reclaimable_bytes
+                .cmp(&a.reclaimable_bytes)
+                .then_with(|| a.sha256.cmp(&b.sha256))
+        });
 
         Ok(groups)
     }
 
     fn compute_partial_hash(path: &Path) -> std::io::Result<String> {
-        let mut file = File::open(path)?;
-        let mut buffer = [0u8; 4096];
-        let bytes_read = file.read(&mut buffer)?;
-        Ok(digest_bytes(&buffer[..bytes_read]))
+        // `read` may return short reads on FUSE/NFS; loop until EOF or the
+        // 4 KiB window is full so identical files can't land in different
+        // buckets.
+        let file = File::open(path)?;
+        let mut buffer = Vec::with_capacity(4096);
+        file.take(4096).read_to_end(&mut buffer)?;
+        Ok(digest_bytes(&buffer))
     }
 }

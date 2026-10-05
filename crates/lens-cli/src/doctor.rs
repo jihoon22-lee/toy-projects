@@ -42,7 +42,8 @@ pub fn check_storage(root_path: &Path) -> DoctorCheck {
     let c_path = std::ffi::CString::new(root_path.to_string_lossy().as_bytes()).unwrap_or_default();
     let res = unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) };
 
-    if res == 0 && stat.f_blocks > 0 {
+    // f_frsize can be 0 on unusual filesystems — guard to avoid a div/zero.
+    if res == 0 && stat.f_blocks > 0 && stat.f_frsize > 0 {
         let total_bytes = stat.f_blocks as u64 * stat.f_frsize as u64;
         let avail_bytes = stat.f_bavail as u64 * stat.f_frsize as u64;
         let free_pct = (avail_bytes as f64 / total_bytes as f64) * 100.0;
@@ -204,39 +205,15 @@ pub fn check_network(proc_path: Option<&Path>) -> Vec<DoctorCheck> {
     checks
 }
 
-use lens_sys::{parse_unit_content, OrderingGraph, SystemdUnit};
-use std::collections::BTreeMap;
+use lens_sys::OrderingGraph;
 
-pub fn load_systemd_units(path: &Path) -> BTreeMap<String, SystemdUnit> {
-    let mut units = BTreeMap::new();
-    if path.is_file() {
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("unit");
-        if let Ok(content) = fs::read_to_string(path) {
-            let unit = parse_unit_content(&content, name, Some(&path.to_string_lossy()));
-            units.insert(name.to_string(), unit);
-        }
-    } else if path.is_dir() {
-        if let Ok(entries) = fs::read_dir(path) {
-            for entry in entries.flatten() {
-                let p = entry.path();
-                if p.is_file() {
-                    if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-                        if name.ends_with(".service")
-                            || name.ends_with(".target")
-                            || name.ends_with(".socket")
-                        {
-                            if let Ok(content) = fs::read_to_string(&p) {
-                                let unit =
-                                    parse_unit_content(&content, name, Some(&p.to_string_lossy()));
-                                units.insert(name.to_string(), unit);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    units
+/// Load systemd units (with `<unit>.d/*.conf` drop-ins applied) through the
+/// shared loader; unreadable units are preserved as diagnostic stubs so a
+/// doctor run never silently drops them.
+pub fn load_systemd_units(
+    path: &Path,
+) -> std::collections::BTreeMap<String, lens_sys::SystemdUnit> {
+    lens_sys::load_units(path).unwrap_or_default()
 }
 
 pub fn check_services(systemd_dir: Option<&Path>) -> DoctorCheck {

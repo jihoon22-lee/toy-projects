@@ -6,6 +6,9 @@ use std::path::Path;
 use crate::model::*;
 use lens_core::error::Result;
 
+// NOTE: /proc/net/* prints addresses as the host-endian interpretation of the
+// in-memory word, so `to_ne_bytes` is intentional and correct on every host —
+// the file format itself is host-endianness dependent, not fixed little-endian.
 pub fn parse_ipv4_hex(hex_str: &str) -> Option<String> {
     if hex_str.len() != 8 {
         return None;
@@ -98,25 +101,35 @@ pub fn parse_proc_net_unix(content: &str) -> Vec<SocketEntry> {
 
     for line in content.lines().skip(1) {
         let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() < 6 {
+        // Format: Num RefCount Protocol Flags Type St Inode [Path]
+        if parts.len() < 7 {
             continue;
         }
 
-        // Format: Num RefCount Protocol Flags Type St Inode [Path]
         let inode = parts[6].parse::<u64>().unwrap_or(0);
+        // Paths may contain whitespace — the kernel prints them verbatim.
         let path = if parts.len() >= 8 {
-            Some(parts[7].to_string())
+            Some(parts[7..].join(" "))
         } else {
             None
         };
+        // Type column: 0001=stream, 0002=dgram, 0005=seqpacket.
+        let kind = match u32::from_str_radix(parts[4], 16).unwrap_or(0) {
+            0x0001 => SocketKind::UnixStream,
+            0x0002 => SocketKind::UnixDgram,
+            _ => SocketKind::Other,
+        };
+        // The St column's encoding differs from TCP states; leave Unknown
+        // rather than mislabel unix sockets.
+        let state = TcpState::Unknown;
 
         entries.push(SocketEntry {
-            kind: SocketKind::UnixStream,
+            kind,
             local_address: "unix".to_string(),
             local_port: 0,
             remote_address: String::new(),
             remote_port: 0,
-            state: TcpState::Unknown,
+            state,
             inode,
             uid: 0,
             tx_queue: 0,
@@ -236,8 +249,20 @@ pub fn inspect_network(proc_path: Option<&Path>) -> Result<NetReport> {
 
     for s in &sockets {
         summary.total_sockets += 1;
+        // UDP has no LISTEN state: a bound UDP socket shows st=07 (CLOSE) with
+        // a wildcard remote endpoint, so detect listeners by remote == *:0.
+        let udp_listening = matches!(s.kind, SocketKind::Udp | SocketKind::Udp6)
+            && s.remote_port == 0
+            && s.local_port != 0
+            && (s.remote_address.is_empty()
+                || s.remote_address == "0.0.0.0"
+                || s.remote_address == "::");
         match s.state {
             TcpState::Listen => {
+                summary.listening_ports += 1;
+                listening.push(s.clone());
+            }
+            _ if udp_listening => {
                 summary.listening_ports += 1;
                 listening.push(s.clone());
             }
@@ -248,7 +273,9 @@ pub fn inspect_network(proc_path: Option<&Path>) -> Result<NetReport> {
         if s.kind == SocketKind::UnixStream || s.kind == SocketKind::UnixDgram {
             summary.unix_domain_sockets += 1;
         }
-        if s.process.is_none()
+        // inode 0 sockets are kernel-owned (e.g. TIME_WAIT) — not orphans.
+        if s.inode != 0
+            && s.process.is_none()
             && (s.kind == SocketKind::Tcp
                 || s.kind == SocketKind::Tcp6
                 || s.kind == SocketKind::Udp
@@ -300,6 +327,24 @@ mod tests {
         assert_eq!(entries[0].local_port, 22);
         assert_eq!(entries[0].state, TcpState::Listen);
         assert_eq!(entries[0].inode, 12345);
+    }
+
+    #[test]
+    fn test_udp_bound_socket_counted_as_listening() {
+        // A bound UDP socket reports st=07 and a wildcard remote endpoint.
+        let tmp = std::env::temp_dir().join(format!("lensnet-{}", std::process::id()));
+        let net = tmp.join("net");
+        std::fs::create_dir_all(&net).unwrap();
+        std::fs::write(
+            net.join("udp"),
+            "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   0: 00000000:0035 00000000:0000 07 00000000:00000000 00:00000000 00000000   101        0 55555 1 0000000000000000 100 0 0 10 0\n",
+        )
+        .unwrap();
+        let report = inspect_network(Some(&tmp)).unwrap();
+        assert_eq!(report.summary.listening_ports, 1);
+        assert_eq!(report.listening.len(), 1);
+        assert_eq!(report.listening[0].local_port, 53);
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

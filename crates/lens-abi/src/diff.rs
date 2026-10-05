@@ -1,7 +1,16 @@
-use lens_core::SetDiff;
+use lens_core::{Compatibility, SetDiff};
 use std::collections::HashMap;
 
 use crate::model::*;
+
+/// Serialize an `InputStatus` with the same kebab-case vocabulary
+/// `ElfReport.status` uses ("non-elf", "tool-error", ...).
+fn status_string(status: &InputStatus) -> String {
+    serde_json::to_value(status)
+        .ok()
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_else(|| format!("{:?}", status).to_lowercase())
+}
 
 pub fn diff_reports(left: &ElfReport, right: &ElfReport) -> DiffReport {
     let mut header_changes = Vec::new();
@@ -50,6 +59,28 @@ pub fn diff_reports(left: &ElfReport, right: &ElfReport) -> DiffReport {
     let symbols_diff = SetDiff::compute(left.abi.symbols.clone(), right.abi.symbols.clone());
     let vtables_diff = SetDiff::compute(left.abi.vtables.clone(), right.abi.vtables.clone());
     let types_diff = SetDiff::compute(left.abi.types.clone(), right.abi.types.clone());
+    // Diff symbol-version requirements (GLIBC_2.x etc.) — a new requirement
+    // is a real forward-compat break, so it must be visible.
+    let version_key = |v: &VersionRequirement| {
+        if v.library.is_empty() {
+            format!("{}:{}", v.namespace, v.version)
+        } else {
+            format!("{}:{}", v.library, v.version)
+        }
+    };
+    let abi_diff = SetDiff::compute(
+        left.abi
+            .versions
+            .iter()
+            .map(version_key)
+            .collect::<Vec<String>>(),
+        right
+            .abi
+            .versions
+            .iter()
+            .map(version_key)
+            .collect::<Vec<String>>(),
+    );
 
     // Symbol attributes diff (size, type, binding)
     let left_evidence_map: HashMap<&str, &SymbolEvidence> = left
@@ -120,14 +151,22 @@ pub fn diff_reports(left: &ElfReport, right: &ElfReport) -> DiffReport {
             uncertain = true;
             diagnostics.push("Dynamic loader search paths or dependencies modified".to_string());
         }
+        if abi_diff.has_changed() {
+            uncertain = true;
+            diagnostics.push(format!(
+                "Symbol version requirements changed (+{} -{})",
+                abi_diff.added.len(),
+                abi_diff.removed.len()
+            ));
+        }
     }
 
-    let compatibility_str = if incompatible {
-        "incompatible"
+    let compatibility = if incompatible {
+        Compatibility::Incompatible
     } else if uncertain {
-        "unknown"
+        Compatibility::Uncertain
     } else {
-        "compatible"
+        Compatibility::Compatible
     };
 
     let changed = !header_changes.is_empty()
@@ -136,18 +175,19 @@ pub fn diff_reports(left: &ElfReport, right: &ElfReport) -> DiffReport {
         || runpath_diff.has_changed()
         || symbols_diff.has_changed()
         || vtables_diff.has_changed()
+        || abi_diff.has_changed()
         || types_diff.has_changed()
         || !symbol_changes.is_empty();
 
     DiffReport {
-        schema: DIFF_SCHEMA_V2.to_string(),
+        schema: DIFF_SCHEMA_V3.to_string(),
         left: left.input.clone(),
         right: right.input.clone(),
         changed,
-        compatible: compatibility_str == "compatible",
-        compatibility: compatibility_str.to_string(),
-        left_status: format!("{:?}", left.status).to_lowercase(),
-        right_status: format!("{:?}", right.status).to_lowercase(),
+        compatible: compatibility.is_compatible(),
+        compatibility,
+        left_status: status_string(&left.status),
+        right_status: status_string(&right.status),
         header_changes,
         dependencies: DiffDependencies {
             needed: needed_diff,
@@ -156,7 +196,7 @@ pub fn diff_reports(left: &ElfReport, right: &ElfReport) -> DiffReport {
         },
         symbols: symbols_diff,
         vtables: vtables_diff,
-        abi: SetDiff::default(),
+        abi: abi_diff,
         types: types_diff,
         symbol_changes,
         diagnostics,

@@ -16,10 +16,6 @@ from urllib.parse import unquote, urlsplit
 from jsonschema.validators import validator_for
 
 ROOT = Path(__file__).resolve().parents[2]
-PRODUCTS = (
-    "abilens", "buildscope", "diskmap", "envlens", "loglens", "servicelens",
-    "testlens", "tracelens",
-)
 
 
 def tracked_files() -> list[Path]:
@@ -70,36 +66,20 @@ def match_version(path: str, pattern: str) -> str:
 
 
 def versions(errors: list[str]) -> None:
+    """The workspace ships a single version; keep Cargo.toml, the release
+    manifest, and CHANGELOG in agreement."""
     manifest = json.loads((ROOT / ".release-please-manifest.json").read_text())
-    for product in PRODUCTS:
-        package = ROOT / product / "pyproject.toml"
-        if package.exists():
-            version = tomllib.loads(package.read_text())["project"]["version"]
-            source = f"{product}/src/{product}/"
-            if product == "servicelens":
-                module_version = match_version(source + "model.py", r'VERSION = "([^"]+)"')
-            else:
-                module_version = match_version(source + "__init__.py", r'__version__ = "([^"]+)"')
-            if version != module_version:
-                errors.append(f"{product}: package and module versions disagree")
-            lock = ROOT / product / "uv.lock"
-            if lock.exists() and lock in tracked_files():
-                entries = tomllib.loads(lock.read_text())["package"]
-                own = next(item for item in entries if item["name"] == product)
-                if own["version"] != version:
-                    errors.append(f"{product}: lockfile version disagrees with package")
-        elif product in {"diskmap", "abilens"}:
-            header = "version.hpp" if product == "diskmap" else "model.hpp"
-            version = match_version(f"{product}/include/{product}/{header}",
-                                    r'k(?:AbiLens)?Version = "([^"]+)"')
-        else:
-            version = match_version(f"{product}/CMakeLists.txt",
-                                    rf'project\({product}\s+VERSION\s+(\S+)')
-        if version != manifest[product]:
-            errors.append(f"{product}: source version {version} differs from release manifest {manifest[product]}")
-        changelog = (ROOT / product / "CHANGELOG.md").read_text()
-        if not re.search(rf"^## (?:\[)?{re.escape(version)}(?:\]|\s|$)", changelog, re.M):
-            errors.append(f"{product}: CHANGELOG has no entry for {version}")
+    cargo = tomllib.loads((ROOT / "Cargo.toml").read_text())
+    version = cargo["workspace"]["package"]["version"]
+    key = "." if "." in manifest else next(iter(manifest), None)
+    manifest_version = manifest.get(".") or manifest.get(key or "", "")
+    if manifest_version and manifest_version != version:
+        errors.append(
+            f"workspace version {version} differs from release manifest {manifest_version}"
+        )
+    changelog = (ROOT / "CHANGELOG.md").read_text()
+    if not re.search(rf"^## (?:\[)?{re.escape(version)}(?:\]|\s|$)", changelog, re.M):
+        errors.append(f"CHANGELOG has no entry for {version}")
 
 
 def main() -> int:
@@ -122,7 +102,7 @@ def main() -> int:
     if errors:
         return 1
     print(f"Documentation: {len(documents)} Markdown files, {len(schemas)} schemas, "
-          f"{len(PRODUCTS)} product versions passed")
+          "workspace version check passed")
     return 0
 
 

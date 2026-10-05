@@ -15,14 +15,25 @@ pub enum LogLevel {
 
 impl LogLevel {
     pub fn parse(s: &str) -> Self {
-        match s.to_uppercase().as_str() {
-            "TRACE" => Self::Trace,
-            "DEBUG" => Self::Debug,
-            "INFO" => Self::Info,
-            "WARN" | "WARNING" => Self::Warn,
-            "ERR" | "ERROR" => Self::Error,
-            "CRIT" | "CRITICAL" | "FATAL" => Self::Fatal,
-            _ => Self::Unknown,
+        // Allocation-free: eq_ignore_ascii_case avoids the per-line String
+        // that to_uppercase() would allocate.
+        if s.eq_ignore_ascii_case("trace") {
+            Self::Trace
+        } else if s.eq_ignore_ascii_case("debug") {
+            Self::Debug
+        } else if s.eq_ignore_ascii_case("info") {
+            Self::Info
+        } else if s.eq_ignore_ascii_case("warn") || s.eq_ignore_ascii_case("warning") {
+            Self::Warn
+        } else if s.eq_ignore_ascii_case("err") || s.eq_ignore_ascii_case("error") {
+            Self::Error
+        } else if s.eq_ignore_ascii_case("crit")
+            || s.eq_ignore_ascii_case("critical")
+            || s.eq_ignore_ascii_case("fatal")
+        {
+            Self::Fatal
+        } else {
+            Self::Unknown
         }
     }
 
