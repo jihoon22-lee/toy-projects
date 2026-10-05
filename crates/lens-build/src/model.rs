@@ -69,4 +69,8 @@ pub struct ImpactReport {
     pub target_header: String,
     pub impacted_units: Vec<String>,
     pub total_impacted: usize,
+    /// True when the on-disk include scan hit its file-count bound — the
+    /// transitive graph may be incomplete.
+    #[serde(default)]
+    pub scan_truncated: bool,
 }

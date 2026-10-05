@@ -67,8 +67,10 @@ pub fn parse_command_entry(entry: &CompileCommandEntry) -> ParsedUnit {
         }
     }
 
-    includes.sort();
-    includes.dedup();
+    // Deduplicate while preserving order — `-I` search order is semantic
+    // (first match wins), so sorting would mis-resolve headers shadowed
+    // across multiple include dirs.
+    dedup_preserve(&mut includes);
     defines.sort();
     defines.dedup();
     flags.sort();
@@ -85,6 +87,12 @@ pub fn parse_command_entry(entry: &CompileCommandEntry) -> ParsedUnit {
         flags,
         forced_includes,
     }
+}
+
+/// Remove duplicates while keeping first-occurrence order.
+fn dedup_preserve(items: &mut Vec<String>) {
+    let mut seen = std::collections::HashSet::new();
+    items.retain(|i| seen.insert(i.clone()));
 }
 
 pub fn split_command_line(cmd: &str) -> Vec<String> {
@@ -155,15 +163,20 @@ pub fn normalize_path(path: &str, base_dir: &str) -> String {
     }
 }
 
-fn clean_path(path: &Path) -> String {
+/// Collapse `.`/`..` components of an already-joined path without touching
+/// the filesystem. `..` never pops past the filesystem root.
+pub(crate) fn clean_path(path: &Path) -> String {
     use std::path::Component;
     let mut components = Vec::new();
     for comp in path.components() {
         match comp {
             Component::CurDir => {}
             Component::ParentDir => {
-                if !components.is_empty() {
-                    components.pop();
+                match components.last() {
+                    Some(Component::RootDir) | None => {} // can't go above /
+                    _ => {
+                        components.pop();
+                    }
                 }
             }
             c => components.push(c),

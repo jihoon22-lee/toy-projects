@@ -13,6 +13,9 @@ pub struct ImpactGraph {
     pub header_to_units: BTreeMap<String, BTreeSet<String>>,
     /// header -> set of headers it includes
     pub header_to_headers: BTreeMap<String, BTreeSet<String>>,
+    /// True when the on-disk include scan hit MAX_SCANNED_FILES — results
+    /// may be incomplete.
+    pub scan_truncated: bool,
 }
 
 impl ImpactGraph {
@@ -45,8 +48,11 @@ impl ImpactGraph {
         visited.insert(unit.file.clone());
 
         // -include headers behave as if the source included them first.
+        // Per GCC they are searched from the preprocessor's working
+        // directory (compile_commands `directory`), not the source's dir.
+        let compile_dir = Path::new(&unit.directory);
         for inc in &unit.forced_includes {
-            if let Some(resolved) = resolve_include(inc, true, &unit.file, &include_dirs) {
+            if let Some(resolved) = resolve_include(inc, true, compile_dir, &include_dirs) {
                 self.add_unit_include(&unit.file, &resolved);
                 if visited.insert(resolved.clone()) {
                     queue.push_back(resolved);
@@ -57,15 +63,20 @@ impl ImpactGraph {
         let mut scanned = 0usize;
         while let Some(current) = queue.pop_front() {
             if scanned >= MAX_SCANNED_FILES {
+                self.scan_truncated = true;
                 break;
             }
             let Ok(content) = std::fs::read_to_string(&current) else {
                 continue;
             };
             scanned += 1;
+            let anchor = Path::new(&current)
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_default();
             for inc in extract_includes(&content) {
                 let Some(resolved) =
-                    resolve_include(&inc.name, inc.quoted, &current, &include_dirs)
+                    resolve_include(&inc.name, inc.quoted, &anchor, &include_dirs)
                 else {
                     continue;
                 };
@@ -130,6 +141,7 @@ impl ImpactGraph {
             target_header: target_header.to_string(),
             impacted_units: impacted_vec,
             total_impacted: total,
+            scan_truncated: self.scan_truncated,
         }
     }
 }
@@ -144,58 +156,126 @@ pub struct IncludeDirective {
 
 pub fn extract_includes(source_code: &str) -> Vec<IncludeDirective> {
     let mut includes = Vec::new();
+    let mut in_block_comment = false;
 
     for line in source_code.lines() {
+        let line = strip_comments(line, &mut in_block_comment);
         let trimmed = line.trim();
-        if let Some(after_hash) = trimmed.strip_prefix('#') {
-            let after_hash = after_hash.trim();
-            if let Some(rest) = after_hash.strip_prefix("include") {
-                let rest = rest.trim();
-                let (quoted, inner) = if rest.starts_with('"') && rest.ends_with('"') {
-                    (true, &rest[1..rest.len() - 1])
-                } else if rest.starts_with('<') && rest.ends_with('>') {
-                    (false, &rest[1..rest.len() - 1])
-                } else {
-                    continue;
-                };
-                let inner = inner.trim();
-                if !inner.is_empty() {
-                    includes.push(IncludeDirective {
-                        name: inner.to_string(),
-                        quoted,
-                    });
-                }
+        let Some(after_hash) = trimmed.strip_prefix('#') else {
+            continue;
+        };
+        let after_hash = after_hash.trim();
+        let Some(rest) = after_hash
+            .strip_prefix("include_next")
+            .or_else(|| after_hash.strip_prefix("include"))
+        else {
+            continue;
+        };
+        let rest = rest.trim();
+        // Take the first "..." or <...> span — anything after it (trailing
+        // comments were already stripped) is ignored.
+        let (quoted, inner) = if let Some(start) = rest.find('"') {
+            match rest[start + 1..].find('"') {
+                Some(end) => (true, &rest[start + 1..start + 1 + end]),
+                None => continue,
             }
+        } else if let Some(start) = rest.find('<') {
+            match rest[start + 1..].find('>') {
+                Some(end) => (false, &rest[start + 1..start + 1 + end]),
+                None => continue,
+            }
+        } else {
+            continue;
+        };
+        let inner = inner.trim();
+        if !inner.is_empty() {
+            includes.push(IncludeDirective {
+                name: inner.to_string(),
+                quoted,
+            });
         }
     }
 
     includes
 }
 
-/// Resolve an include name to an existing on-disk path.
+/// Remove `//` and `/* ... */` comments from one line, tracking block-comment
+/// state across lines. String and char literals are respected so a `"//"` in
+/// code is not mistaken for a comment.
+fn strip_comments(line: &str, in_block: &mut bool) -> String {
+    let bytes = line.as_bytes();
+    let mut out = String::with_capacity(line.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if *in_block {
+            if i + 1 < bytes.len() && bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                *in_block = false;
+                i += 2;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+        match bytes[i] {
+            b'"' | b'\'' => {
+                let quote = bytes[i];
+                out.push(quote as char);
+                i += 1;
+                while i < bytes.len() && bytes[i] != quote {
+                    if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                        out.push(bytes[i] as char);
+                        out.push(bytes[i + 1] as char);
+                        i += 2;
+                    } else {
+                        out.push(bytes[i] as char);
+                        i += 1;
+                    }
+                }
+                if i < bytes.len() {
+                    out.push(bytes[i] as char);
+                    i += 1;
+                }
+            }
+            b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'/' => break,
+            b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'*' => {
+                *in_block = true;
+                i += 2;
+            }
+            c => {
+                out.push(c as char);
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+/// Resolve an include name to an existing on-disk path. The returned path is
+/// normalized (`./`/`..` collapsed) so the same header reached via different
+/// spellings shares a single graph key.
 ///
-/// Quoted includes search the including file's directory first (per the C/C++
-/// standard), then the `-I`/`-isystem` search dirs; angle-bracket includes
-/// only search the search dirs. Returns `None` when the header cannot be
-/// found — system headers outside the project are expected to miss.
+/// Quoted includes search `anchor_dir` first (per the C/C++ standard that is
+/// the including file's directory; for `-include` it is the compiler's
+/// working directory), then the `-I`/`-isystem` search dirs; angle-bracket
+/// includes only search the search dirs. Returns `None` when the header
+/// cannot be found — system headers outside the project are expected to
+/// miss.
 fn resolve_include(
     name: &str,
     quoted: bool,
-    including_file: &str,
+    anchor_dir: &Path,
     include_dirs: &[&str],
 ) -> Option<String> {
     if quoted {
-        if let Some(dir) = Path::new(including_file).parent() {
-            let candidate = dir.join(name);
-            if candidate.is_file() {
-                return Some(candidate.to_string_lossy().into_owned());
-            }
+        let candidate = anchor_dir.join(name);
+        if candidate.is_file() {
+            return Some(crate::compiler::clean_path(&candidate));
         }
     }
     for dir in include_dirs {
         let candidate = Path::new(dir).join(name);
         if candidate.is_file() {
-            return Some(candidate.to_string_lossy().into_owned());
+            return Some(crate::compiler::clean_path(&candidate));
         }
     }
     None
