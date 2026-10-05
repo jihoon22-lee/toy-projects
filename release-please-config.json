@@ -1,76 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
-  "include-component-in-tag": true,
+  "release-type": "rust",
+  "include-component-in-tag": false,
   "include-v-in-tag": true,
-  "tag-separator": "/",
-  "draft": true,
-  "bump-minor-pre-major": true,
-  "packages": {
-    "loglens": {
-      "release-type": "simple",
-      "extra-files": [
-        "CMakeLists.txt"
-      ],
-      "component": "loglens"
-    },
-    "diskmap": {
-      "release-type": "simple",
-      "extra-files": [
-        "include/diskmap/version.hpp"
-      ],
-      "component": "diskmap"
-    },
-    "buildscope": {
-      "release-type": "simple",
-      "extra-files": [
-        "CMakeLists.txt"
-      ],
-      "component": "buildscope"
-    },
-    "abilens": {
-      "release-type": "simple",
-      "extra-files": [
-        "include/abilens/model.hpp"
-      ],
-      "component": "abilens"
-    },
-    "envlens": {
-      "release-type": "python",
-      "component": "envlens"
-    },
-    "tracelens": {
-      "release-type": "simple",
-      "component": "tracelens",
-      "extra-files": [
-        "CMakeLists.txt"
-      ]
-    },
-    "testlens": {
-      "release-type": "python",
-      "component": "testlens",
-      "extra-files": [
-        {
-          "type": "toml",
-          "path": "uv.lock",
-          "jsonpath": "$.package[?(@.name.value=='testlens')].version"
-        }
-      ]
-    },
-    "servicelens": {
-      "release-type": "python",
-      "component": "servicelens",
-      "extra-files": [
-        {
-          "type": "toml",
-          "path": "uv.lock",
-          "jsonpath": "$.package[?(@.name.value=='servicelens')].version"
-        },
-        {
-          "type": "generic",
-          "path": "src/servicelens/model.py"
-        }
-      ]
-    }
-  },
-  "bump-patch-for-minor-pre-major": false
+  "bump-minor-pre-major": true
 }

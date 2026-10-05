@@ -7,8 +7,9 @@ import re
 import shutil
 from urllib.parse import quote, urlsplit
 
-PRODUCTS = ('loglens', 'diskmap', 'buildscope', 'envlens', 'abilens', 'tracelens', 'testlens', 'servicelens')
 ROOT = Path(__file__).resolve().parents[2]
+CRATES_DIR = ROOT / 'crates'
+PRODUCTS = tuple(f"crates/{p.name}" for p in sorted(CRATES_DIR.iterdir()) if p.is_dir()) if CRATES_DIR.is_dir() else ()
 
 
 def assemble(destination: Path) -> None:
