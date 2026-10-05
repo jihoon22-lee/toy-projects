@@ -4,6 +4,7 @@ use crate::model::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NetDiffReport {
+    pub schema: String,
     pub new_listeners: Vec<SocketEntry>,
     pub closed_listeners: Vec<SocketEntry>,
     pub new_connections: Vec<SocketEntry>,
@@ -78,6 +79,7 @@ pub fn diff_net_reports(left: &NetReport, right: &NetReport) -> NetDiffReport {
         right.summary.time_wait_sockets as i64 - left.summary.time_wait_sockets as i64;
 
     NetDiffReport {
+        schema: "lens.net.diff/v1".to_string(),
         new_listeners,
         closed_listeners,
         new_connections,

@@ -107,19 +107,29 @@ pub fn parse_proc_net_unix(content: &str) -> Vec<SocketEntry> {
         }
 
         let inode = parts[6].parse::<u64>().unwrap_or(0);
+        // Paths may contain whitespace — the kernel prints them verbatim.
         let path = if parts.len() >= 8 {
-            Some(parts[7].to_string())
+            Some(parts[7..].join(" "))
         } else {
             None
         };
+        // Type column: 0001=stream, 0002=dgram, 0005=seqpacket.
+        let kind = match u32::from_str_radix(parts[4], 16).unwrap_or(0) {
+            0x0001 => SocketKind::UnixStream,
+            0x0002 => SocketKind::UnixDgram,
+            _ => SocketKind::Other,
+        };
+        // The St column's encoding differs from TCP states; leave Unknown
+        // rather than mislabel unix sockets.
+        let state = TcpState::Unknown;
 
         entries.push(SocketEntry {
-            kind: SocketKind::UnixStream,
+            kind,
             local_address: "unix".to_string(),
             local_port: 0,
             remote_address: String::new(),
             remote_port: 0,
-            state: TcpState::Unknown,
+            state,
             inode,
             uid: 0,
             tx_queue: 0,
@@ -263,7 +273,9 @@ pub fn inspect_network(proc_path: Option<&Path>) -> Result<NetReport> {
         if s.kind == SocketKind::UnixStream || s.kind == SocketKind::UnixDgram {
             summary.unix_domain_sockets += 1;
         }
-        if s.process.is_none()
+        // inode 0 sockets are kernel-owned (e.g. TIME_WAIT) — not orphans.
+        if s.inode != 0
+            && s.process.is_none()
             && (s.kind == SocketKind::Tcp
                 || s.kind == SocketKind::Tcp6
                 || s.kind == SocketKind::Udp

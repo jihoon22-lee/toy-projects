@@ -10,7 +10,18 @@ use lens_core::{LensError, Result};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-const UNIT_SUFFIXES: [&str; 4] = [".service", ".target", ".socket", ".timer"];
+const UNIT_SUFFIXES: [&str; 10] = [
+    ".service",
+    ".socket",
+    ".target",
+    ".timer",
+    ".mount",
+    ".automount",
+    ".swap",
+    ".path",
+    ".slice",
+    ".scope",
+];
 
 /// Load one unit file, then merge every `*.conf` in its `<name>.d/` directory.
 pub fn load_unit(path: &Path) -> Result<SystemdUnit> {
@@ -25,8 +36,12 @@ pub fn load_unit(path: &Path) -> Result<SystemdUnit> {
     })?;
     let mut unit = parse_unit_content(&content, &name, Some(&path.to_string_lossy()));
 
-    let drop_dir = drop_in_dir(path, &name);
-    if drop_dir.is_dir() {
+    // systemd precedence: for an instance `foo@bar.service`, template-level
+    // `foo@.service.d/*.conf` merges first, then `foo@bar.service.d/*.conf`.
+    for drop_dir in drop_in_dirs(path, &name) {
+        if !drop_dir.is_dir() {
+            continue;
+        }
         let mut confs: Vec<PathBuf> = match std::fs::read_dir(&drop_dir) {
             Ok(rd) => rd
                 .flatten()
@@ -65,6 +80,17 @@ pub fn load_unit(path: &Path) -> Result<SystemdUnit> {
 /// unit files — each with its drop-ins applied.
 pub fn load_units(path: &Path) -> Result<BTreeMap<String, SystemdUnit>> {
     let mut units = BTreeMap::new();
+    if !path.exists() {
+        // Fail closed: a misspelled --systemd-dir must not yield a vacuous
+        // "0 units, no cycles" report.
+        return Err(LensError::Io {
+            path: path.to_path_buf(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "unit path does not exist",
+            ),
+        });
+    }
     if path.is_file() {
         let unit = load_unit(path)?;
         units.insert(unit.name.clone(), unit);
@@ -118,11 +144,21 @@ pub fn load_units(path: &Path) -> Result<BTreeMap<String, SystemdUnit>> {
     Ok(units)
 }
 
-fn drop_in_dir(unit_path: &Path, unit_name: &str) -> PathBuf {
-    unit_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(format!("{}.d", unit_name))
+/// Drop-in directories for a unit, in merge order. `foo@bar.service` gets
+/// `foo@.service.d/` (template level) then `foo@bar.service.d/`.
+fn drop_in_dirs(unit_path: &Path, unit_name: &str) -> Vec<PathBuf> {
+    let parent = unit_path.parent().unwrap_or_else(|| Path::new("."));
+    let mut dirs = Vec::new();
+    if let Some(at) = unit_name.find('@') {
+        if let Some(dot) = unit_name.rfind('.') {
+            if at < dot {
+                let template = format!("{}@{}.d", &unit_name[..at], &unit_name[dot..]);
+                dirs.push(parent.join(template));
+            }
+        }
+    }
+    dirs.push(parent.join(format!("{}.d", unit_name)));
+    dirs
 }
 
 #[cfg(test)]
@@ -161,5 +197,35 @@ mod tests {
         assert_eq!(unit.drop_ins.len(), 1);
         assert_eq!(unit.wants, vec!["b.service".to_string()]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_template_drop_in_merges_before_instance() {
+        let dir = std::env::temp_dir().join(format!("lenssys-tpl-{}", std::process::id()));
+        let tpl = dir.join("foo@.service.d");
+        let inst = dir.join("foo@bar.service.d");
+        std::fs::create_dir_all(&tpl).unwrap();
+        std::fs::create_dir_all(&inst).unwrap();
+        std::fs::write(dir.join("foo@bar.service"), "[Service]\nExecStart=/run/%i\n").unwrap();
+        std::fs::write(tpl.join("10-tpl.conf"), "[Unit]\nDescription=tpl\n").unwrap();
+        std::fs::write(inst.join("20-inst.conf"), "[Unit]\nDescription=inst\n").unwrap();
+
+        let unit = load_unit(&dir.join("foo@bar.service")).unwrap();
+        assert_eq!(unit.drop_ins.len(), 2);
+        // instance drop-in wins on Description (merged after template —
+        // last value wins for single-valued keys)
+        assert_eq!(
+            unit.sections["Unit"]["Description"].last().unwrap(),
+            "inst"
+        );
+        // %i expands to the instance name
+        assert_eq!(unit.exec_start.as_deref(), Some("/run/bar"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_load_units_rejects_missing_path() {
+        let missing = std::path::Path::new("/nonexistent-lens-sys-dir-xyz");
+        assert!(load_units(missing).is_err());
     }
 }

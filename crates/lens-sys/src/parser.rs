@@ -18,24 +18,28 @@ impl SpecContext {
         sections: &BTreeMap<String, BTreeMap<String, Vec<String>>>,
     ) -> Self {
         let (prefix, instance) = split_unit_name(unit_name);
-        let user = sections
+        let raw_user = sections
             .get("Service")
             .and_then(|s| s.get("User"))
             .and_then(|v| v.last())
             .cloned()
             .unwrap_or_else(|| "root".to_string());
-        let home = if user == "root" {
-            "/root".to_string()
-        } else {
-            format!("/home/{}", user)
-        };
-        SpecContext {
+        let mut ctx = SpecContext {
             unit_name: unit_name.to_string(),
             prefix,
             instance,
-            user,
-            home,
-        }
+            user: raw_user,
+            home: String::new(),
+        };
+        // `User=` may itself contain specifiers (e.g. `User=%i`).
+        let user = expand_with(&ctx, &ctx.user.clone());
+        ctx.user = user;
+        ctx.home = if ctx.user == "root" {
+            "/root".to_string()
+        } else {
+            format!("/home/{}", ctx.user)
+        };
+        ctx
     }
 
     fn minimal(unit_name: &str) -> Self {
@@ -300,12 +304,19 @@ pub fn apply_drop_in(base: &mut SystemdUnit, drop_in_content: &str, drop_in_path
 
     for (_line, sec, key, raw_val) in entries {
         let value = expand_with(&ctx, &raw_val);
-        if sec == "Service" && key == "User" && !value.is_empty() {
-            ctx.user = value.clone();
-            ctx.home = if value == "root" {
+        if sec == "Service" && key == "User" {
+            // `User=` (empty) resets to the manager default (root), and any
+            // new value updates %u/%h for the remaining entries.
+            let effective = if value.is_empty() {
+                "root".to_string()
+            } else {
+                value.clone()
+            };
+            ctx.user = effective.clone();
+            ctx.home = if effective == "root" {
                 "/root".to_string()
             } else {
-                format!("/home/{}", value)
+                format!("/home/{}", effective)
             };
         }
         apply_entry(&mut base.sections, &sec, &key, &value);
