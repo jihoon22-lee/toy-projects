@@ -23,8 +23,8 @@ toy-projects/
 │   ├── lens-sys/       systemd 유닛/드롭인 파서, Specifier 확장, Tarjan SCC 순환 탐지
 │   ├── lens-build/     compile_commands.json 파서, 플래그 정규화, 헤더 영향도 역방향 DAG
 │   ├── lens-env/       Zero-Code Python venv 분석기, 미충족 패키지 검사, import 섀도잉 탐지
-│   ├── lens-net/       네트워크 소켓 포렌식, /proc/net 무실행 파싱, 프로세스 FD 상관관계, 포트 Diff
-│   ├── lens-cli/       단일 통합 CLI 실행 파일 (`lens`) 및 포렌식 비행기록장치 (`.lens` bundle)
+│   ├── lens-net/       네트워크 소켓 포렌식, IPv4/IPv6 /proc/net 무실행 파싱, 프로세스 FD 상관관계, 포트 Diff
+│   ├── lens-cli/       단일 통합 CLI (`lens`), 시스템 종합 진단 (`doctor`), 셸 자동완성, 포렌식 번들
 │   ├── lens-tui/       4개 탭 대화형 터미널 UI 대시보드 (Storage, Services, Logs, Network)
 │   └── lens-mcp/       AI 어시스턴트(Claude, Antigravity) 연동용 Model Context Protocol 서버
 ```
@@ -51,7 +51,7 @@ toy-projects/
 
 ## 3. 빌드 및 테스트
 
-### 전체 테스트 실행 (10개 크레이트 동시 검증)
+### 전체 테스트 실행 (13개 크레이트 동시 검증)
 ```bash
 cargo test --workspace --jobs 2
 ```
@@ -105,6 +105,13 @@ $ lens net diff net_baseline.json net_candidate.json
 $ lens bundle create incident.lens --disk /var/log --trace /tmp/strace.log --test target/junit.xml
 $ lens bundle inspect incident.lens
 $ lens bundle verify incident.lens
+
+# 11. 시스템 종합 상태 원클릭 점검 (Storage, Network, Services, Security)
+$ lens doctor
+$ lens doctor --json
+
+# 12. 셸 자동완성 스크립트 생성 (Bash, Zsh, Fish)
+$ source <(lens completion bash)
 ```
 
 ---

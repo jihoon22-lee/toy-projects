@@ -168,5 +168,19 @@ pub fn list_tools() -> Vec<McpTool> {
                 "required": ["bundle_path"]
             }),
         },
+        McpTool {
+            name: "lens_doctor".to_string(),
+            description:
+                "Run a comprehensive health check across storage capacity, open network ports, systemd cycles, and environment security."
+                    .to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "root_path": { "type": "string", "description": "Optional root filesystem path (default /)" },
+                    "proc_dir": { "type": "string", "description": "Optional procfs path (default /proc)" },
+                    "systemd_dir": { "type": "string", "description": "Optional systemd unit dir (default /etc/systemd/system)" }
+                }
+            }),
+        },
     ]
 }

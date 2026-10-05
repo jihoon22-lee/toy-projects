@@ -132,6 +132,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "clap_complete"
+version = "4.6.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "037e2a1a92236d0aff7e845093f64661d6df4c02c9fcc61a60e9e1d736fa392f"
+dependencies = [
+ "clap",
+]
+
+[[package]]
 name = "clap_derive"
 version = "4.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -466,7 +475,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "lens-abi"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "cpp_demangle",
  "flate2",
@@ -482,7 +491,7 @@ dependencies = [
 
 [[package]]
 name = "lens-build"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "lens-core",
  "serde",
@@ -493,9 +502,10 @@ dependencies = [
 
 [[package]]
 name = "lens-cli"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "clap",
+ "clap_complete",
  "flate2",
  "lens-abi",
  "lens-build",
@@ -507,6 +517,7 @@ dependencies = [
  "lens-sys",
  "lens-test",
  "lens-trace",
+ "libc",
  "serde",
  "serde_json",
  "thiserror",
@@ -514,7 +525,7 @@ dependencies = [
 
 [[package]]
 name = "lens-core"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "flate2",
  "memmap2",
@@ -528,7 +539,7 @@ dependencies = [
 
 [[package]]
 name = "lens-disk"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "lens-core",
  "rayon",
@@ -541,7 +552,7 @@ dependencies = [
 
 [[package]]
 name = "lens-env"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "lens-core",
  "serde",
@@ -553,7 +564,7 @@ dependencies = [
 
 [[package]]
 name = "lens-log"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "lens-core",
  "memmap2",
@@ -566,10 +577,11 @@ dependencies = [
 
 [[package]]
 name = "lens-mcp"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "lens-abi",
  "lens-build",
+ "lens-cli",
  "lens-core",
  "lens-disk",
  "lens-env",
@@ -585,7 +597,7 @@ dependencies = [
 
 [[package]]
 name = "lens-net"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "lens-core",
  "serde",
@@ -596,7 +608,7 @@ dependencies = [
 
 [[package]]
 name = "lens-sys"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "lens-core",
  "serde",
@@ -607,7 +619,7 @@ dependencies = [
 
 [[package]]
 name = "lens-test"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "lens-core",
  "quick-xml",
@@ -619,7 +631,7 @@ dependencies = [
 
 [[package]]
 name = "lens-trace"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "lens-core",
  "serde",
@@ -630,7 +642,7 @@ dependencies = [
 
 [[package]]
 name = "lens-tui"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "clap",
  "crossterm",
