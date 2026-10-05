@@ -46,3 +46,12 @@ jobs:
           ./target/release/lens --version
           ./target/release/lens --help
           ./target/release/lens-tui --help
+
+  merge-gate:
+    name: Merge Gate
+    runs-on: ubuntu-latest
+    needs: [test, build-release]
+    steps:
+      - name: Gate Check
+        run: echo "All workspace tests and release builds passed. Merge Gate open."
+
