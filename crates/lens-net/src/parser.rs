@@ -6,6 +6,9 @@ use std::path::Path;
 use crate::model::*;
 use lens_core::error::Result;
 
+// NOTE: /proc/net/* prints addresses as the host-endian interpretation of the
+// in-memory word, so `to_ne_bytes` is intentional and correct on every host —
+// the file format itself is host-endianness dependent, not fixed little-endian.
 pub fn parse_ipv4_hex(hex_str: &str) -> Option<String> {
     if hex_str.len() != 8 {
         return None;
@@ -98,11 +101,11 @@ pub fn parse_proc_net_unix(content: &str) -> Vec<SocketEntry> {
 
     for line in content.lines().skip(1) {
         let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() < 6 {
+        // Format: Num RefCount Protocol Flags Type St Inode [Path]
+        if parts.len() < 7 {
             continue;
         }
 
-        // Format: Num RefCount Protocol Flags Type St Inode [Path]
         let inode = parts[6].parse::<u64>().unwrap_or(0);
         let path = if parts.len() >= 8 {
             Some(parts[7].to_string())
@@ -236,8 +239,20 @@ pub fn inspect_network(proc_path: Option<&Path>) -> Result<NetReport> {
 
     for s in &sockets {
         summary.total_sockets += 1;
+        // UDP has no LISTEN state: a bound UDP socket shows st=07 (CLOSE) with
+        // a wildcard remote endpoint, so detect listeners by remote == *:0.
+        let udp_listening = matches!(s.kind, SocketKind::Udp | SocketKind::Udp6)
+            && s.remote_port == 0
+            && s.local_port != 0
+            && (s.remote_address.is_empty()
+                || s.remote_address == "0.0.0.0"
+                || s.remote_address == "::");
         match s.state {
             TcpState::Listen => {
+                summary.listening_ports += 1;
+                listening.push(s.clone());
+            }
+            _ if udp_listening => {
                 summary.listening_ports += 1;
                 listening.push(s.clone());
             }
@@ -300,6 +315,24 @@ mod tests {
         assert_eq!(entries[0].local_port, 22);
         assert_eq!(entries[0].state, TcpState::Listen);
         assert_eq!(entries[0].inode, 12345);
+    }
+
+    #[test]
+    fn test_udp_bound_socket_counted_as_listening() {
+        // A bound UDP socket reports st=07 and a wildcard remote endpoint.
+        let tmp = std::env::temp_dir().join(format!("lensnet-{}", std::process::id()));
+        let net = tmp.join("net");
+        std::fs::create_dir_all(&net).unwrap();
+        std::fs::write(
+            net.join("udp"),
+            "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   0: 00000000:0035 00000000:0000 07 00000000:00000000 00:00000000 00000000   101        0 55555 1 0000000000000000 100 0 0 10 0\n",
+        )
+        .unwrap();
+        let report = inspect_network(Some(&tmp)).unwrap();
+        assert_eq!(report.summary.listening_ports, 1);
+        assert_eq!(report.listening.len(), 1);
+        assert_eq!(report.listening[0].local_port, 53);
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
