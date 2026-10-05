@@ -39,7 +39,10 @@ impl TraceAnalyzer {
         let mut processes: BTreeMap<String, ProcessInfo> = BTreeMap::new();
         let mut events: Vec<TraceEvent> = Vec::new();
         let mut pending: HashMap<u64, PendingCall> = HashMap::new();
-        let mut open_fds: std::collections::BTreeSet<u64> = std::collections::BTreeSet::new();
+        // fd tables are per-process: tid -> open fd set. A global set would
+        // let process B's close(3) erase process A's open fd 3.
+        let mut open_fds: BTreeMap<u64, std::collections::BTreeSet<u64>> = BTreeMap::new();
+        let mut leaked_fds: BTreeMap<u64, std::collections::BTreeSet<u64>> = BTreeMap::new();
         let mut io_read_bytes = 0u64;
         let mut io_write_bytes = 0u64;
 
@@ -66,6 +69,13 @@ impl TraceAnalyzer {
                     })
                     .exited = true;
                 pending.remove(&tid);
+                // Any fd still open at exit is a leak for this process; move
+                // it out of the live table so a recycled tid starts fresh.
+                if let Some(fds) = open_fds.remove(&tid) {
+                    if !fds.is_empty() {
+                        leaked_fds.entry(tid).or_default().extend(fds);
+                    }
+                }
                 continue;
             }
 
@@ -152,14 +162,33 @@ impl TraceAnalyzer {
                 // FD leak & I/O tracking
                 if ev.error.is_none() {
                     match ev.syscall.as_str() {
-                        "open" | "openat" | "creat" => {
+                        // Syscalls whose return value is a new file descriptor.
+                        "open" | "openat" | "openat2" | "creat" | "socket" | "accept"
+                        | "accept4" | "dup" | "dup2" | "dup3" | "epoll_create"
+                        | "epoll_create1" | "eventfd" | "eventfd2" | "signalfd" | "signalfd4"
+                        | "timerfd_create" | "inotify_init" | "inotify_init1" | "memfd_create"
+                        | "pidfd_open" | "perf_event_open" | "fanotify_init" | "bpf" => {
                             if let Ok(fd) = ev.result.parse::<u64>() {
-                                open_fds.insert(fd);
+                                open_fds.entry(ev.tid).or_default().insert(fd);
+                            }
+                        }
+                        // pipe/pipe2/socketpair hand back both ends in the
+                        // argument array, e.g. pipe2([3,4], O_CLOEXEC) = 0
+                        "pipe" | "pipe2" | "socketpair" => {
+                            if let (Ok(0), Some(fds)) =
+                                (ev.result.parse::<u64>(), parse_fd_array(&ev.arguments))
+                            {
+                                let table = open_fds.entry(ev.tid).or_default();
+                                for fd in fds {
+                                    table.insert(fd);
+                                }
                             }
                         }
                         "close" => {
                             if let Ok(fd) = ev.arguments.trim().parse::<u64>() {
-                                open_fds.remove(&fd);
+                                if let Some(table) = open_fds.get_mut(&ev.tid) {
+                                    table.remove(&fd);
+                                }
                             }
                         }
                         "read" | "pread" | "pread64" | "recv" | "recvfrom" | "recvmsg" => {
@@ -182,7 +211,20 @@ impl TraceAnalyzer {
             }
         }
 
-        let fd_leaks: Vec<u64> = open_fds.into_iter().collect();
+        // Fds open at end-of-trace are leaks for still-running processes.
+        for (tid, fds) in open_fds {
+            leaked_fds.entry(tid).or_default().extend(fds);
+        }
+        let fd_leaks_by_process: BTreeMap<String, Vec<u64>> = leaked_fds
+            .iter()
+            .map(|(tid, fds)| (tid.to_string(), fds.iter().copied().collect()))
+            .collect();
+        let mut fd_leaks: Vec<u64> = leaked_fds
+            .values()
+            .flat_map(|fds| fds.iter().copied())
+            .collect();
+        fd_leaks.sort_unstable();
+        fd_leaks.dedup();
 
         TraceSnapshot {
             schema: SNAPSHOT_SCHEMA_V1.to_string(),
@@ -195,10 +237,23 @@ impl TraceAnalyzer {
             processes,
             events,
             fd_leaks,
+            fd_leaks_by_process,
             io_read_bytes,
             io_write_bytes,
         }
     }
+}
+
+/// Extract an fd array from strace arguments like `[3,4]` in `pipe2([3,4], 0)`.
+fn parse_fd_array(arguments: &str) -> Option<Vec<u64>> {
+    let open = arguments.find('[')?;
+    let close = arguments[open..].find(']')? + open;
+    let inner = &arguments[open + 1..close];
+    let fds: Option<Vec<u64>> = inner
+        .split(',')
+        .map(|s| s.trim().parse::<u64>().ok())
+        .collect();
+    fds.filter(|v| !v.is_empty())
 }
 
 fn split_tid_and_body(line: &str) -> (u64, Option<&str>, &str) {
@@ -405,7 +460,38 @@ mod tests {
 
         // FD 3 was closed, but FD 4 was leaked
         assert_eq!(snapshot.fd_leaks, vec![4]);
+        assert_eq!(snapshot.fd_leaks_by_process["1001"], vec![4]);
         assert_eq!(snapshot.io_read_bytes, 20);
         assert_eq!(snapshot.io_write_bytes, 11);
+    }
+
+    #[test]
+    fn test_fd_tracking_is_per_process() {
+        let lines = vec![
+            // pid A opens fd 3 and never closes it; pid B closes *its* fd 3.
+            "2001 openat(AT_FDCWD, \"/etc/hosts\", O_RDONLY) = 3 <0.000100>",
+            "2002 openat(AT_FDCWD, \"/tmp/x\", O_RDONLY) = 3 <0.000110>",
+            "2002 close(3) = 0 <0.000030>",
+            // pid B exits cleanly; pid A still holds fd 3 at end of trace.
+            "2002 +++ exited with 0 +++",
+        ];
+
+        let snapshot = TraceAnalyzer::new().analyze_lines(lines);
+        // B's close(3) must not erase A's fd 3.
+        assert_eq!(snapshot.fd_leaks_by_process["2001"], vec![3]);
+        assert!(!snapshot.fd_leaks_by_process.contains_key("2002"));
+    }
+
+    #[test]
+    fn test_fd_creating_syscalls_and_pipe() {
+        let lines = vec![
+            "3001 socket(AF_INET, SOCK_STREAM, 0) = 3 <0.000010>",
+            "3001 accept4(3, NULL, NULL, SOCK_CLOEXEC) = 4 <0.000020>",
+            "3001 pipe2([5,6], O_CLOEXEC) = 0 <0.000010>",
+            "3001 dup2(4, 7) = 7 <0.000010>",
+            "3001 close(4) = 0 <0.000010>",
+        ];
+        let snapshot = TraceAnalyzer::new().analyze_lines(lines);
+        assert_eq!(snapshot.fd_leaks_by_process["3001"], vec![3, 5, 6, 7]);
     }
 }

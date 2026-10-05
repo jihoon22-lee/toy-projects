@@ -52,8 +52,15 @@ pub struct TraceSnapshot {
     pub errors: BTreeMap<String, u64>,
     pub processes: BTreeMap<String, ProcessInfo>,
     pub events: Vec<TraceEvent>,
+    /// Union of file descriptors left open when each process exited or when
+    /// the trace ended (kept for v1 schema compatibility).
     #[serde(default)]
     pub fd_leaks: Vec<u64>,
+    /// Per-process view of `fd_leaks`: tid -> fds still open at exit/end.
+    /// fd numbers are per-process, so a global set misattributes closes across
+    /// processes; this map preserves attribution.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub fd_leaks_by_process: BTreeMap<String, Vec<u64>>,
     #[serde(default)]
     pub io_read_bytes: u64,
     #[serde(default)]
