@@ -1,5 +1,6 @@
 use lens_core::SetDiff;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 pub const RUN_SCHEMA_V1: &str = "testlens.run/v1";
 pub const DIFF_SCHEMA_V1: &str = "testlens.diff/v1";
@@ -54,6 +55,12 @@ pub struct TestRun {
     pub complete: bool,
     pub summary: TestSummary,
     pub cases: Vec<TestCase>,
+    /// `<properties>` entries declared on the suite/case level.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub properties: BTreeMap<String, String>,
+    /// Suite-level `<system-out>`/`<system-err>` text (outside testcases).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suite_output: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

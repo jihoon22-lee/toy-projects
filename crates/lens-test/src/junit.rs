@@ -7,10 +7,14 @@ use lens_core::{LensError, Result};
 pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> {
     let mut reader = Reader::from_reader(xml_bytes);
     reader.config_mut().trim_text(true);
+    // Best-effort: a single mismatched end tag must not discard the report.
+    reader.config_mut().check_end_names = false;
 
     let mut buf = Vec::new();
     let mut cases = Vec::new();
     let mut summary = TestSummary::default();
+    let mut properties = std::collections::BTreeMap::new();
+    let mut suite_output = String::new();
 
     let mut current_name = String::new();
     let mut current_classname = String::new();
@@ -21,7 +25,9 @@ pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> 
     let mut current_body = String::new();
     // Which element's character data we are accumulating.
     let mut capture: Option<&'static str> = None;
+    let mut capture_in_case = false;
     let mut in_testcase = false;
+    let mut in_properties = false;
     // Depth of unclosed elements; a truncated document leaves this > 0 at EOF.
     let mut open_depth = 0usize;
 
@@ -87,13 +93,38 @@ pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> 
                         }
                     }
                     b"skipped" if in_testcase => {
-                        current_status = TestStatus::Skipped;
+                        // Never downgrade a failure/error to skipped.
+                        if current_status == TestStatus::Passed {
+                            current_status = TestStatus::Skipped;
+                        }
                         capture = Some("skipped");
                         current_body.clear();
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"message" {
+                                current_message = Some(decode_attr(&attr));
+                            }
+                        }
                     }
-                    b"system-out" | b"system-err" if in_testcase => {
+                    // Suite- or case-level captured output.
+                    b"system-out" | b"system-err" => {
                         capture = Some("system");
+                        capture_in_case = in_testcase;
                         current_body.clear();
+                    }
+                    b"properties" => in_properties = true,
+                    b"property" if in_properties => {
+                        let mut k = None;
+                        let mut v = None;
+                        for attr in e.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"name" => k = Some(decode_attr(&attr)),
+                                b"value" => v = Some(decode_attr(&attr)),
+                                _ => {}
+                            }
+                        }
+                        if let Some(k) = k {
+                            properties.insert(k, v.unwrap_or_default());
+                        }
                     }
                     _ => {}
                 }
@@ -155,25 +186,53 @@ pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> 
                             }
                         }
                         b"skipped" => {
-                            current_status = TestStatus::Skipped;
+                            if current_status == TestStatus::Passed {
+                                current_status = TestStatus::Skipped;
+                            }
+                            for attr in e.attributes().flatten() {
+                                if attr.key.as_ref() == b"message" {
+                                    current_message = Some(decode_attr(&attr));
+                                }
+                            }
                         }
                         _ => {}
                     }
                 }
+                if e.name().as_ref() == b"property" && in_properties {
+                    let mut k = None;
+                    let mut v = None;
+                    for attr in e.attributes().flatten() {
+                        match attr.key.as_ref() {
+                            b"name" => k = Some(decode_attr(&attr)),
+                            b"value" => v = Some(decode_attr(&attr)),
+                            _ => {}
+                        }
+                    }
+                    if let Some(k) = k {
+                        properties.insert(k, v.unwrap_or_default());
+                    }
+                }
             }
             Ok(Event::Text(ref e)) => {
-                if capture.is_some() && in_testcase {
-                    let text = quick_xml::escape::unescape(&String::from_utf8_lossy(e))
+                if capture.is_some() {
+                    // Honor the document's declared encoding and entities.
+                    let raw = decoder
+                        .decode(e)
                         .map(|c| c.into_owned())
                         .unwrap_or_else(|_| String::from_utf8_lossy(e).into_owned());
+                    let text = quick_xml::escape::unescape(&raw)
+                        .map(|c| c.into_owned())
+                        .unwrap_or(raw);
                     current_body.push_str(&text);
-                    current_body.push('\n');
                 }
             }
             Ok(Event::CData(ref e)) => {
-                if capture.is_some() && in_testcase {
-                    current_body.push_str(&String::from_utf8_lossy(e));
-                    current_body.push('\n');
+                if capture.is_some() {
+                    let text = decoder
+                        .decode(e)
+                        .map(|c| c.into_owned())
+                        .unwrap_or_else(|_| String::from_utf8_lossy(e).into_owned());
+                    current_body.push_str(&text);
                 }
             }
             Ok(Event::End(ref e)) => {
@@ -193,12 +252,21 @@ pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> 
                 }) {
                     let body = current_body.trim().to_string();
                     match kind {
-                        "system" => {
+                        "system" if capture_in_case => {
                             if !body.is_empty() {
                                 if !current_output.is_empty() {
                                     current_output.push('\n');
                                 }
                                 current_output.push_str(&body);
+                            }
+                        }
+                        "system" => {
+                            // suite-level <system-out>/<system-err>
+                            if !body.is_empty() {
+                                if !suite_output.is_empty() {
+                                    suite_output.push('\n');
+                                }
+                                suite_output.push_str(&body);
                             }
                         }
                         _ => {
@@ -209,6 +277,9 @@ pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> 
                             }
                         }
                     }
+                }
+                if name == b"properties" {
+                    in_properties = false;
                 }
                 if name == b"testcase" && in_testcase {
                     in_testcase = false;
@@ -279,5 +350,11 @@ pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> 
         complete: open_depth == 0,
         summary,
         cases,
+        properties,
+        suite_output: if suite_output.is_empty() {
+            None
+        } else {
+            Some(suite_output)
+        },
     })
 }

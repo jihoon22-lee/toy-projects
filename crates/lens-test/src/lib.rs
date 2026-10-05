@@ -105,4 +105,48 @@ mod tests {
         );
         assert_eq!(diff.fixes, vec!["FIX: A::t2 recovered in candidate"]);
     }
+
+    #[test]
+    fn test_properties_suite_output_and_entities() {
+        let xml = r#"<testsuite tests="1">
+            <properties>
+                <property name="ci.build" value="1234"/>
+                <property name="branch" value="main"/>
+            </properties>
+            <testcase name="t&quot;q&quot;" classname="A&amp;B" time="0.1">
+                <error message="boom"/>
+            </testcase>
+            <system-out>suite stdout</system-out>
+        </testsuite>"#;
+
+        let run = parse_junit_xml(xml.as_bytes(), "p").unwrap();
+        assert_eq!(run.properties["ci.build"], "1234");
+        assert_eq!(run.properties["branch"], "main");
+        assert_eq!(run.suite_output.as_deref(), Some("suite stdout"));
+        assert_eq!(run.cases[0].name, "t\"q\"");
+        assert_eq!(run.cases[0].classname, "A&B");
+        assert_eq!(run.cases[0].status, TestStatus::Error);
+        assert_eq!(run.cases[0].message.as_deref(), Some("boom"));
+    }
+
+    #[test]
+    fn test_truncated_xml_is_incomplete() {
+        let xml = r#"<testsuite tests="2">
+            <testcase name="t1" classname="A" time="0.1"/>
+            <testcase name="t2" classname="A" time="0.2"><failure>"#;
+        let run = parse_junit_xml(xml.as_bytes(), "p").unwrap();
+        assert!(!run.complete);
+        assert_eq!(run.summary.total, 1); // only the closed testcase counted
+    }
+
+    #[test]
+    fn test_deterministic_run_id() {
+        let xml = br#"<testsuite tests="1"><testcase name="a" classname="C" time="0"/></testsuite>"#;
+        let a = parse_junit_xml(xml, "p").unwrap();
+        let b = parse_junit_xml(xml, "p").unwrap();
+        assert_eq!(a.run_id, b.run_id);
+        let other = br#"<testsuite tests="1"><testcase name="b" classname="C" time="0"/></testsuite>"#;
+        let c = parse_junit_xml(other, "p").unwrap();
+        assert_ne!(a.run_id, c.run_id);
+    }
 }
