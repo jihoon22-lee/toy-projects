@@ -61,7 +61,7 @@ fn handle_request(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
                 },
                 "serverInfo": {
                     "name": "lens-mcp",
-                    "version": "0.3.0"
+                    "version": env!("CARGO_PKG_VERSION")
                 }
             })),
             error: None,

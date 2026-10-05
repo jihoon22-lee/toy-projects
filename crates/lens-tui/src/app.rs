@@ -103,8 +103,19 @@ impl TuiApp {
     }
 
     pub fn reload_network(&mut self) {
-        if let Ok(rep) = inspect_network(None) {
-            self.net_report = Some(rep);
+        match inspect_network(None) {
+            Ok(rep) => {
+                if self.net_selected >= rep.listening.len() {
+                    self.net_selected = 0;
+                }
+                self.net_report = Some(rep);
+            }
+            Err(_) => {
+                // Clear stale data so the UI shows "unavailable", not
+                // a snapshot from a previous run.
+                self.net_report = None;
+                self.net_selected = 0;
+            }
         }
     }
 
@@ -146,14 +157,27 @@ impl TuiApp {
                 })
             });
 
-        if let Some(p) = path {
-            if let Ok(indexer) = LogIndexer::open(&p) {
+        let loaded = path.and_then(|p| {
+            LogIndexer::open(&p).ok().map(|indexer| {
                 let start = indexer.len().saturating_sub(2000);
-                self.log_lines = (start..indexer.len())
+                let lines: Vec<String> = (start..indexer.len())
                     .filter_map(|i| indexer.get_line(i).map(|s| s.to_string()))
                     .collect();
+                (p, lines)
+            })
+        });
+        match loaded {
+            Some((p, lines)) => {
+                self.log_lines = lines;
                 self.log_path = Some(p);
                 self.log_scroll = self.log_lines.len();
+            }
+            None => {
+                // No readable log — drop previously shown lines so the tab
+                // doesn't display stale output under a new directory.
+                self.log_lines.clear();
+                self.log_path = None;
+                self.log_scroll = 0;
             }
         }
     }
@@ -168,6 +192,10 @@ impl TuiApp {
             };
             self.populate_items(&res);
         } else {
+            // Do not leave the previous directory's entries visible.
+            self.items.clear();
+            self.total_size = 0;
+            self.selected_index = 0;
             self.status_message = format!("Failed to scan {:?}", self.current_path);
         }
     }

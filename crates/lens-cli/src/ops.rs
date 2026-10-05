@@ -18,9 +18,20 @@ use std::fs;
 pub fn dispatch(command: Commands) -> Result<()> {
     match command {
         Commands::Disk { action } => match action {
-            DiskCommands::Scan { path, json } => {
-                let scanner = DiskScanner::new(ScanOptions::default());
+            DiskCommands::Scan {
+                path,
+                json,
+                parallel,
+            } => {
+                let mut opts = ScanOptions::default();
+                opts.parallel = parallel;
+                let scanner = DiskScanner::new(opts);
                 let result = scanner.scan(&path)?;
+                // Scan errors are surfaced even in --json mode so evidence
+                // gaps never go unnoticed.
+                for e in &result.errors {
+                    eprintln!("scan warning: {e}");
+                }
                 if json {
                     let snapshot = SnapshotV2::from_tree(
                         &result.tree,
@@ -114,7 +125,15 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     filter = filter.with_query(&q);
                 }
                 if let Some(lvl_str) = min_level {
-                    filter = filter.with_min_level(LogLevel::parse(&lvl_str));
+                    let lvl = LogLevel::parse(&lvl_str);
+                    if lvl == LogLevel::Unknown && !lvl_str.eq_ignore_ascii_case("unknown") {
+                        return Err(lens_core::LensError::InvalidInput {
+                            message: format!(
+                                "invalid --min-level {lvl_str:?}; expected trace|debug|info|warn|error|fatal"
+                            ),
+                        });
+                    }
+                    filter = filter.with_min_level(lvl);
                 }
 
                 let mut matched = 0;
@@ -243,7 +262,25 @@ pub fn dispatch(command: Commands) -> Result<()> {
                 })?;
                 let entries: Vec<CompileCommandEntry> = serde_json::from_str(&content)?;
                 let units: Vec<_> = entries.iter().map(parse_command_entry).collect();
-                println!("{}", to_deterministic_pretty(&units)?);
+                // Emit the full buildscope.snapshot/v4 schema, including the
+                // reverse-impact graph resolved from on-disk headers.
+                let mut graph = ImpactGraph::new();
+                for unit in &units {
+                    graph.add_translation_unit(unit);
+                }
+                let reverse_impact = graph
+                    .header_to_units
+                    .iter()
+                    .map(|(h, us)| (h.clone(), us.iter().cloned().collect()))
+                    .collect();
+                let snapshot = lens_build::BuildSnapshot {
+                    schema: lens_build::SNAPSHOT_SCHEMA_V4.to_string(),
+                    version: env!("CARGO_PKG_VERSION").to_string(),
+                    total_units: units.len(),
+                    units,
+                    reverse_impact,
+                };
+                println!("{}", to_deterministic_pretty(&snapshot)?);
             }
             BuildCommands::Impact { file, header } => {
                 let content = fs::read_to_string(&file).map_err(|e| lens_core::LensError::Io {
@@ -351,6 +388,23 @@ pub fn dispatch(command: Commands) -> Result<()> {
                 env,
                 net,
             } => {
+                // A bundle with zero artifact sources would produce an
+                // empty manifest that still verifies OK — refuse to create it.
+                let any_source = disk.is_some()
+                    || log.is_some()
+                    || trace.is_some()
+                    || test.is_some()
+                    || sys.is_some()
+                    || env.is_some()
+                    || net;
+                if !any_source {
+                    return Err(lens_core::LensError::InvalidInput {
+                        message: "at least one artifact source is required \
+                                  (--disk/--log/--trace/--test/--sys/--env/--net)"
+                            .to_string(),
+                    });
+                }
+
                 // Fail-closed collection: every capture error is preserved in the
                 // manifest's diagnostics rather than silently dropped.
                 let mut artifacts: Vec<BundleArtifact> = Vec::new();
@@ -368,6 +422,10 @@ pub fn dispatch(command: Commands) -> Result<()> {
                 if let Some(ref d) = disk {
                     collect!("disk", "reports/disk_snapshot.json", {
                         let res = DiskScanner::new(ScanOptions::default()).scan(d)?;
+                        // Per-entry scan failures are evidence gaps — record
+                        // them in the manifest diagnostics.
+                        diagnostics
+                            .extend(res.errors.iter().map(|e| format!("disk scan: {e}")));
                         Ok(SnapshotV2::from_tree(
                             &res.tree,
                             res.root_id,
@@ -504,7 +562,12 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     println!("Bundle verification SUCCESSFUL: {:?}", bundle);
                     println!("  Total manifest files:    {}", report.total_files);
                     println!("  Verified SHA-256 files:  {}", report.verified_files);
-                    println!("  Integrity: 100% Authentic & Tamper-Free");
+                    // The manifest has no signature: this reports integrity
+                    // against the embedded manifest, not provenance.
+                    println!("  Integrity: all files match the embedded manifest");
+                    for u in &report.unexpected_files {
+                        println!("  Unlisted entry (not in manifest): {}", u);
+                    }
                 } else {
                     eprintln!("Bundle verification FAILED: {:?}", bundle);
                     if let Some(err) = report.error {
@@ -515,6 +578,9 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     }
                     for m in &report.missing_files {
                         eprintln!("  Missing:  {}", m);
+                    }
+                    for u in &report.unexpected_files {
+                        eprintln!("  Unlisted: {}", u);
                     }
                     return Err(lens_core::LensError::InvalidInput {
                         message: "Bundle cryptographic verification failed".to_string(),
@@ -636,8 +702,9 @@ pub fn dispatch(command: Commands) -> Result<()> {
             }
         }
         Commands::Tui { path } => {
-            lens_tui::run(&path).map_err(|e| lens_core::LensError::InvalidInput {
-                message: format!("TUI failed: {}", e),
+            lens_tui::run(&path).map_err(|e| lens_core::LensError::Io {
+                path: path.clone(),
+                source: e,
             })?;
         }
         Commands::Completion { shell } => {

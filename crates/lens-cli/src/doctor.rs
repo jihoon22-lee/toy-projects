@@ -42,7 +42,8 @@ pub fn check_storage(root_path: &Path) -> DoctorCheck {
     let c_path = std::ffi::CString::new(root_path.to_string_lossy().as_bytes()).unwrap_or_default();
     let res = unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) };
 
-    if res == 0 && stat.f_blocks > 0 {
+    // f_frsize can be 0 on unusual filesystems — guard to avoid a div/zero.
+    if res == 0 && stat.f_blocks > 0 && stat.f_frsize > 0 {
         let total_bytes = stat.f_blocks as u64 * stat.f_frsize as u64;
         let avail_bytes = stat.f_bavail as u64 * stat.f_frsize as u64;
         let free_pct = (avail_bytes as f64 / total_bytes as f64) * 100.0;

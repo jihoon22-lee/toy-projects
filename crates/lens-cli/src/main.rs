@@ -1,8 +1,14 @@
 use clap::Parser;
 use lens_cli::cli::Cli;
-use lens_core::Result;
 
-fn main() -> Result<()> {
+fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
-    lens_cli::ops::dispatch(cli.command)
+    match lens_cli::ops::dispatch(cli.command) {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(e) => {
+            // Human-readable Display variant (Debug dumps raw io::Error structs).
+            eprintln!("error: {e}");
+            std::process::ExitCode::FAILURE
+        }
+    }
 }

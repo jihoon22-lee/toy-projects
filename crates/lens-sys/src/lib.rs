@@ -99,7 +99,7 @@ ExecStart=/usr/bin/new-daemon --fast
     fn test_diff_systemd() {
         let snap1 = SystemdSnapshot {
             schema: SNAPSHOT_SCHEMA_V1.to_string(),
-            version: "0.3.0".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
             semantics: "systemd-255-subset-v1".to_string(),
             units: {
                 let mut map = BTreeMap::new();
@@ -115,7 +115,7 @@ ExecStart=/usr/bin/new-daemon --fast
 
         let snap2 = SystemdSnapshot {
             schema: SNAPSHOT_SCHEMA_V1.to_string(),
-            version: "0.3.0".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
             semantics: "systemd-255-subset-v1".to_string(),
             units: {
                 let mut map = BTreeMap::new();

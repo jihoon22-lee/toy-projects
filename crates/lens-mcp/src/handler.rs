@@ -30,14 +30,16 @@ pub fn execute_tool(name: &str, args: &Value) -> Result<String, String> {
             } else {
                 let children_count = res.tree.children_ids(res.root_id).len();
                 let root = &res.tree.nodes[res.root_id as usize];
-                Ok(serde_json::to_string_pretty(&serde_json::json!({
+                serde_json::to_string_pretty(&serde_json::json!({
                     "path": path_str,
                     "scanned_entries": res.scanned_entries,
                     "logical_bytes": root.size,
                     "allocated_bytes": root.allocated_size,
                     "children_count": children_count,
+                    "complete": res.complete,
+                    "errors": res.errors,
                 }))
-                .unwrap())
+                .map_err(|e| e.to_string())
             }
         }
         "lens_disk_duplicates" => {
@@ -79,23 +81,38 @@ pub fn execute_tool(name: &str, args: &Value) -> Result<String, String> {
                 filter = filter.with_query(q);
             }
             if let Some(lvl) = args.get("min_level").and_then(|v| v.as_str()) {
-                filter = filter.with_min_level(LogLevel::parse(lvl));
+                let parsed = LogLevel::parse(lvl);
+                if parsed == LogLevel::Unknown && !lvl.eq_ignore_ascii_case("unknown") {
+                    return Err(format!(
+                        "Invalid 'min_level' {lvl:?}; expected trace|debug|info|warn|error|fatal"
+                    ));
+                }
+                filter = filter.with_min_level(parsed);
             }
 
+            // The scan is capped at 1000 lines — surface the bound so callers
+            // don't read a partial result as complete.
+            const MAX_SCANNED: usize = 1000;
             let mut matches = Vec::new();
-            for idx in 0..indexer.len().min(1000) {
+            for idx in 0..indexer.len().min(MAX_SCANNED) {
                 if let Some(line) = indexer.get_line(idx) {
                     let record = parse_line(line, idx + 1);
                     if filter.matches(&record) {
                         matches.push(serde_json::json!({
                             "line": record.line_number,
-                            "level": format!("{:?}", record.level),
+                            "level": record.level.as_str(),
                             "raw": record.raw,
                         }));
                     }
                 }
             }
-            Ok(serde_json::to_string_pretty(&matches).unwrap())
+            serde_json::to_string_pretty(&serde_json::json!({
+                "matches": matches,
+                "scanned_lines": indexer.len().min(MAX_SCANNED),
+                "total_lines": indexer.len(),
+                "truncated": indexer.len() > MAX_SCANNED,
+            }))
+            .map_err(|e| e.to_string())
         }
         "lens_trace_analyze" => {
             let path_str = args
@@ -115,12 +132,12 @@ pub fn execute_tool(name: &str, args: &Value) -> Result<String, String> {
             let units = load_sys_units(Path::new(dir_str)).map_err(|e| e.to_string())?;
             let graph = OrderingGraph::build(&units);
             let cycles = graph.find_cycles();
-            Ok(serde_json::to_string_pretty(&serde_json::json!({
+            serde_json::to_string_pretty(&serde_json::json!({
                 "scanned_units": units.len(),
                 "cycle_count": cycles.len(),
                 "cycles": cycles,
             }))
-            .unwrap())
+            .map_err(|e| e.to_string())
         }
         "lens_build_impact" => {
             let file_str = args
@@ -152,12 +169,12 @@ pub fn execute_tool(name: &str, args: &Value) -> Result<String, String> {
                 .and_then(|v| v.as_str())
                 .ok_or("Missing 'venv_path' argument")?;
             let venv = inspect_venv(Path::new(path_str)).map_err(|e| e.to_string())?;
-            Ok(serde_json::to_string_pretty(&serde_json::json!({
+            serde_json::to_string_pretty(&serde_json::json!({
                 "python_version": venv.python_version,
                 "packages_count": venv.packages.len(),
                 "missing_dependencies": venv.missing_dependencies,
             }))
-            .unwrap())
+            .map_err(|e| e.to_string())
         }
         "lens_net_inspect" => {
             let proc_dir = args.get("proc_dir").and_then(|v| v.as_str()).map(Path::new);

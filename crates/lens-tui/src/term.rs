@@ -365,7 +365,7 @@ fn run_app<B: ratatui::backend::Backend>(
 
             // Footer
             let footer = Paragraph::new(format!(
-                " {} | Hotkeys: [Tab/1-4] Views  [q] Quit  [j/k] Navigate  [Enter] Open  [Backspace/h] Parent",
+                " {} | Hotkeys: [Tab/1-4] Views  [q] Quit  [j/k] Navigate  [Enter] Open  [Backspace/h] Parent  [r] Reload",
                 app.status_message
             ))
             .style(Style::default().fg(Color::DarkGray))

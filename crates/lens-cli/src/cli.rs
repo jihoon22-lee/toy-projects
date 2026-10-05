@@ -93,6 +93,9 @@ pub enum DiskCommands {
         path: PathBuf,
         #[arg(long)]
         json: bool,
+        /// Parallelize per-entry stat with rayon
+        #[arg(long)]
+        parallel: bool,
     },
     /// Find duplicate files with hard link deduplication
     Duplicates {
@@ -119,7 +122,7 @@ pub enum AbiCommands {
 pub enum LogCommands {
     /// Inspect log file metrics and line counts
     Inspect { path: PathBuf },
-    /// Search and filter log lines with zero-allocation speed
+    /// Search and filter log lines (memory-mapped, memchr-accelerated)
     Filter {
         path: PathBuf,
         #[arg(long)]
@@ -220,7 +223,7 @@ pub enum NetCommands {
 
 #[derive(Subcommand)]
 pub enum BundleCommands {
-    /// Create a consolidated .lens forensic archive (tar.gz + signed manifest)
+    /// Create a consolidated .lens forensic archive (tar.gz + embedded manifest)
     Create {
         /// Output path for the .lens bundle
         output: PathBuf,
@@ -242,6 +245,6 @@ pub enum BundleCommands {
     },
     /// Inspect contents and diagnostics of a .lens bundle
     Inspect { bundle: PathBuf },
-    /// Verify cryptographic SHA-256 integrity and authenticity of a .lens bundle
+    /// Verify bundle contents against its embedded manifest's SHA-256 checksums
     Verify { bundle: PathBuf },
 }
