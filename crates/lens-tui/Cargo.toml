@@ -1,0 +1,26 @@
+[package]
+name = "lens-tui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "lens-tui"
+path = "src/main.rs"
+
+[dependencies]
+lens-core = { path = "../lens-core" }
+lens-disk = { path = "../lens-disk" }
+lens-log = { path = "../lens-log" }
+lens-sys = { path = "../lens-sys" }
+lens-net = { path = "../lens-net" }
+clap = { workspace = true }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.17"

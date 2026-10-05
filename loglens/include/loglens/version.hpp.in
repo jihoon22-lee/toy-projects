@@ -1,2 +1,0 @@
-#pragma once
-#define LOGLENS_VERSION "@PROJECT_VERSION@"

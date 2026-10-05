@@ -1,0 +1,21 @@
+[package]
+name = "lens-abi"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+lens-core = { path = "../lens-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+object = { workspace = true }
+gimli = { workspace = true }
+flate2 = { workspace = true }
+cpp_demangle = { workspace = true }
+rustc-demangle = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.17"

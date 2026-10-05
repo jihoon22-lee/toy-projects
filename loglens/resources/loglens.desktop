@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=LogLens
-Comment=Inspect logs and preserve investigation evidence
-Exec=loglens-gui %f
-Icon=loglens
-Terminal=false
-Categories=Development;Utility;
-MimeType=text/plain;

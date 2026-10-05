@@ -1,2 +1,0 @@
-#pragma once
-#define TRACELENS_VERSION "@PROJECT_VERSION@"
