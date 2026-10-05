@@ -168,3 +168,55 @@ E2E 확인:
   타입은 향후 스키마 버전업에서 검토.
 - 이후 다중 서브에이전트 코드 리뷰(보안/파서/성능/아키텍처/테스트·문서)를
   수행하고 결과를 통합 검토한다 — 결과는 별도 섹션에 추가 예정.
+
+---
+
+## 다중 서브에이전트 코드 리뷰 통합 결과 (2차 패스)
+
+5개의 독립 SWE-2 리뷰 에이전트(보안/포렌식, 파서 정확성, 동시성·성능,
+아키텍처·스키마, 테스트·CI·문서)로 다중 리뷰를 수행하고 발견사항을 통합해
+모두 수정했다.
+
+### Critical 해결
+
+- **release.yml 태그 해석 버그**: `gh api repos/.../commits`는 *리스트* 엔드
+  포인트라 태그 유무와 무관하게 항상 성공 — 비교가 무의미했던 것을
+  `git/ref/tags/<tag>` --jq `.object.sha`로 교체(404 → 태그 없음).
+  테스트의 fake gh도 실제 의미론을 모델링하도록 수정.
+- **번들 매니페스트 스푸핑**: `*/manifest.json` 접미 매칭을 정확 경로 매칭으로,
+  중복/미등재 엔트리 거부, 중첩 매니페스트가 본 매니페스트로 오인되던 경로 차단.
+  생성 시 임시 파일+원자적 rename, 심볼링크 출력 덮어쓰기 방지.
+
+### High 해결
+
+- 스캐너 visited_dirs에 심볼링크 타깃을 기록해 같은 타깃을 가리키는 실 경로의
+  하위 트리가 누락되던 오염 제거; 깊이 상한 시 `complete=false`.
+- trash가 canonicalize된 *타깃*을 이동하던 것을 링크 자체 이동으로 교체.
+- `-I` 검색 순서를 파괴하던 정렬 dedup을 순서 보존 dedup으로 교체.
+- `resolve_include`의 미정규화 `..` 키, `-include` cwd 앵커, 주석 내
+  `#include` 오검출, 스캔 상한의 묵묵한 종료(`scan_truncated` 추가).
+- strace: `+++ killed/superseded`를 syscall로 오인하던 문제, `-y` fd 주석이
+  close 파싱을 깨던 문제(가짜 fd leak), fork 시 fd 상속, tid 재사용 generation.
+- 잔여 하드코딩 `"0.3.0"`(lens-sys 테스트, MCP serverInfo) 제거.
+- `DiffReport.abi.versions`가 영구 빈 값이던 것을 실제 verneed 비교로 구현.
+
+### Medium/Low 해결
+
+- partial hash short-read, `(0,0)` inode 경로 폴백, 중복 그룹 결정적 2차 정렬.
+- 스트립된 ELF용 program-header 폴백(PT_DYNAMIC/PT_INTERP), SHF_ALLOC 필터,
+  압축 DWARF(`SHF_COMPRESSED`/zlib) 해제.
+- systemd suffix 전면 확장, 템플릿 drop-in 병합, unix 소켓 `St`를 TCP 상태로
+  오역하지 않도록 분리, net diff 스키마 필드, inode=0 고아 노이즈 제거.
+- JUnit: `<properties>`, suite 출력, 인코딩 인지, malformed 종료 태그 관대
+  처리, 잘림 감지, 결정적 run_id.
+- CLI/MCP/TUI: Display 에러, 인자 검증, `build inspect` 스키마 출력,
+  번들 최소 소스 요구, TUI stale 상태 제거, MCP 1000라인 상한 명시,
+  `.unwrap()` 직렬화 에러 전파.
+- 문서: "authentic/signed" 워딩을 매니페스트 무결성으로 정정, 도메인 수 9개,
+  check_docs.py CI 연결, assemble_pages가 crates/README.md 발행.
+
+### 검증
+
+각 작업 단위는 conventional commit으로 분리: `fix(core)`, `fix(disk)`,
+`fix(build)`, `fix(trace)`, `fix(abi)`, `fix(sys,net)`, `fix(test)`,
+`fix(cli,mcp,tui)`, `ci`, `docs`. 최종 전체 검증은 별도 기록.

@@ -39,6 +39,33 @@ Lens는 워크스페이스 단일 버전으로 릴리스된다. 태그는 `vX.Y.
 - systemd unit 로딩을 `lens_sys::load_units`로 통합(CLI/doctor/MCP 중복 제거).
 - README 성능 주장을 실측값으로 정정.
 
+### 2차 다중 리뷰 기반 강화
+- 번들 검증: 매니페스트를 `manifest.json` 정확 경로로만 해석(중첩 스푸핑 차단),
+  중복·미등재 아카이브 엔트리 거부, 실제 해제 바이트 상한 적용, 번들 생성은
+  임시 파일+원자적 rename으로 부분 쓰기·심볼링크 덮어쓰기 방지.
+- lens-disk: 심볼링크 별칭이 visited_dirs를 오염시켜 하위 트리를 누락하던
+  문제 수정, 깊이 상한 도달 시 `complete=false`, trash가 링크 타깃 대신 링크
+  자체를 이동, `(dev=0,ino=0)` 파일은 경로 기반 중복 판정 폴백.
+- lens-build: `-I` 검색 순서 보존 dedup, `..`/`./` include 경로 정규화,
+  `-include`를 컴파일 디렉터리 기준 해석, 주석 내 `#include` 무시,
+  스캔 상한 도달을 `scan_truncated`로 표면화.
+- lens-trace: `+++ exited/killed/superseded` 계열 종결행 전부 처리,
+  `strace -y` fd 주석(`3</etc/hosts>`) 제거, fork/clone 시 fd 테이블 상속,
+  tid 재사용 generation 분리.
+- lens-abi: 스트립된 바이너리용 program header(PT_DYNAMIC/PT_INTERP) 폴백,
+  SHF_ALLOC 섹션 필터, 압축 DWARF 해제, `abi.versions` diff 비교.
+- lens-sys: 유닛 suffix 전면 지원, 템플릿(`foo@.service`) drop-in 병합.
+- lens-net: unix 소켓 Type/St 열 의미론 수정, diff 스키마 필드 추가,
+  inode=0 고아 소켓 노이즈 제거.
+- lens-test: `<properties>` 수집, suite 레벨 출력 보존, 인코딩 인지 디코딩,
+  malformed 종료 태그 관대한 처리, 잘린 문서 `complete=false`.
+- CLI/MCP/TUI: 표준에러 출력을 Display로, `--min-level`/`min_level` 검증,
+  스캔 오류 표면화, `build inspect`가 `buildscope.snapshot/v4` 출력,
+  `bundle create`에 최소 1개 소스 요구, TUI 리로드 실패 시 stale 상태 제거.
+- CI: release.yml 태그 해석을 `git/ref/tags/<tag>`로 교체(이전 `/commits`
+  리스트 엔드포인트는 항상 성공해 비교가 무의미했음), check_docs를 CI에 연결,
+  assemble_pages가 `crates/README.md`를 `crates/index.md`로 발행.
+
 ## 0.4.2
 
 마지막 태그된 릴리스. 이후 변경은 위 Unreleased 항목 참고.

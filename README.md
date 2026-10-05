@@ -14,7 +14,7 @@
 toy-projects/
 ├── Cargo.toml          루트 워크스페이스 정의
 ├── crates/
-│   ├── lens-core/      공통 기반 (Zero-Copy I/O, SafeInput TOCTOU 방어, SHA-256, 3상태 Diff, 암호학적 번들 검증)
+│   ├── lens-core/      공통 기반 (Zero-Copy I/O, SafeInput TOCTOU 방어, SHA-256, 3상태 Diff, 번들 매니페스트 무결성 검증)
 │   ├── lens-disk/      스토리지 분석, 연속 메모리 아레나 트리, 중복 파일 탐지, FreeDesktop Trash
 │   ├── lens-abi/       ELF 동적 심볼 검사, C++/Rust 심볼 디맹글링, ABI 3상태 Diff
 │   ├── lens-log/       mmap 제로카피 라인 인덱서, 무할당 필터 평가, Session v2
@@ -25,7 +25,7 @@ toy-projects/
 │   ├── lens-env/       Zero-Code Python venv 분석기, 미충족 패키지 검사, import 섀도잉 탐지
 │   ├── lens-net/       네트워크 소켓 포렌식, IPv4/IPv6 /proc/net 무실행 파싱, 프로세스 FD 상관관계, 포트 Diff
 │   ├── lens-cli/       단일 통합 CLI (`lens`), 시스템 종합 진단 (`doctor`), 셸 자동완성, 포렌식 번들
-│   ├── lens-tui/       대화형 터미널 UI 대시보드 (Storage, Network 실데이터)
+│   ├── lens-tui/       대화형 터미널 UI 대시보드 (Storage, Services, Logs, Network 실데이터)
 │   └── lens-mcp/       AI 어시스턴트(Claude, Antigravity) 연동용 Model Context Protocol 서버
 ```
 
@@ -66,7 +66,7 @@ cargo build --release -p lens-cli --jobs 2
 
 ## 4. 통합 CLI 사용법 (`lens`)
 
-단일 실행 파일 `lens` 하나로 8개 진단 도메인의 기능과 포렌식 번들링을 모두 실행할 수 있습니다.
+단일 실행 파일 `lens` 하나로 9개 진단 도메인(disk, abi, log, test, trace, sys, build, env, net)의 기능과 포렌식 번들링을 모두 실행할 수 있습니다.
 
 ```bash
 # 1. 파일시스템 초고속 스캔 & 중복 파일 탐지 (동일 inode 하드링크 자동 인식)
@@ -101,7 +101,7 @@ $ lens env inspect .venv --project .
 $ lens net inspect
 $ lens net diff net_baseline.json net_candidate.json
 
-# 10. 종합 사고 포렌식 비행기록장치(.lens) 번들 생성, 검사 및 암호학적 무결성 검증
+# 10. 종합 사고 포렌식 비행기록장치(.lens) 번들 생성/검사 및 매니페스트 무결성 검증
 $ lens bundle create incident.lens --disk /var/log --trace /tmp/strace.log --test target/junit.xml
 $ lens bundle inspect incident.lens
 $ lens bundle verify incident.lens
