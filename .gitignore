@@ -2,6 +2,7 @@
 build/
 src/gui/build/
 bin/
+target/
 *.o
 *.a
 *.so
