@@ -1,5 +1,43 @@
 use lens_disk::{DiskScanner, ScanOptions, ScanResult};
+use lens_net::{inspect_network, NetReport};
 use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TuiTab {
+    Storage,
+    Services,
+    Logs,
+    Network,
+}
+
+impl TuiTab {
+    pub fn all() -> &'static [TuiTab] {
+        &[
+            TuiTab::Storage,
+            TuiTab::Services,
+            TuiTab::Logs,
+            TuiTab::Network,
+        ]
+    }
+
+    pub fn title(&self) -> &'static str {
+        match self {
+            TuiTab::Storage => "1: Storage",
+            TuiTab::Services => "2: Services",
+            TuiTab::Logs => "3: Logs",
+            TuiTab::Network => "4: Network",
+        }
+    }
+
+    pub fn next(&self) -> Self {
+        match self {
+            TuiTab::Storage => TuiTab::Services,
+            TuiTab::Services => TuiTab::Logs,
+            TuiTab::Logs => TuiTab::Network,
+            TuiTab::Network => TuiTab::Storage,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct TuiItem {
@@ -13,9 +51,12 @@ pub struct TuiItem {
 
 pub struct TuiApp {
     pub current_path: PathBuf,
+    pub active_tab: TuiTab,
     pub items: Vec<TuiItem>,
     pub selected_index: usize,
     pub total_size: u64,
+    pub net_report: Option<NetReport>,
+    pub net_selected: usize,
     pub status_message: String,
     pub should_quit: bool,
 }
@@ -24,14 +65,33 @@ impl TuiApp {
     pub fn new(initial_path: &Path) -> Self {
         let mut app = Self {
             current_path: initial_path.to_path_buf(),
+            active_tab: TuiTab::Storage,
             items: Vec::new(),
             selected_index: 0,
             total_size: 0,
-            status_message: "Ready. Use j/k to navigate, Enter to open, q to quit.".to_string(),
+            net_report: None,
+            net_selected: 0,
+            status_message: "Ready. [Tab/1-4] Switch tabs  [j/k] Navigate  [Enter] Open  [q] Quit"
+                .to_string(),
             should_quit: false,
         };
         app.reload();
+        app.reload_network();
         app
+    }
+
+    pub fn next_tab(&mut self) {
+        self.active_tab = self.active_tab.next();
+    }
+
+    pub fn set_tab(&mut self, tab: TuiTab) {
+        self.active_tab = tab;
+    }
+
+    pub fn reload_network(&mut self) {
+        if let Ok(rep) = inspect_network(None) {
+            self.net_report = Some(rep);
+        }
     }
 
     pub fn reload(&mut self) {

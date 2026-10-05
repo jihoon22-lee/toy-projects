@@ -12,6 +12,7 @@ members = [
     "crates/lens-cli",
     "crates/lens-tui",
     "crates/lens-mcp",
+    "crates/lens-net",
 ]
 resolver = "2"
 
@@ -35,6 +36,9 @@ clap = { version = "4.5", features = ["derive"] }
 object = { version = "0.36", default-features = false, features = ["read_core", "elf"] }
 gimli = { version = "0.31", default-features = false, features = ["read"] }
 flate2 = "1.0"
+tar = "0.4"
 regex = "1.11"
 crossterm = "0.28"
 ratatui = "0.29"
+cpp_demangle = "0.4"
+rustc-demangle = "0.1"

@@ -6,10 +6,11 @@ use std::path::{Path, PathBuf};
 
 use lens_abi::{diff_reports, inspect_elf};
 use lens_build::{diff_compilations, parse_command_entry, CompileCommandEntry, ImpactGraph};
-use lens_core::{to_deterministic_pretty, Result};
+use lens_core::{to_deterministic_pretty, verify_bundle_archive, Result};
 use lens_disk::{DiskScanner, DuplicateFinder, ScanOptions, SnapshotV2, TrashManager};
 use lens_env::{detect_shadowing, diff_environments, inspect_venv, EnvSnapshot};
 use lens_log::{parse_line, LogFilter, LogIndexer, LogLevel};
+use lens_net::{diff_net_reports, inspect_network, NetReport};
 use lens_sys::{diff_systemd, parse_unit_content, OrderingGraph, SystemdSnapshot, SystemdUnit};
 use lens_test::{diff_test_runs, parse_junit_xml};
 use lens_trace::{diff_snapshots, TraceAnalyzer};
@@ -64,6 +65,11 @@ enum Commands {
     Env {
         #[command(subcommand)]
         action: EnvCommands,
+    },
+    /// Linux socket, listening port, and network connection forensics
+    Net {
+        #[command(subcommand)]
+        action: NetCommands,
     },
     /// Forensic Flight Recorder: bundle multiple diagnostic artifacts into a .lens container
     Bundle {
@@ -189,6 +195,22 @@ enum EnvCommands {
 }
 
 #[derive(Subcommand)]
+enum NetCommands {
+    /// Inspect open listening ports, sockets, and associated processes
+    Inspect {
+        #[arg(long)]
+        proc_dir: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Compare two network snapshot JSON reports
+    Diff {
+        baseline: PathBuf,
+        candidate: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
 enum BundleCommands {
     /// Create a consolidated .lens forensic archive from multiple system sources
     Create {
@@ -209,6 +231,8 @@ enum BundleCommands {
     },
     /// Inspect contents and diagnostics of a .lens bundle
     Inspect { bundle: PathBuf },
+    /// Verify cryptographic SHA-256 integrity and authenticity of a .lens bundle
+    Verify { bundle: PathBuf },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -713,6 +737,105 @@ fn main() -> Result<()> {
                         "None"
                     }
                 );
+            }
+            BundleCommands::Verify { bundle } => {
+                let report = verify_bundle_archive(&bundle)?;
+                if report.is_valid {
+                    println!("Bundle verification SUCCESSFUL: {:?}", bundle);
+                    println!("  Total manifest files:    {}", report.total_files);
+                    println!("  Verified SHA-256 files:  {}", report.verified_files);
+                    println!("  Integrity: 100% Authentic & Tamper-Free");
+                } else {
+                    eprintln!("Bundle verification FAILED: {:?}", bundle);
+                    if let Some(err) = report.error {
+                        eprintln!("  Error: {}", err);
+                    }
+                    for t in &report.tampered_files {
+                        eprintln!("  Tampered: {}", t);
+                    }
+                    for m in &report.missing_files {
+                        eprintln!("  Missing:  {}", m);
+                    }
+                    return Err(lens_core::LensError::InvalidInput {
+                        message: "Bundle cryptographic verification failed".to_string(),
+                    });
+                }
+            }
+        },
+        Commands::Net { action } => match action {
+            NetCommands::Inspect { proc_dir, json } => {
+                let report = inspect_network(proc_dir.as_deref())?;
+                if json {
+                    println!("{}", to_deterministic_pretty(&report)?);
+                } else {
+                    println!("Network & Socket Inspection Summary:");
+                    println!("  Total Sockets:          {}", report.summary.total_sockets);
+                    println!(
+                        "  Listening Ports:        {}",
+                        report.summary.listening_ports
+                    );
+                    println!(
+                        "  Established Conns:      {}",
+                        report.summary.established_connections
+                    );
+                    println!(
+                        "  TIME_WAIT Sockets:      {}",
+                        report.summary.time_wait_sockets
+                    );
+                    println!(
+                        "  Orphan Sockets:         {}",
+                        report.summary.orphan_sockets
+                    );
+                    println!(
+                        "  UNIX Domain Sockets:    {}",
+                        report.summary.unix_domain_sockets
+                    );
+                    println!("\nActive Listening Ports:");
+                    println!(
+                        "{:<8} {:<24} {:<10} {:<8} {:<16}",
+                        "PROTO", "LOCAL ADDRESS", "INODE", "PID", "PROCESS"
+                    );
+                    for l in &report.listening {
+                        let proc_str = l
+                            .process
+                            .as_ref()
+                            .map(|p| p.name.as_str())
+                            .unwrap_or("<orphan>");
+                        let pid_str = l
+                            .process
+                            .as_ref()
+                            .map(|p| p.pid.to_string())
+                            .unwrap_or_else(|| "-".to_string());
+                        let addr = format!("{}:{}", l.local_address, l.local_port);
+                        println!(
+                            "{:<8} {:<24} {:<10} {:<8} {}",
+                            format!("{:?}", l.kind),
+                            addr,
+                            l.inode,
+                            pid_str,
+                            proc_str
+                        );
+                    }
+                }
+            }
+            NetCommands::Diff {
+                baseline,
+                candidate,
+            } => {
+                let base_content =
+                    fs::read_to_string(&baseline).map_err(|e| lens_core::LensError::Io {
+                        path: baseline.clone(),
+                        source: e,
+                    })?;
+                let cand_content =
+                    fs::read_to_string(&candidate).map_err(|e| lens_core::LensError::Io {
+                        path: candidate.clone(),
+                        source: e,
+                    })?;
+                let base_report: NetReport = serde_json::from_str(&base_content)?;
+                let cand_report: NetReport = serde_json::from_str(&cand_content)?;
+                let diff = diff_net_reports(&base_report, &cand_report);
+                println!("{}", to_deterministic_pretty(&diff)?);
             }
         },
     }

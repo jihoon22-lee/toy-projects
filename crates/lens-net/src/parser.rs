@@ -1,0 +1,267 @@
+use std::collections::HashMap;
+use std::fs;
+use std::net::Ipv4Addr;
+use std::path::Path;
+
+use crate::model::*;
+use lens_core::error::Result;
+
+pub fn parse_ipv4_hex(hex_str: &str) -> Option<String> {
+    if hex_str.len() != 8 {
+        return None;
+    }
+    let num = u32::from_str_radix(hex_str, 16).ok()?;
+    let bytes = num.to_ne_bytes();
+    Some(Ipv4Addr::new(bytes[3], bytes[2], bytes[1], bytes[0]).to_string())
+}
+
+pub fn parse_port_hex(hex_str: &str) -> Option<u16> {
+    u16::from_str_radix(hex_str, 16).ok()
+}
+
+pub fn parse_addr_port(entry: &str) -> (String, u16) {
+    if let Some((addr_hex, port_hex)) = entry.split_once(':') {
+        let addr = parse_ipv4_hex(addr_hex).unwrap_or_else(|| addr_hex.to_string());
+        let port = parse_port_hex(port_hex).unwrap_or(0);
+        (addr, port)
+    } else {
+        (entry.to_string(), 0)
+    }
+}
+
+pub fn parse_proc_net_tcp(content: &str, kind: SocketKind) -> Vec<SocketEntry> {
+    let mut entries = Vec::new();
+
+    for line in content.lines().skip(1) {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 10 {
+            continue;
+        }
+
+        let (local_address, local_port) = parse_addr_port(parts[1]);
+        let (remote_address, remote_port) = parse_addr_port(parts[2]);
+        let state = TcpState::from_hex(parts[3]);
+
+        let (tx_queue, rx_queue) = if let Some((tx, rx)) = parts[4].split_once(':') {
+            (
+                u64::from_str_radix(tx, 16).unwrap_or(0),
+                u64::from_str_radix(rx, 16).unwrap_or(0),
+            )
+        } else {
+            (0, 0)
+        };
+
+        let uid = parts[7].parse::<u32>().unwrap_or(0);
+        let inode = parts[9].parse::<u64>().unwrap_or(0);
+
+        entries.push(SocketEntry {
+            kind,
+            local_address,
+            local_port,
+            remote_address,
+            remote_port,
+            state,
+            inode,
+            uid,
+            tx_queue,
+            rx_queue,
+            process: None,
+            unix_path: None,
+        });
+    }
+
+    entries
+}
+
+pub fn parse_proc_net_unix(content: &str) -> Vec<SocketEntry> {
+    let mut entries = Vec::new();
+
+    for line in content.lines().skip(1) {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 6 {
+            continue;
+        }
+
+        // Format: Num RefCount Protocol Flags Type St Inode [Path]
+        let inode = parts[6].parse::<u64>().unwrap_or(0);
+        let path = if parts.len() >= 8 {
+            Some(parts[7].to_string())
+        } else {
+            None
+        };
+
+        entries.push(SocketEntry {
+            kind: SocketKind::UnixStream,
+            local_address: "unix".to_string(),
+            local_port: 0,
+            remote_address: String::new(),
+            remote_port: 0,
+            state: TcpState::Unknown,
+            inode,
+            uid: 0,
+            tx_queue: 0,
+            rx_queue: 0,
+            process: None,
+            unix_path: path,
+        });
+    }
+
+    entries
+}
+
+pub fn scan_process_socket_inodes(proc_dir: &Path) -> HashMap<u64, SocketProcess> {
+    let mut inode_map = HashMap::new();
+
+    let entries = match fs::read_dir(proc_dir) {
+        Ok(e) => e,
+        Err(_) => return inode_map,
+    };
+
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let name_str = file_name.to_string_lossy();
+        let pid = match name_str.parse::<u32>() {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+
+        let pid_path = entry.path();
+        let fd_dir = pid_path.join("fd");
+
+        // Read proc name and cmdline
+        let comm = fs::read_to_string(pid_path.join("comm"))
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let cmdline = fs::read_to_string(pid_path.join("cmdline"))
+            .unwrap_or_default()
+            .replace('\0', " ")
+            .trim()
+            .to_string();
+
+        let fd_entries = match fs::read_dir(fd_dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        for fd_entry in fd_entries.flatten() {
+            let fd_num = fd_entry
+                .file_name()
+                .to_string_lossy()
+                .parse::<u32>()
+                .unwrap_or(0);
+
+            if let Ok(target) = fs::read_link(fd_entry.path()) {
+                let target_str = target.to_string_lossy();
+                if let Some(inode_str) = target_str
+                    .strip_prefix("socket:[")
+                    .and_then(|s| s.strip_suffix(']'))
+                {
+                    if let Ok(inode) = inode_str.parse::<u64>() {
+                        inode_map.insert(
+                            inode,
+                            SocketProcess {
+                                pid,
+                                name: comm.clone(),
+                                cmdline: cmdline.clone(),
+                                fd: fd_num,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    inode_map
+}
+
+pub fn inspect_network(proc_path: Option<&Path>) -> Result<NetReport> {
+    let base = proc_path.unwrap_or_else(|| Path::new("/proc"));
+
+    let tcp_path = base.join("net/tcp");
+    let udp_path = base.join("net/udp");
+    let unix_path = base.join("net/unix");
+
+    let mut sockets = Vec::new();
+
+    if let Ok(content) = fs::read_to_string(&tcp_path) {
+        sockets.extend(parse_proc_net_tcp(&content, SocketKind::Tcp));
+    }
+    if let Ok(content) = fs::read_to_string(&udp_path) {
+        sockets.extend(parse_proc_net_tcp(&content, SocketKind::Udp));
+    }
+    if let Ok(content) = fs::read_to_string(&unix_path) {
+        sockets.extend(parse_proc_net_unix(&content));
+    }
+
+    // Correlate with process inodes
+    let process_map = scan_process_socket_inodes(base);
+    for s in &mut sockets {
+        if let Some(proc) = process_map.get(&s.inode) {
+            s.process = Some(proc.clone());
+        }
+    }
+
+    let mut summary = NetSummary::default();
+    let mut listening = Vec::new();
+
+    for s in &sockets {
+        summary.total_sockets += 1;
+        match s.state {
+            TcpState::Listen => {
+                summary.listening_ports += 1;
+                listening.push(s.clone());
+            }
+            TcpState::Established => summary.established_connections += 1,
+            TcpState::TimeWait => summary.time_wait_sockets += 1,
+            _ => {}
+        }
+        if s.kind == SocketKind::UnixStream || s.kind == SocketKind::UnixDgram {
+            summary.unix_domain_sockets += 1;
+        }
+        if s.process.is_none() && (s.kind == SocketKind::Tcp || s.kind == SocketKind::Udp) {
+            summary.orphan_sockets += 1;
+        }
+    }
+
+    Ok(NetReport {
+        schema_version: "lens.net/v1".to_string(),
+        summary,
+        sockets,
+        listening,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_proc_net_tcp() {
+        let sample = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 0100007F:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 998877 1 0000000000000000 100 0 0 10 0
+   1: 0100007F:1F90 0100007F:D001 01 00000000:00000000 00:00000000 00000000  1000        0 998878 1 0000000000000000 100 0 0 10 0
+";
+        let entries = parse_proc_net_tcp(sample, SocketKind::Tcp);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].local_port, 8080);
+        assert_eq!(entries[0].state, TcpState::Listen);
+        assert_eq!(entries[0].inode, 998877);
+
+        assert_eq!(entries[1].local_port, 8080);
+        assert_eq!(entries[1].state, TcpState::Established);
+        assert_eq!(entries[1].inode, 998878);
+    }
+
+    #[test]
+    fn test_parse_proc_net_unix() {
+        let sample = "Num       RefCount Protocol Flags    Type St Inode Path
+0000000000000000: 00000002 00000000 00010000 0001 01 123456 /run/test.sock
+";
+        let entries = parse_proc_net_unix(sample);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].inode, 123456);
+        assert_eq!(entries[0].unix_path, Some("/run/test.sock".to_string()));
+    }
+}

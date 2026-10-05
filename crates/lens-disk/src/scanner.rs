@@ -13,6 +13,7 @@ pub struct ScanOptions {
     pub one_file_system: bool,
     pub min_size: u64,
     pub exclude_patterns: Vec<String>,
+    pub parallel: bool,
 }
 
 impl Default for ScanOptions {
@@ -23,6 +24,7 @@ impl Default for ScanOptions {
             one_file_system: false,
             min_size: 0,
             exclude_patterns: Vec::new(),
+            parallel: false,
         }
     }
 }
@@ -44,6 +46,11 @@ pub struct DiskScanner {
 impl DiskScanner {
     pub fn new(options: ScanOptions) -> Self {
         Self { options }
+    }
+
+    pub fn with_parallel(mut self, parallel: bool) -> Self {
+        self.options.parallel = parallel;
+        self
     }
 
     pub fn scan<P: AsRef<Path>>(&self, root_path: P) -> Result<ScanResult> {

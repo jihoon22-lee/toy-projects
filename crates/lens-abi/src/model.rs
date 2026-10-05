@@ -59,6 +59,8 @@ pub struct SymbolEvidence {
     #[serde(rename = "type")]
     pub symbol_type: String,
     pub default_version: bool,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub demangled: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

@@ -8,23 +8,24 @@
 
 ## 1. 아키텍처 및 워크스페이스 구조 (`crates/`)
 
-플랫폼은 10개의 고성능 모듈식 Rust 크레이트로 구성되어 있습니다.
+플랫폼은 13개의 고성능 모듈식 Rust 크레이트로 구성되어 있습니다.
 
 ```text
 toy-projects/
 ├── Cargo.toml          루트 워크스페이스 정의
 ├── crates/
-│   ├── lens-core/      공통 기반 (Zero-Copy I/O, SafeInput TOCTOU 방어, SHA-256, 3상태 Diff)
-│   ├── lens-disk/      스토리지 분석, ArenaTree (<40B), 중복 파일 탐지, FreeDesktop Trash
-│   ├── lens-abi/       ELF/DWARF 검사, SHF_COMPRESSED 압축 지원, 전 버전 태그 수집
+│   ├── lens-core/      공통 기반 (Zero-Copy I/O, SafeInput TOCTOU 방어, SHA-256, 3상태 Diff, 암호학적 번들 검증)
+│   ├── lens-disk/      스토리지 분석, ArenaTree (<40B), 중복 파일 탐지, 병렬 스캔, FreeDesktop Trash
+│   ├── lens-abi/       ELF/DWARF 검사, SHF_COMPRESSED 지원, C++/Rust 심볼 디맹글링, 전 버전 태그 수집
 │   ├── lens-log/       mmap 제로카피 라인 인덱서, 무할당 고속 검색 엔진, Session v2
 │   ├── lens-test/      quick-xml 초고속 스트리밍 테스트 파서, 회귀 자동 탐지
-│   ├── lens-trace/     strace 스트리밍 파서, 미완료/재개 스레드 시퀀스 복원, 지연/에러 diff
+│   ├── lens-trace/     strace 스트리밍 파서, FD 누수/IO 처리량 추적, 미완료 스레드 복원, 지연/에러 diff
 │   ├── lens-sys/       systemd 유닛/드롭인 파서, Specifier 확장, Tarjan SCC 순환 탐지
 │   ├── lens-build/     compile_commands.json 파서, 플래그 정규화, 헤더 영향도 역방향 DAG
 │   ├── lens-env/       Zero-Code Python venv 분석기, 미충족 패키지 검사, import 섀도잉 탐지
+│   ├── lens-net/       네트워크 소켓 포렌식, /proc/net 무실행 파싱, 프로세스 FD 상관관계, 포트 Diff
 │   ├── lens-cli/       단일 통합 CLI 실행 파일 (`lens`) 및 포렌식 비행기록장치 (`.lens` bundle)
-│   ├── lens-tui/       대화형 터미널 UI 대시보드 (VIM 키바인딩, 디스크 트리맵, 실시간 게이지)
+│   ├── lens-tui/       4개 탭 대화형 터미널 UI 대시보드 (Storage, Services, Logs, Network)
 │   └── lens-mcp/       AI 어시스턴트(Claude, Antigravity) 연동용 Model Context Protocol 서버
 ```
 
@@ -96,9 +97,14 @@ $ lens build impact compile_commands.json --header include/common.h
 # 8. Python 가상환경 종속성 및 표준 라이브러리 모듈 섀도잉 정적 검사
 $ lens env inspect .venv --project .
 
-# 9. 종합 사고 포렌식 비행기록장치(.lens) 번들 생성 및 검사
+# 9. 활성 소켓/포트/네트워크 포렌식 검사 및 Diff
+$ lens net inspect
+$ lens net diff net_baseline.json net_candidate.json
+
+# 10. 종합 사고 포렌식 비행기록장치(.lens) 번들 생성, 검사 및 암호학적 무결성 검증
 $ lens bundle create incident.lens --disk /var/log --trace /tmp/strace.log --test target/junit.xml
 $ lens bundle inspect incident.lens
+$ lens bundle verify incident.lens
 ```
 
 ---
@@ -117,3 +123,6 @@ $ lens bundle inspect incident.lens
 - [시스템 유닛/서비스 엔진 (`lens-sys`)](crates/lens-sys/README.md)
 - [빌드 데이터베이스 엔진 (`lens-build`)](crates/lens-build/README.md)
 - [파이썬 환경 엔진 (`lens-env`)](crates/lens-env/README.md)
+- [네트워크 포렌식 엔진 (`lens-net`)](crates/lens-net/README.md)
+- [터미널 대시보드 (`lens-tui`)](crates/lens-tui/README.md)
+- [AI 에이전트 MCP 서버 (`lens-mcp`)](crates/lens-mcp/README.md)

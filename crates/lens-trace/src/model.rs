@@ -52,6 +52,12 @@ pub struct TraceSnapshot {
     pub errors: BTreeMap<String, u64>,
     pub processes: BTreeMap<String, ProcessInfo>,
     pub events: Vec<TraceEvent>,
+    #[serde(default)]
+    pub fd_leaks: Vec<u64>,
+    #[serde(default)]
+    pub io_read_bytes: u64,
+    #[serde(default)]
+    pub io_write_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

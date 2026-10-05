@@ -19,7 +19,9 @@ pub mod json;
 
 pub use diff::{Compatibility, SetDiff};
 pub use error::{LensError, Result};
-pub use evidence::{BoundedCollector, Diagnostic, Evidence, Source};
+pub use evidence::{
+    verify_bundle_archive, BoundedCollector, BundleVerificationReport, Diagnostic, Evidence, Source,
+};
 pub use hash::{digest_bytes, digest_file, digest_reader, IncrementalHasher};
 pub use identity::{FileIdentity, SafeInput};
 pub use json::{to_deterministic_pretty, to_deterministic_string};

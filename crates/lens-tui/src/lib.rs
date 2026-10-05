@@ -1,3 +1,3 @@
 pub mod app;
 
-pub use app::TuiApp;
+pub use app::{TuiApp, TuiTab};

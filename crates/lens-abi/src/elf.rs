@@ -3,6 +3,23 @@ use std::path::Path;
 
 use crate::model::*;
 
+pub fn demangle_symbol(name: &str) -> Option<String> {
+    let raw_name = name.split_once('@').map(|(s, _)| s).unwrap_or(name);
+
+    if let Ok(sym) = cpp_demangle::Symbol::new(raw_name) {
+        if let Ok(demangled) = sym.demangle(&cpp_demangle::DemangleOptions::default()) {
+            return Some(demangled);
+        }
+    }
+
+    let rust_demangled = rustc_demangle::demangle(raw_name).to_string();
+    if rust_demangled != raw_name {
+        Some(rust_demangled)
+    } else {
+        None
+    }
+}
+
 pub fn inspect_elf<P: AsRef<Path>>(path: P, data: &[u8]) -> ElfReport {
     let input_path = path.as_ref().to_string_lossy().into_owned();
 
@@ -114,6 +131,7 @@ pub fn inspect_elf<P: AsRef<Path>>(path: P, data: &[u8]) -> ElfReport {
                 visibility: "default".to_string(),
                 symbol_type: symbol_type.to_string(),
                 default_version: name.contains("@@"),
+                demangled: demangle_symbol(name),
             });
         }
     }
@@ -170,5 +188,23 @@ pub fn inspect_elf<P: AsRef<Path>>(path: P, data: &[u8]) -> ElfReport {
         },
         diagnostics: Vec::new(),
         evidence,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_demangle_symbol() {
+        // C++ mangled symbol
+        let cpp_mangled = "_ZNSt6vectorIiSaIiEE9push_backERKi";
+        let demangled = demangle_symbol(cpp_mangled);
+        assert!(demangled.is_some());
+        let s = demangled.unwrap();
+        assert!(s.contains("std::vector") && s.contains("push_back"));
+
+        // Plain C symbol
+        assert_eq!(demangle_symbol("simple_function"), None);
     }
 }

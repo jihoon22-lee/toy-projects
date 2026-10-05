@@ -39,6 +39,9 @@ impl TraceAnalyzer {
         let mut processes: BTreeMap<String, ProcessInfo> = BTreeMap::new();
         let mut events: Vec<TraceEvent> = Vec::new();
         let mut pending: HashMap<u64, PendingCall> = HashMap::new();
+        let mut open_fds: std::collections::BTreeSet<u64> = std::collections::BTreeSet::new();
+        let mut io_read_bytes = 0u64;
+        let mut io_write_bytes = 0u64;
 
         for line in lines {
             let trimmed = line.trim();
@@ -146,11 +149,40 @@ impl TraceAnalyzer {
                     *errors.entry(err.clone()).or_default() += 1;
                 }
 
+                // FD leak & I/O tracking
+                if ev.error.is_none() {
+                    match ev.syscall.as_str() {
+                        "open" | "openat" | "creat" => {
+                            if let Ok(fd) = ev.result.parse::<u64>() {
+                                open_fds.insert(fd);
+                            }
+                        }
+                        "close" => {
+                            if let Ok(fd) = ev.arguments.trim().parse::<u64>() {
+                                open_fds.remove(&fd);
+                            }
+                        }
+                        "read" | "pread" | "pread64" | "recv" | "recvfrom" | "recvmsg" => {
+                            if let Ok(bytes) = ev.result.parse::<u64>() {
+                                io_read_bytes += bytes;
+                            }
+                        }
+                        "write" | "pwrite" | "pwrite64" | "send" | "sendto" | "sendmsg" => {
+                            if let Ok(bytes) = ev.result.parse::<u64>() {
+                                io_write_bytes += bytes;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
                 if events.len() < self.max_retained_events {
                     events.push(ev);
                 }
             }
         }
+
+        let fd_leaks: Vec<u64> = open_fds.into_iter().collect();
 
         TraceSnapshot {
             schema: SNAPSHOT_SCHEMA_V1.to_string(),
@@ -162,6 +194,9 @@ impl TraceAnalyzer {
             errors,
             processes,
             events,
+            fd_leaks,
+            io_read_bytes,
+            io_write_bytes,
         }
     }
 }
@@ -349,4 +384,28 @@ fn find_matching_paren_suffix(s: &str) -> Option<usize> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_fd_leaks_and_io_tracking() {
+        let lines = vec![
+            "1001 openat(AT_FDCWD, \"/etc/hosts\", O_RDONLY) = 3 <0.000100>",
+            "1001 read(3, \"127.0.0.1 localhost\\n\", 1024) = 20 <0.000050>",
+            "1001 openat(AT_FDCWD, \"/etc/resolv.conf\", O_RDONLY) = 4 <0.000120>",
+            "1001 write(1, \"output log\\n\", 11) = 11 <0.000040>",
+            "1001 close(3) = 0 <0.000030>",
+        ];
+
+        let analyzer = TraceAnalyzer::new();
+        let snapshot = analyzer.analyze_lines(lines);
+
+        // FD 3 was closed, but FD 4 was leaked
+        assert_eq!(snapshot.fd_leaks, vec![4]);
+        assert_eq!(snapshot.io_read_bytes, 20);
+        assert_eq!(snapshot.io_write_bytes, 11);
+    }
 }

@@ -143,5 +143,30 @@ pub fn list_tools() -> Vec<McpTool> {
                 "required": ["venv_path"]
             }),
         },
+        McpTool {
+            name: "lens_net_inspect".to_string(),
+            description:
+                "Inspect Linux network sockets, listening ports, established connections, and map them to processes."
+                    .to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "proc_dir": { "type": "string", "description": "Optional proc filesystem root (default /proc)" }
+                }
+            }),
+        },
+        McpTool {
+            name: "lens_bundle_verify".to_string(),
+            description:
+                "Cryptographically verify the SHA-256 integrity and authenticity of a .lens forensic archive against its manifest."
+                    .to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "bundle_path": { "type": "string", "description": "Path to .lens (.tar.gz) forensic bundle" }
+                },
+                "required": ["bundle_path"]
+            }),
+        },
     ]
 }

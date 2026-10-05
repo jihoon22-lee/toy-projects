@@ -159,6 +159,20 @@ pub fn execute_tool(name: &str, args: &Value) -> Result<String, String> {
             }))
             .unwrap())
         }
+        "lens_net_inspect" => {
+            let proc_dir = args.get("proc_dir").and_then(|v| v.as_str()).map(Path::new);
+            let report = lens_net::inspect_network(proc_dir).map_err(|e| e.to_string())?;
+            to_deterministic_pretty(&report).map_err(|e| e.to_string())
+        }
+        "lens_bundle_verify" => {
+            let bundle_str = args
+                .get("bundle_path")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing 'bundle_path' argument")?;
+            let report = lens_core::verify_bundle_archive(Path::new(bundle_str))
+                .map_err(|e| e.to_string())?;
+            to_deterministic_pretty(&report).map_err(|e| e.to_string())
+        }
         other => Err(format!("Unknown tool: {}", other)),
     }
 }
