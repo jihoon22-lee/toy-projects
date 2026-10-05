@@ -1,4 +1,4 @@
-use lens_core::SetDiff;
+use lens_core::{Compatibility, SetDiff};
 use serde::{Deserialize, Serialize};
 
 pub const REPORT_SCHEMA_V2: &str = "abilens.report/v2";
@@ -59,6 +59,10 @@ pub struct SymbolEvidence {
     #[serde(rename = "type")]
     pub symbol_type: String,
     pub default_version: bool,
+    /// False for undefined (imported) dynamic symbols — consumers must not
+    /// treat an import as an export.
+    #[serde(default)]
+    pub defined: bool,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub demangled: Option<String>,
 }
@@ -70,7 +74,7 @@ pub struct PolicyEvaluation {
     pub violations: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AbiData {
     pub versions: Vec<VersionRequirement>,
     pub symbols: Vec<String>,
@@ -108,7 +112,9 @@ pub struct DiffReport {
     pub right: String,
     pub changed: bool,
     pub compatible: bool,
-    pub compatibility: String,
+    /// Three-state verdict using the shared vocabulary: `compatible`,
+    /// `incompatible`, or `uncertain` (fail-closed on ambiguous evidence).
+    pub compatibility: Compatibility,
     pub left_status: String,
     pub right_status: String,
     pub header_changes: Vec<String>,

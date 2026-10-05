@@ -1,4 +1,4 @@
-use lens_core::SetDiff;
+use lens_core::{Compatibility, SetDiff};
 use std::collections::HashMap;
 
 use crate::model::*;
@@ -122,12 +122,12 @@ pub fn diff_reports(left: &ElfReport, right: &ElfReport) -> DiffReport {
         }
     }
 
-    let compatibility_str = if incompatible {
-        "incompatible"
+    let compatibility = if incompatible {
+        Compatibility::Incompatible
     } else if uncertain {
-        "unknown"
+        Compatibility::Uncertain
     } else {
-        "compatible"
+        Compatibility::Compatible
     };
 
     let changed = !header_changes.is_empty()
@@ -144,8 +144,8 @@ pub fn diff_reports(left: &ElfReport, right: &ElfReport) -> DiffReport {
         left: left.input.clone(),
         right: right.input.clone(),
         changed,
-        compatible: compatibility_str == "compatible",
-        compatibility: compatibility_str.to_string(),
+        compatible: compatibility.is_compatible(),
+        compatibility,
         left_status: format!("{:?}", left.status).to_lowercase(),
         right_status: format!("{:?}", right.status).to_lowercase(),
         header_changes,

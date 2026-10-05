@@ -571,7 +571,6 @@ name = "lens-abi"
 version = "0.4.2"
 dependencies = [
  "cpp_demangle",
- "flate2",
  "gimli",
  "lens-core",
  "object",
@@ -641,7 +640,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror",
- "walkdir",
 ]
 
 [[package]]
