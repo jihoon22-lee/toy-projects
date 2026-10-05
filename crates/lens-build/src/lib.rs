@@ -181,6 +181,34 @@ mod tests {
     }
 
     #[test]
+    fn test_extended_include_flags() {
+        // -iquote/-idirafter contribute include dirs (both separate-arg and
+        // joined forms), -imacros contributes a forced include, and
+        // -isysroot consumes its value without leaking into `flags`.
+        let entry = CompileCommandEntry {
+            directory: "/p".to_string(),
+            file: "m.c".to_string(),
+            command: None,
+            arguments: Some(vec![
+                "cc".to_string(),
+                "-iquote".to_string(),
+                "q".to_string(),
+                "-idirafterD".to_string(),
+                "-imacros".to_string(),
+                "pre.h".to_string(),
+                "-isysroot".to_string(),
+                "/sdk".to_string(),
+                "-Wall".to_string(),
+            ]),
+            output: None,
+        };
+        let unit = parse_command_entry(&entry);
+        assert_eq!(unit.includes, vec!["/p/q".to_string(), "/p/D".to_string()]);
+        assert_eq!(unit.forced_includes, vec!["pre.h".to_string()]);
+        assert_eq!(unit.flags, vec!["-Wall".to_string()]);
+    }
+
+    #[test]
     fn test_diff_compilations() {
         let u1 = ParsedUnit {
             file: "/project/src/main.cpp".to_string(),
