@@ -61,14 +61,14 @@ jobs:
           import os
           import re
           outputs = json.loads(os.environ['RELEASE_OUTPUTS'])
-          paths = json.loads(outputs.get('paths_released', '[]'))
-          allowed = {'loglens', 'diskmap', 'buildscope', 'envlens', 'abilens', 'tracelens', 'testlens', 'servicelens'}
           releases = []
-          for path in paths:
-              tag = outputs.get(path + '--tag_name', '')
-              if path not in allowed or not re.fullmatch(re.escape(path) + r'/v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?', tag):
-                  raise SystemExit('unexpected release path or tag')
-              sha = outputs.get(path + '--sha', '')
+          if outputs.get('releases_created') == 'true':
+              # Single-package release: the root component emits a plain
+              # top-level tag_name/sha (e.g. v0.4.2), not per-path outputs.
+              tag = outputs.get('tag_name', '')
+              if not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?', tag):
+                  raise SystemExit('unexpected release tag')
+              sha = outputs.get('sha', '')
               if not re.fullmatch(r'[0-9a-fA-F]{40}', sha):
                   raise SystemExit('release output is missing an exact commit SHA')
               releases.append({'tag': tag, 'sha': sha})

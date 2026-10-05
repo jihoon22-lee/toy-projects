@@ -18,7 +18,7 @@ STEPS = {
     for step in WORKFLOW["jobs"]["artifacts"]["steps"]
 }
 SHA = "a" * 40
-TAG = "envlens/v0.2.0"
+TAG = "v0.5.0"
 FAKE_GH = r"""#!/usr/bin/env python3
 import json, os, pathlib, shutil, sys
 args = sys.argv[1:]

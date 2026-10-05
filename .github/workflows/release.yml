@@ -6,49 +6,141 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag, e.g. v0.3.0"
+        description: "Release tag, e.g. v0.4.2"
         required: true
+        type: string
+      sha:
+        description: "Commit SHA the tag must point to (optional)"
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      sha:
+        required: false
         type: string
 
 permissions:
   contents: write
 
 jobs:
-  build-and-release:
-    name: Build and Publish Release Binaries
+  artifacts:
+    name: Build, verify and publish release binaries
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      REQUESTED_SHA: ${{ inputs.sha }}
     steps:
+      - name: Resolve the immutable source commit
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TARGET="${REQUESTED_SHA:-}"
+          if [ -z "$TARGET" ]; then
+            # Recover the commit from an existing (draft) release, then fall
+            # back to the commit that triggered the tag push.
+            TARGET="$(gh release view "$RELEASE_TAG" --json targetCommitish --jq .targetCommitish 2>/dev/null || true)"
+          fi
+          if [ -z "$TARGET" ]; then
+            TARGET="${{ github.sha }}"
+          fi
+          # A release tag is immutable: refuse to move one that already points
+          # at a different commit.
+          EXISTING=""
+          if RES="$(gh api "repos/${GH_REPO}/commits" 2>/dev/null)"; then
+            EXISTING="$RES"
+          fi
+          if [ -n "$EXISTING" ] && [ "$EXISTING" != "$TARGET" ]; then
+            echo "tag ${RELEASE_TAG} already points at ${EXISTING}; refusing to move it" >&2
+            exit 1
+          fi
+          PUBLISHED="false"
+          ASSETS="0"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            if [ "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = "false" ]; then
+              PUBLISHED="true"
+            fi
+            ASSETS="$(gh release view "$RELEASE_TAG" --json assets --jq '.assets | length' 2>/dev/null || echo 0)"
+            ASSETS="${ASSETS:-0}"
+          fi
+          {
+            echo "sha=${TARGET}"
+            echo "published=${PUBLISHED}"
+            echo "has_assets=$([ "$ASSETS" -gt 0 ] && echo true || echo false)"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.resolve.outputs.sha }}
+          fetch-depth: 0
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build release binaries
-        run: |
-          cargo build --release -p lens-cli -p lens-tui -p lens-mcp
+        run: cargo build --release -p lens-cli -p lens-tui -p lens-mcp
 
       - name: Package artifacts
-        id: package
         run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          ARCHIVE_NAME="lens-${TAG}-linux-x86_64.tar.gz"
+          set -euo pipefail
+          ARCHIVE="lens-${RELEASE_TAG}-linux-x86_64.tar.gz"
           mkdir -p dist
-          tar -czvf "dist/${ARCHIVE_NAME}" -C target/release lens lens-tui lens-mcp
-          cd dist
-          sha256sum "${ARCHIVE_NAME}" > "${ARCHIVE_NAME}.sha256"
-          cd ..
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "archive=${ARCHIVE_NAME}" >> "$GITHUB_OUTPUT"
+          tar -czf "dist/${ARCHIVE}" -C target/release lens lens-tui lens-mcp
+          (cd dist && sha256sum "${ARCHIVE}" > SHA256SUMS.txt)
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.package.outputs.tag }}
-          name: "Release ${{ steps.package.outputs.tag }}"
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-          files: |
-            dist/*.tar.gz
-            dist/*.sha256
+      # Upload to a draft first, re-download what GitHub actually stored, and
+      # only then pin the immutable tag and flip the release to published.
+      - name: Upload draft assets, verify and publish
+        if: steps.resolve.outputs.has_assets != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          DIST: dist
+          SOURCE_SHA: ${{ steps.resolve.outputs.sha }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --target "$SOURCE_SHA" --draft --notes "binary verification in progress"
+          fi
+          gh release upload "$RELEASE_TAG" "$DIST"/* --clobber
+          VERIFY="$RUNNER_TEMP/verified-assets"
+          rm -rf "$VERIFY"
+          gh release download "$RELEASE_TAG" --dir "$VERIFY"
+          (cd "$VERIFY" && sha256sum -c SHA256SUMS.txt)
+          EXISTING=""
+          if RES="$(gh api "repos/${GH_REPO}/commits" 2>/dev/null)"; then
+            EXISTING="$RES"
+          fi
+          if [ -n "$EXISTING" ] && [ "$EXISTING" != "$SOURCE_SHA" ]; then
+            echo "tag ${RELEASE_TAG} moved to ${EXISTING}; refusing to publish" >&2
+            exit 1
+          fi
+          if [ -z "$EXISTING" ]; then
+            gh api "repos/${GH_REPO}/git/refs" -f ref="refs/tags/${RELEASE_TAG}" -f sha="$SOURCE_SHA"
+          fi
+          gh release edit "$RELEASE_TAG" --draft=false
+
+      # Retry path: the release is already published with assets attached, so
+      # only re-verify what is stored; never re-upload or re-publish.
+      - name: Verify an already published release
+        if: steps.resolve.outputs.has_assets == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" != "false" ]; then
+            echo "release ${RELEASE_TAG} is not published yet" >&2
+            exit 1
+          fi
+          VERIFY="$RUNNER_TEMP/published-assets"
+          rm -rf "$VERIFY"
+          gh release download "$RELEASE_TAG" --dir "$VERIFY"
+          (cd "$VERIFY" && sha256sum -c SHA256SUMS.txt)
+          echo "published=true" >> "$GITHUB_OUTPUT"
