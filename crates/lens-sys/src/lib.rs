@@ -1,10 +1,12 @@
 pub mod dag;
 pub mod diff;
+pub mod loader;
 pub mod model;
 pub mod parser;
 
 pub use dag::OrderingGraph;
 pub use diff::diff_systemd;
+pub use loader::{load_unit, load_units};
 pub use model::*;
 pub use parser::{apply_drop_in, expand_specifiers, parse_unit_content};
 

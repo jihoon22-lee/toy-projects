@@ -1,20 +1,75 @@
 use crate::model::{Diagnostic, SystemdUnit};
 use std::collections::BTreeMap;
 
-pub fn expand_specifiers(value: &str, unit_name: &str) -> String {
-    let (prefix, instance) = if let Some(at_pos) = unit_name.find('@') {
+/// Specifier expansion context for a unit. `%u`/`%h` resolve against the
+/// unit's `User=` setting (default root), not unconditionally root.
+#[derive(Debug, Clone)]
+struct SpecContext {
+    unit_name: String,
+    prefix: String,
+    instance: String,
+    user: String,
+    home: String,
+}
+
+impl SpecContext {
+    fn for_unit(
+        unit_name: &str,
+        sections: &BTreeMap<String, BTreeMap<String, Vec<String>>>,
+    ) -> Self {
+        let (prefix, instance) = split_unit_name(unit_name);
+        let user = sections
+            .get("Service")
+            .and_then(|s| s.get("User"))
+            .and_then(|v| v.last())
+            .cloned()
+            .unwrap_or_else(|| "root".to_string());
+        let home = if user == "root" {
+            "/root".to_string()
+        } else {
+            format!("/home/{}", user)
+        };
+        SpecContext {
+            unit_name: unit_name.to_string(),
+            prefix,
+            instance,
+            user,
+            home,
+        }
+    }
+
+    fn minimal(unit_name: &str) -> Self {
+        let (prefix, instance) = split_unit_name(unit_name);
+        SpecContext {
+            unit_name: unit_name.to_string(),
+            prefix,
+            instance,
+            user: "root".to_string(),
+            home: "/root".to_string(),
+        }
+    }
+}
+
+fn split_unit_name(unit_name: &str) -> (String, String) {
+    if let Some(at_pos) = unit_name.find('@') {
         let p = &unit_name[..at_pos];
         let rest = &unit_name[at_pos + 1..];
         let inst = rest.rfind('.').map(|dot| &rest[..dot]).unwrap_or(rest);
-        (p, inst)
+        (p.to_string(), inst.to_string())
     } else {
         let p = unit_name
             .rfind('.')
             .map(|dot| &unit_name[..dot])
             .unwrap_or(unit_name);
-        (p, "")
-    };
+        (p.to_string(), String::new())
+    }
+}
 
+pub fn expand_specifiers(value: &str, unit_name: &str) -> String {
+    expand_with(&SpecContext::minimal(unit_name), value)
+}
+
+fn expand_with(ctx: &SpecContext, value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     let mut chars = value.chars().peekable();
 
@@ -24,11 +79,11 @@ pub fn expand_specifiers(value: &str, unit_name: &str) -> String {
                 chars.next();
                 match next {
                     '%' => out.push('%'),
-                    'n' | 'N' => out.push_str(unit_name),
-                    'p' => out.push_str(prefix),
-                    'i' | 'I' => out.push_str(instance),
-                    'u' => out.push_str("root"),
-                    'h' => out.push_str("/root"),
+                    'n' | 'N' => out.push_str(&ctx.unit_name),
+                    'p' => out.push_str(&ctx.prefix),
+                    'i' | 'I' => out.push_str(&ctx.instance),
+                    'u' => out.push_str(&ctx.user),
+                    'h' => out.push_str(&ctx.home),
                     other => {
                         out.push('%');
                         out.push(other);
@@ -45,11 +100,14 @@ pub fn expand_specifiers(value: &str, unit_name: &str) -> String {
     out
 }
 
-pub fn parse_unit_content(content: &str, unit_name: &str, path: Option<&str>) -> SystemdUnit {
-    let mut sections: BTreeMap<String, BTreeMap<String, Vec<String>>> = BTreeMap::new();
-    let mut current_section = String::new();
-    let mut diagnostics = Vec::new();
+/// One raw assignment in file order: (line, section, key, raw value).
+/// Kept ordered because `Key=` resets must apply positionally.
+type UnitEntry = (usize, String, String, String);
 
+/// Parse physical content into ordered (line, section, key, raw_value) entries,
+/// handling line continuations and collecting syntax diagnostics.
+fn unit_entries(content: &str, path: Option<&str>) -> (Vec<UnitEntry>, Vec<Diagnostic>) {
+    let mut diagnostics = Vec::new();
     let mut logical_lines = Vec::new();
     let mut buffer = String::new();
     let mut start_line = 1;
@@ -85,18 +143,19 @@ pub fn parse_unit_content(content: &str, unit_name: &str, path: Option<&str>) ->
         logical_lines.push((start_line, buffer));
     }
 
+    let mut entries = Vec::new();
+    let mut current_section = String::new();
+
     for (line_num, line) in logical_lines {
         let trimmed = line.trim();
         if trimmed.starts_with('[') && trimmed.ends_with(']') {
             current_section = trimmed[1..trimmed.len() - 1].trim().to_string();
-            sections.entry(current_section.clone()).or_default();
             continue;
         }
 
         if let Some(eq_idx) = trimmed.find('=') {
             let key = trimmed[..eq_idx].trim().to_string();
-            let raw_val = trimmed[eq_idx + 1..].trim();
-            let val = expand_specifiers(raw_val, unit_name);
+            let raw_val = trimmed[eq_idx + 1..].trim().to_string();
 
             if current_section.is_empty() {
                 diagnostics.push(Diagnostic {
@@ -109,149 +168,60 @@ pub fn parse_unit_content(content: &str, unit_name: &str, path: Option<&str>) ->
                 continue;
             }
 
-            let sec_map = sections.entry(current_section.clone()).or_default();
-            let entries = sec_map.entry(key.clone()).or_default();
-
-            // In systemd, an empty assignment like `ExecStart=` clears previous values
-            if val.is_empty() {
-                entries.clear();
-            } else {
-                entries.push(val);
-            }
+            entries.push((line_num, current_section.clone(), key, raw_val));
         }
     }
 
-    // Extract dependencies & ExecStart
-    let mut wants = Vec::new();
-    let mut requires = Vec::new();
-    let mut before = Vec::new();
-    let mut after = Vec::new();
-    let mut exec_start = None;
+    (entries, diagnostics)
+}
 
-    if let Some(sec) = sections.get("Unit") {
-        if let Some(w) = sec.get("Wants") {
-            for line in w {
-                for item in line.split_whitespace() {
-                    wants.push(item.to_string());
-                }
-            }
-        }
-        if let Some(r) = sec.get("Requires") {
-            for line in r {
-                for item in line.split_whitespace() {
-                    requires.push(item.to_string());
-                }
-            }
-        }
-        if let Some(b) = sec.get("Before") {
-            for line in b {
-                for item in line.split_whitespace() {
-                    before.push(item.to_string());
-                }
-            }
-        }
-        if let Some(a) = sec.get("After") {
-            for line in a {
-                for item in line.split_whitespace() {
-                    after.push(item.to_string());
-                }
-            }
-        }
-    }
-
-    if let Some(sec) = sections.get("Service") {
-        if let Some(es) = sec.get("ExecStart") {
-            if let Some(last) = es.last() {
-                exec_start = Some(last.clone());
-            }
-        }
-    }
-
-    wants.sort();
-    wants.dedup();
-    requires.sort();
-    requires.dedup();
-    before.sort();
-    before.dedup();
-    after.sort();
-    after.dedup();
-
-    SystemdUnit {
-        name: unit_name.to_string(),
-        path: path.map(String::from),
-        sections,
-        wants,
-        requires,
-        before,
-        after,
-        exec_start,
-        drop_ins: Vec::new(),
-        diagnostics,
+/// Apply one raw assignment to `sections`, honoring systemd `Key=` reset
+/// semantics: an empty value clears the key's accumulated values.
+fn apply_entry(
+    sections: &mut BTreeMap<String, BTreeMap<String, Vec<String>>>,
+    section: &str,
+    key: &str,
+    value: &str,
+) {
+    let sec_map = sections.entry(section.to_string()).or_default();
+    if value.is_empty() {
+        sec_map.remove(key);
+    } else {
+        sec_map
+            .entry(key.to_string())
+            .or_default()
+            .push(value.to_string());
     }
 }
 
-pub fn apply_drop_in(base: &mut SystemdUnit, drop_in_content: &str, drop_in_path: &str) {
-    let drop_in_unit = parse_unit_content(drop_in_content, &base.name, Some(drop_in_path));
-
-    base.drop_ins.push(drop_in_path.to_string());
-    base.diagnostics.extend(drop_in_unit.diagnostics);
-
-    for (sec_name, sec_keys) in drop_in_unit.sections {
-        let target_sec = base.sections.entry(sec_name.clone()).or_default();
-        for (key, values) in sec_keys {
-            if values.is_empty() {
-                target_sec.remove(&key);
-            } else {
-                let target_values = target_sec.entry(key).or_default();
-                for val in values {
-                    target_values.push(val);
-                }
-            }
-        }
-    }
-
-    // Refresh dependencies & exec_start
+/// Refresh the flattened dependency/exec fields from `sections`.
+fn refresh_derived(unit: &mut SystemdUnit) {
     let mut wants = Vec::new();
     let mut requires = Vec::new();
     let mut before = Vec::new();
     let mut after = Vec::new();
 
-    if let Some(sec) = base.sections.get("Unit") {
-        if let Some(w) = sec.get("Wants") {
-            for line in w {
-                for item in line.split_whitespace() {
-                    wants.push(item.to_string());
-                }
-            }
-        }
-        if let Some(r) = sec.get("Requires") {
-            for line in r {
-                for item in line.split_whitespace() {
-                    requires.push(item.to_string());
-                }
-            }
-        }
-        if let Some(b) = sec.get("Before") {
-            for line in b {
-                for item in line.split_whitespace() {
-                    before.push(item.to_string());
-                }
-            }
-        }
-        if let Some(a) = sec.get("After") {
-            for line in a {
-                for item in line.split_whitespace() {
-                    after.push(item.to_string());
+    if let Some(sec) = unit.sections.get("Unit") {
+        for (key, out) in [
+            ("Wants", &mut wants),
+            ("Requires", &mut requires),
+            ("Before", &mut before),
+            ("After", &mut after),
+        ] {
+            if let Some(lines) = sec.get(key) {
+                for line in lines {
+                    out.extend(line.split_whitespace().map(str::to_string));
                 }
             }
         }
     }
 
-    if let Some(sec) = base.sections.get("Service") {
-        if let Some(es) = sec.get("ExecStart") {
-            base.exec_start = es.last().cloned();
-        }
-    }
+    unit.exec_start = unit
+        .sections
+        .get("Service")
+        .and_then(|s| s.get("ExecStart"))
+        .and_then(|es| es.last())
+        .cloned();
 
     wants.sort();
     wants.dedup();
@@ -262,8 +232,84 @@ pub fn apply_drop_in(base: &mut SystemdUnit, drop_in_content: &str, drop_in_path
     after.sort();
     after.dedup();
 
-    base.wants = wants;
-    base.requires = requires;
-    base.before = before;
-    base.after = after;
+    unit.wants = wants;
+    unit.requires = requires;
+    unit.before = before;
+    unit.after = after;
+}
+
+pub fn parse_unit_content(content: &str, unit_name: &str, path: Option<&str>) -> SystemdUnit {
+    // Pass 1: raw ordered entries (unexpanded) so User= is known before
+    // resolving %u/%h anywhere in the file.
+    let (entries, diagnostics) = unit_entries(content, path);
+
+    let mut raw_sections: BTreeMap<String, BTreeMap<String, Vec<String>>> = BTreeMap::new();
+    let mut section_order = Vec::new();
+    for (_, sec, _, _) in &entries {
+        if !raw_sections.contains_key(sec) {
+            raw_sections.insert(sec.clone(), BTreeMap::new());
+            section_order.push(sec.clone());
+        }
+    }
+    for (_, sec, key, val) in &entries {
+        apply_entry(&mut raw_sections, sec, key, val);
+    }
+
+    // Pass 2: expand every stored value against the resolved context.
+    let ctx = SpecContext::for_unit(unit_name, &raw_sections);
+    let mut sections: BTreeMap<String, BTreeMap<String, Vec<String>>> = BTreeMap::new();
+    for sec_name in section_order {
+        let raw_map = &raw_sections[&sec_name];
+        let mut out_map = BTreeMap::new();
+        for (k, vals) in raw_map {
+            out_map.insert(
+                k.clone(),
+                vals.iter().map(|v| expand_with(&ctx, v)).collect(),
+            );
+        }
+        sections.insert(sec_name, out_map);
+    }
+
+    let mut unit = SystemdUnit {
+        name: unit_name.to_string(),
+        path: path.map(String::from),
+        sections,
+        wants: Vec::new(),
+        requires: Vec::new(),
+        before: Vec::new(),
+        after: Vec::new(),
+        exec_start: None,
+        drop_ins: Vec::new(),
+        diagnostics,
+    };
+    refresh_derived(&mut unit);
+    unit
+}
+
+/// Merge a drop-in fragment into `base`, honoring positional `Key=` resets:
+/// an empty assignment clears the base's accumulated values for that key.
+pub fn apply_drop_in(base: &mut SystemdUnit, drop_in_content: &str, drop_in_path: &str) {
+    base.drop_ins.push(drop_in_path.to_string());
+
+    let (entries, diagnostics) = unit_entries(drop_in_content, Some(drop_in_path));
+    base.diagnostics.extend(diagnostics);
+
+    // Specifier context follows the merged state; a drop-in that sets User=
+    // updates %u/%h expansion for subsequent entries.
+    let mut ctx = SpecContext::for_unit(&base.name, &base.sections);
+
+    for (_line, sec, key, raw_val) in entries {
+        let value = expand_with(&ctx, &raw_val);
+        if sec == "Service" && key == "User" && !value.is_empty() {
+            ctx.user = value.clone();
+            ctx.home = if value == "root" {
+                "/root".to_string()
+            } else {
+                format!("/home/{}", value)
+            };
+        }
+        apply_entry(&mut base.sections, &sec, &key, &value);
+    }
+
+    refresh_derived(base);
 }
