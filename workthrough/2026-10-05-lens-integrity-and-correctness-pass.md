@@ -219,4 +219,15 @@ E2E 확인:
 
 각 작업 단위는 conventional commit으로 분리: `fix(core)`, `fix(disk)`,
 `fix(build)`, `fix(trace)`, `fix(abi)`, `fix(sys,net)`, `fix(test)`,
-`fix(cli,mcp,tui)`, `ci`, `docs`. 최종 전체 검증은 별도 기록.
+`fix(cli,mcp,tui)`, `ci`, `docs`, `style`(fmt/clippy 정리).
+
+### 최종 전체 검증
+
+```bash
+cargo fmt --all -- --check                    # clean
+cargo clippy --workspace --all-targets -D warnings  # clean
+cargo test --workspace                        # 29개 타깃 전부 ok
+cargo build --release                         # ok
+python3 .github/scripts/test_release_flow.py  # 6 tests OK
+python3 .github/scripts/check_docs.py         # pass
+```

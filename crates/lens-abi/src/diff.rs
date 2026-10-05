@@ -69,8 +69,17 @@ pub fn diff_reports(left: &ElfReport, right: &ElfReport) -> DiffReport {
         }
     };
     let abi_diff = SetDiff::compute(
-        left.abi.versions.iter().map(version_key).collect::<Vec<String>>(),
-        right.abi.versions.iter().map(version_key).collect::<Vec<String>>(),
+        left.abi
+            .versions
+            .iter()
+            .map(version_key)
+            .collect::<Vec<String>>(),
+        right
+            .abi
+            .versions
+            .iter()
+            .map(version_key)
+            .collect::<Vec<String>>(),
     );
 
     // Symbol attributes diff (size, type, binding)

@@ -130,8 +130,7 @@ fn parse_program_headers(data: &[u8], is64: bool, le: bool) -> ProgramHeaders {
             rd_u16(data, 44, le).map(|v| v as usize),
         )
     };
-    let (Some(phoff), Some(phentsize), Some(phnum)) = (phoff, phentsize, phnum)
-    else {
+    let (Some(phoff), Some(phentsize), Some(phnum)) = (phoff, phentsize, phnum) else {
         return ph;
     };
     if phentsize == 0 {
@@ -155,8 +154,7 @@ fn parse_program_headers(data: &[u8], is64: bool, le: bool) -> ProgramHeaders {
                 read32(base + 16),
             )
         };
-        let (Some(t), Some(off), Some(vaddr), Some(filesz)) =
-            (p_type, p_offset, p_vaddr, p_filesz)
+        let (Some(t), Some(off), Some(vaddr), Some(filesz)) = (p_type, p_offset, p_vaddr, p_filesz)
         else {
             continue;
         };
@@ -343,11 +341,7 @@ fn parse_dynamic(file: &object::File, data: &[u8]) -> DynamicInfo {
     let interp_bytes = ph
         .interp
         .and_then(|(off, size)| data.get(off as usize..(off + size) as usize))
-        .or_else(|| {
-            file.section_by_name(".interp")
-                .and_then(|s| s.data().ok())
-                .map(|d| &d[..])
-        });
+        .or_else(|| file.section_by_name(".interp").and_then(|s| s.data().ok()));
     let mut info = DynamicInfo {
         interpreter: interp_bytes.and_then(|d| cstr_at(d, 0)),
         ..Default::default()
@@ -357,11 +351,7 @@ fn parse_dynamic(file: &object::File, data: &[u8]) -> DynamicInfo {
     let dyn_data: &[u8] = ph
         .dynamic
         .and_then(|(off, size)| data.get(off as usize..(off + size) as usize))
-        .or_else(|| {
-            file.section_by_name(".dynamic")
-                .and_then(|s| s.data().ok())
-                .map(|d| &d[..])
-        })
+        .or_else(|| file.section_by_name(".dynamic").and_then(|s| s.data().ok()))
         .unwrap_or(&[]);
     if dyn_data.is_empty() {
         return info;

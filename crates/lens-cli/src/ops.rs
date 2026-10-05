@@ -23,9 +23,10 @@ pub fn dispatch(command: Commands) -> Result<()> {
                 json,
                 parallel,
             } => {
-                let mut opts = ScanOptions::default();
-                opts.parallel = parallel;
-                let scanner = DiskScanner::new(opts);
+                let scanner = DiskScanner::new(ScanOptions {
+                    parallel,
+                    ..Default::default()
+                });
                 let result = scanner.scan(&path)?;
                 // Scan errors are surfaced even in --json mode so evidence
                 // gaps never go unnoticed.
@@ -424,8 +425,7 @@ pub fn dispatch(command: Commands) -> Result<()> {
                         let res = DiskScanner::new(ScanOptions::default()).scan(d)?;
                         // Per-entry scan failures are evidence gaps — record
                         // them in the manifest diagnostics.
-                        diagnostics
-                            .extend(res.errors.iter().map(|e| format!("disk scan: {e}")));
+                        diagnostics.extend(res.errors.iter().map(|e| format!("disk scan: {e}")));
                         Ok(SnapshotV2::from_tree(
                             &res.tree,
                             res.root_id,

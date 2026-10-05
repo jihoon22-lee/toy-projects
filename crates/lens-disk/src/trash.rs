@@ -117,7 +117,11 @@ impl TrashManager {
         let mut candidate_name = file_name.to_string();
         let mut counter = 1;
         while occupied(&self.files_dir().join(&candidate_name))
-            || occupied(&self.info_dir().join(format!("{}.trashinfo", candidate_name)))
+            || occupied(
+                &self
+                    .info_dir()
+                    .join(format!("{}.trashinfo", candidate_name)),
+            )
         {
             candidate_name = format!("{}_{}", file_name, counter);
             counter += 1;
@@ -203,8 +207,8 @@ impl TrashManager {
         }
 
         // Verify the file in trash is still the file that was trashed.
-        let current = fs::symlink_metadata(&receipt.trashed_file_path)
-            .map_err(|e| LensError::Io {
+        let current =
+            fs::symlink_metadata(&receipt.trashed_file_path).map_err(|e| LensError::Io {
                 path: receipt.trashed_file_path.clone(),
                 source: e,
             })?;

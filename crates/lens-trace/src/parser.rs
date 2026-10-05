@@ -197,21 +197,19 @@ impl TraceAnalyzer {
                         "fork" | "vfork" | "clone" | "clone3" => {
                             if let Ok(child) = ev.result.parse::<u64>() {
                                 if child > 0 {
-                                    let inherited = open_fds
-                                        .get(&ev.tid)
-                                        .cloned()
-                                        .unwrap_or_default();
+                                    let inherited =
+                                        open_fds.get(&ev.tid).cloned().unwrap_or_default();
                                     open_fds.insert(child, inherited);
-                                    processes
-                                        .entry(child.to_string())
-                                        .or_insert_with(|| ProcessInfo {
+                                    processes.entry(child.to_string()).or_insert_with(|| {
+                                        ProcessInfo {
                                             tid: child,
                                             generation: 0,
                                             calls: 0,
                                             parent: ev.tid.to_string(),
                                             relation: ev.syscall.clone(),
                                             exited: false,
-                                        });
+                                        }
+                                    });
                                 }
                             }
                         }
@@ -293,8 +291,8 @@ fn parse_fd_array(arguments: &str) -> Option<Vec<u64>> {
     let bytes = arguments.as_bytes();
     let mut in_anno = false;
     let mut close = None;
-    for i in open + 1..bytes.len() {
-        match bytes[i] {
+    for (i, &b) in bytes.iter().enumerate().skip(open + 1) {
+        match b {
             b'<' => in_anno = true,
             b'>' => in_anno = false,
             b']' if !in_anno => {
@@ -305,10 +303,7 @@ fn parse_fd_array(arguments: &str) -> Option<Vec<u64>> {
         }
     }
     let inner = &arguments[open + 1..close?];
-    let fds: Option<Vec<u64>> = inner
-        .split(',')
-        .map(|s| fd_from_arg(s))
-        .collect();
+    let fds: Option<Vec<u64>> = inner.split(',').map(fd_from_arg).collect();
     fds.filter(|v| !v.is_empty())
 }
 

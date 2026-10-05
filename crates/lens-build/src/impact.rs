@@ -75,8 +75,7 @@ impl ImpactGraph {
                 .map(|p| p.to_path_buf())
                 .unwrap_or_default();
             for inc in extract_includes(&content) {
-                let Some(resolved) =
-                    resolve_include(&inc.name, inc.quoted, &anchor, &include_dirs)
+                let Some(resolved) = resolve_include(&inc.name, inc.quoted, &anchor, &include_dirs)
                 else {
                     continue;
                 };

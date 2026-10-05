@@ -85,10 +85,7 @@ pub fn load_units(path: &Path) -> Result<BTreeMap<String, SystemdUnit>> {
         // "0 units, no cycles" report.
         return Err(LensError::Io {
             path: path.to_path_buf(),
-            source: std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "unit path does not exist",
-            ),
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "unit path does not exist"),
         });
     }
     if path.is_file() {
@@ -206,7 +203,11 @@ mod tests {
         let inst = dir.join("foo@bar.service.d");
         std::fs::create_dir_all(&tpl).unwrap();
         std::fs::create_dir_all(&inst).unwrap();
-        std::fs::write(dir.join("foo@bar.service"), "[Service]\nExecStart=/run/%i\n").unwrap();
+        std::fs::write(
+            dir.join("foo@bar.service"),
+            "[Service]\nExecStart=/run/%i\n",
+        )
+        .unwrap();
         std::fs::write(tpl.join("10-tpl.conf"), "[Unit]\nDescription=tpl\n").unwrap();
         std::fs::write(inst.join("20-inst.conf"), "[Unit]\nDescription=inst\n").unwrap();
 
@@ -214,10 +215,7 @@ mod tests {
         assert_eq!(unit.drop_ins.len(), 2);
         // instance drop-in wins on Description (merged after template —
         // last value wins for single-valued keys)
-        assert_eq!(
-            unit.sections["Unit"]["Description"].last().unwrap(),
-            "inst"
-        );
+        assert_eq!(unit.sections["Unit"]["Description"].last().unwrap(), "inst");
         // %i expands to the instance name
         assert_eq!(unit.exec_start.as_deref(), Some("/run/bar"));
         let _ = std::fs::remove_dir_all(&dir);

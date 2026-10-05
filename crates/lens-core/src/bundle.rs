@@ -10,8 +10,8 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::Read;
 use std::fs::File;
+use std::io::Read;
 use std::path::Path;
 use tar::{Archive, Builder, Header};
 
@@ -242,10 +242,7 @@ where
             if let LensError::Io { source, .. } = &err {
                 if source.kind() == std::io::ErrorKind::InvalidData {
                     return LensError::LimitExceeded {
-                        message: format!(
-                            "bundle exceeds {} decompressed bytes",
-                            MAX_BUNDLE_BYTES
-                        ),
+                        message: format!("bundle exceeds {} decompressed bytes", MAX_BUNDLE_BYTES),
                     };
                 }
             }
@@ -479,10 +476,7 @@ mod tests {
         assert_eq!(m.version, "0.5.0-test");
     }
 
-    fn rebuild_with(
-        path: &Path,
-        mutate: impl FnOnce(&mut Vec<(String, Vec<u8>)>),
-    ) {
+    fn rebuild_with(path: &Path, mutate: impl FnOnce(&mut Vec<(String, Vec<u8>)>)) {
         let raw = std::fs::read(path).unwrap();
         let mut archive = Archive::new(GzDecoder::new(&raw[..]));
         let mut rebuilt: Vec<(String, Vec<u8>)> = Vec::new();
@@ -502,7 +496,9 @@ mod tests {
             header.set_size(data.len() as u64);
             header.set_mode(0o644);
             header.set_cksum();
-            builder.append_data(&mut header, name, data.as_slice()).unwrap();
+            builder
+                .append_data(&mut header, name, data.as_slice())
+                .unwrap();
         }
         builder.into_inner().unwrap().finish().unwrap();
     }

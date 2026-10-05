@@ -158,8 +158,7 @@ mod tests {
         assert_eq!(serial.scanned_entries, parallel.scanned_entries);
         assert_eq!(serial.complete, parallel.complete);
         assert_eq!(serial.errors, parallel.errors);
-        let serial_names: Vec<String> =
-            serial.tree.nodes.iter().map(|n| n.name.clone()).collect();
+        let serial_names: Vec<String> = serial.tree.nodes.iter().map(|n| n.name.clone()).collect();
         let parallel_names: Vec<String> =
             parallel.tree.nodes.iter().map(|n| n.name.clone()).collect();
         assert_eq!(serial_names, parallel_names);
@@ -176,8 +175,10 @@ mod tests {
         }
         fs::write(deep.join("hidden.txt"), b"x").unwrap();
 
-        let mut opts = ScanOptions::default();
-        opts.max_depth = 2;
+        let opts = ScanOptions {
+            max_depth: 2,
+            ..Default::default()
+        };
         let res = DiskScanner::new(opts).scan(dir.path()).unwrap();
 
         assert!(!res.complete);

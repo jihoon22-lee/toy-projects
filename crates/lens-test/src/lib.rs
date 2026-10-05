@@ -141,11 +141,13 @@ mod tests {
 
     #[test]
     fn test_deterministic_run_id() {
-        let xml = br#"<testsuite tests="1"><testcase name="a" classname="C" time="0"/></testsuite>"#;
+        let xml =
+            br#"<testsuite tests="1"><testcase name="a" classname="C" time="0"/></testsuite>"#;
         let a = parse_junit_xml(xml, "p").unwrap();
         let b = parse_junit_xml(xml, "p").unwrap();
         assert_eq!(a.run_id, b.run_id);
-        let other = br#"<testsuite tests="1"><testcase name="b" classname="C" time="0"/></testsuite>"#;
+        let other =
+            br#"<testsuite tests="1"><testcase name="b" classname="C" time="0"/></testsuite>"#;
         let c = parse_junit_xml(other, "p").unwrap();
         assert_ne!(a.run_id, c.run_id);
     }
