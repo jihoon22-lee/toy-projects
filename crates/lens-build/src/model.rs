@@ -30,6 +30,9 @@ pub struct ParsedUnit {
     pub standard: Option<String>,
     #[serde(default)]
     pub flags: Vec<String>,
+    /// Headers injected via `-include`, treated as includes of the unit file.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub forced_includes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

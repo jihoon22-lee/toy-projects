@@ -3,9 +3,9 @@ pub mod diff;
 pub mod impact;
 pub mod model;
 
-pub use compiler::{parse_command_entry, split_command_line};
+pub use compiler::{normalize_path, parse_command_entry, split_command_line};
 pub use diff::diff_compilations;
-pub use impact::{extract_includes, ImpactGraph};
+pub use impact::{extract_includes, ImpactGraph, IncludeDirective};
 pub use model::*;
 
 #[cfg(test)]
@@ -71,6 +71,52 @@ mod tests {
     }
 
     #[test]
+    fn test_add_translation_unit_resolves_on_disk_includes() {
+        let root = std::env::temp_dir().join(format!("lensbuild-{}", std::process::id()));
+        let inc_dir = root.join("include");
+        let src_dir = root.join("src");
+        std::fs::create_dir_all(&inc_dir).unwrap();
+        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::write(inc_dir.join("config.h"), "#define X 1\n").unwrap();
+        std::fs::write(src_dir.join("app.h"), "#include \"config.h\"\n").unwrap();
+        std::fs::write(src_dir.join("main.cpp"), "#include \"app.h\"\n").unwrap();
+        std::fs::write(src_dir.join("core.cpp"), "#include <config.h>\n").unwrap();
+
+        let mk = |file: &str, args: Vec<&str>| {
+            let entry = CompileCommandEntry {
+                directory: root.to_string_lossy().into_owned(),
+                file: src_dir.join(file).to_string_lossy().into_owned(),
+                command: None,
+                arguments: Some(
+                    std::iter::once("c++".to_string())
+                        .chain(args.into_iter().map(String::from))
+                        .collect(),
+                ),
+                output: None,
+            };
+            parse_command_entry(&entry)
+        };
+        let inc_arg = format!("-I{}", inc_dir.display());
+        let u_main = mk("main.cpp", vec![inc_arg.as_str()]);
+        let u_core = mk("core.cpp", vec![inc_arg.as_str()]);
+
+        let mut graph = ImpactGraph::new();
+        graph.add_translation_unit(&u_main);
+        graph.add_translation_unit(&u_core);
+
+        // Transitive: config.h -> app.h -> main.cpp; direct: config.h -> core.cpp
+        let config_key = inc_dir.join("config.h").to_string_lossy().into_owned();
+        let report = graph.compute_impact(&config_key);
+        assert_eq!(report.total_impacted, 2);
+        let main_key = src_dir.join("main.cpp").to_string_lossy().into_owned();
+        let core_key = src_dir.join("core.cpp").to_string_lossy().into_owned();
+        assert!(report.impacted_units.contains(&main_key));
+        assert!(report.impacted_units.contains(&core_key));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn test_diff_compilations() {
         let u1 = ParsedUnit {
             file: "/project/src/main.cpp".to_string(),
@@ -81,6 +127,7 @@ mod tests {
             output: Some("main.o".to_string()),
             standard: Some("c++20".to_string()),
             flags: vec!["-O0".to_string()],
+            forced_includes: Vec::new(),
         };
 
         let u2 = ParsedUnit {
@@ -92,6 +139,7 @@ mod tests {
             output: Some("main.o".to_string()),
             standard: Some("c++20".to_string()),
             flags: vec!["-O3".to_string()],
+            forced_includes: Vec::new(),
         };
 
         let diff = diff_compilations(&[u1], &[u2]);

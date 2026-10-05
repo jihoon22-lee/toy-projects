@@ -16,6 +16,7 @@ pub fn parse_command_entry(entry: &CompileCommandEntry) -> ParsedUnit {
     let mut output = entry.output.clone();
     let mut standard = None;
     let mut flags = Vec::new();
+    let mut forced_includes = Vec::new();
 
     let mut iter = args.into_iter();
     if let Some(comp) = iter.next() {
@@ -35,6 +36,16 @@ pub fn parse_command_entry(entry: &CompileCommandEntry) -> ParsedUnit {
             }
         } else if let Some(inc) = arg.strip_prefix("-isystem") {
             includes.push(normalize_path(inc, &entry.directory));
+        } else if arg == "-include" {
+            if let Some(inc) = iter.next() {
+                forced_includes.push(inc);
+            }
+        } else if let Some(inc) = arg.strip_prefix("-include") {
+            if !inc.is_empty() {
+                forced_includes.push(inc.to_string());
+            } else {
+                flags.push(arg);
+            }
         } else if arg == "-D" {
             if let Some(def) = iter.next() {
                 defines.push(def);
@@ -72,6 +83,7 @@ pub fn parse_command_entry(entry: &CompileCommandEntry) -> ParsedUnit {
         output,
         standard,
         flags,
+        forced_includes,
     }
 }
 
@@ -131,7 +143,9 @@ pub fn split_command_line(cmd: &str) -> Vec<String> {
     args
 }
 
-fn normalize_path(path: &str, base_dir: &str) -> String {
+/// Normalize `path` against `base_dir` and collapse `.`/`..` components
+/// without touching the filesystem (no symlink resolution).
+pub fn normalize_path(path: &str, base_dir: &str) -> String {
     let p = Path::new(path);
     if p.is_absolute() {
         clean_path(p)
