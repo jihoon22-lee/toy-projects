@@ -40,13 +40,14 @@ if args[0] == "api":
         assert not state["tag"], "ref must never be overwritten"
         state["tag"] = fields["sha"]
         finish("create-tag")
-    if endpoint.endswith("/commits"):
+    # The commit-list endpoint repos/.../commits must NOT appear here: it
+    # always succeeds and would mask the tag-resolution call. Only the
+    # git/ref/tags/<tag> lookup resolves a tag to a commit (404 when absent).
+    if "/git/ref/tags/" in endpoint:
         if not state["tag"]:
-            print(json.dumps({"message": "Not Found", "status": "404"}))
+            print(json.dumps({"message": "Not Found", "status": "404"}), file=sys.stderr)
             sys.exit(1)
         finish("resolve-tag", state["tag"])
-    if "/commits/" in endpoint:
-        finish("resolve-commit", endpoint.rsplit("/", 1)[1])
 if args[:2] == ["workflow", "run"]:
     assert value("--ref") == "release-please--branches--main"
     finish("dispatch-ci")

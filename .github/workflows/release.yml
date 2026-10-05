@@ -52,7 +52,7 @@ jobs:
           # A release tag is immutable: refuse to move one that already points
           # at a different commit.
           EXISTING=""
-          if RES="$(gh api "repos/${GH_REPO}/commits" 2>/dev/null)"; then
+          if RES="$(gh api "repos/${GH_REPO}/git/ref/tags/${RELEASE_TAG}" --jq '.object.sha' 2>/dev/null)"; then
             EXISTING="$RES"
           fi
           if [ -n "$EXISTING" ] && [ "$EXISTING" != "$TARGET" ]; then
@@ -114,7 +114,7 @@ jobs:
           gh release download "$RELEASE_TAG" --dir "$VERIFY"
           (cd "$VERIFY" && sha256sum -c SHA256SUMS.txt)
           EXISTING=""
-          if RES="$(gh api "repos/${GH_REPO}/commits" 2>/dev/null)"; then
+          if RES="$(gh api "repos/${GH_REPO}/git/ref/tags/${RELEASE_TAG}" --jq '.object.sha' 2>/dev/null)"; then
             EXISTING="$RES"
           fi
           if [ -n "$EXISTING" ] && [ "$EXISTING" != "$SOURCE_SHA" ]; then
