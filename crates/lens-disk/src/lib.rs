@@ -3,9 +3,11 @@
 //! High-performance filesystem diagnostics, storage tree analysis, and safe cleanup workbench.
 //!
 //! Re-architects and replaces legacy `diskmap` with:
-//! - **Compact Arena Tree ([`arena::ArenaTree`])**: 90%+ RAM reduction over C++ node objects.
-//! - **High-Speed Scanner ([`scanner::DiskScanner`])**: Bounded traversal with mount and cycle safeguards.
-//! - **Duplicate Finder ([`duplicates::DuplicateFinder`])**: Multi-stage (size -> 4KB partial -> full SHA-256) with hardlink deduplication.
+//! - **Arena Tree ([`arena::ArenaTree`])**: Contiguous `u32`-indexed node storage
+//!   with O(1) child insertion and iterative aggregation.
+//! - **Scanner ([`scanner::DiskScanner`])**: Bounded traversal with mount and cycle
+//!   safeguards; optional rayon-parallel stat.
+//! - **Duplicate Finder ([`duplicates::DuplicateFinder`])**: Multi-stage (size -> inode -> 4KB partial -> full SHA-256) with hardlink deduplication.
 //! - **FreeDesktop Trash Manager ([`trash::TrashManager`])**: XDG spec-compliant trash movement and audit receipt restoration.
 //! - **Snapshot V2 ([`snapshot::SnapshotV2`])**: 100% compliant with `diskmap.snapshot/v2` schema.
 

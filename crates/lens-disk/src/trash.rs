@@ -91,9 +91,8 @@ impl TrashManager {
             .info_dir()
             .join(format!("{}.trashinfo", candidate_name));
 
-        // Format ISO-8601 timestamp
-        let now = std::time::SystemTime::now();
-        let deletion_date = humantime_or_iso(now);
+        // FreeDesktop `DeletionDate`: local time in `YYYY-MM-DDTHH:MM:SS`.
+        let deletion_date = lens_core::time::local_now_iso();
 
         // 1. Write the .trashinfo file
         let info_content = format!(
@@ -156,65 +155,4 @@ impl TrashManager {
 
         Ok(())
     }
-}
-
-fn humantime_or_iso(now: std::time::SystemTime) -> String {
-    let dur = now
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = dur.as_secs();
-    // Simple basic UTC calendar formatting
-    let days = secs / 86400;
-    let day_secs = secs % 86400;
-    let hours = day_secs / 3600;
-    let minutes = (day_secs % 3600) / 60;
-    let seconds = day_secs % 60;
-
-    // Approximate year/month from days since 1970
-    let mut y = 1970;
-    let mut d = days;
-    loop {
-        let leap = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) {
-            366
-        } else {
-            365
-        };
-        if d < leap {
-            break;
-        }
-        d -= leap;
-        y += 1;
-    }
-    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
-    let month_days = [
-        31,
-        if leap { 29 } else { 28 },
-        31,
-        30,
-        31,
-        30,
-        31,
-        31,
-        30,
-        31,
-        30,
-        31,
-    ];
-    let mut m = 1;
-    for &md in &month_days {
-        if d < md {
-            break;
-        }
-        d -= md;
-        m += 1;
-    }
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
-        y,
-        m,
-        d + 1,
-        hours,
-        minutes,
-        seconds
-    )
 }
