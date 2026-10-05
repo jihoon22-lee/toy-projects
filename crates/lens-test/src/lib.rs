@@ -55,6 +55,35 @@ mod tests {
     }
 
     #[test]
+    fn test_output_and_body_capture() {
+        let xml = r#"<testsuite tests="2">
+            <testcase name="t1" classname="A" time="0.1">
+                <failure>stack trace without message attr</failure>
+                <system-out>stdout blob</system-out>
+                <system-err>stderr blob</system-err>
+            </testcase>
+            <testcase name="t2" classname="A" time="0.2">
+                <skipped>not needed on this platform</skipped>
+            </testcase>
+        </testsuite>"#;
+
+        let run = parse_junit_xml(xml.as_bytes(), "p").unwrap();
+        assert_eq!(run.summary.failed, 1);
+        assert_eq!(
+            run.cases[0].message.as_deref(),
+            Some("stack trace without message attr")
+        );
+        let out = run.cases[0].output.as_deref().unwrap_or("");
+        assert!(out.contains("stdout blob"));
+        assert!(out.contains("stderr blob"));
+        assert_eq!(
+            run.cases[1].message.as_deref(),
+            Some("not needed on this platform")
+        );
+        assert!(run.cases[1].output.is_none());
+    }
+
+    #[test]
     fn test_diff_test_runs() {
         let xml_baseline = r#"<testsuite tests="2">
             <testcase name="t1" classname="A" time="0.1"/>

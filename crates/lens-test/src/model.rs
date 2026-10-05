@@ -23,6 +23,9 @@ pub struct TestCase {
     pub duration_sec: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// Captured `system-out`/`system-err` text for this case, if any.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub output: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
