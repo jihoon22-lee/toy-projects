@@ -23,19 +23,17 @@ impl LogIndexer {
         let mut spans = Vec::with_capacity(data.len() / 64);
         let mut line_start = 0;
 
-        for (idx, &byte) in data.iter().enumerate() {
-            if byte == b'\n' {
-                let mut line_end = idx;
-                // Strip trailing \r
-                if line_end > line_start && data[line_end - 1] == b'\r' {
-                    line_end -= 1;
-                }
-                spans.push(LineSpan {
-                    offset: line_start,
-                    length: line_end - line_start,
-                });
-                line_start = idx + 1;
+        for idx in memchr::memchr_iter(b'\n', data) {
+            let mut line_end = idx;
+            // Strip trailing \r
+            if line_end > line_start && data[line_end - 1] == b'\r' {
+                line_end -= 1;
             }
+            spans.push(LineSpan {
+                offset: line_start,
+                length: line_end - line_start,
+            });
+            line_start = idx + 1;
         }
 
         // Remaining bytes without trailing newline

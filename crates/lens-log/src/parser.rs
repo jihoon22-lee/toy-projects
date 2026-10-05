@@ -13,25 +13,40 @@ pub fn parse_line<'a>(raw: &'a str, line_number: usize) -> LogRecordView<'a> {
             let mut message = String::new();
             let mut source = String::new();
             let mut timestamp_ms = 0;
+            let mut fields = Vec::new();
 
             for (k, v) in map {
-                let k_lower = k.to_lowercase();
-                if k_lower == "level" || k_lower == "severity" {
+                // eq_ignore_ascii_case: no per-key lowercase allocation.
+                if k.eq_ignore_ascii_case("level") || k.eq_ignore_ascii_case("severity") {
                     if let Some(s) = v.as_str() {
                         level = LogLevel::parse(s);
                     }
-                } else if k_lower == "msg" || k_lower == "message" {
+                } else if k.eq_ignore_ascii_case("msg") || k.eq_ignore_ascii_case("message") {
                     if let Some(s) = v.as_str() {
                         message = s.to_string();
                     }
-                } else if k_lower == "source" || k_lower == "logger" || k_lower == "component" {
+                } else if k.eq_ignore_ascii_case("source")
+                    || k.eq_ignore_ascii_case("logger")
+                    || k.eq_ignore_ascii_case("component")
+                {
                     if let Some(s) = v.as_str() {
                         source = s.to_string();
                     }
-                } else if k_lower == "ts" || k_lower == "time" || k_lower == "timestamp" {
+                } else if k.eq_ignore_ascii_case("ts")
+                    || k.eq_ignore_ascii_case("time")
+                    || k.eq_ignore_ascii_case("timestamp")
+                {
                     if let Some(n) = v.as_u64() {
                         timestamp_ms = n;
                     }
+                } else {
+                    // Preserve unrecognized structured fields instead of
+                    // dropping them silently.
+                    let value = v
+                        .as_str()
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| v.to_string());
+                    fields.push((k, value));
                 }
             }
 
@@ -48,23 +63,13 @@ pub fn parse_line<'a>(raw: &'a str, line_number: usize) -> LogRecordView<'a> {
                 message: final_message,
                 raw,
                 line_number,
-                fields: Vec::new(),
+                fields,
             };
         }
     }
 
     // Standard log format heuristic: [LEVEL] or LEVEL
-    let mut detected_level = LogLevel::Unknown;
-    let words: Vec<&'a str> = trimmed.split_whitespace().collect();
-
-    for &word in words.iter().take(5) {
-        let clean = word.trim_matches(|c| c == '[' || c == ']' || c == '(' || c == ')' || c == ':');
-        let lvl = LogLevel::parse(clean);
-        if lvl != LogLevel::Unknown {
-            detected_level = lvl;
-            break;
-        }
-    }
+    let detected_level = detect_level(raw);
 
     LogRecordView {
         timestamp_ms: 0,
@@ -75,4 +80,18 @@ pub fn parse_line<'a>(raw: &'a str, line_number: usize) -> LogRecordView<'a> {
         line_number,
         fields: Vec::new(),
     }
+}
+
+/// Scan only the first few words of `raw` for a level token.
+/// Used by callers that need the level without building a record.
+pub fn detect_level(raw: &str) -> LogLevel {
+    let trimmed = raw.trim();
+    for word in trimmed.split_whitespace().take(5) {
+        let clean = word.trim_matches(|c| c == '[' || c == ']' || c == '(' || c == ')' || c == ':');
+        let lvl = LogLevel::parse(clean);
+        if lvl != LogLevel::Unknown {
+            return lvl;
+        }
+    }
+    LogLevel::Unknown
 }

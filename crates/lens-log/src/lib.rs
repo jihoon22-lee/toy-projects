@@ -16,7 +16,7 @@ pub mod session;
 
 pub use filter::{contains_insensitive, LogFilter};
 pub use indexer::{LineSpan, LogIndexer};
-pub use parser::parse_line;
+pub use parser::{detect_level, parse_line};
 pub use record::{LogLevel, LogRecordView, OwnedLogRecord};
 pub use session::{SessionSource, SessionV2, SESSION_SCHEMA_V2};
 
