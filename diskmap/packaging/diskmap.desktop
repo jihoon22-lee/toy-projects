@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=DiskMap
-Comment=Inspect disk usage, duplicate evidence and recoverable cleanup
-Exec=diskmap-gui %f
-Icon=diskmap
-Terminal=false
-Categories=Utility;System;FileTools;
-StartupNotify=true

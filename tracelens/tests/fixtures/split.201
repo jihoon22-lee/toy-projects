@@ -1,3 +1,0 @@
-12:00:00.000001 fork() = 202 <0.000020>
-12:00:00.000050 openat(AT_FDCWD, "child.txt", O_RDONLY) = 3
-+++ exited with 0 +++

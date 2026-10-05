@@ -1,5 +1,0 @@
-[pid 7] read(3,  <unfinished ...>
-[pid 8] --- SIGINT {si_signo=SIGINT} ---
-[pid 9] <... write resumed>"x", 1) = 1
-[pid 8] +++ killed by SIGINT +++
-% time     seconds  usecs/call     calls    errors syscall
