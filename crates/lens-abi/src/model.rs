@@ -2,7 +2,10 @@ use lens_core::{Compatibility, SetDiff};
 use serde::{Deserialize, Serialize};
 
 pub const REPORT_SCHEMA_V2: &str = "abilens.report/v2";
-pub const DIFF_SCHEMA_V2: &str = "abilens.diff/v2";
+/// v3: `compatibility` uses the shared `compatible|incompatible|uncertain`
+/// vocabulary (was "unknown"), status strings serialize kebab-case like
+/// `ElfReport.status`, and `abi` carries the version-requirement diff.
+pub const DIFF_SCHEMA_V3: &str = "abilens.diff/v3";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

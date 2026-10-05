@@ -17,6 +17,7 @@ struct DynamicInfo {
 }
 
 const DT_STRTAB: i64 = 5;
+const DT_STRSZ: i64 = 10;
 const DT_SONAME: i64 = 14;
 const DT_RPATH: i64 = 15;
 const DT_RUNPATH: i64 = 29;
@@ -24,6 +25,11 @@ const DT_VERDEF: i64 = 0x6ffffffc;
 const DT_VERDEFNUM: i64 = 0x6ffffffd;
 const DT_VERNEED: i64 = 0x6ffffffe;
 const DT_VERNEEDNUM: i64 = 0x6fffffff;
+
+const PT_LOAD: u64 = 1;
+const PT_DYNAMIC: u64 = 2;
+const PT_INTERP: u64 = 3;
+const SHF_ALLOC: u64 = 0x2;
 
 fn rd_u16(d: &[u8], off: usize, le: bool) -> Option<u64> {
     let b: [u8; 2] = d.get(off..off + 2)?.try_into().ok()?;
@@ -71,16 +77,141 @@ fn rd_dyn(d: &[u8], off: usize, is64: bool, le: bool) -> Option<(i64, u64)> {
     }
 }
 
-/// Map a virtual address into file bytes via the section that covers it.
-fn vaddr_bytes<'a>(file: &'a object::File<'a>, vaddr: u64) -> Option<&'a [u8]> {
+/// A PT_LOAD segment for vaddr→file-offset mapping.
+struct LoadSegment {
+    vaddr: u64,
+    offset: u64,
+    filesz: u64,
+}
+
+/// Program headers decoded straight from the ELF bytes — still available
+/// when section headers were stripped (`sstrip`, UPX, corrupted binaries).
+struct ProgramHeaders {
+    loads: Vec<LoadSegment>,
+    /// (file_offset, file_size) of PT_DYNAMIC
+    dynamic: Option<(u64, u64)>,
+    /// (file_offset, file_size) of PT_INTERP
+    interp: Option<(u64, u64)>,
+}
+
+fn parse_program_headers(data: &[u8], is64: bool, le: bool) -> ProgramHeaders {
+    let mut ph = ProgramHeaders {
+        loads: Vec::new(),
+        dynamic: None,
+        interp: None,
+    };
+    let read32 = |off: usize| -> Option<u64> {
+        let b: [u8; 4] = data.get(off..off + 4)?.try_into().ok()?;
+        Some(if le {
+            u32::from_le_bytes(b) as u64
+        } else {
+            u32::from_be_bytes(b) as u64
+        })
+    };
+    let read64 = |off: usize| -> Option<u64> {
+        let b: [u8; 8] = data.get(off..off + 8)?.try_into().ok()?;
+        Some(if le {
+            u64::from_le_bytes(b)
+        } else {
+            u64::from_be_bytes(b)
+        })
+    };
+    // ELF header: e_phoff, e_phentsize, e_phnum
+    let (phoff, phentsize, phnum) = if is64 {
+        (
+            read64(32).map(|v| v as usize),
+            rd_u16(data, 54, le).map(|v| v as usize),
+            rd_u16(data, 56, le).map(|v| v as usize),
+        )
+    } else {
+        (
+            read32(28).map(|v| v as usize),
+            rd_u16(data, 42, le).map(|v| v as usize),
+            rd_u16(data, 44, le).map(|v| v as usize),
+        )
+    };
+    let (Some(phoff), Some(phentsize), Some(phnum)) = (phoff, phentsize, phnum)
+    else {
+        return ph;
+    };
+    if phentsize == 0 {
+        return ph;
+    }
+
+    for i in 0..phnum.min(4096) {
+        let base = phoff + i * phentsize;
+        let (p_type, p_offset, p_vaddr, p_filesz) = if is64 {
+            (
+                read32(base),
+                read64(base + 8),
+                read64(base + 16),
+                read64(base + 32),
+            )
+        } else {
+            (
+                read32(base),
+                read32(base + 4),
+                read32(base + 8),
+                read32(base + 16),
+            )
+        };
+        let (Some(t), Some(off), Some(vaddr), Some(filesz)) =
+            (p_type, p_offset, p_vaddr, p_filesz)
+        else {
+            continue;
+        };
+        match t {
+            PT_LOAD => ph.loads.push(LoadSegment {
+                vaddr,
+                offset: off,
+                filesz,
+            }),
+            PT_DYNAMIC => ph.dynamic = Some((off, filesz)),
+            PT_INTERP => ph.interp = Some((off, filesz)),
+            _ => {}
+        }
+    }
+    ph
+}
+
+/// True if the section is SHF_ALLOC (occupies the runtime address space);
+/// non-ELF objects are treated as alloc so the fallback stays usable.
+fn section_is_alloc(s: &object::Section) -> bool {
+    match s.flags() {
+        object::SectionFlags::Elf { sh_flags } => sh_flags & SHF_ALLOC != 0,
+        _ => true,
+    }
+}
+
+/// Map a virtual address into file bytes. Dynamic tags always point into
+/// PT_LOAD segments; sections are the fallback for files without program
+/// headers (e.g. relocatable objects), restricted to SHF_ALLOC sections so
+/// non-alloc sections can't shadow runtime addresses.
+fn vaddr_bytes<'a>(
+    file: &'a object::File<'a>,
+    data: &'a [u8],
+    ph: &ProgramHeaders,
+    vaddr: u64,
+) -> Option<&'a [u8]> {
+    for seg in &ph.loads {
+        if vaddr >= seg.vaddr && vaddr < seg.vaddr.saturating_add(seg.filesz) {
+            let off = (seg.offset + (vaddr - seg.vaddr)) as usize;
+            if off <= data.len() {
+                return Some(&data[off..]);
+            }
+        }
+    }
     for s in file.sections() {
+        if !section_is_alloc(&s) {
+            continue;
+        }
         let start = s.address();
         let end = start.saturating_add(s.size());
         if s.size() > 0 && vaddr >= start && vaddr < end {
-            if let Ok(data) = s.data() {
+            if let Ok(d) = s.data() {
                 let off = (vaddr - start) as usize;
-                if off <= data.len() {
-                    return Some(&data[off..]);
+                if off <= d.len() {
+                    return Some(&d[off..]);
                 }
             }
         }
@@ -93,8 +224,8 @@ fn cstr_at(d: &[u8], off: usize) -> Option<String> {
     Some(String::from_utf8_lossy(&d[off..end]).into_owned())
 }
 
-fn parse_verneed(
-    file: &object::File,
+fn parse_verneed<'a>(
+    map: &dyn Fn(u64) -> Option<&'a [u8]>,
     base_vaddr: u64,
     count: u64,
     strtab: &[u8],
@@ -105,7 +236,7 @@ fn parse_verneed(
     //               vn_aux@8 u32, vn_next@12 u32  (16 bytes)
     let mut cur = base_vaddr;
     for _ in 0..count.min(1024) {
-        let Some(ent) = vaddr_bytes(file, cur) else {
+        let Some(ent) = map(cur) else {
             break;
         };
         let Some(cnt) = rd_u16(ent, 2, le) else { break };
@@ -121,7 +252,7 @@ fn parse_verneed(
         // Vernaux follows at cur + vn_aux; chain via vna_next.
         let mut aux_cur = cur.saturating_add(aux);
         for _ in 0..cnt.min(1024) {
-            let Some(a) = vaddr_bytes(file, aux_cur) else {
+            let Some(a) = map(aux_cur) else {
                 break;
             };
             let Some(name_off) = rd_u32(a, 8, le) else {
@@ -150,8 +281,8 @@ fn parse_verneed(
     }
 }
 
-fn parse_verdef(
-    file: &object::File,
+fn parse_verdef<'a>(
+    map: &dyn Fn(u64) -> Option<&'a [u8]>,
     base_vaddr: u64,
     count: u64,
     strtab: &[u8],
@@ -162,7 +293,7 @@ fn parse_verdef(
     //              vd_hash@8, vd_aux@12, vd_next@16 u32  (20 bytes)
     let mut cur = base_vaddr;
     for _ in 0..count.min(1024) {
-        let Some(ent) = vaddr_bytes(file, cur) else {
+        let Some(ent) = map(cur) else {
             break;
         };
         let Some(cnt) = rd_u16(ent, 6, le) else { break };
@@ -176,7 +307,7 @@ fn parse_verdef(
         let mut aux_cur = cur.saturating_add(aux);
         // Verdaux: vda_name@0 u32, vda_next@4 u32 (8 bytes)
         for _ in 0..cnt.min(1024) {
-            let Some(a) = vaddr_bytes(file, aux_cur) else {
+            let Some(a) = map(aux_cur) else {
                 break;
             };
             let Some(name_off) = rd_u32(a, 0, le) else {
@@ -206,20 +337,35 @@ fn parse_verdef(
 fn parse_dynamic(file: &object::File, data: &[u8]) -> DynamicInfo {
     let le = file.is_little_endian();
     let is64 = file.is_64();
+    let ph = parse_program_headers(data, is64, le);
+    let map = |v: u64| vaddr_bytes(file, data, &ph, v);
+
+    let interp_bytes = ph
+        .interp
+        .and_then(|(off, size)| data.get(off as usize..(off + size) as usize))
+        .or_else(|| {
+            file.section_by_name(".interp")
+                .and_then(|s| s.data().ok())
+                .map(|d| &d[..])
+        });
     let mut info = DynamicInfo {
-        interpreter: file
-            .section_by_name(".interp")
-            .and_then(|s| s.data().ok())
-            .and_then(|d| cstr_at(d, 0)),
+        interpreter: interp_bytes.and_then(|d| cstr_at(d, 0)),
         ..Default::default()
     };
 
-    let Some(dyn_sec) = file.section_by_name(".dynamic") else {
+    // .dynamic via PT_DYNAMIC first — section headers may be stripped.
+    let dyn_data: &[u8] = ph
+        .dynamic
+        .and_then(|(off, size)| data.get(off as usize..(off + size) as usize))
+        .or_else(|| {
+            file.section_by_name(".dynamic")
+                .and_then(|s| s.data().ok())
+                .map(|d| &d[..])
+        })
+        .unwrap_or(&[]);
+    if dyn_data.is_empty() {
         return info;
-    };
-    let Ok(dyn_data) = dyn_sec.data() else {
-        return info;
-    };
+    }
 
     let entry_size = if is64 { 16 } else { 8 };
     let mut strtab_vaddr = None;
@@ -238,7 +384,7 @@ fn parse_dynamic(file: &object::File, data: &[u8]) -> DynamicInfo {
         };
         match tag {
             DT_STRTAB => strtab_vaddr = Some(val),
-            10 => strtab_size = val as usize, // DT_STRSZ
+            DT_STRSZ => strtab_size = val as usize,
             DT_SONAME => soname_off = Some(val),
             DT_RPATH => rpath_off = Some(val),
             DT_RUNPATH => runpath_off = Some(val),
@@ -249,11 +395,10 @@ fn parse_dynamic(file: &object::File, data: &[u8]) -> DynamicInfo {
             0 => break, // DT_NULL
             _ => {}
         }
-        let _ = data;
     }
 
     let strtab: &[u8] = strtab_vaddr
-        .and_then(|v| vaddr_bytes(file, v))
+        .and_then(&map)
         .map(|d| &d[..d.len().min(strtab_size)])
         .or_else(|| file.section_by_name(".dynstr").and_then(|s| s.data().ok()))
         .unwrap_or(&[]);
@@ -273,10 +418,10 @@ fn parse_dynamic(file: &object::File, data: &[u8]) -> DynamicInfo {
     }
 
     if let (Some(v), n) = (verneed, verneednum) {
-        parse_verneed(file, v, n, strtab, le, &mut info.versions);
+        parse_verneed(&map, v, n, strtab, le, &mut info.versions);
     }
     if let (Some(v), n) = (verdef, verdefnum) {
-        parse_verdef(file, v, n, strtab, le, &mut info.versions);
+        parse_verdef(&map, v, n, strtab, le, &mut info.versions);
     }
     info.versions.sort_by(|a, b| {
         (&a.library, &a.namespace, &a.version).cmp(&(&b.library, &b.namespace, &b.version))

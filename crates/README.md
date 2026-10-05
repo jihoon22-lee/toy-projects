@@ -51,7 +51,7 @@ let snap = SnapshotV2::from_tree(&res.tree, res.root_id, res.complete, res.trunc
   stripped 바이너리는 진단 메모만 남김). 타입 그래프(멤버/레이아웃 비교)는 미구현.
 - `diff_reports`: 심볼/vtable/타입 집합 차분 + 속성 변경(타입·바인딩·데이터 크기)
   + 헤더 변경을 종합해 3상태 호환성 판정. 경로/의존성 변경은 `Uncertain`.
-- 스키마: `abilens.report/v2`, `abilens.diff/v2`.
+- 스키마: `abilens.report/v2`, `abilens.diff/v3`(v3에서 `compatibility` 어휘가 `compatible|incompatible|uncertain`으로 통일되고 버전 요구사항 diff가 `abi` 필드에 채워짐).
 
 ## lens-log — 로그 분석
 

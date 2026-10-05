@@ -34,10 +34,14 @@ pub fn extract_dwarf_types(file: &object::File) -> (Vec<String>, Option<String>)
     };
 
     let dwarf = gimli::Dwarf::load(|id| -> Result<GimliReader, gimli::Error> {
+        // uncompressed_data() handles SHF_COMPRESSED and .zdebug_* payloads;
+        // the zdebug fallback covers sections renamed by objcopy.
+        let zname = format!(".z{}", &id.name()[1..]);
         let data: Vec<u8> = file
             .section_by_name(id.name())
-            .and_then(|s| s.data().ok())
-            .map(|c| c.to_vec())
+            .or_else(|| file.section_by_name(&zname))
+            .and_then(|s| s.uncompressed_data().ok())
+            .map(|c| c.into_owned())
             .unwrap_or_default();
         Ok(gimli::EndianRcSlice::new(Rc::from(data), endian))
     });
@@ -55,8 +59,17 @@ pub fn extract_dwarf_types(file: &object::File) -> (Vec<String>, Option<String>)
     let mut types: BTreeSet<String> = BTreeSet::new();
     let mut units = dwarf.units();
     let mut truncated = false;
+    let mut parse_error = false;
 
-    while let Ok(Some(header)) = units.next() {
+    loop {
+        let header = match units.next() {
+            Ok(Some(h)) => h,
+            Ok(None) => break,
+            Err(_) => {
+                parse_error = true;
+                break;
+            }
+        };
         let unit = match dwarf.unit(header) {
             Ok(u) => u,
             Err(_) => continue,
@@ -103,6 +116,8 @@ pub fn extract_dwarf_types(file: &object::File) -> (Vec<String>, Option<String>)
 
     let diagnostic = if truncated {
         Some(format!("type list truncated at {} entries", MAX_TYPES))
+    } else if parse_error {
+        Some("DWARF unit iteration failed; type list may be incomplete".to_string())
     } else if types.is_empty() {
         Some(".debug_info present but contained no named types".to_string())
     } else {
