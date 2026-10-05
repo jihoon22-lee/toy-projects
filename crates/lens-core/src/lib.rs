@@ -7,21 +7,27 @@
 //! - **Hash ([`hash`])**: Standard SHA-256 hashing and streaming digest calculations.
 //! - **Diff ([`diff`])**: Conservative 3-state compatibility model (`Compatible`, `Incompatible`, `Uncertain`).
 //! - **Evidence ([`evidence`])**: Source provenance, exact observation coordinates, and bounded diagnostic collectors.
+//! - **Bundle ([`bundle`])**: The canonical `.lens` archive format shared by create/inspect/verify.
 //! - **JSON ([`json`])**: Deterministic canonical JSON serialization with guaranteed key sorting.
+//! - **Time ([`time`])**: Shared ISO-8601 timestamp helpers.
 //! - **Error ([`error`])**: Unified typed error handling.
 
+pub mod bundle;
 pub mod diff;
 pub mod error;
 pub mod evidence;
 pub mod hash;
 pub mod identity;
 pub mod json;
+pub mod time;
 
+pub use bundle::{
+    create_bundle_archive, inspect_bundle, verify_bundle_archive, BundleArtifact, BundleInspection,
+    BundleManifest, BundleVerificationReport, BUNDLE_SCHEMA_V2,
+};
 pub use diff::{Compatibility, SetDiff};
 pub use error::{LensError, Result};
-pub use evidence::{
-    verify_bundle_archive, BoundedCollector, BundleVerificationReport, Diagnostic, Evidence, Source,
-};
+pub use evidence::{BoundedCollector, Diagnostic, Evidence, Source};
 pub use hash::{digest_bytes, digest_file, digest_reader, IncrementalHasher};
 pub use identity::{FileIdentity, SafeInput};
 pub use json::{to_deterministic_pretty, to_deterministic_string};

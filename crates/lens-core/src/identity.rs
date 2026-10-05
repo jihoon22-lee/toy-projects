@@ -40,6 +40,16 @@ impl FileIdentity {
         Ok(Self::from_metadata(&meta))
     }
 
+    /// Identity of the file the path resolves to (follows symlinks), matching
+    /// the semantics of `File::open` used by `SafeInput`.
+    pub fn from_path_follow<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let meta = std::fs::metadata(path.as_ref()).map_err(|e| LensError::Io {
+            path: path.as_ref().to_path_buf(),
+            source: e,
+        })?;
+        Ok(Self::from_metadata(&meta))
+    }
+
     pub fn from_file(file: &File, path: &Path) -> Result<Self> {
         let meta = file.metadata().map_err(|e| LensError::Io {
             path: path.to_path_buf(),
@@ -95,7 +105,9 @@ impl SafeInput {
                 path: self.path.clone(),
             });
         }
-        let current_path_meta = FileIdentity::from_path(&self.path)?;
+        // `from_path` (lstat) sees the symlink inode, which never matches the
+        // opened file's identity; compare against the resolved target instead.
+        let current_path_meta = FileIdentity::from_path_follow(&self.path)?;
         if !self.initial_identity.is_unchanged(&current_path_meta) {
             return Err(LensError::InputChanged {
                 path: self.path.clone(),
