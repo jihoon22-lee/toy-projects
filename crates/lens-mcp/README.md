@@ -14,6 +14,7 @@ This enables AI assistants to autonomously:
 - Detect systemd service ordering cycles before deployment.
 - Predict recompilation scope from C/C++ header modifications.
 - Audit Python virtual environments for missing dependencies.
+- Run comprehensive system health checks across storage, network, and services.
 
 ## Supported MCP Tools
 
@@ -27,6 +28,7 @@ This enables AI assistants to autonomously:
 | `lens_sys_cycles` | `dir: string` | Detect dependency ordering cycles in systemd service definitions |
 | `lens_build_impact` | `compile_commands: string`, `header: string` | Calculate reverse compilation impact for a modified C/C++ header |
 | `lens_env_check` | `venv_path: string` | Check Python virtualenv for missing or unsatisfied packages |
+| `lens_doctor` | _none_ | Run comprehensive host diagnostics across storage, network, and services |
 
 ## Claude Desktop Configuration
 

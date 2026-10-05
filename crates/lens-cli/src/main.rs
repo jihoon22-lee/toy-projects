@@ -76,6 +76,22 @@ enum Commands {
         #[command(subcommand)]
         action: BundleCommands,
     },
+    /// Unified system health check across storage, network, services, and environment
+    Doctor {
+        #[arg(long)]
+        root: Option<PathBuf>,
+        #[arg(long)]
+        procfs: Option<PathBuf>,
+        #[arg(long)]
+        systemd_dir: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Generate shell auto-completion script
+    Completion {
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
 }
 
 #[derive(Subcommand)]
@@ -838,6 +854,51 @@ fn main() -> Result<()> {
                 println!("{}", to_deterministic_pretty(&diff)?);
             }
         },
+        Commands::Doctor {
+            root,
+            procfs,
+            systemd_dir,
+            json,
+        } => {
+            let report = lens_cli::doctor::run_doctor(
+                root.as_deref(),
+                procfs.as_deref(),
+                systemd_dir.as_deref(),
+            );
+            if json {
+                println!("{}", to_deterministic_pretty(&report)?);
+            } else {
+                println!("=== Lens System Doctor Diagnosis ===");
+                println!("Overall Status: {:?}", report.overall_status);
+                println!(
+                    "Summary: {} Total | {} Passed | {} Warnings | {} Failures\n",
+                    report.summary.total,
+                    report.summary.passed,
+                    report.summary.warnings,
+                    report.summary.failures
+                );
+                println!("{:<12} {:<30} {:<8} MESSAGE", "CATEGORY", "CHECK", "STATUS");
+                for c in &report.checks {
+                    let status_str = match c.status {
+                        lens_cli::doctor::HealthStatus::Pass => "[PASS]",
+                        lens_cli::doctor::HealthStatus::Warn => "[WARN]",
+                        lens_cli::doctor::HealthStatus::Fail => "[FAIL]",
+                    };
+                    println!(
+                        "{:<12} {:<30} {:<8} {}",
+                        c.category, c.name, status_str, c.message
+                    );
+                    if let Some(ref rec) = c.recommendation {
+                        println!("             -> Recommendation: {}", rec);
+                    }
+                }
+            }
+        }
+        Commands::Completion { shell } => {
+            use clap::CommandFactory;
+            let mut cmd = Cli::command();
+            clap_complete::generate(shell, &mut cmd, "lens", &mut std::io::stdout());
+        }
     }
 
     Ok(())

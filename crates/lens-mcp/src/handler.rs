@@ -173,6 +173,19 @@ pub fn execute_tool(name: &str, args: &Value) -> Result<String, String> {
                 .map_err(|e| e.to_string())?;
             to_deterministic_pretty(&report).map_err(|e| e.to_string())
         }
+        "lens_doctor" => {
+            let root_path = args
+                .get("root_path")
+                .and_then(|v| v.as_str())
+                .map(Path::new);
+            let proc_dir = args.get("proc_dir").and_then(|v| v.as_str()).map(Path::new);
+            let systemd_dir = args
+                .get("systemd_dir")
+                .and_then(|v| v.as_str())
+                .map(Path::new);
+            let report = lens_cli::doctor::run_doctor(root_path, proc_dir, systemd_dir);
+            to_deterministic_pretty(&report).map_err(|e| e.to_string())
+        }
         other => Err(format!("Unknown tool: {}", other)),
     }
 }

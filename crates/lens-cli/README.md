@@ -22,8 +22,10 @@ Commands:
   sys     Systemd service unit, drop-in override, and dependency DAG analysis
   build   Compilation database analysis, compiler flags, and header impact DAG
   env     Python virtual environment audit, dependency check, and shadowing detection
-  bundle  Forensic Flight Recorder: bundle multiple diagnostic artifacts into a .lens container
-  help    Print this message or the help of the given subcommand(s)
+  bundle      Forensic Flight Recorder: bundle multiple diagnostic artifacts into a .lens container
+  doctor      Comprehensive system diagnostic health check across storage, network, and services
+  completion  Generate shell autocompletions (bash, zsh, fish, powershell)
+  help        Print this message or the help of the given subcommand(s)
 ```
 
 ---
@@ -130,6 +132,27 @@ $ lens bundle create incident_20261005.lens \
 
 # Inspect forensic bundle provenance, diagnostics, and embedded artifacts
 $ lens bundle inspect incident_20261005.lens
+```
+
+### 10. `lens doctor` (System Diagnostic Health Check)
+```bash
+# Run comprehensive system diagnostics across storage, network, and services
+$ lens doctor
+
+# Output diagnostic report as JSON
+$ lens doctor --json
+```
+
+### 11. `lens completion` (Shell Autocompletions)
+```bash
+# Generate completion script for bash
+$ lens completion bash > /etc/bash_completion.d/lens
+
+# Generate completion script for zsh
+$ lens completion zsh > ~/.zfunc/_lens
+
+# Generate completion script for fish
+$ lens completion fish > ~/.config/fish/completions/lens.fish
 ```
 
 ---

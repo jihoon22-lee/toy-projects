@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path::Path;
 
 use crate::model::*;
@@ -12,7 +12,21 @@ pub fn parse_ipv4_hex(hex_str: &str) -> Option<String> {
     }
     let num = u32::from_str_radix(hex_str, 16).ok()?;
     let bytes = num.to_ne_bytes();
-    Some(Ipv4Addr::new(bytes[3], bytes[2], bytes[1], bytes[0]).to_string())
+    Some(Ipv4Addr::new(bytes[0], bytes[1], bytes[2], bytes[3]).to_string())
+}
+
+pub fn parse_ipv6_hex(hex_str: &str) -> Option<String> {
+    if hex_str.len() != 32 {
+        return None;
+    }
+    let mut bytes = [0u8; 16];
+    for i in 0..4 {
+        let chunk = &hex_str[i * 8..(i + 1) * 8];
+        let num = u32::from_str_radix(chunk, 16).ok()?;
+        let chunk_bytes = num.to_ne_bytes();
+        bytes[i * 4..(i + 1) * 4].copy_from_slice(&chunk_bytes);
+    }
+    Some(Ipv6Addr::from(bytes).to_string())
 }
 
 pub fn parse_port_hex(hex_str: &str) -> Option<u16> {
@@ -21,7 +35,13 @@ pub fn parse_port_hex(hex_str: &str) -> Option<u16> {
 
 pub fn parse_addr_port(entry: &str) -> (String, u16) {
     if let Some((addr_hex, port_hex)) = entry.split_once(':') {
-        let addr = parse_ipv4_hex(addr_hex).unwrap_or_else(|| addr_hex.to_string());
+        let addr = if addr_hex.len() == 32 {
+            parse_ipv6_hex(addr_hex).unwrap_or_else(|| addr_hex.to_string())
+        } else if addr_hex.len() == 8 {
+            parse_ipv4_hex(addr_hex).unwrap_or_else(|| addr_hex.to_string())
+        } else {
+            addr_hex.to_string()
+        };
         let port = parse_port_hex(port_hex).unwrap_or(0);
         (addr, port)
     } else {
@@ -181,6 +201,8 @@ pub fn inspect_network(proc_path: Option<&Path>) -> Result<NetReport> {
 
     let tcp_path = base.join("net/tcp");
     let udp_path = base.join("net/udp");
+    let tcp6_path = base.join("net/tcp6");
+    let udp6_path = base.join("net/udp6");
     let unix_path = base.join("net/unix");
 
     let mut sockets = Vec::new();
@@ -190,6 +212,12 @@ pub fn inspect_network(proc_path: Option<&Path>) -> Result<NetReport> {
     }
     if let Ok(content) = fs::read_to_string(&udp_path) {
         sockets.extend(parse_proc_net_tcp(&content, SocketKind::Udp));
+    }
+    if let Ok(content) = fs::read_to_string(&tcp6_path) {
+        sockets.extend(parse_proc_net_tcp(&content, SocketKind::Tcp6));
+    }
+    if let Ok(content) = fs::read_to_string(&udp6_path) {
+        sockets.extend(parse_proc_net_tcp(&content, SocketKind::Udp6));
     }
     if let Ok(content) = fs::read_to_string(&unix_path) {
         sockets.extend(parse_proc_net_unix(&content));
@@ -220,7 +248,12 @@ pub fn inspect_network(proc_path: Option<&Path>) -> Result<NetReport> {
         if s.kind == SocketKind::UnixStream || s.kind == SocketKind::UnixDgram {
             summary.unix_domain_sockets += 1;
         }
-        if s.process.is_none() && (s.kind == SocketKind::Tcp || s.kind == SocketKind::Udp) {
+        if s.process.is_none()
+            && (s.kind == SocketKind::Tcp
+                || s.kind == SocketKind::Tcp6
+                || s.kind == SocketKind::Udp
+                || s.kind == SocketKind::Udp6)
+        {
             summary.orphan_sockets += 1;
         }
     }
@@ -245,6 +278,7 @@ mod tests {
 ";
         let entries = parse_proc_net_tcp(sample, SocketKind::Tcp);
         assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].local_address, "127.0.0.1");
         assert_eq!(entries[0].local_port, 8080);
         assert_eq!(entries[0].state, TcpState::Listen);
         assert_eq!(entries[0].inode, 998877);
@@ -252,6 +286,20 @@ mod tests {
         assert_eq!(entries[1].local_port, 8080);
         assert_eq!(entries[1].state, TcpState::Established);
         assert_eq!(entries[1].inode, 998878);
+    }
+
+    #[test]
+    fn test_parse_proc_net_tcp6() {
+        let sample = "  sl  local_address                         remote_address                        st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 00000000000000000000000000000000:0016 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0  12345 1 0000000000000000 100 0 0 10 0
+";
+        let entries = parse_proc_net_tcp(sample, SocketKind::Tcp6);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].kind, SocketKind::Tcp6);
+        assert_eq!(entries[0].local_address, "::");
+        assert_eq!(entries[0].local_port, 22);
+        assert_eq!(entries[0].state, TcpState::Listen);
+        assert_eq!(entries[0].inode, 12345);
     }
 
     #[test]
