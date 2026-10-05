@@ -599,7 +599,6 @@ version = "0.4.2"
 dependencies = [
  "clap",
  "clap_complete",
- "flate2",
  "lens-abi",
  "lens-build",
  "lens-core",
@@ -610,6 +609,7 @@ dependencies = [
  "lens-sys",
  "lens-test",
  "lens-trace",
+ "lens-tui",
  "libc",
  "serde",
  "serde_json",

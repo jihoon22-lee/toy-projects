@@ -9,7 +9,7 @@ use lens_core::to_deterministic_pretty;
 use lens_disk::{DiskScanner, DuplicateFinder, ScanOptions, SnapshotV2};
 use lens_env::inspect_venv;
 use lens_log::{parse_line, LogFilter, LogIndexer, LogLevel};
-use lens_sys::{parse_unit_content, OrderingGraph, SystemdUnit};
+use lens_sys::{OrderingGraph, SystemdUnit};
 use lens_trace::TraceAnalyzer;
 
 pub fn execute_tool(name: &str, args: &Value) -> Result<String, String> {
@@ -137,13 +137,13 @@ pub fn execute_tool(name: &str, args: &Value) -> Result<String, String> {
             let mut graph = ImpactGraph::new();
             for entry in &entries {
                 let unit = parse_command_entry(entry);
-                if let Ok(src) = fs::read_to_string(&unit.file) {
-                    for inc in lens_build::extract_includes(&src) {
-                        graph.add_unit_include(&unit.file, &inc);
-                    }
-                }
+                graph.add_translation_unit(&unit);
             }
-            let report = graph.compute_impact(header_str);
+            let cwd = std::env::current_dir()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| "/".to_string());
+            let target = lens_build::normalize_path(header_str, &cwd);
+            let report = graph.compute_impact(&target);
             to_deterministic_pretty(&report).map_err(|e| e.to_string())
         }
         "lens_env_check" => {
@@ -191,22 +191,6 @@ pub fn execute_tool(name: &str, args: &Value) -> Result<String, String> {
 }
 
 fn load_sys_units(dir: &Path) -> std::io::Result<BTreeMap<String, SystemdUnit>> {
-    let mut units = BTreeMap::new();
-    if dir.is_dir() {
-        for entry in fs::read_dir(dir)?.flatten() {
-            let p = entry.path();
-            if p.is_file() {
-                if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-                    if name.ends_with(".service") || name.ends_with(".target") {
-                        if let Ok(content) = fs::read_to_string(&p) {
-                            let unit =
-                                parse_unit_content(&content, name, Some(&p.to_string_lossy()));
-                            units.insert(name.to_string(), unit);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    Ok(units)
+    lens_sys::load_units(dir)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
 }

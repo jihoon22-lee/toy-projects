@@ -25,10 +25,10 @@ lens-sys = { path = "../lens-sys" }
 lens-build = { path = "../lens-build" }
 lens-env = { path = "../lens-env" }
 lens-net = { path = "../lens-net" }
+lens-tui = { path = "../lens-tui" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 clap = { workspace = true }
 clap_complete = "4.5"
 libc = "0.2"
 thiserror = { workspace = true }
-flate2 = { workspace = true }
