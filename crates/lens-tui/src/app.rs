@@ -1,5 +1,7 @@
 use lens_disk::{DiskScanner, ScanOptions, ScanResult};
+use lens_log::LogIndexer;
 use lens_net::{inspect_network, NetReport};
+use lens_sys::SystemdUnit;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +59,11 @@ pub struct TuiApp {
     pub total_size: u64,
     pub net_report: Option<NetReport>,
     pub net_selected: usize,
+    pub sys_units: Vec<SystemdUnit>,
+    pub sys_selected: usize,
+    pub log_path: Option<PathBuf>,
+    pub log_lines: Vec<String>,
+    pub log_scroll: usize,
     pub status_message: String,
     pub should_quit: bool,
 }
@@ -71,12 +78,19 @@ impl TuiApp {
             total_size: 0,
             net_report: None,
             net_selected: 0,
+            sys_units: Vec::new(),
+            sys_selected: 0,
+            log_path: None,
+            log_lines: Vec::new(),
+            log_scroll: 0,
             status_message: "Ready. [Tab/1-4] Switch tabs  [j/k] Navigate  [Enter] Open  [q] Quit"
                 .to_string(),
             should_quit: false,
         };
         app.reload();
         app.reload_network();
+        app.reload_services();
+        app.reload_logs();
         app
     }
 
@@ -91,6 +105,56 @@ impl TuiApp {
     pub fn reload_network(&mut self) {
         if let Ok(rep) = inspect_network(None) {
             self.net_report = Some(rep);
+        }
+    }
+
+    /// Load systemd units (with drop-ins) for the Services tab.
+    pub fn reload_services(&mut self) {
+        let base = Path::new("/etc/systemd/system");
+        match lens_sys::load_units(base) {
+            Ok(units) => {
+                self.sys_units = units.into_values().collect();
+            }
+            Err(_) => {
+                self.sys_units = Vec::new();
+            }
+        }
+        if self.sys_selected >= self.sys_units.len() {
+            self.sys_selected = 0;
+        }
+    }
+
+    /// Tail the first readable system log for the Logs tab.
+    pub fn reload_logs(&mut self) {
+        let candidates = [
+            "/var/log/syslog",
+            "/var/log/messages",
+            "/var/log/kern.log",
+            "/var/log/daemon.log",
+        ];
+        let path = candidates
+            .iter()
+            .map(Path::new)
+            .find(|p| p.is_file())
+            .map(|p| p.to_path_buf())
+            .or_else(|| {
+                // Fall back to the first *.log file in /var/log.
+                std::fs::read_dir("/var/log").ok().and_then(|rd| {
+                    rd.flatten()
+                        .map(|e| e.path())
+                        .find(|p| p.extension().map(|e| e == "log").unwrap_or(false) && p.is_file())
+                })
+            });
+
+        if let Some(p) = path {
+            if let Ok(indexer) = LogIndexer::open(&p) {
+                let start = indexer.len().saturating_sub(2000);
+                self.log_lines = (start..indexer.len())
+                    .filter_map(|i| indexer.get_line(i).map(|s| s.to_string()))
+                    .collect();
+                self.log_path = Some(p);
+                self.log_scroll = self.log_lines.len();
+            }
         }
     }
 
@@ -135,17 +199,65 @@ impl TuiApp {
     }
 
     pub fn next(&mut self) {
-        if !self.items.is_empty() {
-            self.selected_index = (self.selected_index + 1) % self.items.len();
+        match self.active_tab {
+            TuiTab::Storage => {
+                if !self.items.is_empty() {
+                    self.selected_index = (self.selected_index + 1) % self.items.len();
+                }
+            }
+            TuiTab::Services => {
+                if !self.sys_units.is_empty() {
+                    self.sys_selected = (self.sys_selected + 1) % self.sys_units.len();
+                }
+            }
+            TuiTab::Logs => {
+                if self.log_scroll < self.log_lines.len() {
+                    self.log_scroll += 1;
+                }
+            }
+            TuiTab::Network => {
+                if let Some(rep) = &self.net_report {
+                    if !rep.listening.is_empty() {
+                        self.net_selected = (self.net_selected + 1) % rep.listening.len();
+                    }
+                }
+            }
         }
     }
 
     pub fn previous(&mut self) {
-        if !self.items.is_empty() {
-            if self.selected_index == 0 {
-                self.selected_index = self.items.len() - 1;
-            } else {
-                self.selected_index -= 1;
+        match self.active_tab {
+            TuiTab::Storage => {
+                if !self.items.is_empty() {
+                    if self.selected_index == 0 {
+                        self.selected_index = self.items.len() - 1;
+                    } else {
+                        self.selected_index -= 1;
+                    }
+                }
+            }
+            TuiTab::Services => {
+                if !self.sys_units.is_empty() {
+                    if self.sys_selected == 0 {
+                        self.sys_selected = self.sys_units.len() - 1;
+                    } else {
+                        self.sys_selected -= 1;
+                    }
+                }
+            }
+            TuiTab::Logs => {
+                self.log_scroll = self.log_scroll.saturating_sub(1);
+            }
+            TuiTab::Network => {
+                if let Some(rep) = &self.net_report {
+                    if !rep.listening.is_empty() {
+                        if self.net_selected == 0 {
+                            self.net_selected = rep.listening.len() - 1;
+                        } else {
+                            self.net_selected -= 1;
+                        }
+                    }
+                }
             }
         }
     }
