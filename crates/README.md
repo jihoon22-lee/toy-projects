@@ -1,110 +1,150 @@
-# Lens Forensic Platform (`crates/`)
+# Lens 크레이트 레퍼런스 (`crates/`)
 
-리눅스 시스템 및 소프트웨어 생명주기 전 영역을 아우르는 **통합 포렌식 및 시스템 진단 플랫폼(Lens Platform)**의 단일 Rust 워크스페이스입니다.
+Lens는 단일 Rust 워크스페이스다. 각 `lens-*` 크레이트가 하나의 진단 도메인을
+담당하고, `lens`(lens-cli) 바이너리와 `lens-mcp` 서버가 공용 진입점이다.
 
-파편화되어 있던 기존 8개 독립 도구(`toy-projects`)의 엄격한 계약(Schema, Fail-Closed, Evidence-Bound)을 온전히 계승하면서, **단일 정적 바이너리(`lens`), 90% 메모리 절감, Zero-Copy I/O, 수십 배의 성능 향상, 사고 포렌식 비행기록장치(`.lens` 번들)**을 완성했습니다.
+공통 계약:
+- **Fail-Closed**: 파싱 불가·증거 부족 시 안전한 것으로 간주하지 않는다.
+- **Evidence-Bound**: 출력은 관측된 파일 오프셋/줄/경로와 해시에 근거한다.
+- **Deterministic JSON**: `lens_core::to_deterministic_*`로 키를 정렬해 출력한다.
+- **3상태 호환성**: `Compatibility::{Compatible, Incompatible, Uncertain}`.
 
 ---
 
-## 워크스페이스 구조 (Workspace Layout)
+## lens-core — 공통 기반
 
-```text
-crates/
-├── lens-core/    공통 기반 (Zero-Copy I/O, FileIdentity, SHA-256, 3상태 Diff, 암호학적 번들 검증)
-├── lens-disk/    스토리지 분석, 아레나 트리, 중복 파일 탐지, 병렬 스캔, FreeDesktop Trash (diskmap 대체)
-├── lens-abi/     ELF/DWARF 타입 검사, SHF_COMPRESSED 압축 지원, C++/Rust 디맹글링, ABI 3상태 Diff (abilens 대체)
-├── lens-log/     mmap 제로카피 라인 인덱서, 무할당 고속 검색, Session v2 (loglens 대체)
-├── lens-test/    quick-xml 초고속 스트리밍 테스트 파서, 회귀 자동 탐지 (testlens 대체)
-├── lens-trace/   strace 스트리밍 파서, FD 누수/IO 처리량 추적, 미완료 시퀀스 복원, 지연/에러 diff (tracelens 대체)
-├── lens-sys/     systemd 유닛/드롭인 파서, Specifier 확장, 의존성 순환(Cycle) DAG 탐지 (servicelens 대체)
-├── lens-build/   compile_commands.json 파서, 플래그 정규화, 헤더 영향도 역방향 DAG (buildscope 대체)
-├── lens-env/     Zero-Code Python venv 분석기, 미충족 패키지 검사, import 섀도잉 탐지 (envlens 대체)
-├── lens-net/     네트워크 소켓 포렌식, IPv4/IPv6 /proc/net 무실행 파싱, 프로세스 FD 상관관계, 포트 Diff
-├── lens-cli/     단일 통합 CLI (`lens`), 시스템 종합 진단 (`doctor`), 셸 자동완성, 포렌식 번들
-├── lens-tui/     4개 탭 대화형 터미널 UI 대시보드 (Storage, Services, Logs, Network)
-└── lens-mcp/     AI 어시스턴트(Claude, Antigravity) 연동용 Model Context Protocol 서버
+| 모듈 | 역할 |
+|---|---|
+| `identity` | `SafeInput`(open→fstat→verify)과 `FileIdentity`로 TOCTOU 방어, `mmap()` |
+| `hash` | SHA-256 `digest_bytes`/`digest_file`, `IncrementalHasher` |
+| `diff` | `Compatibility` 3상태 enum, `SetDiff<T>` |
+| `evidence` | `Evidence`, `Source`, 상한 있는 `BoundedCollector` |
+| `json` | 결정론적 JSON 직렬화(키 정렬) |
+| `time` | UTC/로컬 ISO-8601 타임스탬프 유틸 |
+| `bundle` | `lens.bundle/v2` — tar.gz + `manifest.json`(SHA-256, 크기·항목 상한) 생성/검사/검증 |
+
+## lens-disk — 파일시스템 분석
+
+- `ArenaTree`: `u32` 인덱스 연속 아레나. 자식 삽입 O(1)(`last_child`),
+  크기 집계는 반복형 post-order(깊은 트리 스택 안전).
+- `DiskScanner`: 최대 깊이/항목 수, 제외 패턴, 마운트 경계(`one_file_system`),
+  심볼링크 루프 감지(링크 **타깃**의 dev/ino 사용). `ScanOptions::parallel`이
+  실제 rayon 병렬 stat을 수행.
+- `DuplicateFinder`: 크기→inode 묶음→4KB 부분 해시→전체 SHA-256 순으로 필터.
+  같은 inode의 하드링크는 회수 가능 용량에서 중복 계산하지 않는다.
+- `TrashManager`: FreeDesktop Trash v1.0 (`files/` + `.trashinfo` 영수증).
+- 스키마: `diskmap.snapshot/v2`, `SnapshotDiff`.
+
+```rust
+use lens_disk::{DiskScanner, ScanOptions, DuplicateFinder, SnapshotV2};
+let res = DiskScanner::new(ScanOptions::default()).scan("/path")?;
+let groups = DuplicateFinder::new(1<<20).find_in_tree(&res.tree, "/path".as_ref())?;
+let snap = SnapshotV2::from_tree(&res.tree, res.root_id, res.complete, res.truncated);
 ```
 
----
+## lens-abi — ELF/ABI 분석
 
-## 8대 레거시 도구 대비 혁신 지표
+- `inspect_elf`: ELF 헤더, `.dynamic`(NEEDED/RPATH/RUNPATH/SONAME/PT_INTERP),
+  `.gnu.version_r`/`.gnu.version_d`의 심볼 버전 요구사항, dynsym 증거
+  (`defined` 여부, 디맹글링 포함)를 수집.
+- `dwarf`: `.debug_info`가 있으면 gimli로 선언 타입명을 추출(최대 10,000건,
+  stripped 바이너리는 진단 메모만 남김). 타입 그래프(멤버/레이아웃 비교)는 미구현.
+- `diff_reports`: 심볼/vtable/타입 집합 차분 + 속성 변경(타입·바인딩·데이터 크기)
+  + 헤더 변경을 종합해 3상태 호환성 판정. 경로/의존성 변경은 `Uncertain`.
+- 스키마: `abilens.report/v2`, `abilens.diff/v2`.
 
-| 영역 | 기존 레거시 (`toy-projects`) | 차세대 Rust 엔진 (`lens`) | 개선 배수 |
-|---|---|---|---|
-| **배포 형태** | Qt6, Python, libstdc++ 런타임 종속 8개 도구 파편화 | 단일 정적 바이너리 (`lens`) | **완전 독립 & 0 종속성** |
-| **디스크 스캔 메모리** | 노드당 432바이트 (100만 파일 시 ~1GB) | 노드당 36바이트 (`ArenaTree`, ~40MB) | **90% 이상 절감** |
-| **로그 검색 핫패스** | 검색 시마다 `toLowerAscii` 힙 할당 (100만회+) | 무할당 슬라이딩 윈도우 (`contains_insensitive`) | **0회 (Zero Allocation)** |
-| **DWARF 압축 섹션** | `SHF_COMPRESSED` 즉시 포기 (`limited`) | `gimli` + `flate2`로 배포판 압축 완벽 지원 | **정상 분석 복원** |
-| **심볼 버전 범위** | `GLIBC*` 3개 네임스페이스 하드코딩 | `DT_VERDEF`/`DT_VERNEED` 전 라이브러리 동적 수집 | **제한 해제** |
-| **테스트 XML 파싱** | Python `defusedxml` (10만 건에 1.3초, 300MB) | `quick-xml` 스트리밍 (10만 건에 30ms, <10MB) | **40배 가속 / 30배 절감** |
-| **strace 다중스레드** | C++ 파서 복잡성, 메모리 누수 위험 | `TraceAnalyzer` 비동기 콜 매칭 및 $O(1)$ 스트리밍 | **안정성/속도 대폭 향상** |
-| **systemd 정적 분석** | Python AST 파싱 속도 지연 | 무평가 정적 파서 + Tarjan SCC 순환 그래프 탐지 | **부팅 데드락 사전 예방** |
-| **빌드 영향도 분석** | CMake 캐시 수동 파싱 | 헤더 역방향 전이 종속성 클로저 계산 (<10ms) | **빌드 타임 예측 가속** |
-| **Python 환경 감사** | Python 인터프리터 구동 위험 | 제로 코드 실행 정적 메타데이터 & 섀도잉 감사 | **보안 취약점 완전 차단** |
-| **사고 포렌식 기록** | 도구별 산출물 수동 수집 | 통합 `.lens` 비행기록장치 번들 생성/검사 | **사고 대응 시간 단축** |
+## lens-log — 로그 분석
 
----
+- `LogIndexer`: mmap + `memchr`로 라인 오프셋 테이블 구축.
+- `parse_line`: JSONL(`level`/`msg`/`ts` 등, 키 대소문자 무시, 나머지 키는
+  `fields`에 보존)과 `LEVEL ...` 휴리스틱. `detect_level`은 레벨만 빠르게 반환.
+- `LogFilter`: min_level/query/source. `matches_line`은 no-op 필터와
+  substring-only 거절을 파싱 없이 단락.
+- 스키마: `loglens.session/v2`.
 
-## 빌드 및 검증
+## lens-test — JUnit 파싱
 
-### 전체 테스트 실행 (13개 크레이트 동시 테스트)
-```bash
-cargo test --workspace --jobs 2
-```
+- `quick-xml` 스트리밍 파서: 속성 엔티티 디코딩, testcase 상태
+  (failure/error/skipped) 메타데이터, `<system-out>`/`<system-err>`와
+  `<properties>` 수집, 열린 태그 잔존 시 `complete=false`(잘린 XML 감지).
+- run id는 입력 해시 기반 결정적 생성.
+- 스키마: `testlens.run/v1`, `testlens.diff/v1`.
 
-### 통합 CLI 릴리즈 빌드
-```bash
-cargo build --release -p lens-cli --jobs 2
-# 생성된 바이너리: target/release/lens
-```
+## lens-trace — strace 분석
 
----
+- strace 라인 파싱, `unfinished`/`resumed` 스티칭, 지연 시간 집계, errno 분포.
+- fd 추적은 tid별 테이블: open/openat/socket/accept/dup/pipe2([3,4]) 등
+  생성 시스템콜과 `+++ exited`에서 잔여 fd를 `fd_leaks_by_process`에 귀속.
+- 스키마: `tracelens.snapshot/v1`, `tracelens.diff/v1`.
 
-## 빠른 시작 (Quick Start)
+## lens-sys — systemd 정적 분석
 
-```bash
-# 1. 파일시스템 스캔 (2만 개 파일 0.05초 완료)
-lens disk scan .
+- `load_units`(공용 로더): 단일 파일 또는 디렉터리의 unit을 로드하고
+  `<unit>.d/*.conf`를 이름순으로 병합. 읽기 실패는 진단 스텁으로 보존.
+- 파서는 할당 순서를 유지해 `ExecStart=` 등 빈 할당 리셋 의미론을 지원하고
+  `%u`/`%h` 등 specifier를 `User=` 기준으로 확장.
+- `OrderingGraph`: Before/After DAG + Tarjan SCC 사이클 탐지.
+- 스키마: `servicelens.snapshot/v1`, `servicelens.diff/v1`.
+- 지원 범위는 `systemd-255-subset-v1`로 명시 — 전체 systemd 의미론의 부분 집합.
 
-# 2. 중복 파일 탐지 (하드링크 Inode 자동 제외)
-lens disk duplicates . --min-size 1048576
+## lens-build — 빌드 영향도
 
-# 3. 바이너리 ABI 리포트 생성 (abilens.report/v2 규격)
-lens abi inspect /usr/bin/python3
+- `compile_commands.json` 파싱: `-I`/`-isystem`, `-D`, `-std`, `-o`,
+  `-include`(강제 포함) 추출, 경로 정규화(`normalize_path`).
+- `ImpactGraph::add_translation_unit`: 소스 파일의 `#include`를 디스크에서
+  해석(`"…"`은 포함 파일 기준 우선, `<…>`은 검색 경로만)하고 헤더 간
+  전이 클로저를 구축. `compute_impact`는 역방향 BFS로 영향받는 TU를 반환.
+- 스키마: `buildscope.snapshot/v4`, `buildscope.diff/v1`, `buildscope.impact/v1`.
 
-# 4. 대용량 로그 무할당 고속 필터링
-lens log filter /var/log/syslog --query "error" --min-level warn
+## lens-env — Python 환경 감사
 
-# 5. JUnit XML 결과 스트리밍 파싱 및 회귀 검증
-lens test parse target/junit.xml --project backend
-lens test diff baseline.xml candidate.xml
+- 인터프리터를 실행하지 않는 정적 분석: `pyvenv.cfg`, `*.dist-info/METADATA`
+  (PEP 376/503), `Requires-Dist` 검증, 프로젝트 소스의 stdlib/서드파티
+  모듈 섀도잉 탐지.
+- 스키마: `envlens.snapshot/v1`, `envlens.diff/v1`.
 
-# 6. Syscall 트레이스 분석 및 지연시간/에러 diff
-lens trace analyze /var/log/strace.log
-lens trace diff baseline_trace.log candidate_trace.log
+## lens-net — 소켓 포렌식
 
-# 7. systemd 유닛 순환 의존성(Cycle) 탐지
-lens sys cycles /etc/systemd/system
+- `/proc/net/{tcp,tcp6,udp,udp6,unix}` 파싱(주소는 커널의 호스트 엔디안
+  표기 — `to_ne_bytes` 의도적 사용), `/proc/[pid]/fd`로 프로세스 상관.
+- UDP는 LISTEN 상태가 없으므로 바인드된 wildcard 소켓(st=07, remote `*:0`)을
+  리스너로 집계.
+- diff는 리스너를 (kind, 주소, 포트)로, 연결을 5-tuple로 매칭(inode는
+  스냅샷 간 불안정). `127.0.0.1→0.0.0.0` 확장을 감지.
+- 스키마: `lens.net/v1`.
 
-# 8. 빌드 데이터베이스 및 헤더 변경 시 재빌드 대상 영향도 추적
-lens build impact compile_commands.json --header include/common.h
+## lens-cli — `lens` 통합 CLI
 
-# 9. Python 가상환경 종속성 및 모듈 섀도잉 정적 검사
-lens env inspect .venv --project .
+- `src/cli.rs`: clap 커맨드 트리. `src/ops.rs`: 전 서브커맨드 디스패치
+  (라이브러리로 공개 — lens-mcp가 재사용). `main.rs`는 얇은 래퍼.
+- `doctor`: 스토리지/네트워크/서비스/환경 종합 헬스체크(`--json` 지원).
+- `bundle create/inspect/verify`: `lens.bundle/v2` 아카이브.
+- `tui`: `lens_tui::run`으로 진입. `completion`: 셸 자동완성 생성.
 
-# 10. 활성 소켓/포트/네트워크 포렌식 검사 및 Diff
-lens net inspect
-lens net diff net_baseline.json net_candidate.json
+## lens-tui — 터미널 대시보드
 
-# 11. 종합 사고 포렌식 비행기록장치(.lens) 번들 생성, 검사 및 암호학적 무결성 검증
-lens bundle create incident.lens --disk /var/log --trace /tmp/strace.log --test target/junit.xml
-lens bundle inspect incident.lens
-lens bundle verify incident.lens
+- 4개 탭 실데이터: Storage(아레나 스캔), Services(`load_units` 결과),
+  Logs(`LogIndexer`로 시스템 로그 tail + 레벨 컬러), Network(리스너 목록).
+- `lens_tui::run(path)`가 렌더 루프를 소유해 `lens-tui` 바이너리와
+  `lens tui`가 공유한다.
 
-# 12. 시스템 종합 상태 원클릭 점검 (Storage, Network, Services, Security)
-lens doctor
-lens doctor --json
+## lens-mcp — MCP 서버
 
-# 13. 셸 자동완성 스크립트 생성 (Bash, Zsh, Fish)
-source <(lens completion bash)
+- JSON-RPC 2.0 over stdio로 진단 툴을 노출:
+
+| 툴 | 용도 |
+|---|---|
+| `lens_disk_scan`, `lens_disk_duplicates` | 스토리지 분석/중복 탐지 |
+| `lens_abi_inspect` | ELF/심볼/버전/DWARF 검사 |
+| `lens_log_filter` | 로그 필터 |
+| `lens_trace_analyze` | strace 분석 |
+| `lens_sys_cycles` | systemd 사이클 |
+| `lens_build_impact` | 헤더 영향도 |
+| `lens_env_check` | venv 의존성 검사 |
+| `lens_net_inspect` | 소켓/리스너 검사 |
+| `lens_bundle_verify` | 번들 무결성 검증 |
+| `lens_doctor` | 종합 진단 |
+
+```json
+{ "mcpServers": { "lens": { "command": "/path/to/lens-mcp" } } }
 ```
