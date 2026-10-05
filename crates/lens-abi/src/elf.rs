@@ -388,7 +388,7 @@ fn parse_dynamic(file: &object::File, data: &[u8]) -> DynamicInfo {
     }
 
     let strtab: &[u8] = strtab_vaddr
-        .and_then(&map)
+        .and_then(map)
         .map(|d| &d[..d.len().min(strtab_size)])
         .or_else(|| file.section_by_name(".dynstr").and_then(|s| s.data().ok()))
         .unwrap_or(&[]);
