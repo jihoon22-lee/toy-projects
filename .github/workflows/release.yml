@@ -106,7 +106,10 @@ jobs:
         run: |
           set -euo pipefail
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --target "$SOURCE_SHA" --draft --notes "binary verification in progress"
+            # Draft is created with the final title and auto-generated notes so
+            # publishing later never leaks placeholder text.
+            gh release create "$RELEASE_TAG" --target "$SOURCE_SHA" --draft \
+              --title "Release ${RELEASE_TAG}" --generate-notes
           fi
           gh release upload "$RELEASE_TAG" "$DIST"/* --clobber
           VERIFY="$RUNNER_TEMP/verified-assets"
