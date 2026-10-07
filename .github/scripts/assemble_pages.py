@@ -26,13 +26,12 @@ def assemble(destination: Path) -> None:
                 if name == 'README.md':
                     relative = relative.with_name('index.md')
                 copies[source] = destination / relative
-        if folder != ROOT:
-            for name in ('docs', 'schemas', 'examples', 'assets', 'resources'):
-                tree = folder / name
-                if tree.is_dir():
-                    for source in tree.rglob('*'):
-                        if source.is_file() and not source.is_symlink() and source.stat().st_size <= 4 * 1024 * 1024:
-                            copies[source] = destination / source.relative_to(ROOT)
+        for name in ('docs', 'schemas', 'examples', 'assets', 'resources'):
+            tree = folder / name
+            if tree.is_dir():
+                for source in tree.rglob('*'):
+                    if source.is_file() and not source.is_symlink() and source.stat().st_size <= 4 * 1024 * 1024:
+                        copies[source] = destination / source.relative_to(ROOT)
     # crates/ itself is not a product directory, but its consolidated README
     # is the canonical crate index for the site.
     consolidated = CRATES_DIR / 'README.md'
