@@ -121,6 +121,8 @@ $ source <(lens completion bash)
 
 ## 5. 상세 문서
 
+- [사용 가이드](docs/GUIDE.md) — 전체 커맨드·출력 스키마·번들 워크플로
+- [아키텍처](docs/ARCHITECTURE.md) — 크레이트 책임, 데이터 흐름, 설계 불변조건
 - [크레이트별 아키텍처·스키마·구현 상태](crates/README.md)
 - [로드맵](ROADMAP.md)
 - [변경 이력](CHANGELOG.md)
