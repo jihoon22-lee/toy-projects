@@ -51,21 +51,33 @@ fn main() -> io::Result<()> {
 
 fn handle_request(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
     match req.method.as_str() {
-        "initialize" => Some(JsonRpcResponse {
-            jsonrpc: "2.0".to_string(),
-            id: req.id.clone(),
-            result: Some(serde_json::json!({
-                "protocolVersion": "2024-11-05",
-                "capabilities": {
-                    "tools": {}
-                },
-                "serverInfo": {
-                    "name": "lens-mcp",
-                    "version": env!("CARGO_PKG_VERSION")
-                }
-            })),
-            error: None,
-        }),
+        "initialize" => {
+            // Protocol negotiation: echo the client's requested version
+            // (we implement the tools/call surface identically for all
+            // 2024-11-05+ clients); fall back to our baseline when the
+            // request omits it.
+            let protocol_version = req
+                .params
+                .as_ref()
+                .and_then(|p| p.get("protocolVersion"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("2024-11-05");
+            Some(JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id: req.id.clone(),
+                result: Some(serde_json::json!({
+                    "protocolVersion": protocol_version,
+                    "capabilities": {
+                        "tools": {}
+                    },
+                    "serverInfo": {
+                        "name": "lens-mcp",
+                        "version": env!("CARGO_PKG_VERSION")
+                    }
+                })),
+                error: None,
+            })
+        }
         "notifications/initialized" => None,
         // MCP ping: an empty result keeps the session liveness check cheap.
         "ping" => Some(JsonRpcResponse {

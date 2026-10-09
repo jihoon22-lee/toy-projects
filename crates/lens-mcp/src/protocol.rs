@@ -37,150 +37,243 @@ pub struct McpTool {
     pub input_schema: Value,
 }
 
+const CWD_NOTE: &str =
+    " Relative paths resolve against the lens-mcp server process's working directory.";
+
+fn desc(text: &str) -> String {
+    format!("{}{}", text, CWD_NOTE)
+}
+
+/// Shared pagination arguments — every tool accepts `limit` (max items
+/// per array, default 200) and `offset`; arrays that were cut carry a
+/// `{ "_truncated": true, "total_before_truncation", "omitted" }` marker.
+fn pagination_props() -> serde_json::Map<String, Value> {
+    serde_json::json!({
+        "limit": { "type": "integer", "description": "Max items per array in the response (default 200)" },
+        "offset": { "type": "integer", "description": "Skip the first N items of each array" }
+    })
+    .as_object()
+    .cloned()
+    .unwrap_or_default()
+}
+
 pub fn list_tools() -> Vec<McpTool> {
+    let pag = pagination_props();
+    let with_pag = |mut props: serde_json::Map<String, Value>| {
+        for (k, v) in pag.clone() {
+            props.insert(k, v);
+        }
+        Value::Object(props)
+    };
     vec![
         McpTool {
             name: "lens_disk_scan".to_string(),
-            description: "Scan filesystem directory and return logical/allocated storage usage."
-                .to_string(),
+            description: desc(
+                "Scan filesystem directory and return logical/allocated storage usage.",
+            ),
             input_schema: serde_json::json!({
                 "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "Directory path to scan" },
+                "properties": with_pag(serde_json::json!({
+                    "path": { "type": "string", "description": "Directory path to scan (relative to server cwd if not absolute)" },
                     "json": { "type": "boolean", "description": "Return full snapshot JSON" }
-                },
+                }).as_object().unwrap().clone()),
                 "required": ["path"]
             }),
         },
         McpTool {
             name: "lens_disk_duplicates".to_string(),
-            description: "Find duplicate files based on SHA-256 hash, ignoring hardlink inodes."
-                .to_string(),
+            description: desc(
+                "Find duplicate files based on SHA-256 hash, ignoring hardlink inodes.",
+            ),
             input_schema: serde_json::json!({
                 "type": "object",
-                "properties": {
+                "properties": with_pag(serde_json::json!({
                     "path": { "type": "string", "description": "Directory path to scan" },
                     "min_size": { "type": "integer", "description": "Minimum file size in bytes" }
-                },
+                }).as_object().unwrap().clone()),
                 "required": ["path"]
             }),
         },
         McpTool {
             name: "lens_abi_inspect".to_string(),
-            description: "Inspect ELF binary dynamic symbols, version definitions, and DWARF info."
-                .to_string(),
+            description: desc(
+                "Inspect ELF binary dynamic symbols, version definitions, and DWARF info.",
+            ),
             input_schema: serde_json::json!({
                 "type": "object",
-                "properties": {
+                "properties": with_pag(serde_json::json!({
                     "binary": { "type": "string", "description": "Path to ELF binary" }
-                },
+                }).as_object().unwrap().clone()),
                 "required": ["binary"]
             }),
         },
         McpTool {
+            name: "lens_abi_diff".to_string(),
+            description: desc(
+                "Compare two ELF binaries and report added/removed symbols with 3-state compatibility (compatible/uncertain/incompatible).",
+            ),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": with_pag(serde_json::json!({
+                    "baseline": { "type": "string", "description": "Older/reference ELF binary" },
+                    "candidate": { "type": "string", "description": "Newer ELF binary" }
+                }).as_object().unwrap().clone()),
+                "required": ["baseline", "candidate"]
+            }),
+        },
+        McpTool {
             name: "lens_log_filter".to_string(),
-            description: "Filter high-volume log files by substring query and minimum log level."
-                .to_string(),
+            description: desc(
+                "Filter high-volume log files by substring query or regex and minimum log level. Use 'tail' to scan the last N lines (recent incident evidence); 'limit'/'offset' page the matched lines.",
+            ),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "path": { "type": "string", "description": "Path to log file" },
-                    "query": { "type": "string", "description": "Substring query" },
-                    "min_level": { "type": "string", "description": "Minimum level (debug, info, warn, error)" }
+                    "query": { "type": "string", "description": "Case-sensitive substring query" },
+                    "regex": { "type": "string", "description": "Regex pattern (alternative to query)" },
+                    "min_level": { "type": "string", "description": "Minimum level (trace, debug, info, warn, error, fatal)" },
+                    "include_unknown": { "type": "boolean", "description": "Keep lines whose level could not be determined" },
+                    "tail": { "type": "integer", "description": "Scan only the last N lines of the file" },
+                    "limit": { "type": "integer", "description": "Max matched lines to return (default 200)" },
+                    "offset": { "type": "integer", "description": "Skip the first N matched lines" }
                 },
                 "required": ["path"]
             }),
         },
         McpTool {
             name: "lens_trace_analyze".to_string(),
-            description:
-                "Analyze raw strace log and extract syscall metrics, latencies, and errors."
-                    .to_string(),
+            description: desc(
+                "Analyze raw strace log and extract syscall metrics, latencies, and errors.",
+            ),
             input_schema: serde_json::json!({
                 "type": "object",
-                "properties": {
+                "properties": with_pag(serde_json::json!({
                     "trace_file": { "type": "string", "description": "Path to strace log file" }
-                },
+                }).as_object().unwrap().clone()),
                 "required": ["trace_file"]
             }),
         },
         McpTool {
             name: "lens_sys_cycles".to_string(),
-            description: "Detect dependency ordering cycles among systemd service units."
-                .to_string(),
+            description: desc(
+                "Detect dependency ordering cycles among systemd service units.",
+            ),
             input_schema: serde_json::json!({
                 "type": "object",
-                "properties": {
+                "properties": with_pag(serde_json::json!({
                     "dir": { "type": "string", "description": "Directory containing systemd unit files" }
-                },
+                }).as_object().unwrap().clone()),
                 "required": ["dir"]
             }),
         },
         McpTool {
-            name: "lens_build_impact".to_string(),
-            description:
-                "Calculate transitive reverse compilation impact of changing a header file."
-                    .to_string(),
+            name: "lens_sys_diff".to_string(),
+            description: desc(
+                "Compare two systemd inputs — saved snapshot JSON files or live unit directories — and report added/removed/modified units and new/resolved cycles.",
+            ),
             input_schema: serde_json::json!({
                 "type": "object",
-                "properties": {
+                "properties": with_pag(serde_json::json!({
+                    "baseline": { "type": "string", "description": "Baseline snapshot JSON or unit directory" },
+                    "candidate": { "type": "string", "description": "Candidate snapshot JSON or unit directory" }
+                }).as_object().unwrap().clone()),
+                "required": ["baseline", "candidate"]
+            }),
+        },
+        McpTool {
+            name: "lens_test_diff".to_string(),
+            description: desc(
+                "Compare two JUnit XML runs (file or directory of *.xml) and report regressions, fixes, and new failures.",
+            ),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": with_pag(serde_json::json!({
+                    "baseline": { "type": "string", "description": "Baseline JUnit XML file or directory" },
+                    "candidate": { "type": "string", "description": "Candidate JUnit XML file or directory" }
+                }).as_object().unwrap().clone()),
+                "required": ["baseline", "candidate"]
+            }),
+        },
+        McpTool {
+            name: "lens_net_diff".to_string(),
+            description: desc(
+                "Compare two network snapshot JSON reports (produced by `lens net inspect --format json`) and report listener/connection deltas.",
+            ),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": with_pag(serde_json::json!({
+                    "baseline": { "type": "string", "description": "Baseline net snapshot JSON" },
+                    "candidate": { "type": "string", "description": "Candidate net snapshot JSON" }
+                }).as_object().unwrap().clone()),
+                "required": ["baseline", "candidate"]
+            }),
+        },
+        McpTool {
+            name: "lens_build_impact".to_string(),
+            description: desc(
+                "Calculate transitive reverse compilation impact of changing a header file. A relative header resolves against the compile database directory and each entry's `directory`, not the server cwd.",
+            ),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": with_pag(serde_json::json!({
                     "compile_commands": { "type": "string", "description": "Path to compile_commands.json" },
-                    "header": { "type": "string", "description": "Target header file to inspect" }
-                },
+                    "header": { "type": "string", "description": "Target header file — absolute, or relative to the compile database/entry directory" }
+                }).as_object().unwrap().clone()),
                 "required": ["compile_commands", "header"]
             }),
         },
         McpTool {
             name: "lens_env_check".to_string(),
-            description:
-                "Check Python virtual environment for missing or unsatisfied dependencies."
-                    .to_string(),
+            description: desc(
+                "Check Python virtual environment for missing or unsatisfied dependencies.",
+            ),
             input_schema: serde_json::json!({
                 "type": "object",
-                "properties": {
+                "properties": with_pag(serde_json::json!({
                     "venv_path": { "type": "string", "description": "Path to Python virtualenv root" },
                     "extras": { "type": "array", "items": { "type": "string" }, "description": "Optional extras to activate for `extra == \"name\"` dependency markers" }
-                },
+                }).as_object().unwrap().clone()),
                 "required": ["venv_path"]
             }),
         },
         McpTool {
             name: "lens_net_inspect".to_string(),
-            description:
-                "Inspect Linux network sockets, listening ports, established connections, and map them to processes."
-                    .to_string(),
+            description: desc(
+                "Inspect Linux network sockets, listening ports, established connections, and map them to processes.",
+            ),
             input_schema: serde_json::json!({
                 "type": "object",
-                "properties": {
+                "properties": with_pag(serde_json::json!({
                     "proc_dir": { "type": "string", "description": "Optional proc filesystem root (default /proc)" }
-                }
+                }).as_object().unwrap().clone()),
             }),
         },
         McpTool {
             name: "lens_bundle_verify".to_string(),
-            description:
-                "Verify a .lens forensic archive's contents against the SHA-256 checksums in its embedded manifest."
-                    .to_string(),
+            description: desc(
+                "Verify a .lens forensic archive's contents against the SHA-256 checksums in its embedded manifest.",
+            ),
             input_schema: serde_json::json!({
                 "type": "object",
-                "properties": {
+                "properties": with_pag(serde_json::json!({
                     "bundle_path": { "type": "string", "description": "Path to .lens (.tar.gz) forensic bundle" }
-                },
+                }).as_object().unwrap().clone()),
                 "required": ["bundle_path"]
             }),
         },
         McpTool {
             name: "lens_doctor".to_string(),
-            description:
-                "Run a comprehensive health check across storage capacity, open network ports, systemd cycles, and environment security."
-                    .to_string(),
+            description: desc(
+                "Run a comprehensive health check across storage capacity, open network ports, systemd cycles, and environment security. Nonexistent override paths return an in-band error.",
+            ),
             input_schema: serde_json::json!({
                 "type": "object",
-                "properties": {
+                "properties": with_pag(serde_json::json!({
                     "root_path": { "type": "string", "description": "Optional root filesystem path (default /)" },
                     "proc_dir": { "type": "string", "description": "Optional procfs path (default /proc)" },
-                    "systemd_dir": { "type": "string", "description": "Optional systemd unit dir (default /etc/systemd/system)" }
-                }
+                    "systemd_dir": { "type": "string", "description": "Optional systemd unit dir (default: merged systemd search path)" }
+                }).as_object().unwrap().clone()),
             }),
         },
     ]
