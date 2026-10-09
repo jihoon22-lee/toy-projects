@@ -24,6 +24,8 @@ pub fn contains_insensitive(haystack: &str, needle_lower: &str) -> bool {
 pub struct LogFilter {
     pub min_level: Option<LogLevel>,
     pub query_lower: Option<String>,
+    /// Regex alternative to `query_lower` for pattern matching (`--regex`).
+    pub query_regex: Option<regex::Regex>,
     pub source: Option<String>,
     /// Keep lines whose level could not be determined even when a
     /// `--min-level` threshold is active (off by default: unknown lines
@@ -55,6 +57,13 @@ impl LogFilter {
         self
     }
 
+    /// Regex query; mutually exclusive with the substring `query` — the
+    /// caller decides precedence. Invalid patterns are a usage error.
+    pub fn with_regex(mut self, pattern: &str) -> Result<Self, regex::Error> {
+        self.query_regex = Some(regex::Regex::new(pattern)?);
+        Ok(self)
+    }
+
     pub fn with_source(mut self, source: &str) -> Self {
         self.source = Some(source.to_string());
         self
@@ -66,6 +75,11 @@ impl LogFilter {
     pub fn matches_line(&self, raw: &str, line_number: usize) -> bool {
         if let Some(needle_lower) = &self.query_lower {
             if !contains_insensitive(raw, needle_lower) {
+                return false;
+            }
+        }
+        if let Some(re) = &self.query_regex {
+            if !re.is_match(raw) {
                 return false;
             }
         }
@@ -111,6 +125,11 @@ impl LogFilter {
 
         if let Some(needle_lower) = &self.query_lower {
             if !contains_insensitive(record.raw, needle_lower) {
+                return false;
+            }
+        }
+        if let Some(re) = &self.query_regex {
+            if !re.is_match(record.raw) {
                 return false;
             }
         }
