@@ -41,7 +41,14 @@ pub struct BuildSnapshot {
     pub version: String,
     pub total_units: usize,
     pub units: Vec<ParsedUnit>,
+    /// header -> translation units that include it *directly* (no
+    /// intermediate header). Kept for v4 compatibility.
     pub reverse_impact: BTreeMap<String, Vec<String>>,
+    /// header -> every translation unit transitively impacted by a
+    /// change to it, including units that only reach it through an
+    /// intermediate header.
+    #[serde(default)]
+    pub transitive_impact: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

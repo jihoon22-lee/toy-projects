@@ -365,12 +365,26 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     .iter()
                     .map(|(h, us)| (h.clone(), us.iter().cloned().collect()))
                     .collect();
+                // Transitive impact for every known header: keys of both
+                // maps plus headers reached only through other headers.
+                let all_headers: std::collections::BTreeSet<String> = graph
+                    .header_to_units
+                    .keys()
+                    .chain(graph.header_to_headers.keys())
+                    .cloned()
+                    .chain(graph.header_to_headers.values().flatten().cloned())
+                    .collect();
+                let transitive_impact = all_headers
+                    .iter()
+                    .map(|h| (h.clone(), graph.compute_impact(h).impacted_units))
+                    .collect();
                 let snapshot = lens_build::BuildSnapshot {
                     schema: lens_build::SNAPSHOT_SCHEMA_V4.to_string(),
                     version: env!("CARGO_PKG_VERSION").to_string(),
                     total_units: units.len(),
                     units,
                     reverse_impact,
+                    transitive_impact,
                 };
                 outln!("{}", to_deterministic_pretty(&snapshot)?);
             }
