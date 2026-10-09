@@ -1,5 +1,6 @@
 use crate::cli::*;
 use crate::doctor::{self, HealthStatus};
+use crate::output::outln;
 use lens_abi::{diff_reports, inspect_elf};
 use lens_build::{diff_compilations, parse_command_entry, CompileCommandEntry, ImpactGraph};
 use lens_core::{
@@ -40,17 +41,28 @@ pub fn dispatch(command: Commands) -> Result<()> {
                         result.complete,
                         result.truncated,
                     );
-                    println!("{}", to_deterministic_pretty(&snapshot)?);
+                    outln!("{}", to_deterministic_pretty(&snapshot)?);
                 } else {
                     let root_node = &result.tree.nodes[result.root_id as usize];
-                    println!("Scan completed successfully for: {:?}", path);
-                    println!("Total entries: {}", result.scanned_entries);
-                    println!(
+                    // Unreadable entries or truncation mean the totals
+                    // undercount reality — say so instead of claiming success.
+                    if result.complete && !result.truncated {
+                        outln!("Scan completed successfully for: {:?}", path);
+                    } else {
+                        outln!(
+                            "Scan INCOMPLETE for: {:?} ({} scan error(s), truncated={})",
+                            path,
+                            result.errors.len(),
+                            result.truncated
+                        );
+                    }
+                    outln!("Total entries: {}", result.scanned_entries);
+                    outln!(
                         "Total logical size: {} bytes ({:.2} MB)",
                         root_node.size,
                         root_node.size as f64 / 1_048_576.0
                     );
-                    println!(
+                    outln!(
                         "Total allocated size: {} bytes ({:.2} MB)",
                         root_node.allocated_size,
                         root_node.allocated_size as f64 / 1_048_576.0
@@ -62,24 +74,25 @@ pub fn dispatch(command: Commands) -> Result<()> {
                 let result = scanner.scan(&path)?;
                 let finder = DuplicateFinder::new(min_size);
                 let groups = finder.find_in_tree(&result.tree, &path)?;
-                println!("Found {} duplicate group(s):", groups.len());
+                outln!("Found {} duplicate group(s):", groups.len());
                 for (i, group) in groups.iter().enumerate() {
-                    println!("\n[{}] Hash: {}", i + 1, group.sha256);
-                    println!(
+                    outln!("\n[{}] Hash: {}", i + 1, group.sha256);
+                    outln!(
                         "    File size: {} bytes, Reclaimable: {} bytes",
-                        group.size, group.reclaimable_bytes
+                        group.size,
+                        group.reclaimable_bytes
                     );
                     for file in &group.files {
-                        println!("    - {:?}", file);
+                        outln!("    - {:?}", file);
                     }
                 }
             }
             DiskCommands::Trash { path } => {
                 let trash = TrashManager::default();
                 let receipt = trash.move_to_trash(&path)?;
-                println!("Successfully trashed: {:?}", receipt.original_path);
-                println!("Trash location: {:?}", receipt.trashed_file_path);
-                println!("Info receipt: {:?}", receipt.info_path);
+                outln!("Successfully trashed: {:?}", receipt.original_path);
+                outln!("Trash location: {:?}", receipt.trashed_file_path);
+                outln!("Info receipt: {:?}", receipt.info_path);
             }
         },
         Commands::Abi { action } => match action {
@@ -89,7 +102,7 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     source: e,
                 })?;
                 let report = inspect_elf(&binary, &bytes);
-                println!("{}", to_deterministic_pretty(&report)?);
+                outln!("{}", to_deterministic_pretty(&report)?);
             }
             AbiCommands::Diff {
                 baseline,
@@ -106,14 +119,14 @@ pub fn dispatch(command: Commands) -> Result<()> {
                 let report_base = inspect_elf(&baseline, &bytes_base);
                 let report_cand = inspect_elf(&candidate, &bytes_cand);
                 let diff = diff_reports(&report_base, &report_cand);
-                println!("{}", to_deterministic_pretty(&diff)?);
+                outln!("{}", to_deterministic_pretty(&diff)?);
             }
         },
         Commands::Log { action } => match action {
             LogCommands::Inspect { path } => {
                 let indexer = LogIndexer::open(&path)?;
-                println!("Log file: {:?}", path);
-                println!("Total lines indexed: {}", indexer.len());
+                outln!("Log file: {:?}", path);
+                outln!("Total lines indexed: {}", indexer.len());
             }
             LogCommands::Filter {
                 path,
@@ -141,7 +154,7 @@ pub fn dispatch(command: Commands) -> Result<()> {
                 for idx in 0..indexer.len() {
                     if let Some(line) = indexer.get_line(idx) {
                         if filter.matches_line(line, idx + 1) {
-                            println!("[{}] {}", idx + 1, line);
+                            outln!("[{}] {}", idx + 1, line);
                             matched += 1;
                         }
                     }
@@ -156,7 +169,7 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     source: e,
                 })?;
                 let run = parse_junit_xml(&bytes, &project)?;
-                println!("{}", to_deterministic_pretty(&run)?);
+                outln!("{}", to_deterministic_pretty(&run)?);
             }
             TestCommands::Diff {
                 baseline,
@@ -173,7 +186,7 @@ pub fn dispatch(command: Commands) -> Result<()> {
                 let run_base = parse_junit_xml(&bytes_base, "baseline")?;
                 let run_cand = parse_junit_xml(&bytes_cand, "candidate")?;
                 let diff = diff_test_runs(&run_base, &run_cand);
-                println!("{}", to_deterministic_pretty(&diff)?);
+                outln!("{}", to_deterministic_pretty(&diff)?);
             }
         },
         Commands::Trace { action } => match action {
@@ -185,7 +198,23 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     })?;
                 let analyzer = TraceAnalyzer::new();
                 let snapshot = analyzer.analyze_lines(content.lines());
-                println!("{}", to_deterministic_pretty(&snapshot)?);
+                // Fail closed on input that is not strace output: when most
+                // candidate lines fail to parse, the report is meaningless.
+                let unparsed = snapshot.total_events.saturating_sub(snapshot.total_calls);
+                if snapshot.total_events == 0 {
+                    return Err(lens_core::LensError::InvalidInput {
+                        message: format!("{:?} contains no recognizable strace lines", trace_file),
+                    });
+                }
+                if unparsed > snapshot.total_calls {
+                    return Err(lens_core::LensError::InvalidInput {
+                        message: format!(
+                            "{:?} does not look like strace output: {} of {} lines failed to parse",
+                            trace_file, unparsed, snapshot.total_events
+                        ),
+                    });
+                }
+                outln!("{}", to_deterministic_pretty(&snapshot)?);
             }
             TraceCommands::Diff {
                 baseline,
@@ -203,7 +232,7 @@ pub fn dispatch(command: Commands) -> Result<()> {
                 let s1 = analyzer.analyze_lines(c1.lines());
                 let s2 = analyzer.analyze_lines(c2.lines());
                 let diff = diff_snapshots(&s1, &s2);
-                println!("{}", to_deterministic_pretty(&diff)?);
+                outln!("{}", to_deterministic_pretty(&diff)?);
             }
         },
         Commands::Sys { action } => match action {
@@ -220,18 +249,18 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     cycles,
                     diagnostics: vec![],
                 };
-                println!("{}", to_deterministic_pretty(&snapshot)?);
+                outln!("{}", to_deterministic_pretty(&snapshot)?);
             }
             SysCommands::Cycles { dir } => {
                 let units = lens_sys::load_units(&dir)?;
                 let graph = OrderingGraph::build(&units);
                 let cycles = graph.find_cycles();
                 if cycles.is_empty() {
-                    println!("No dependency cycles detected among {} units.", units.len());
+                    outln!("No dependency cycles detected among {} units.", units.len());
                 } else {
-                    println!("Detected {} cycle(s):", cycles.len());
+                    outln!("Detected {} cycle(s):", cycles.len());
                     for (i, c) in cycles.iter().enumerate() {
-                        println!("  [{}] {}", i + 1, c.join(" -> "));
+                        outln!("  [{}] {}", i + 1, c.join(" -> "));
                     }
                 }
             }
@@ -252,7 +281,7 @@ pub fn dispatch(command: Commands) -> Result<()> {
                 let s1: SystemdSnapshot = serde_json::from_str(&b_str)?;
                 let s2: SystemdSnapshot = serde_json::from_str(&c_str)?;
                 let diff = diff_systemd(&s1, &s2);
-                println!("{}", to_deterministic_pretty(&diff)?);
+                outln!("{}", to_deterministic_pretty(&diff)?);
             }
         },
         Commands::Build { action } => match action {
@@ -281,7 +310,7 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     units,
                     reverse_impact,
                 };
-                println!("{}", to_deterministic_pretty(&snapshot)?);
+                outln!("{}", to_deterministic_pretty(&snapshot)?);
             }
             BuildCommands::Impact { file, header } => {
                 let content = fs::read_to_string(&file).map_err(|e| lens_core::LensError::Io {
@@ -301,7 +330,7 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     .unwrap_or_else(|_| "/".to_string());
                 let target = lens_build::normalize_path(&header, &cwd);
                 let report = graph.compute_impact(&target);
-                println!("{}", to_deterministic_pretty(&report)?);
+                outln!("{}", to_deterministic_pretty(&report)?);
             }
             BuildCommands::Diff {
                 baseline,
@@ -322,7 +351,7 @@ pub fn dispatch(command: Commands) -> Result<()> {
                 let u1: Vec<_> = b_entries.iter().map(parse_command_entry).collect();
                 let u2: Vec<_> = c_entries.iter().map(parse_command_entry).collect();
                 let diff = diff_compilations(&u1, &u2);
-                println!("{}", to_deterministic_pretty(&diff)?);
+                outln!("{}", to_deterministic_pretty(&diff)?);
             }
         },
         Commands::Env { action } => match action {
@@ -339,7 +368,7 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     version: env!("CARGO_PKG_VERSION").to_string(),
                     venv,
                 };
-                println!("{}", to_deterministic_pretty(&snapshot)?);
+                outln!("{}", to_deterministic_pretty(&snapshot)?);
             }
             EnvCommands::Check { venv_path } => {
                 let venv = inspect_venv(&venv_path).map_err(|e| lens_core::LensError::Io {
@@ -347,14 +376,14 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     source: e,
                 })?;
                 if venv.missing_dependencies.is_empty() {
-                    println!("All dependencies satisfied in {:?}.", venv_path);
+                    outln!("All dependencies satisfied in {:?}.", venv_path);
                 } else {
-                    println!(
+                    outln!(
                         "Found {} missing dependenc(ies):",
                         venv.missing_dependencies.len()
                     );
                     for d in &venv.missing_dependencies {
-                        println!("  - {}", d);
+                        outln!("  - {}", d);
                     }
                 }
             }
@@ -375,7 +404,7 @@ pub fn dispatch(command: Commands) -> Result<()> {
                 let s1: EnvSnapshot = serde_json::from_str(&b_str)?;
                 let s2: EnvSnapshot = serde_json::from_str(&c_str)?;
                 let diff = diff_environments(&s1.venv, &s2.venv);
-                println!("{}", to_deterministic_pretty(&diff)?);
+                outln!("{}", to_deterministic_pretty(&diff)?);
             }
         },
         Commands::Bundle { action } => match action {
@@ -388,6 +417,7 @@ pub fn dispatch(command: Commands) -> Result<()> {
                 sys,
                 env,
                 net,
+                force,
             } => {
                 // A bundle with zero artifact sources would produce an
                 // empty manifest that still verifies OK — refuse to create it.
@@ -406,18 +436,37 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     });
                 }
 
+                // Evidence is append-only: refuse to destroy an existing
+                // bundle unless the caller explicitly passes --force.
+                if output.try_exists().map_err(|e| lens_core::LensError::Io {
+                    path: output.clone(),
+                    source: e,
+                })? && !force
+                {
+                    return Err(lens_core::LensError::InvalidInput {
+                        message: format!(
+                            "output bundle {:?} already exists; pass --force to overwrite",
+                            output
+                        ),
+                    });
+                }
+
                 // Fail-closed collection: every capture error is preserved in the
                 // manifest's diagnostics rather than silently dropped.
                 let mut artifacts: Vec<BundleArtifact> = Vec::new();
                 let mut diagnostics: Vec<String> = Vec::new();
 
+                // Each producer runs inside its own closure so `?` aborts only
+                // that source's collection, never the whole dispatch.
                 macro_rules! collect {
-                    ($name:literal, $entry:literal, $produce:expr) => {
-                        match $produce.and_then(|v| BundleArtifact::json($entry, &v)) {
+                    ($name:literal, $entry:literal, $produce:expr) => {{
+                        #[allow(unused_mut)]
+                        let mut produce = || $produce;
+                        match produce().and_then(|v| BundleArtifact::json($entry, &v)) {
                             Ok(artifact) => artifacts.push(artifact),
                             Err(e) => diagnostics.push(format!("{}: {}", $name, e)),
                         }
-                    };
+                    }};
                 }
 
                 if let Some(ref d) = disk {
@@ -517,56 +566,56 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     diagnostics.clone(),
                 )?;
 
-                println!(
+                outln!(
                     "Successfully created forensic flight recorder bundle: {:?}",
                     output
                 );
-                println!("  Artifacts embedded: {}", manifest.sources.len());
+                outln!("  Artifacts embedded: {}", manifest.sources.len());
                 if !diagnostics.is_empty() {
-                    println!("  Collection warnings recorded in manifest:");
+                    outln!("  Collection warnings recorded in manifest:");
                     for d in &diagnostics {
-                        println!("    - {}", d);
+                        outln!("    - {}", d);
                     }
                 }
             }
             BundleCommands::Inspect { bundle } => {
                 let report = inspect_bundle(&bundle)?;
-                println!("=== Lens Forensic Flight Recorder Bundle ===");
-                println!("Entries: {}", report.entries.len());
+                outln!("=== Lens Forensic Flight Recorder Bundle ===");
+                outln!("Entries: {}", report.entries.len());
                 match &report.manifest {
                     Some(m) => {
-                        println!("Schema:        {}", m.schema);
-                        println!("Tool:          {} v{}", m.tool, m.version);
-                        println!("Created At:    {}", m.created_at);
-                        println!("Manifest Files:");
+                        outln!("Schema:        {}", m.schema);
+                        outln!("Tool:          {} v{}", m.tool, m.version);
+                        outln!("Created At:    {}", m.created_at);
+                        outln!("Manifest Files:");
                         for s in &m.sources {
-                            println!("  - {} ({} bytes)", s.path, s.size);
+                            outln!("  - {} ({} bytes)", s.path, s.size);
                         }
                         if !m.diagnostics.is_empty() {
-                            println!("Capture Diagnostics:");
+                            outln!("Capture Diagnostics:");
                             for d in &m.diagnostics {
-                                println!("  ! {}", d);
+                                outln!("  ! {}", d);
                             }
                         }
                     }
-                    None => println!("Manifest: NOT FOUND (untrusted bundle)"),
+                    None => outln!("Manifest: NOT FOUND (untrusted bundle)"),
                 }
-                println!("Archive Entries:");
+                outln!("Archive Entries:");
                 for e in &report.entries {
-                    println!("  - {} ({} bytes)", e.name, e.size);
+                    outln!("  - {} ({} bytes)", e.name, e.size);
                 }
             }
             BundleCommands::Verify { bundle } => {
                 let report = verify_bundle_archive(&bundle)?;
                 if report.is_valid {
-                    println!("Bundle verification SUCCESSFUL: {:?}", bundle);
-                    println!("  Total manifest files:    {}", report.total_files);
-                    println!("  Verified SHA-256 files:  {}", report.verified_files);
+                    outln!("Bundle verification SUCCESSFUL: {:?}", bundle);
+                    outln!("  Total manifest files:    {}", report.total_files);
+                    outln!("  Verified SHA-256 files:  {}", report.verified_files);
                     // The manifest has no signature: this reports integrity
                     // against the embedded manifest, not provenance.
-                    println!("  Integrity: all files match the embedded manifest");
+                    outln!("  Integrity: all files match the embedded manifest");
                     for u in &report.unexpected_files {
-                        println!("  Unlisted entry (not in manifest): {}", u);
+                        outln!("  Unlisted entry (not in manifest): {}", u);
                     }
                 } else {
                     eprintln!("Bundle verification FAILED: {:?}", bundle);
@@ -592,34 +641,38 @@ pub fn dispatch(command: Commands) -> Result<()> {
             NetCommands::Inspect { proc_dir, json } => {
                 let report = inspect_network(proc_dir.as_deref())?;
                 if json {
-                    println!("{}", to_deterministic_pretty(&report)?);
+                    outln!("{}", to_deterministic_pretty(&report)?);
                 } else {
-                    println!("Network & Socket Inspection Summary:");
-                    println!("  Total Sockets:          {}", report.summary.total_sockets);
-                    println!(
+                    outln!("Network & Socket Inspection Summary:");
+                    outln!("  Total Sockets:          {}", report.summary.total_sockets);
+                    outln!(
                         "  Listening Ports:        {}",
                         report.summary.listening_ports
                     );
-                    println!(
+                    outln!(
                         "  Established Conns:      {}",
                         report.summary.established_connections
                     );
-                    println!(
+                    outln!(
                         "  TIME_WAIT Sockets:      {}",
                         report.summary.time_wait_sockets
                     );
-                    println!(
+                    outln!(
                         "  Orphan Sockets:         {}",
                         report.summary.orphan_sockets
                     );
-                    println!(
+                    outln!(
                         "  UNIX Domain Sockets:    {}",
                         report.summary.unix_domain_sockets
                     );
-                    println!("\nActive Listening Ports:");
-                    println!(
+                    outln!("\nActive Listening Ports:");
+                    outln!(
                         "{:<8} {:<24} {:<10} {:<8} {:<16}",
-                        "PROTO", "LOCAL ADDRESS", "INODE", "PID", "PROCESS"
+                        "PROTO",
+                        "LOCAL ADDRESS",
+                        "INODE",
+                        "PID",
+                        "PROCESS"
                     );
                     for l in &report.listening {
                         let proc_str = l
@@ -633,7 +686,7 @@ pub fn dispatch(command: Commands) -> Result<()> {
                             .map(|p| p.pid.to_string())
                             .unwrap_or_else(|| "-".to_string());
                         let addr = format!("{}:{}", l.local_address, l.local_port);
-                        println!(
+                        outln!(
                             "{:<8} {:<24} {:<10} {:<8} {}",
                             format!("{:?}", l.kind),
                             addr,
@@ -661,7 +714,7 @@ pub fn dispatch(command: Commands) -> Result<()> {
                 let base_report: NetReport = serde_json::from_str(&base_content)?;
                 let cand_report: NetReport = serde_json::from_str(&cand_content)?;
                 let diff = diff_net_reports(&base_report, &cand_report);
-                println!("{}", to_deterministic_pretty(&diff)?);
+                outln!("{}", to_deterministic_pretty(&diff)?);
             }
         },
         Commands::Doctor {
@@ -670,33 +723,51 @@ pub fn dispatch(command: Commands) -> Result<()> {
             systemd_dir,
             json,
         } => {
+            // An explicitly passed path that does not exist is a usage
+            // error, not a healthy-looking "non-systemd environment" report.
+            for (flag, dir) in [
+                ("--root", &root),
+                ("--procfs", &procfs),
+                ("--systemd-dir", &systemd_dir),
+            ] {
+                if let Some(p) = dir {
+                    if !p.exists() {
+                        return Err(lens_core::LensError::InvalidInput {
+                            message: format!("{flag} path {:?} does not exist", p),
+                        });
+                    }
+                }
+            }
             let report =
                 doctor::run_doctor(root.as_deref(), procfs.as_deref(), systemd_dir.as_deref());
             if json {
-                println!("{}", to_deterministic_pretty(&report)?);
+                outln!("{}", to_deterministic_pretty(&report)?);
             } else {
-                println!("=== Lens System Doctor Diagnosis ===");
-                println!("Overall Status: {:?}", report.overall_status);
-                println!(
+                outln!("=== Lens System Doctor Diagnosis ===");
+                outln!("Overall Status: {:?}", report.overall_status);
+                outln!(
                     "Summary: {} Total | {} Passed | {} Warnings | {} Failures\n",
                     report.summary.total,
                     report.summary.passed,
                     report.summary.warnings,
                     report.summary.failures
                 );
-                println!("{:<12} {:<30} {:<8} MESSAGE", "CATEGORY", "CHECK", "STATUS");
+                outln!("{:<12} {:<30} {:<8} MESSAGE", "CATEGORY", "CHECK", "STATUS");
                 for c in &report.checks {
                     let status_str = match c.status {
                         HealthStatus::Pass => "[PASS]",
                         HealthStatus::Warn => "[WARN]",
                         HealthStatus::Fail => "[FAIL]",
                     };
-                    println!(
+                    outln!(
                         "{:<12} {:<30} {:<8} {}",
-                        c.category, c.name, status_str, c.message
+                        c.category,
+                        c.name,
+                        status_str,
+                        c.message
                     );
                     if let Some(ref rec) = c.recommendation {
-                        println!("             -> Recommendation: {}", rec);
+                        outln!("             -> Recommendation: {}", rec);
                     }
                 }
             }
