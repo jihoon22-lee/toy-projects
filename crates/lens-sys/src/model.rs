@@ -15,6 +15,27 @@ pub struct Diagnostic {
     pub line: Option<usize>,
 }
 
+/// One declared ordering relationship (`Before=`/`After=`) with its
+/// origin in the unit file, so cycle reports can show the real
+/// directive chain instead of a sorted SCC.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OrderingEdge {
+    /// The directive as written: `Before` or `After`.
+    pub directive: String,
+    /// Unit that declared the directive.
+    pub source: String,
+    /// Unit named in the directive.
+    pub target: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<usize>,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct SystemdUnit {
     pub name: String,
@@ -33,6 +54,18 @@ pub struct SystemdUnit {
     pub exec_start: Option<String>,
     #[serde(default)]
     pub drop_ins: Vec<String>,
+    /// Declared ordering edges with file/line origin.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ordering_edges: Vec<OrderingEdge>,
+    /// Symlink to `/dev/null` — a masked unit cannot be ordered.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub masked: bool,
+    /// For alias symlink stubs: the canonical unit this resolves to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alias_of: Option<String>,
+    /// Symlink names that resolve to this unit.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
     #[serde(default)]
     pub diagnostics: Vec<Diagnostic>,
 }

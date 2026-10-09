@@ -22,35 +22,28 @@ pub fn diff_systemd(baseline: &SystemdSnapshot, candidate: &SystemdSnapshot) -> 
                 removed_units.push(name);
             }
             (Some(b), Some(c)) => {
+                // Compare the full section/key matrix — this covers the
+                // derived fields (wants/requires/before/after/exec_start)
+                // and also keys they do not surface, like `User=`.
                 let mut details = Vec::new();
 
-                if b.exec_start != c.exec_start {
-                    details.push(format!(
-                        "ExecStart changed from {:?} to {:?}",
-                        b.exec_start, c.exec_start
-                    ));
-                }
-
-                if b.wants != c.wants {
-                    details.push(format!("Wants changed from {:?} to {:?}", b.wants, c.wants));
-                }
-
-                if b.requires != c.requires {
-                    details.push(format!(
-                        "Requires changed from {:?} to {:?}",
-                        b.requires, c.requires
-                    ));
-                }
-
-                if b.before != c.before {
-                    details.push(format!(
-                        "Before changed from {:?} to {:?}",
-                        b.before, c.before
-                    ));
-                }
-
-                if b.after != c.after {
-                    details.push(format!("After changed from {:?} to {:?}", b.after, c.after));
+                let section_names: BTreeSet<&String> =
+                    b.sections.keys().chain(c.sections.keys()).collect();
+                for sec in section_names {
+                    let bm = b.sections.get(sec);
+                    let cm = c.sections.get(sec);
+                    let keys: BTreeSet<&String> = bm
+                        .into_iter()
+                        .flat_map(|m| m.keys())
+                        .chain(cm.into_iter().flat_map(|m| m.keys()))
+                        .collect();
+                    for key in keys {
+                        let bv = bm.and_then(|m| m.get(key));
+                        let cv = cm.and_then(|m| m.get(key));
+                        if bv != cv {
+                            details.push(format!("[{}] {}: {:?} -> {:?}", sec, key, bv, cv));
+                        }
+                    }
                 }
 
                 if b.drop_ins != c.drop_ins {

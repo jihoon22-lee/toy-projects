@@ -96,19 +96,96 @@ pub fn load_units(path: &Path) -> Result<BTreeMap<String, SystemdUnit>> {
             path: path.to_path_buf(),
             source: e,
         })?;
+        // Unit-suffixed entries: regular files and symlinks both count.
         let mut paths: Vec<PathBuf> = entries
             .flatten()
-            .map(|e| e.path())
-            .filter(|p| {
-                p.is_file()
-                    && p.file_name()
-                        .and_then(|n| n.to_str())
+            .filter(|e| {
+                e.file_type()
+                    .map(|t| t.is_file() || t.is_symlink())
+                    .unwrap_or(false)
+                    && e.file_name()
+                        .to_str()
                         .map(|n| UNIT_SUFFIXES.iter().any(|s| n.ends_with(s)))
                         .unwrap_or(false)
             })
+            .map(|e| e.path())
             .collect();
         paths.sort();
+
+        // (link name, canonical target unit name) for alias symlinks.
+        let mut alias_pairs: Vec<(String, String)> = Vec::new();
         for p in paths {
+            let name = p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+            if p.is_symlink() {
+                match std::fs::canonicalize(&p) {
+                    Ok(target) if target == Path::new("/dev/null") => {
+                        // Masked unit: cannot be ordered, must not
+                        // participate in the graph.
+                        let mut unit = SystemdUnit {
+                            name: name.clone(),
+                            path: Some(p.to_string_lossy().into_owned()),
+                            masked: true,
+                            ..Default::default()
+                        };
+                        unit.diagnostics.push(Diagnostic {
+                            code: "UNIT_MASKED".to_string(),
+                            severity: "info".to_string(),
+                            message: "unit is masked (symlink to /dev/null)".to_string(),
+                            path: Some(p.to_string_lossy().into_owned()),
+                            line: None,
+                        });
+                        units.insert(name, unit);
+                        continue;
+                    }
+                    Ok(target) => {
+                        let target_name = target
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("")
+                            .to_string();
+                        // A symlink whose basename differs from the link's
+                        // is an alias (e.g. dbus-org.foo.service).
+                        if !target_name.is_empty() && target_name != name {
+                            let mut unit = SystemdUnit {
+                                name: name.clone(),
+                                path: Some(p.to_string_lossy().into_owned()),
+                                alias_of: Some(target_name.clone()),
+                                ..Default::default()
+                            };
+                            unit.diagnostics.push(Diagnostic {
+                                code: "UNIT_ALIAS".to_string(),
+                                severity: "info".to_string(),
+                                message: format!("alias for {}", target_name),
+                                path: Some(p.to_string_lossy().into_owned()),
+                                line: None,
+                            });
+                            units.insert(name.clone(), unit);
+                            alias_pairs.push((name, target_name));
+                            continue;
+                        }
+                    }
+                    Err(e) => {
+                        let mut unit = SystemdUnit {
+                            name: name.clone(),
+                            path: Some(p.to_string_lossy().into_owned()),
+                            ..Default::default()
+                        };
+                        unit.diagnostics.push(Diagnostic {
+                            code: "UNIT_UNREADABLE".to_string(),
+                            severity: "error".to_string(),
+                            message: format!("broken symlink: {}", e),
+                            path: Some(p.to_string_lossy().into_owned()),
+                            line: None,
+                        });
+                        units.insert(name, unit);
+                        continue;
+                    }
+                }
+            }
             match load_unit(&p) {
                 Ok(unit) => {
                     units.insert(unit.name.clone(), unit);
@@ -116,11 +193,6 @@ pub fn load_units(path: &Path) -> Result<BTreeMap<String, SystemdUnit>> {
                 Err(e) => {
                     // Fail-closed: an unreadable unit is recorded rather than
                     // silently skipped, so diagnostics surface the gap.
-                    let name = p
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("unknown")
-                        .to_string();
                     let mut unit = SystemdUnit {
                         name: name.clone(),
                         path: Some(p.to_string_lossy().into_owned()),
@@ -135,6 +207,12 @@ pub fn load_units(path: &Path) -> Result<BTreeMap<String, SystemdUnit>> {
                     });
                     units.insert(name, unit);
                 }
+            }
+        }
+        // Fold alias names onto their canonical units.
+        for (alias_name, target_name) in alias_pairs {
+            if let Some(target) = units.get_mut(&target_name) {
+                target.aliases.push(alias_name);
             }
         }
     }
