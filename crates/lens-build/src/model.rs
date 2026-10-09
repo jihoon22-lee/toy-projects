@@ -80,4 +80,14 @@ pub struct ImpactReport {
     /// transitive graph may be incomplete.
     #[serde(default)]
     pub scan_truncated: bool,
+    /// Compile-database entries whose source file could not be read.
+    #[serde(default)]
+    pub missing_sources: usize,
+    /// `#include` directives that resolved to no file on disk.
+    #[serde(default)]
+    pub unresolved_includes: usize,
+    /// Populated when the target header is absent from the include graph:
+    /// closest basename matches and how to spell the path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
 }
