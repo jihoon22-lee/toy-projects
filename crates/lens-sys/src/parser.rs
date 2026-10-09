@@ -161,8 +161,30 @@ fn unit_entries(content: &str, path: Option<&str>) -> (Vec<UnitEntry>, Vec<Diagn
 
     for (line_num, line) in logical_lines {
         let trimmed = line.trim();
-        if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            current_section = trimmed[1..trimmed.len() - 1].trim().to_string();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') && trimmed.len() >= 2 {
+            let inner = &trimmed[1..trimmed.len() - 1];
+            if inner.trim().is_empty() || inner.contains('[') || inner.contains(']') {
+                diagnostics.push(Diagnostic {
+                    code: "SYNTAX_SECTION_HEADER".to_string(),
+                    severity: "warning".to_string(),
+                    message: format!("Malformed section header '{}'", trimmed),
+                    path: path.map(String::from),
+                    line: Some(line_num),
+                });
+                continue;
+            }
+            current_section = inner.trim().to_string();
+            continue;
+        }
+        if trimmed.starts_with('[') {
+            // e.g. `[Unit` — a section header that was never closed.
+            diagnostics.push(Diagnostic {
+                code: "SYNTAX_SECTION_HEADER".to_string(),
+                severity: "warning".to_string(),
+                message: format!("Unclosed or malformed section header '{}'", trimmed),
+                path: path.map(String::from),
+                line: Some(line_num),
+            });
             continue;
         }
 
@@ -182,6 +204,14 @@ fn unit_entries(content: &str, path: Option<&str>) -> (Vec<UnitEntry>, Vec<Diagn
             }
 
             entries.push((line_num, current_section.clone(), key, raw_val));
+        } else {
+            diagnostics.push(Diagnostic {
+                code: "SYNTAX_GARBAGE_LINE".to_string(),
+                severity: "warning".to_string(),
+                message: format!("Non-assignment line ignored: '{}'", trimmed),
+                path: path.map(String::from),
+                line: Some(line_num),
+            });
         }
     }
 

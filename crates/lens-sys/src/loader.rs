@@ -216,7 +216,83 @@ pub fn load_units(path: &Path) -> Result<BTreeMap<String, SystemdUnit>> {
             }
         }
     }
+    flag_missing_references(&mut units);
     Ok(units)
+}
+
+/// Dependency directives whose targets should resolve to real unit files.
+const REF_KEYS: [&str; 4] = ["Wants", "Requires", "Before", "After"];
+
+fn refs_for<'a>(unit: &'a SystemdUnit, directive: &str) -> &'a [String] {
+    match directive {
+        "Wants" => &unit.wants,
+        "Requires" => &unit.requires,
+        "Before" => &unit.before,
+        _ => &unit.after,
+    }
+}
+
+/// Suffixes for which an unresolved `Wants=`/`Requires=`/ordering target is
+/// worth flagging. `.device`/`.mount`/`.automount`/`.swap`/`.scope`/`.slice`
+/// units are commonly produced by generators or PID 1 itself, so missing
+/// references to them are not diagnosed.
+const REF_CHECKED_SUFFIXES: [&str; 5] = [".service", ".socket", ".target", ".timer", ".path"];
+
+/// Record a `UNIT_REF_MISSING` warning on each unit that references a unit
+/// name not present in the loaded set (aliases count; template references
+/// like `foo@bar.service` resolve via `foo@.service`). Missing references
+/// are almost always operator error — a typo or a dependency that was not
+/// installed — so surfacing them keeps `sys inspect` honest.
+fn flag_missing_references(units: &mut BTreeMap<String, SystemdUnit>) {
+    let known: std::collections::BTreeSet<String> = units.keys().cloned().collect();
+    let mut templates = std::collections::BTreeSet::new();
+    for name in &known {
+        if crate::parser::is_template_name(name) {
+            templates.insert(name.clone());
+        }
+    }
+
+    let unit_names: Vec<String> = units.keys().cloned().collect();
+    for name in unit_names {
+        let unit = units.get(&name).unwrap().clone();
+        if unit.masked || unit.alias_of.is_some() || crate::parser::is_template_name(&name) {
+            continue;
+        }
+        let mut missing: std::collections::BTreeSet<(String, String)> =
+            std::collections::BTreeSet::new();
+        for directive in REF_KEYS {
+            for target in refs_for(&unit, directive) {
+                if !REF_CHECKED_SUFFIXES.iter().any(|s| target.ends_with(s)) {
+                    continue;
+                }
+                if known.contains(target) {
+                    continue;
+                }
+                // `foo@bar.service` resolves when template `foo@.service` exists.
+                if let Some(at) = target.find('@') {
+                    if let Some(dot) = target.rfind('.') {
+                        if at < dot {
+                            let tpl = format!("{}@{}", &target[..at], &target[dot..]);
+                            if templates.contains(&tpl) {
+                                continue;
+                            }
+                        }
+                    }
+                }
+                missing.insert((directive.to_string(), target.clone()));
+            }
+        }
+        let unit = units.get_mut(&name).unwrap();
+        for (directive, target) in missing {
+            unit.diagnostics.push(Diagnostic {
+                code: "UNIT_REF_MISSING".to_string(),
+                severity: "warning".to_string(),
+                message: format!("{}={} does not match any loaded unit", directive, target),
+                path: unit.path.clone(),
+                line: None,
+            });
+        }
+    }
 }
 
 /// Drop-in directories for a unit, in merge order. `foo@bar.service` gets
@@ -440,6 +516,7 @@ pub fn load_units_merged(dirs: &[impl AsRef<Path>]) -> BTreeMap<String, SystemdU
             target.aliases.push(alias_name);
         }
     }
+    flag_missing_references(&mut units);
     units
 }
 
@@ -607,5 +684,58 @@ mod tests {
         let ghost = &units["ghost.service"];
         assert_eq!(ghost.sections["Service"]["Environment"], vec!["X=1"]);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_syntax_and_missing_reference_diagnostics() {
+        let dir = std::env::temp_dir().join(format!("lenssys-diag-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("bad.service"),
+            "[Unit\nRequires=nope.service\ngarbage line without equals\n[Service]\nExecStart=/bin/x\n",
+        )
+        .unwrap();
+
+        let units = load_units(&dir).unwrap();
+        let diags = &units["bad.service"].diagnostics;
+        assert!(diags.iter().any(|d| d.code == "SYNTAX_SECTION_HEADER"));
+        assert!(diags.iter().any(|d| d.code == "SYNTAX_GARBAGE_LINE"));
+        // `Requires=nope.service` landed after the unclosed `[Unit`, so it
+        // was ignored as garbage-adjacent syntax; use a clean section to
+        // pin the missing-reference check.
+        std::fs::write(
+            dir.join("refs.service"),
+            "[Unit]\nRequires=nope.service\n[Service]\nExecStart=/bin/y\n",
+        )
+        .unwrap();
+        let units = load_units(&dir).unwrap();
+        let diags = &units["refs.service"].diagnostics;
+        assert!(diags
+            .iter()
+            .any(|d| d.code == "UNIT_REF_MISSING" && d.message.contains("nope.service")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_missing_reference_resolves_via_template() {
+        let dir = std::env::temp_dir().join(format!("lenssys-tpl-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("getty@.service"),
+            "[Service]\nExecStart=/sbin/agetty\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("multi-user.target"),
+            "[Unit]\nWants=getty@tty1.service\n",
+        )
+        .unwrap();
+
+        let units = load_units(&dir).unwrap();
+        assert!(units["multi-user.target"]
+            .diagnostics
+            .iter()
+            .all(|d| d.code != "UNIT_REF_MISSING"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
