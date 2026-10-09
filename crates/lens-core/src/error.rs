@@ -16,6 +16,12 @@ pub enum LensError {
     #[error("Corrupt or invalid input format: {message}")]
     InvalidInput { message: String },
 
+    /// The arguments themselves are wrong (missing flag, no input given,
+    /// unknown option value) — the message stands alone, with no
+    /// "corrupt input" prefix.
+    #[error("{message}")]
+    Usage { message: String },
+
     #[error("File modified during inspection (TOCTOU violation): {path:?}")]
     InputChanged { path: PathBuf },
 
