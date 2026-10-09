@@ -1,10 +1,11 @@
 use crate::model::{OrderingEdge, SystemdUnit};
 use crate::parser::is_template_name;
+use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// An ordering constraint `before` must start before `after`, produced
 /// by a `Before=`/`After=` directive declared at `path:line`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct OrderingConstraint {
     pub before: String,
     pub after: String,
@@ -19,7 +20,7 @@ pub struct OrderingConstraint {
 /// A directed cycle in the ordering graph: `members` is the SCC and
 /// `edges` is one concrete directed cycle path annotated with the
 /// directive (and file:line) responsible for each hop.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CyclePath {
     pub members: Vec<String>,
     pub edges: Vec<OrderingConstraint>,
