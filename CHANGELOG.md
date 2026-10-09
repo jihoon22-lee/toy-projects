@@ -84,6 +84,38 @@ incomplete, `trace analyze` fd 누수. Phase 0에서 0이 아닌 값으로
   버리지 않고 `errors`로 보고, 스캔 경고도 출력, 크기는 사람 친화적
   단위 + `total_reclaimable_bytes` 요약.
 
+### 워크플로우 (Phase 2b)
+
+- `lens build impact`: 상대 `--header`를 cwd뿐 아니라 compile database
+  디렉터리와 각 엔트리의 `directory` 기준으로 해석 — 프로젝트 하위
+  디렉터리에서도 동작. 그래프에 없는 헤더는 basename 유사 후보와 경로
+  전달 방법을 힌트로 출력(종료 코드는 유지). 리포트에
+  `missing_sources`/`unresolved_includes` 카운트와 스캔 절단 경고를
+  추가하고, 파일별 include 추출 결과를 캐시해 대형 프로젝트의 중복 I/O를
+  제거.
+- `lens disk trash`: 다중 경로 입력과 `--dry-run` 지원.
+  `trash list`/`trash restore <name>` 추가 — `.trashinfo` 메타데이터와
+  파일 옆 identity 사이드카로 복원 시 교체 여부를 검증(fail-closed).
+  EXDEV(다른 파일시스템)는 FreeDesktop `$topdir/.Trash-$uid`(0700)로
+  폴백. `list`/`restore`는 `--trash-dir`로 topdir trash를 지정 가능.
+- `lens log`: invalid UTF-8 줄을 조용히 건너뛰지 않고 U+FFFD로
+  표시하며 `lossy_lines` 카운트를 JSON/stderr로 보고. `.gz` 입력은
+  상한 있는 해제(512 MiB)로 지원하고 `-`는 stdin을 읽는다.
+  `log filter`에 `--regex`, `--limit`, `--context`, `--format jsonl`
+  (매치 줄당 JSON 오브젝트) 추가.
+- `lens sys`/`doctor`/TUI: systemd 유닛 로더를 검색 경로 병합 방식으로
+  공유화 — `/etc`, `/run`, `/usr/lib`, `/lib` 우선순위 병합(/etc가 최상위,
+  drop-in은 전 디렉터리에서 수집해 낮은 우선순위부터 적용). `sys
+  inspect`/`sys cycles`는 경로 인자를 생략하면 시스템 검색 경로를 사용;
+  명시 경로는 여전히 존재하지 않으면 오류.
+- `lens bundle`: `bundle show <bundle> <entry>`와 `bundle extract
+  <bundle> <dest> [--force]` 추가 — 추출 전 무결성 검증, `..`/절대/역슬래시
+  엔트리 이름 거부, `--force` 없이 덮어쓰지 않음. `--log`는 요약 외에
+  원본 로그 내용을 `logs/` 아티팩트로 포함(8 MiB 꼬리 상한). 실패 메시지를
+  "cryptographic verification failed"에서 "integrity check failed"로 정정
+  — 매니페스트는 서명되지 않으며 무결성 확인이다. 무결성 검증 실패는 이제
+  findings(exit 1)로 분류 — 검증은 정상 수행됐고 결과가 부정적인 경우다.
+
 ## 0.4.3
 
 무결성·정확성 대수정 릴리스. 상세 내역은 아래 섹션 참고.

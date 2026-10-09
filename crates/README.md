@@ -21,7 +21,7 @@ Lens는 단일 Rust 워크스페이스다. 각 `lens-*` 크레이트가 하나�
 | `evidence` | `Evidence`, `Source`, 상한 있는 `BoundedCollector` |
 | `json` | 결정론적 JSON 직렬화(키 정렬) |
 | `time` | UTC/로컬 ISO-8601 타임스탬프 유틸 |
-| `bundle` | `lens.bundle/v2` — tar.gz + `manifest.json`(SHA-256, 크기·항목 상한) 생성/검사/검증 |
+| `bundle` | `lens.bundle/v2` — tar.gz + `manifest.json`(SHA-256, 크기·항목 상한) 생성/검사/검증, `read_bundle_entry`(단일 엔트리 추출), `extract_bundle`(검증 우선 + 이름 검증 + `--force` 없이 덮어쓰기 거부) |
 
 ## lens-disk — 파일시스템 분석
 
@@ -35,6 +35,10 @@ Lens는 단일 Rust 워크스페이스다. 각 `lens-*` 크레이트가 하나�
   `find_in_tree`는 `DuplicateReport`(groups + 해시 실패 `errors` +
   `total_reclaimable_bytes`)를 반환한다.
 - `TrashManager`: FreeDesktop Trash v1.0 (`files/` + `.trashinfo` 영수증).
+  `list()`/`restore_by_name()`은 `.trashinfo` + `.lens.json` identity
+  사이드카로 trashed 파일의 교체 여부를 검증(fail-closed: 대상 점유·
+  identity 불일치·안전하지 않은 이름/경로는 거부). EXDEV 시
+  `$topdir/.Trash-$uid`(0700)로 폴백.
 - 스키마: `diskmap.snapshot/v2`, `SnapshotDiff`.
 
 ```rust
@@ -57,10 +61,14 @@ let snap = SnapshotV2::from_tree(&res.tree, res.root_id, res.complete, res.trunc
 
 ## lens-log — 로그 분석
 
-- `LogIndexer`: mmap + `memchr`로 라인 오프셋 테이블 구축.
+- `LogIndexer`: mmap + `memchr`로 라인 오프셋 테이블 구축. `.gz` 입력은
+  상한 있는 해제(512 MiB)로, 스트림(`from_reader`, stdin `-` 경로)은
+  상한 있는 메모리 버퍼로 처리. invalid UTF-8 줄은 인덱싱되고
+  `lossy_lines()`로 집계되며 `get_line_lossy`가 U+FFFD로 노출.
 - `parse_line`: JSONL(`level`/`msg`/`ts` 등, 키 대소문자 무시, 나머지 키는
   `fields`에 보존)과 `LEVEL ...` 휴리스틱. `detect_level`은 레벨만 빠르게 반환.
-- `LogFilter`: min_level/query/source. `matches_line`은 no-op 필터와
+- `LogFilter`: min_level/query(대소문자 무시 substring)/`--regex`
+  (regex::Regex)/source. `matches_line`은 no-op 필터와
   substring-only 거절을 파싱 없이 단락.
 - 스키마: `loglens.session/v2`.
 
@@ -91,6 +99,10 @@ let snap = SnapshotV2::from_tree(&res.tree, res.root_id, res.complete, res.trunc
 
 - `load_units`(공용 로더): 단일 파일 또는 디렉터리의 unit을 로드하고
   `<unit>.d/*.conf`를 이름순으로 병합. 읽기 실패는 진단 스텁으로 보존.
+- `load_units_merged(dirs)` + `SYSTEMD_SEARCH_DIRS`: `/etc` → `/run` →
+  `/usr/lib` → `/lib` 우선순위 병합 — 상위 디렉터리의 유닛(또는 mask/
+  alias)이 하위를 가리고, drop-in은 모든 디렉터리에서 수집해 낮은
+  우선순위부터 적용. doctor/TUI/`sys` 기본 경로가 이 로더를 공유한다.
 - 파서는 할당 순서를 유지해 `ExecStart=` 등 빈 할당 리셋 의미론을 지원하고
   `%u`/`%h` 등 specifier를 `User=` 기준으로 확장.
 - `OrderingGraph`: Before/After DAG + Tarjan SCC 사이클 탐지.
@@ -103,7 +115,10 @@ let snap = SnapshotV2::from_tree(&res.tree, res.root_id, res.complete, res.trunc
   `-include`(강제 포함) 추출, 경로 정규화(`normalize_path`).
 - `ImpactGraph::add_translation_unit`: 소스 파일의 `#include`를 디스크에서
   해석(`"…"`은 포함 파일 기준 우선, `<…>`은 검색 경로만)하고 헤더 간
-  전이 클로저를 구축. `compute_impact`는 역방향 BFS로 영향받는 TU를 반환.
+  전이 클로저를 구축. include 추출은 파일별 캐시로 중복 I/O를 피하고,
+  읽기 실패 소스와 미해결 include는 `missing_sources`/
+  `unresolved_includes`로 집계된다. `compute_impact`는 역방향 BFS로
+  영향받는 TU를 반환(`ImpactReport`는 `scan_truncated`/`hint` 포함).
 - 스키마: `buildscope.snapshot/v4`, `buildscope.diff/v1`, `buildscope.impact/v1`.
 
 ## lens-env — Python 환경 감사

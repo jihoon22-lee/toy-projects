@@ -22,7 +22,7 @@ source <(lens completion bash)   # zsh, fish도 지원
 | 코드 | 의미 | 예시 |
 |------|------|------|
 | 0 | clean — findings 없음 | 정상 스캔, 회귀 없는 `test diff` |
-| 1 | findings 있음 | `test diff` 회귀/신규 실패, `abi diff` incompatible·uncertain(수동 검토 필요), `sys cycles` 사이클, `env check` 누락/충돌 의존성, `doctor`의 `--fail-on` 기준 이상, `disk scan` incomplete(권한 오류·절단), `trace analyze` fd 누수 |
+| 1 | findings 있음 | `test diff` 회귀/신규 실패, `abi diff` incompatible·uncertain(수동 검토 필요), `sys cycles` 사이클, `env check` 누락/충돌 의존성, `doctor`의 `--fail-on` 기준 이상, `disk scan` incomplete(권한 오류·절단), `trace analyze` fd 누수, `bundle verify` 무결성 불일치 |
 | 2 | 사용·입력·런타임 오류 | 존재하지 않는 경로, 잘못된 플래그 값, 파싱 불가 입력 |
 
 `doctor`는 `--fail-on warn|fail`(기본 `fail`)로 findings 기준을 조절한다.
@@ -44,7 +44,9 @@ lens disk scan <path> [--json|--format json] [--parallel]
                [--max-depth N] [--exclude PATTERN]... [-x|--one-file-system]
                [--top N]
 lens disk duplicates <path> [--min-size BYTES] [--format text|json]
-lens disk trash <path>
+lens disk trash <path>... [--dry-run] [--format text|json]
+lens disk trash list [--trash-dir DIR] [--format text|json]
+lens disk trash restore <name> [--trash-dir DIR]
 ```
 
 - `scan`: 아레나 트리로 계층 구조 + 논리/할당 크기 집계. `--json`은
@@ -63,6 +65,13 @@ lens disk trash <path>
   `--format json`은 `{groups, errors, total_reclaimable_bytes}`를 출력.
 - `trash`: FreeDesktop Trash 규격으로 이동(`.trashinfo` 기록 포함,
   심볼링크는 타깃이 아닌 링크 자체가 이동됨, 복구 영수증 출력).
+  다중 경로를 받고, `--dry-run`은 이동 없이 예정 동작만 출력한다.
+  파일이 다른 파일시스템에 있으면(EXDEV) 그 마운트의 `$topdir/
+  .Trash-$uid`(mode 0700)로 폴백한다. `trash list`는
+  `.trashinfo` 기준으로 항목을 나열하고, `trash restore <name>`은
+  저장된 identity(파일 크기·inode·mtime)를 검증한 뒤 원래 위치로
+  복원한다 — 대상이 이미 존재하거나 trashed 파일의 identity가
+  바뀌었으면 거부한다. topdir trash 항목은 `--trash-dir`로 지정한다.
 
 ### 2. abi — ELF 바이너리 검사
 
@@ -83,13 +92,23 @@ lens abi diff <baseline> <candidate> [--format text|json]
 
 ```bash
 lens log inspect <path> [--format text|json]
-lens log filter <path> [--query TEXT] [--min-level LEVEL] [--include-unknown] [--format text|json]
+lens log filter <path> [--query TEXT | --regex PATTERN] [--min-level LEVEL]
+                [--include-unknown] [--limit N] [--context N]
+                [--format text|json|jsonl]
 ```
 
 - mmap 라인 인덱서(memchr 기반)로 GB급 로그를 즉시 열람.
+- `path`로 `-`를 주면 stdin을 읽는다(상한 있는 버퍼링). `.gz` 파일은
+  상한 해제(512 MiB)로 읽는다 — 로테이트된 로그를 바로 조사 가능.
+- invalid UTF-8 줄은 건너뛰지 않고 U+FFFD로 표시하며, `lossy_lines`
+  카운트를 JSON 필드와 stderr로 보고한다.
 - `--min-level`: trace|debug|info|warn|error|fatal (오타 시 즉시 거부).
   레벨을 판별할 수 없는 줄은 제외되고 stderr에 제외 수를 보고한다.
   `--include-unknown`으로 복원 가능.
+- `--regex`는 substring `--query` 대신 regex 매칭을 쓴다(둘은
+  상호배타). `--limit N`은 매치 N개에서 중단하고, `--context N`은
+  매치 전후 N줄을 함께 출력(컨텍스트 줄은 `[N]-`/`"context": true`).
+  `--format jsonl`은 출력 줄당 JSON 오브젝트 하나로 낸다.
 - 레벨 감지는 텍스트 레벨 + syslog PRI(`<33>`) + 커널 printk(`<3>`)
   접두사까지 인식. 메시지 추출은 무할당 슬라이딩 윈도우로 수행.
 
@@ -130,8 +149,8 @@ lens trace diff <baseline> <candidate> [--format text|json]
 ### 6. sys — systemd 정적 분석
 
 ```bash
-lens sys inspect <path>          # 유닛 파일 또는 디렉터리
-lens sys cycles <dir> [--format text|json]
+lens sys inspect [path]          # 유닛 파일/디렉터리; 생략 시 시스템 검색 경로
+lens sys cycles [dir] [--format text|json]
 lens sys diff <baseline> <candidate>   # 스냅샷 JSON 또는 유닛 디렉터리
 ```
 
@@ -143,6 +162,10 @@ lens sys diff <baseline> <candidate>   # 스냅샷 JSON 또는 유닛 디렉터�
   유닛은 엣지 대상에서 제외, alias/템플릿 이름도 해석.
 - `diff`는 섹션의 모든 키를 비교(`User=` 추가 등). `servicelens.snapshot|
   diff/v1` 출력.
+- `inspect`/`cycles`의 경로를 생략하면 systemd 검색 경로를 우선순위
+  병합해 로드한다(`/etc` → `/run` → `/usr/lib` → `/lib`, 상위가 하위를
+  가리고 drop-in은 전 디렉터리에서 수집). 같은 병합 로더를 doctor와
+  TUI Services 탭도 공유한다. 명시한 경로가 없으면 오류(exit 2).
 
 ### 7. build — 컴파일 데이터베이스 분석
 
@@ -158,8 +181,13 @@ lens build diff <baseline.json> <candidate.json> [--format text|json]
 - `-I`/`-isystem`/`-iquote`/`-idirafter` 순서 보존(첫 일치 우선),
   `-include`/`-imacros` 강제 인클루드, 주석 내 `#include` 무시,
   `..`/`./` 경로 정규화.
-- `impact`는 헤더의 전이 의존자(재컴파일 대상)를 계산. 온디스크 스캔 상한
-  도달 시 `scan_truncated=true`.
+- `impact`는 헤더의 전이 의존자(재컴파일 대상)를 계산. 상대 `--header`
+  는 compile database 디렉터리와 각 엔트리의 `directory` 기준으로 해석돼
+  어느 cwd에서도 동작한다. 그래프에 없는 헤더는 basename 유사 후보와
+  경로 전달 방법을 `hint`로 보고(warning, findings 아님). 리포트에
+  `missing_sources`/`unresolved_includes` 카운트를 포함하고 온디스크
+  스캔 상한 도달 시 `scan_truncated=true`. 파일별 include 추출은
+  캐시돼 대형 프로젝트의 중복 디스크 읽기를 줄인다.
 
 ### 8. env — Python 가상환경 감사
 
@@ -200,16 +228,24 @@ lens net diff <baseline.json> <candidate.json> [--format text|json]
 ```bash
 lens bundle create incident.lens \
   --disk /var/log --trace strace.log --test junit.xml \
-  --sys /etc/systemd/system --env .venv --net
+  --sys /etc/systemd/system --env .venv --net --log app.log
 lens bundle inspect incident.lens
 lens bundle verify incident.lens
+lens bundle show incident.lens reports/log_summary.json
+lens bundle extract incident.lens out/ [--force]
 ```
 
 - `tar.gz` + `manifest.json`(`lens.bundle/v2`): 아티팩트별 SHA-256, 크기,
   수집 진단(diagnostics) 보존. 최소 1개 소스 필수.
+- `--log`는 요약 JSON 외에 원본 로그 내용을 `logs/<name>` 엔트리로
+  포함한다(8 MiB 꼬리 상한, 절단 시 diagnostics에 기록).
 - `verify`: 정확 경로의 매니페스트만 신뢰(중첩 스푸핑 차단), 중복/미등재
   엔트리 거부, 해제 바이트 상한 적용. 매니페스트는 서명되지 않으므로
-  **무결성 확인이지 출처 인증이 아닙니다**.
+  **무결성 확인이지 출처 인증이 아닙니다**. 무결성 불일치는 findings로
+  exit 1(읽기 불가/손상 파일은 exit 2).
+- `show`는 `tar` 없이 개별 엔트리 내용을 출력. `extract`는 검증을
+  먼저 통과한 번들만 풀고, `..`/절대/역슬래시 엔트리를 거부하며
+  `--force` 없이는 기존 파일을 덮어쓰지 않는다.
 - 생성은 임시 파일 + 원자적 rename(부분 쓰기·심볼링크 덮어쓰기 방지).
 
 ## 시스템 종합 점검 (`doctor`)

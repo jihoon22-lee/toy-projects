@@ -17,7 +17,9 @@ lens-mcp ──┴─────────────┤
 
 - **lens-core**: 공유 기반. `LensError`/`Result`, `SafeInput`(TOCTOU 방어),
   SHA-256 유틸, `Compatibility` 3상태 어휘, `to_deterministic_pretty`,
-  시간 유틸(`utc_now_iso`/`local_now_iso`), 번들 포맷(create/inspect/verify).
+  시간 유틸(`utc_now_iso`/`local_now_iso`), 번들 포맷(create/inspect/
+  verify/show/extract — `extract_bundle`은 검증을 먼저 통과해야 하고
+  엔트리 이름/덮어쓰기를 fail-closed로 거부).
 - **도메인 크레이트** (`lens-disk`, `lens-abi`, `lens-log`, `lens-test`,
   `lens-trace`, `lens-sys`, `lens-build`, `lens-env`, `lens-net`):
   각각 수집·파싱·스냅샷·diff를 담당. 서로 의존하지 않아 독립 테스트 가능.
@@ -57,6 +59,9 @@ lens-mcp ──┴─────────────┤
 - `duplicates.rs`: 크기 → 부분 해시 → 전체 해시 3단 판정, inode 그룹으로
   하드링크 중복 해시 방지, 결정적 2차 정렬.
 - `trash.rs`: FreeDesktop Trash 규격(충돌 회피 파일명, `.trashinfo`).
+  `.lens.json` identity 사이드카로 복원 시 교체 검증(fail-closed),
+  `list`/`restore_by_name` 제공, EXDEV는 `$topdir/.Trash-$uid`(0700)
+  폴백.
 
 ### lens-abi
 - `elf.rs`: `object` 크레이트 기반. 섹션 헤더 없는 스트립 바이너리는
@@ -68,7 +73,10 @@ lens-mcp ──┴─────────────┤
   비교(import만의 변경은 compatible), weak 심볼은 `binding="weak"`.
 
 ### lens-log
-- `indexer.rs`: memmap2 라인 인덱스 + memchr 오프셋 계산.
+- `indexer.rs`: memmap2 라인 인덱스 + memchr 오프셋 계산. `.gz`와
+  stdin 스트림은 해제 상한(512 MiB, 번들 해제 상한과 같은 규약) 아래
+  메모리 소스로 전환. invalid UTF-8 줄은 버리지 않고 `lossy_lines`로
+  집계·U+FFFD로 노출.
 - `parser.rs`/`filter.rs`: 무할당 `contains_insensitive` 슬라이딩 윈도우,
   `LogLevel::parse`는 `eq_ignore_ascii_case`(할당 없음), 구조화 `fields`.
   syslog PRI/커널 printk 우선순위 토큰(`<N>`)에서도 레벨 추출. `--min-level`
@@ -94,6 +102,11 @@ lens-mcp ──┴─────────────┤
   specifier(`%u`/`%h`/`%i` 등) 확장.
 - `loader.rs`: 파일/디렉터리 로딩, `.d/` drop-in 스캔(템플릿 포함),
   후순위 override. `/dev/null` masked 유닛과 alias는 엣지 대상에서 정리.
+  `load_units_merged`는 `SYSTEMD_SEARCH_DIRS`(/etc→/run→/usr/lib→/lib,
+  높은 우선순위 순)를 병합 — 상위 디렉터리의 유닛 파일·mask·alias가
+  하위를 가리고, drop-in은 모든 디렉터리에서 수집해 낮은 우선순위부터
+  적용. drop-in만 존재하는 유닛은 스텁으로 합성. doctor/TUI/`sys`의
+  기본 경로가 이 단일 구현을 공유.
 - `dag.rs`: Wants/Requires/Before/After로 유향 그래프 + Tarjan SCC.
   사이클은 SCC 멤버 정렬이 아니라 실제 방향 경로로 재구성하고 각 엣지의
   기원(유닛 파일:라인 + 디렉티브)을 함께 보고.
@@ -108,7 +121,10 @@ lens-mcp ──┴─────────────┤
   `-I` 순서), 전이 헤더 클로저(`header_to_headers`), 역방향
   `header_to_units`. 스냅샷의 `reverse_impact`는 직접 includer만,
   `transitive_impact`는 헤더 체인 전이 includer까지.
-  `MAX_SCANNED_FILES` 도달 → `scan_truncated`.
+  `MAX_SCANNED_FILES` 도달 → `scan_truncated`. 파일별 include 추출은
+  캐시되고, 읽기 실패 소스·미해결 include는 `missing_sources`/
+  `unresolved_includes`로 리포트에 남는다. CLI의 `--header` 상대 경로는
+  compile database 디렉터리와 각 엔트리의 `directory` 기준으로 해석된다.
 
 ### lens-net
 - `parser.rs`: `/proc/net/{tcp,tcp6,udp,udp6,unix}` — 주소는 호스트 엔디안
