@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path::Path;
@@ -89,6 +89,7 @@ pub fn parse_proc_net_tcp(content: &str, kind: SocketKind) -> Vec<SocketEntry> {
             tx_queue,
             rx_queue,
             process: None,
+            owner_state: None,
             unix_path: None,
         });
     }
@@ -135,6 +136,7 @@ pub fn parse_proc_net_unix(content: &str) -> Vec<SocketEntry> {
             tx_queue: 0,
             rx_queue: 0,
             process: None,
+            owner_state: None,
             unix_path: path,
         });
     }
@@ -142,12 +144,26 @@ pub fn parse_proc_net_unix(content: &str) -> Vec<SocketEntry> {
     entries
 }
 
-pub fn scan_process_socket_inodes(proc_dir: &Path) -> HashMap<u64, SocketProcess> {
-    let mut inode_map = HashMap::new();
+/// inode→process map plus the set of process owner uids whose fd table
+/// could not be read (permission denied). Sockets that fail correlation
+/// but belong to an uninspectable uid are `owner_unknown`, not orphans.
+pub struct ProcessSocketScan {
+    pub inode_map: HashMap<u64, SocketProcess>,
+    pub uninspectable_uids: HashSet<u32>,
+    pub uninspectable_count: usize,
+}
+
+pub fn scan_process_socket_inodes(proc_dir: &Path) -> ProcessSocketScan {
+    let mut scan = ProcessSocketScan {
+        inode_map: HashMap::new(),
+        uninspectable_uids: HashSet::new(),
+        uninspectable_count: 0,
+    };
+    let inode_map = &mut scan.inode_map;
 
     let entries = match fs::read_dir(proc_dir) {
         Ok(e) => e,
-        Err(_) => return inode_map,
+        Err(_) => return scan,
     };
 
     for entry in entries.flatten() {
@@ -174,7 +190,20 @@ pub fn scan_process_socket_inodes(proc_dir: &Path) -> HashMap<u64, SocketProcess
 
         let fd_entries = match fs::read_dir(fd_dir) {
             Ok(e) => e,
-            Err(_) => continue,
+            Err(_) => {
+                // EACCES on /proc/<pid>/fd — the process exists but its
+                // sockets cannot be attributed. Record the owner uid so
+                // unowned sockets of that uid classify as owner_unknown.
+                scan.uninspectable_count += 1;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::MetadataExt;
+                    if let Ok(meta) = fs::metadata(&pid_path) {
+                        scan.uninspectable_uids.insert(meta.uid());
+                    }
+                }
+                continue;
+            }
         };
 
         for fd_entry in fd_entries.flatten() {
@@ -206,7 +235,7 @@ pub fn scan_process_socket_inodes(proc_dir: &Path) -> HashMap<u64, SocketProcess
         }
     }
 
-    inode_map
+    scan
 }
 
 pub fn inspect_network(proc_path: Option<&Path>) -> Result<NetReport> {
@@ -241,10 +270,24 @@ pub fn inspect_network(proc_path: Option<&Path>) -> Result<NetReport> {
     }
 
     // Correlate with process inodes
-    let process_map = scan_process_socket_inodes(base);
+    let proc_scan = scan_process_socket_inodes(base);
     for s in &mut sockets {
-        if let Some(proc) = process_map.get(&s.inode) {
+        if let Some(proc) = proc_scan.inode_map.get(&s.inode) {
             s.process = Some(proc.clone());
+        } else if s.inode != 0
+            && matches!(
+                s.kind,
+                SocketKind::Tcp | SocketKind::Tcp6 | SocketKind::Udp | SocketKind::Udp6
+            )
+        {
+            // Not attributable to any inspected process. If the socket's
+            // uid matches a process whose fd table we could not read, the
+            // owner is unknown rather than the socket being orphaned.
+            s.owner_state = Some(if proc_scan.uninspectable_uids.contains(&s.uid) {
+                OwnerState::OwnerUnknown
+            } else {
+                OwnerState::Orphan
+            });
         }
     }
 
@@ -278,16 +321,15 @@ pub fn inspect_network(proc_path: Option<&Path>) -> Result<NetReport> {
             summary.unix_domain_sockets += 1;
         }
         // inode 0 sockets are kernel-owned (e.g. TIME_WAIT) — not orphans.
-        if s.inode != 0
-            && s.process.is_none()
-            && (s.kind == SocketKind::Tcp
-                || s.kind == SocketKind::Tcp6
-                || s.kind == SocketKind::Udp
-                || s.kind == SocketKind::Udp6)
-        {
-            summary.orphan_sockets += 1;
+        if s.process.is_none() {
+            match s.owner_state {
+                Some(OwnerState::Orphan) => summary.orphan_sockets += 1,
+                Some(OwnerState::OwnerUnknown) => summary.owner_unknown_sockets += 1,
+                None => {}
+            }
         }
     }
+    summary.uninspectable_processes = proc_scan.uninspectable_count;
 
     Ok(NetReport {
         schema_version: "lens.net/v1".to_string(),
