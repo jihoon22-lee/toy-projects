@@ -18,7 +18,7 @@ pub mod snapshot;
 pub mod trash;
 
 pub use arena::{ArenaTree, DiskMetadata, FsKind, FsNode, NodeId};
-pub use duplicates::{DuplicateFinder, DuplicateGroup};
+pub use duplicates::{DuplicateFinder, DuplicateGroup, DuplicateReport};
 pub use scanner::{DiskScanner, ScanOptions, ScanResult};
 pub use snapshot::{SnapshotDiff, SnapshotNodeV2, SnapshotV2, SCHEMA_V2};
 pub use trash::{TrashManager, TrashReceipt};
@@ -67,12 +67,47 @@ mod tests {
         let res = scanner.scan(dir.path()).unwrap();
 
         let finder = DuplicateFinder::new(1);
-        let groups = finder.find_in_tree(&res.tree, dir.path()).unwrap();
+        let report = finder.find_in_tree(&res.tree, dir.path()).unwrap();
+        let groups = &report.groups;
 
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].size, 8192);
         assert_eq!(groups[0].files.len(), 2);
         assert_eq!(groups[0].reclaimable_bytes, 8192);
+        assert_eq!(report.total_reclaimable_bytes, 8192);
+        assert!(report.errors.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_duplicate_hash_failures_reported_not_dropped() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().unwrap();
+        let content = vec![0x42u8; 8192];
+        fs::write(dir.path().join("a.bin"), &content).unwrap();
+        fs::write(dir.path().join("b.bin"), &content).unwrap();
+        let locked = dir.path().join("c.bin");
+        fs::write(&locked, &content).unwrap();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+
+        let scanner = DiskScanner::new(ScanOptions::default());
+        let res = scanner.scan(dir.path()).unwrap();
+        let report = DuplicateFinder::new(1)
+            .find_in_tree(&res.tree, dir.path())
+            .unwrap();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o644)).unwrap();
+
+        if report.errors.is_empty() {
+            // The filesystem honored reads anyway (e.g. root) — nothing to
+            // assert about the failure path.
+            return;
+        }
+        assert_eq!(report.errors.len(), 1);
+        assert!(report.errors[0].contains("c.bin"));
+        // The two readable copies still form a group.
+        assert_eq!(report.groups.len(), 1);
+        assert_eq!(report.groups[0].files.len(), 2);
     }
 
     #[test]

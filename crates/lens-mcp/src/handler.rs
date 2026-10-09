@@ -55,10 +55,10 @@ pub fn execute_tool(name: &str, args: &Value) -> Result<String, String> {
             let scanner = DiskScanner::new(ScanOptions::default());
             let res = scanner.scan(path).map_err(|e| e.to_string())?;
             let finder = DuplicateFinder::new(min_size);
-            let groups = finder
+            let report = finder
                 .find_in_tree(&res.tree, path)
                 .map_err(|e| e.to_string())?;
-            to_deterministic_pretty(&groups).map_err(|e| e.to_string())
+            to_deterministic_pretty(&report).map_err(|e| e.to_string())
         }
         "lens_abi_inspect" => {
             let bin_str = args

@@ -16,6 +16,16 @@ pub struct DuplicateGroup {
     pub reclaimable_bytes: u64,
 }
 
+/// Duplicate groups plus evidence gaps — hash failures are reported
+/// instead of silently dropped.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DuplicateReport {
+    pub groups: Vec<DuplicateGroup>,
+    pub errors: Vec<String>,
+    /// Sum of `reclaimable_bytes` across all groups.
+    pub total_reclaimable_bytes: u64,
+}
+
 pub struct DuplicateFinder {
     min_size: u64,
 }
@@ -26,7 +36,7 @@ impl DuplicateFinder {
     }
 
     /// Finds duplicates across files registered in an ArenaTree.
-    pub fn find_in_tree(&self, tree: &ArenaTree, base_dir: &Path) -> Result<Vec<DuplicateGroup>> {
+    pub fn find_in_tree(&self, tree: &ArenaTree, base_dir: &Path) -> Result<DuplicateReport> {
         // Step 1: Bucket regular files by size. Symlinks are excluded: their
         // node size is the link's own, not the target's, so hashing them would
         // compare the wrong bytes. Hardlinks are folded by (dev, ino) using
@@ -70,16 +80,18 @@ impl DuplicateFinder {
         }
 
         let mut groups = Vec::new();
+        let mut errors = Vec::new();
 
         for (size, inode_buckets) in size_buckets {
             // Step 2: Partial hash (first 4KB) once per unique inode.
             let mut partial_buckets: HashMap<String, Vec<String>> = HashMap::new();
             for (key, paths) in &inode_buckets {
-                if let Ok(partial_hash) = Self::compute_partial_hash(&paths[0]) {
-                    partial_buckets
+                match Self::compute_partial_hash(&paths[0]) {
+                    Ok(partial_hash) => partial_buckets
                         .entry(partial_hash)
                         .or_default()
-                        .push(key.clone());
+                        .push(key.clone()),
+                    Err(e) => errors.push(format!("{}: {}", paths[0].display(), e)),
                 }
             }
 
@@ -91,8 +103,11 @@ impl DuplicateFinder {
 
                 let mut full_buckets: HashMap<String, Vec<String>> = HashMap::new();
                 for id in inode_ids {
-                    if let Ok(full_hash) = digest_file(&inode_buckets[&id][0]) {
-                        full_buckets.entry(full_hash).or_default().push(id);
+                    match digest_file(&inode_buckets[&id][0]) {
+                        Ok(full_hash) => full_buckets.entry(full_hash).or_default().push(id),
+                        Err(e) => {
+                            errors.push(format!("{}: {}", inode_buckets[&id][0].display(), e))
+                        }
                     }
                 }
 
@@ -128,8 +143,15 @@ impl DuplicateFinder {
                 .cmp(&a.reclaimable_bytes)
                 .then_with(|| a.sha256.cmp(&b.sha256))
         });
+        errors.sort();
+        errors.dedup();
+        let total_reclaimable_bytes = groups.iter().map(|g| g.reclaimable_bytes).sum();
 
-        Ok(groups)
+        Ok(DuplicateReport {
+            groups,
+            errors,
+            total_reclaimable_bytes,
+        })
     }
 
     fn compute_partial_hash(path: &Path) -> std::io::Result<String> {
