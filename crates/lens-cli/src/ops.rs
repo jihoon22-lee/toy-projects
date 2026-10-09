@@ -15,6 +15,29 @@ use lens_sys::{diff_systemd, OrderingGraph, SystemdSnapshot};
 use lens_test::{diff_test_runs, parse_junit_xml};
 use lens_trace::{diff_snapshots, TraceAnalyzer};
 use std::fs;
+use std::path::Path;
+
+/// `sys diff` accepts either a saved snapshot JSON or a live unit
+/// directory, which is loaded and graphed into an equivalent snapshot.
+fn sys_snapshot_from(path: &Path) -> Result<SystemdSnapshot> {
+    if path.is_dir() {
+        let units = lens_sys::load_units(path)?;
+        let graph = OrderingGraph::build(&units);
+        return Ok(SystemdSnapshot {
+            schema: lens_sys::SNAPSHOT_SCHEMA_V1.to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            semantics: "systemd-255-subset-v1".to_string(),
+            units,
+            cycles: graph.find_cycles(),
+            diagnostics: vec![],
+        });
+    }
+    let s = fs::read_to_string(path).map_err(|e| lens_core::LensError::Io {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+    Ok(serde_json::from_str(&s)?)
+}
 
 pub fn dispatch(command: Commands) -> Result<()> {
     match command {
@@ -276,13 +299,39 @@ pub fn dispatch(command: Commands) -> Result<()> {
             SysCommands::Cycles { dir } => {
                 let units = lens_sys::load_units(&dir)?;
                 let graph = OrderingGraph::build(&units);
-                let cycles = graph.find_cycles();
+                let cycles = graph.find_cycle_paths();
                 if cycles.is_empty() {
                     outln!("No dependency cycles detected among {} units.", units.len());
                 } else {
                     outln!("Detected {} cycle(s):", cycles.len());
                     for (i, c) in cycles.iter().enumerate() {
-                        outln!("  [{}] {}", i + 1, c.join(" -> "));
+                        if c.edges.is_empty() {
+                            outln!("  [{}] {}", i + 1, c.members.join(" -> "));
+                        } else {
+                            // Real directed path: each hop carries the
+                            // directive and file:line that produced it.
+                            let mut line = String::new();
+                            for e in &c.edges {
+                                let origin = match (&e.path, e.line) {
+                                    (Some(p), Some(l)) => format!(
+                                        "{}:{}",
+                                        Path::new(p)
+                                            .file_name()
+                                            .map(|f| f.to_string_lossy().into_owned())
+                                            .unwrap_or_else(|| p.clone()),
+                                        l
+                                    ),
+                                    (Some(p), None) => p.clone(),
+                                    _ => e.declared_by.clone(),
+                                };
+                                line.push_str(&format!(
+                                    "{} --{}({})--> ",
+                                    e.before, e.directive, origin
+                                ));
+                            }
+                            line.push_str(&c.edges.last().unwrap().after);
+                            outln!("  [{}] {}", i + 1, line);
+                        }
                     }
                 }
             }
@@ -290,18 +339,9 @@ pub fn dispatch(command: Commands) -> Result<()> {
                 baseline,
                 candidate,
             } => {
-                let b_str =
-                    fs::read_to_string(&baseline).map_err(|e| lens_core::LensError::Io {
-                        path: baseline.clone(),
-                        source: e,
-                    })?;
-                let c_str =
-                    fs::read_to_string(&candidate).map_err(|e| lens_core::LensError::Io {
-                        path: candidate.clone(),
-                        source: e,
-                    })?;
-                let s1: SystemdSnapshot = serde_json::from_str(&b_str)?;
-                let s2: SystemdSnapshot = serde_json::from_str(&c_str)?;
+                // Inputs may be saved snapshots or live unit directories.
+                let s1 = sys_snapshot_from(&baseline)?;
+                let s2 = sys_snapshot_from(&candidate)?;
                 let diff = diff_systemd(&s1, &s2);
                 outln!("{}", to_deterministic_pretty(&diff)?);
             }
