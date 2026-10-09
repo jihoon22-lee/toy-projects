@@ -32,13 +32,15 @@ Lens는 단일 Rust 워크스페이스다. 각 `lens-*` 크레이트가 하나�
   실제 rayon 병렬 stat을 수행.
 - `DuplicateFinder`: 크기→inode 묶음→4KB 부분 해시→전체 SHA-256 순으로 필터.
   같은 inode의 하드링크는 회수 가능 용량에서 중복 계산하지 않는다.
+  `find_in_tree`는 `DuplicateReport`(groups + 해시 실패 `errors` +
+  `total_reclaimable_bytes`)를 반환한다.
 - `TrashManager`: FreeDesktop Trash v1.0 (`files/` + `.trashinfo` 영수증).
 - 스키마: `diskmap.snapshot/v2`, `SnapshotDiff`.
 
 ```rust
 use lens_disk::{DiskScanner, ScanOptions, DuplicateFinder, SnapshotV2};
 let res = DiskScanner::new(ScanOptions::default()).scan("/path")?;
-let groups = DuplicateFinder::new(1<<20).find_in_tree(&res.tree, "/path".as_ref())?;
+let report = DuplicateFinder::new(1<<20).find_in_tree(&res.tree, "/path".as_ref())?;
 let snap = SnapshotV2::from_tree(&res.tree, res.root_id, res.complete, res.truncated);
 ```
 
@@ -67,8 +69,16 @@ let snap = SnapshotV2::from_tree(&res.tree, res.root_id, res.complete, res.trunc
 - `quick-xml` 스트리밍 파서: 속성 엔티티 디코딩, testcase 상태
   (failure/error/skipped) 메타데이터, `<system-out>`/`<system-err>`와
   `<properties>` 수집, 열린 태그 잔존 시 `complete=false`(잘린 XML 감지).
+- 케이스 신원은 `suite::classname::name` — 같은 이름의 케이스가 다른
+  suite에서 충돌하지 않는다. 중복 identity는 덮어쓰지 않고 diff의
+  `diagnostics`로 보고.
+- `diff_test_runs`는 구조화된 `CaseChange` 목록(`regressions`,
+  `fixes`, `new_failures`, `removed_tests`, `skipped_changes`)을 반환.
+  skipped→passed는 fix가 아니다. `merge_test_runs`는 모듈별 JUnit
+  파일들을 하나의 run으로 병합.
 - run id는 입력 해시 기반 결정적 생성.
-- 스키마: `testlens.run/v1`, `testlens.diff/v1`.
+- 스키마: `testlens.run/v1`, `testlens.diff/v2`(v2에서 regressions 등이
+  문자열에서 `CaseChange` 구조로 변경).
 
 ## lens-trace — strace 분석
 
@@ -111,7 +121,10 @@ let snap = SnapshotV2::from_tree(&res.tree, res.root_id, res.complete, res.trunc
   리스너로 집계.
 - diff는 리스너를 (kind, 주소, 포트)로, 연결을 5-tuple로 매칭(inode는
   스냅샷 간 불안정). `127.0.0.1→0.0.0.0` 확장을 감지.
-- 스키마: `lens.net/v1`.
+- 소유자 불명 소켓은 `owner_state`로 `orphan`(실제 미보유)과
+  `owner_unknown`(`/proc/<pid>/fd` EACCES)을 구분하고, summary에
+  `uninspectable_processes`를 기록.
+- 스키마: `lens.net/v1`(additive 필드만 추가).
 
 ## lens-cli — `lens` 통합 CLI
 

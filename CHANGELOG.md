@@ -51,6 +51,39 @@ Lens는 워크스페이스 단일 버전으로 릴리스된다. 태그는 `vX.Y.
   헤더 체인을 거친 간접 includer까지 포함하는 `transitive_impact` 추가
   (`buildscope.snapshot/v4` 유지, 신규 필드).
 
+### CLI 계약 (Phase 2)
+
+**Changed (breaking)** — 종료 코드 규약을 `diff(1)` 관례로 통일:
+`0`=clean, `1`=findings 있음, `2`=사용·입력·런타임 오류. 출력 텍스트는
+그대로이고 종료 코드만 바뀐다. findings는 `test diff` 회귀/신규 실패,
+`abi diff` incompatible·uncertain(uncertain은 수동 검토가 필요하므로
+findings로 분류 — 문서 표 참고), `sys cycles` 사이클 발견, `env check`
+누락/충돌 의존성, `doctor`의 `--fail-on` 기준 이상, `disk scan`
+incomplete, `trace analyze` fd 누수. Phase 0에서 0이 아닌 값으로
+통일했던 잘못된 입력 경로는 이제 **2**로 종료한다.
+- `lens doctor --fail-on warn|fail`(기본 `fail`) 추가.
+- `--format text|json`을 전 명령에 통일. `text`는 사람이 읽는 요약
+  모드(예: `abi inspect`는 SONAME/NEEDED/export·import 수), `json`은
+  기존 결정적 스키마. 명령별 기본값은 유지. `net inspect --no-unix` 추가.
+  `disk scan`/`net inspect`/`doctor`의 `--json`은 `--format json`
+  별칭으로 유지.
+- `lens disk scan`: `--max-depth`, `--exclude`(반복), `-x`/
+  `--one-file-system`, `--top N`(기본 10) 노출. 텍스트 크기는
+  KiB/MiB/GiB로 표시.
+- `lens test diff`: 결과를 `testlens.diff/v2`로 구조화 —
+  `regressions`/`fixes`가 `CaseChange{id,before,after,message}` 목록이
+  되고 `new_failures`, `removed_tests`, `skipped_changes`,
+  `diagnostics`(중복 identity) 추가(**스키마 v1→v2**). skipped→passed는
+  fix로 집계하지 않는다. 파일/디렉터리/`*.xml` glob 다중 입력 지원.
+- `lens net inspect`: 소유자 불명 소켓을 `owner_state`로
+  `orphan`과 `owner_unknown`(권한 부족)을 구분하고 summary에
+  `owner_unknown_sockets`/`uninspectable_processes` 추가
+  (`lens.net/v1` additive). doctor는 권한 부족 소켓을 orphan WARN으로
+  세지 않고 "sudo로 재실행" 권고를 단다.
+- `lens disk duplicates`: `--format text|json` 추가. 해시 실패를 조용히
+  버리지 않고 `errors`로 보고, 스캔 경고도 출력, 크기는 사람 친화적
+  단위 + `total_reclaimable_bytes` 요약.
+
 ## 0.4.3
 
 무결성·정확성 대수정 릴리스. 상세 내역은 아래 섹션 참고.

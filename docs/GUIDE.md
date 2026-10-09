@@ -15,30 +15,60 @@ cargo build --release -p lens-cli
 source <(lens completion bash)   # zsh, fish도 지원
 ```
 
+## 공통 계약
+
+### 종료 코드
+
+| 코드 | 의미 | 예시 |
+|------|------|------|
+| 0 | clean — findings 없음 | 정상 스캔, 회귀 없는 `test diff` |
+| 1 | findings 있음 | `test diff` 회귀/신규 실패, `abi diff` incompatible·uncertain(수동 검토 필요), `sys cycles` 사이클, `env check` 누락/충돌 의존성, `doctor`의 `--fail-on` 기준 이상, `disk scan` incomplete(권한 오류·절단), `trace analyze` fd 누수 |
+| 2 | 사용·입력·런타임 오류 | 존재하지 않는 경로, 잘못된 플래그 값, 파싱 불가 입력 |
+
+`doctor`는 `--fail-on warn|fail`(기본 `fail`)로 findings 기준을 조절한다.
+
+### 출력 형식
+
+대부분의 명령이 `--format text|json`을 지원한다. `text`는 사람이 읽는
+요약(색인·집계·top-N)이고, `json`은 기존 결정적 JSON 스키마를 출력한다.
+기본값은 명령별 기존 동작을 유지한다(예: `abi inspect`는 json,
+`disk scan`은 text). `disk scan`/`net inspect`의 기존 `--json` 플래그는
+`--format json`의 별칭으로 유지된다.
+
 ## 도메인별 사용법
 
 ### 1. disk — 파일시스템 분석
 
 ```bash
-lens disk scan <path> [--json] [--parallel]
-lens disk duplicates <path> [--min-size BYTES]
+lens disk scan <path> [--json|--format json] [--parallel]
+               [--max-depth N] [--exclude PATTERN]... [-x|--one-file-system]
+               [--top N]
+lens disk duplicates <path> [--min-size BYTES] [--format text|json]
 lens disk trash <path>
 ```
 
 - `scan`: 아레나 트리로 계층 구조 + 논리/할당 크기 집계. `--json`은
   `diskmap.snapshot/v2` 출력. 심볼링크 루프 감지, 깊이/항목 상한 도달 시
   `complete=false`로 표시되며 per-entry 오류는 stderr로 나옵니다.
-- `--parallel`: rayon으로 per-entry stat 병렬화(대형 트리에서 유효).
+- `--max-depth`/`--exclude`/`--one-file-system`: 스캔 범위 제한
+  (`--exclude`는 반복 지정 가능, 이름 glob 패턴). `-x`는 마운트 경계를
+  넘지 않는다(WSL의 `/mnt/c`, `/proc` 등 제외에 유용).
+- `--top N`(기본 10): 텍스트 출력에 최상위에서 가장 큰 항목 N개를
+  KiB/MiB/GiB 단위로 표시.
+- `--parallel`: rayon으로 per-entry stat 병렬화. cold cache의 대형 트리에서
+  유효하고, warm cache에서는 이득이 거의 없다.
 - `duplicates`: 부분 해시 → 전체 SHA-256 2단계 판정. 하드링크(inode 공유)는
   회수 가능 용량에서 제외, `(dev=0,ino=0)` 파일은 경로 기반 폴백.
+  해시 실패는 `errors`로 집계해 출력하고, 총 회수 가능 용량 요약을 표시.
+  `--format json`은 `{groups, errors, total_reclaimable_bytes}`를 출력.
 - `trash`: FreeDesktop Trash 규격으로 이동(`.trashinfo` 기록 포함,
   심볼링크는 타깃이 아닌 링크 자체가 이동됨, 복구 영수증 출력).
 
 ### 2. abi — ELF 바이너리 검사
 
 ```bash
-lens abi inspect <binary>
-lens abi diff <baseline> <candidate>
+lens abi inspect <binary> [--format text|json]
+lens abi diff <baseline> <candidate> [--format text|json]
 ```
 
 - 동적 심볼 표면(정의/미정의 구분), DT_NEEDED, RPATH/RUNPATH, SONAME,
@@ -52,8 +82,8 @@ lens abi diff <baseline> <candidate>
 ### 3. log — 로그 인덱싱·필터
 
 ```bash
-lens log inspect <path>
-lens log filter <path> [--query TEXT] [--min-level LEVEL] [--include-unknown]
+lens log inspect <path> [--format text|json]
+lens log filter <path> [--query TEXT] [--min-level LEVEL] [--include-unknown] [--format text|json]
 ```
 
 - mmap 라인 인덱서(memchr 기반)로 GB급 로그를 즉시 열람.
@@ -66,22 +96,27 @@ lens log filter <path> [--query TEXT] [--min-level LEVEL] [--include-unknown]
 ### 4. test — JUnit 리포트 파싱·회귀 diff
 
 ```bash
-lens test parse <file> [--project NAME]
-lens test diff <baseline> <candidate>
+lens test parse <file|dir|glob> [--project NAME] [--format text|json]
+lens test diff <baseline> <candidate> [--format text|json]
 ```
 
-- `testlens.run/v1`: 테스트케이스 신원(`classname::name`), 상태
+- 입력은 파일 1개, `*.xml` 디렉터리, 또는 `*`/`?` 파일명 glob — CI의
+  모듈별 JUnit 파일들을 하나의 run으로 병합해 비교한다.
+- `testlens.run/v1`: 테스트케이스 신원(`suite::classname::name`), 상태
   (passed/failed/error/skipped), 실패 본문, `system-out`/`system-err`,
   `<properties>`, suite 출력까지 수집.
 - 잘린/깨진 XML은 가능한 범위까지 파싱하고 `complete=false`로 표시.
 - `run_id`는 내용 기반 결정적 해시(재실행해도 동일).
-- `diff`는 `testlens.diff/v1`: REGRESSION/FIX 목록.
+- `diff`는 `testlens.diff/v2`: 구조화된 `regressions[]{id,before,after,
+  message}`, `fixes`, `new_failures`(새로 등장한 실패/에러 — exit 1),
+  `removed_tests`, `skipped_changes`. skipped→passed는 fix가 아니라
+  skip 변경으로 분류. 중복 identity는 `diagnostics`로 보고.
 
 ### 5. trace — strace 분석
 
 ```bash
-lens trace analyze <trace_file>
-lens trace diff <baseline> <candidate>
+lens trace analyze <trace_file> [--format text|json]
+lens trace diff <baseline> <candidate> [--format text|json]
 ```
 
 - `tracelens.snapshot/v1`: syscall 집계, 에러, 지연, IO 처리량,
@@ -96,7 +131,7 @@ lens trace diff <baseline> <candidate>
 
 ```bash
 lens sys inspect <path>          # 유닛 파일 또는 디렉터리
-lens sys cycles <dir>
+lens sys cycles <dir> [--format text|json]
 lens sys diff <baseline> <candidate>   # 스냅샷 JSON 또는 유닛 디렉터리
 ```
 
@@ -112,9 +147,9 @@ lens sys diff <baseline> <candidate>   # 스냅샷 JSON 또는 유닛 디렉터�
 ### 7. build — 컴파일 데이터베이스 분석
 
 ```bash
-lens build inspect <compile_commands.json>
-lens build impact <compile_commands.json> --header <path>
-lens build diff <baseline.json> <candidate.json>
+lens build inspect <compile_commands.json> [--format text|json]
+lens build impact <compile_commands.json> --header <path> [--format text|json]
+lens build diff <baseline.json> <candidate.json> [--format text|json]
 ```
 
 - `inspect`는 `buildscope.snapshot/v4`: 파싱된 유닛 + 역방향 impact 그래프.
@@ -129,9 +164,9 @@ lens build diff <baseline.json> <candidate.json>
 ### 8. env — Python 가상환경 감사
 
 ```bash
-lens env inspect <venv_path> [--project <dir>]
-lens env check <venv_path> [--extras a,b]
-lens env diff <baseline.json> <candidate.json>
+lens env inspect <venv_path> [--project <dir>] [--format text|json]
+lens env check <venv_path> [--extras a,b] [--format text|json]
+lens env diff <baseline.json> <candidate.json> [--format text|json]
 ```
 
 - 인터프리터 실행 없이 정적 메타데이터 감사(dist-info/METADATA).
@@ -146,12 +181,17 @@ lens env diff <baseline.json> <candidate.json>
 ### 9. net — 소켓/포트 포렌식
 
 ```bash
-lens net inspect [--proc-dir PATH] [--json]
-lens net diff <baseline.json> <candidate.json>
+lens net inspect [--proc-dir PATH] [--json|--format json] [--no-unix]
+lens net diff <baseline.json> <candidate.json> [--format text|json]
 ```
 
 - `/proc/net/{tcp,tcp6,udp,udp6,unix}` 파싱 + `/proc/*/fd` inode→PID 상관.
 - UDP 바인드 소켓도 리스너로 집계. unix 소켓은 Type/St 의미론 분리.
+  `--no-unix`는 unix 소켓을 출력에서 제외.
+- 소유자 없는 소켓은 `owner_state`로 구분: `orphan`(inode를 검사했으나
+  보유 프로세스 없음) vs `owner_unknown`(`/proc/<pid>/fd` 접근 거부로
+  확인 불가 — 텍스트에서 `<owner unknown>`으로 표시, sudo 권장).
+  summary에 `owner_unknown_sockets`/`uninspectable_processes` 카운터.
 - `lens.net/v1` 스키마. `diff`는 (kind, address, port)/5-tuple 매칭으로
   바인드 주소 변경도 closed+new로 표면화.
 
@@ -175,11 +215,14 @@ lens bundle verify incident.lens
 ## 시스템 종합 점검 (`doctor`)
 
 ```bash
-lens doctor [--root PATH] [--procfs PATH] [--systemd-dir PATH] [--json]
+lens doctor [--root PATH] [--procfs PATH] [--systemd-dir PATH]
+            [--json|--format json] [--fail-on warn|fail]
 ```
 
 스토리지 용량(statvfs), 네트워크, 서비스, 환경 검사를 PASS/WARN/FAIL로
-집계하고 권장 조치를 출력합니다.
+집계하고 권장 조치를 출력합니다. `--fail-on`(기본 `fail`) 미만의
+심각도는 exit 0을 유지한다 — 권한 부족으로 검사 불가한 소켓은 orphan
+WARN이 아니라 PASS + "sudo로 재실행" 권고로 보고한다.
 
 ## TUI 대시보드
 

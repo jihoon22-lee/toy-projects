@@ -38,7 +38,7 @@ lens-mcp ──┴─────────────┤
    직렬화. `HashMap` 반복 결과가 출력에 도달하면 안 된다.
 3. **스키마 버전 명시**: 모든 스냅샷/리포트에 `schema` 문자열
    (`lens.bundle/v2`, `diskmap.snapshot/v2`, `abilens.report/v2`,
-   `testlens.run/v1`, `tracelens.snapshot/v1`, `servicelens.snapshot/v1`,
+   `testlens.run/v1`, `testlens.diff/v2`, `tracelens.snapshot/v1`, `servicelens.snapshot/v1`,
    `envlens.snapshot/v1`, `lens.net/v1`, `buildscope.snapshot/v4` 등).
 4. **단일 구현 단일 책임**: 같은 파일 포맷을 파싱하는 코드는 하나
    (예: 번들 create/inspect/verify는 모두 `lens_core::bundle` 한 구현).
