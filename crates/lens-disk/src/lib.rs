@@ -21,6 +21,7 @@ pub use arena::{ArenaTree, DiskMetadata, FsKind, FsNode, NodeId};
 pub use duplicates::{DuplicateFinder, DuplicateGroup, DuplicateReport};
 pub use scanner::{DiskScanner, ScanOptions, ScanResult};
 pub use snapshot::{SnapshotDiff, SnapshotNodeV2, SnapshotV2, SCHEMA_V2};
+pub use trash::TrashEntry;
 pub use trash::{TrashManager, TrashReceipt};
 
 #[cfg(test)]

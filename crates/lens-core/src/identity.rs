@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use crate::error::{LensError, Result};
 
 /// POSIX file system identity to detect file modifications and hard link sharing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct FileIdentity {
     pub device: u64,
     pub inode: u64,
