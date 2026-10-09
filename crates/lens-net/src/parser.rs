@@ -4,7 +4,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path::Path;
 
 use crate::model::*;
-use lens_core::error::Result;
+use lens_core::error::{LensError, Result};
 
 // NOTE: /proc/net/* prints addresses as the host-endian interpretation of the
 // in-memory word, so `to_ne_bytes` is intentional and correct on every host —
@@ -220,9 +220,13 @@ pub fn inspect_network(proc_path: Option<&Path>) -> Result<NetReport> {
 
     let mut sockets = Vec::new();
 
-    if let Ok(content) = fs::read_to_string(&tcp_path) {
-        sockets.extend(parse_proc_net_tcp(&content, SocketKind::Tcp));
-    }
+    // net/tcp is mandatory: a procfs that cannot provide it (bad --proc-dir,
+    // /proc not mounted) must fail closed instead of reporting 0 sockets.
+    let tcp_content = fs::read_to_string(&tcp_path).map_err(|e| LensError::Io {
+        path: tcp_path.clone(),
+        source: e,
+    })?;
+    sockets.extend(parse_proc_net_tcp(&tcp_content, SocketKind::Tcp));
     if let Ok(content) = fs::read_to_string(&udp_path) {
         sockets.extend(parse_proc_net_tcp(&content, SocketKind::Udp));
     }
@@ -335,6 +339,12 @@ mod tests {
         let tmp = std::env::temp_dir().join(format!("lensnet-{}", std::process::id()));
         let net = tmp.join("net");
         std::fs::create_dir_all(&net).unwrap();
+        // net/tcp is mandatory input — provide a header-only table.
+        std::fs::write(
+            net.join("tcp"),
+            "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n",
+        )
+        .unwrap();
         std::fs::write(
             net.join("udp"),
             "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   0: 00000000:0035 00000000:0000 07 00000000:00000000 00:00000000 00000000   101        0 55555 1 0000000000000000 100 0 0 10 0\n",

@@ -5,6 +5,8 @@ use std::fs;
 use std::path::Path;
 
 pub fn inspect_venv(venv_path: &Path) -> std::io::Result<PyVenv> {
+    validate_venv(venv_path)?;
+
     let mut home = String::new();
     let mut python_version = String::new();
 
@@ -84,6 +86,33 @@ pub fn inspect_venv(venv_path: &Path) -> std::io::Result<PyVenv> {
         missing_dependencies,
         shadowing_issues: Vec::new(),
     })
+}
+
+/// A path that is not a virtualenv must not yield an empty "all satisfied"
+/// report — fail closed on missing `pyvenv.cfg` and `site-packages`.
+fn validate_venv(venv_path: &Path) -> std::io::Result<()> {
+    if venv_path.join("pyvenv.cfg").is_file() {
+        return Ok(());
+    }
+    let lib = venv_path.join("lib");
+    let has_site_packages = lib.join("site-packages").is_dir()
+        || fs::read_dir(&lib)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .any(|e| e.path().join("site-packages").is_dir())
+            })
+            .unwrap_or(false);
+    if has_site_packages {
+        return Ok(());
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        format!(
+            "not a Python virtualenv (no pyvenv.cfg or site-packages): {}",
+            venv_path.display()
+        ),
+    ))
 }
 
 fn scan_site_packages(site_packages: &Path, packages: &mut BTreeMap<String, PyPackage>) {
