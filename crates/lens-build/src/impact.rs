@@ -171,6 +171,56 @@ impl ImpactGraph {
             hint: None,
         }
     }
+
+    /// True when `h` names a header the graph knows: directly included by
+    /// a translation unit, an includee of another header, or an includer.
+    pub fn header_in_graph(&self, h: &str) -> bool {
+        self.header_to_units.contains_key(h)
+            || self.header_to_headers.contains_key(h)
+            || self.header_to_headers.values().any(|s| s.contains(h))
+    }
+
+    /// Known headers whose basename matches `header`, for "did you mean"
+    /// hints when a requested header is absent from the graph.
+    pub fn closest_headers(&self, header: &str, max: usize) -> Vec<String> {
+        let base = Path::new(header)
+            .file_name()
+            .map(|f| f.to_string_lossy().into_owned())
+            .unwrap_or_else(|| header.to_string());
+        let mut candidates: Vec<String> = self
+            .header_to_units
+            .keys()
+            .chain(self.header_to_headers.keys())
+            .chain(self.header_to_headers.values().flatten())
+            .filter(|h| {
+                Path::new(h.as_str())
+                    .file_name()
+                    .map(|f| f.to_string_lossy() == base)
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect();
+        candidates.sort();
+        candidates.dedup();
+        candidates.truncate(max);
+        candidates
+    }
+}
+
+/// Resolve a possibly-relative header argument against `bases` in order
+/// (compile-database directory, each entry's `directory`, caller's cwd):
+/// the first base whose normalization lands in the graph wins. Absolute
+/// headers normalize directly. When nothing resolves, fall back to the
+/// first base so the report still names a concrete target.
+pub fn resolve_header_target(graph: &ImpactGraph, header: &str, bases: &[String]) -> String {
+    if Path::new(header).is_absolute() {
+        return crate::normalize_path(header, "/");
+    }
+    bases
+        .iter()
+        .map(|b| crate::normalize_path(header, b))
+        .find(|c| graph.header_in_graph(c))
+        .unwrap_or_else(|| crate::normalize_path(header, bases.first().map_or(".", |b| b)))
 }
 
 /// An `#include` directive with its spelling preserved: `quoted` is true for

@@ -5,7 +5,7 @@ pub mod model;
 
 pub use compiler::{normalize_path, parse_command_entry, split_command_line};
 pub use diff::diff_compilations;
-pub use impact::{extract_includes, ImpactGraph, IncludeDirective};
+pub use impact::{extract_includes, resolve_header_target, ImpactGraph, IncludeDirective};
 pub use model::*;
 
 #[cfg(test)]
