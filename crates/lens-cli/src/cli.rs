@@ -129,6 +129,9 @@ pub enum LogCommands {
         query: Option<String>,
         #[arg(long)]
         min_level: Option<String>,
+        /// Keep lines whose level could not be determined when --min-level is set
+        #[arg(long)]
+        include_unknown: bool,
     },
 }
 

@@ -9,7 +9,7 @@ use lens_core::{
 };
 use lens_disk::{DiskScanner, DuplicateFinder, ScanOptions, SnapshotV2, TrashManager};
 use lens_env::{detect_shadowing, diff_environments, inspect_venv, EnvSnapshot};
-use lens_log::{LogFilter, LogIndexer, LogLevel};
+use lens_log::{parse_line, LogFilter, LogIndexer, LogLevel};
 use lens_net::{diff_net_reports, inspect_network, NetReport};
 use lens_sys::{diff_systemd, OrderingGraph, SystemdSnapshot};
 use lens_test::{diff_test_runs, parse_junit_xml};
@@ -132,6 +132,7 @@ pub fn dispatch(command: Commands) -> Result<()> {
                 path,
                 query,
                 min_level,
+                include_unknown,
             } => {
                 let indexer = LogIndexer::open(&path)?;
                 let mut filter = LogFilter::new();
@@ -149,17 +150,38 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     }
                     filter = filter.with_min_level(lvl);
                 }
+                filter = filter.with_include_unknown(include_unknown);
 
                 let mut matched = 0;
+                let mut excluded_unknown = 0usize;
                 for idx in 0..indexer.len() {
                     if let Some(line) = indexer.get_line(idx) {
-                        if filter.matches_line(line, idx + 1) {
+                        if filter.min_level.is_some() {
+                            // Level filtering needs the parsed record; it
+                            // also lets us count evidence discarded for
+                            // having no detectable level.
+                            let record = parse_line(line, idx + 1);
+                            if filter.rejected_only_by_unknown_level(&record) {
+                                excluded_unknown += 1;
+                                continue;
+                            }
+                            if filter.matches(&record) {
+                                outln!("[{}] {}", idx + 1, line);
+                                matched += 1;
+                            }
+                        } else if filter.matches_line(line, idx + 1) {
                             outln!("[{}] {}", idx + 1, line);
                             matched += 1;
                         }
                     }
                 }
                 eprintln!("\nMatched {} of {} line(s).", matched, indexer.len());
+                if excluded_unknown > 0 {
+                    eprintln!(
+                        "Excluded {} line(s) whose log level could not be determined (--include-unknown to keep them).",
+                        excluded_unknown
+                    );
+                }
             }
         },
         Commands::Test { action } => match action {
