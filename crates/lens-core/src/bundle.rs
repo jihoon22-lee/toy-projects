@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tar::{Archive, Builder, Header};
 
 use crate::error::{LensError, Result};
@@ -432,6 +432,122 @@ pub fn inspect_bundle<P: AsRef<Path>>(bundle_path: P) -> Result<BundleInspection
     })
 }
 
+/// Read a single entry's bytes by exact (normalized) name. Enforces the
+/// same traversal/size rules as verification.
+pub fn read_bundle_entry<P: AsRef<Path>>(bundle_path: P, name: &str) -> Result<Vec<u8>> {
+    if !valid_entry_name(name) {
+        return Err(LensError::InvalidInput {
+            message: format!("unsafe or empty bundle entry name: {:?}", name),
+        });
+    }
+    let want = normalize_entry_name(name);
+    let mut found = None;
+    stream_entries(bundle_path.as_ref(), |entry_name, reader, _size| {
+        if normalize_entry_name(entry_name) == want {
+            let mut buf = Vec::new();
+            reader
+                .take(MAX_BUNDLE_BYTES)
+                .read_to_end(&mut buf)
+                .map_err(|e| io_err(bundle_path.as_ref(), e))?;
+            found = Some(buf);
+        }
+        Ok(())
+    })?;
+    found.ok_or_else(|| LensError::InvalidInput {
+        message: format!("entry {:?} not found in bundle", name),
+    })
+}
+
+/// Verify then extract a bundle into `dest_dir`. Refuses to write outside
+/// the destination (entry names are re-validated) and refuses to overwrite
+/// existing files unless `force` is set. Returns extracted paths.
+pub fn extract_bundle<P: AsRef<Path>>(
+    bundle_path: P,
+    dest_dir: P,
+    force: bool,
+) -> Result<Vec<PathBuf>> {
+    let bundle_path = bundle_path.as_ref();
+    let dest_dir = dest_dir.as_ref();
+
+    // Evidence integrity first: never extract a bundle that fails
+    // verification.
+    let report = verify_bundle_archive(bundle_path)?;
+    if !report.is_valid {
+        return Err(LensError::InvalidInput {
+            message: format!(
+                "bundle integrity check failed: {}",
+                report.error.unwrap_or_else(|| {
+                    format!(
+                        "{} tampered, {} missing, {} unexpected file(s)",
+                        report.tampered_files.len(),
+                        report.missing_files.len(),
+                        report.unexpected_files.len()
+                    )
+                })
+            ),
+        });
+    }
+
+    std::fs::create_dir_all(dest_dir).map_err(|e| io_err(dest_dir, e))?;
+    let mut written = Vec::new();
+    stream_entries(bundle_path, |name, reader, _size| {
+        let name = normalize_entry_name(name);
+        if !valid_entry_name(name) {
+            return Err(LensError::InvalidInput {
+                message: format!("unsafe bundle entry name: {:?}", name),
+            });
+        }
+        let target = dest_dir.join(name);
+        // Belt-and-braces: join+normalize again, ensure it stays under dest.
+        let normalized_target = normalize_path_str(&target.to_string_lossy());
+        let normalized_dest = normalize_path_str(&dest_dir.to_string_lossy());
+        if !format!("{normalized_target}/").starts_with(&format!("{normalized_dest}/")) {
+            return Err(LensError::InvalidInput {
+                message: format!("entry {:?} escapes destination", name),
+            });
+        }
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
+        }
+        if !force && target.symlink_metadata().is_ok() {
+            return Err(LensError::InvalidInput {
+                message: format!("{:?} already exists; pass --force to overwrite", target),
+            });
+        }
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&target)
+            .map_err(|e| io_err(&target, e))?;
+        std::io::copy(&mut reader.take(MAX_BUNDLE_BYTES), &mut file)
+            .map_err(|e| io_err(&target, e))?;
+        written.push(target);
+        Ok(())
+    })?;
+    written.sort();
+    Ok(written)
+}
+
+/// Lexically normalize a path string (`.`/`..`/`//` collapsed).
+fn normalize_path_str(s: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for c in s.split('/') {
+        match c {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            other => parts.push(other),
+        }
+    }
+    let mut out = parts.join("/");
+    if s.starts_with('/') {
+        out = format!("/{}", out);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -608,5 +724,112 @@ mod tests {
         assert!(create_bundle_archive(&out, "x", &artifacts, vec![]).is_err());
         assert!(!out.exists());
         assert!(!dir.path().join("out.lens.tmp").exists());
+    }
+
+    #[test]
+    fn test_read_bundle_entry() {
+        let tmp = NamedTempFile::new().unwrap();
+        create_bundle_archive(tmp.path(), "x", &sample_artifacts(), vec![]).unwrap();
+
+        let bytes = read_bundle_entry(tmp.path(), "reports/disk_snapshot.json").unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["schema"], "diskmap.snapshot/v2");
+
+        // Missing and unsafe names are rejected.
+        assert!(read_bundle_entry(tmp.path(), "reports/nope.json").is_err());
+        assert!(read_bundle_entry(tmp.path(), "../evil").is_err());
+        assert!(read_bundle_entry(tmp.path(), "/abs").is_err());
+    }
+
+    #[test]
+    fn test_extract_verifies_and_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let bundle = dir.path().join("b.lens");
+        create_bundle_archive(&bundle, "x", &sample_artifacts(), vec![]).unwrap();
+
+        let dest = dir.path().join("out");
+        let written = extract_bundle(&bundle, &dest, false).unwrap();
+        assert_eq!(written.len(), 3); // 2 artifacts + manifest
+        assert!(dest.join("reports/disk_snapshot.json").exists());
+        assert!(dest.join("manifest.json").exists());
+
+        // Refuse overwrite without force; succeed with it.
+        assert!(extract_bundle(&bundle, &dest, false).is_err());
+        assert!(extract_bundle(&bundle, &dest, true).is_ok());
+    }
+
+    #[test]
+    fn test_extract_refuses_tampered_bundle() {
+        let dir = tempfile::tempdir().unwrap();
+        let bundle = dir.path().join("b.lens");
+        create_bundle_archive(&bundle, "x", &sample_artifacts(), vec![]).unwrap();
+        rebuild_with(&bundle, |entries| {
+            for (name, data) in entries.iter_mut() {
+                if name == "reports/disk_snapshot.json" {
+                    data[0] ^= 0xFF;
+                }
+            }
+        });
+        let dest = dir.path().join("out");
+        assert!(extract_bundle(&bundle, &dest, false).is_err());
+        assert!(!dest.join("reports/disk_snapshot.json").exists());
+    }
+
+    /// Minimal tar writer for hostile fixtures — the `tar` crate refuses
+    /// `..` names, which is exactly what this test needs to produce.
+    fn raw_tar(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut out = Vec::new();
+        for (name, data) in entries {
+            let mut hdr = [0u8; 512];
+            hdr[..name.len()].copy_from_slice(name.as_bytes());
+            hdr[100..108].copy_from_slice(b"0000644\0");
+            hdr[108..116].copy_from_slice(b"0000000\0");
+            hdr[116..124].copy_from_slice(b"0000000\0");
+            hdr[124..136].copy_from_slice(format!("{:011o}\0", data.len()).as_bytes());
+            hdr[136..148].copy_from_slice(b"00000000000\0");
+            hdr[148..156].copy_from_slice(b"        ");
+            hdr[156] = b'0';
+            let cksum: u64 = hdr.iter().map(|&b| b as u64).sum();
+            hdr[148..156].copy_from_slice(format!("{:06o}\0 ", cksum).as_bytes());
+            out.extend_from_slice(&hdr);
+            out.extend_from_slice(data);
+            let pad = (512 - data.len() % 512) % 512;
+            out.extend(std::iter::repeat_n(0, pad));
+        }
+        out.extend(std::iter::repeat_n(0, 1024));
+        out
+    }
+
+    #[test]
+    fn test_extract_rejects_traversal_entries() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let bundle = dir.path().join("evil.lens");
+        // The manifest even lists the traversal entry with a correct hash
+        // (verify passes) — the extractor's own name check must refuse it.
+        let payload: &[u8] = b"owned";
+        let manifest = serde_json::json!({
+            "schema": BUNDLE_SCHEMA_V2,
+            "tool": "lens",
+            "version": "x",
+            "created_at": "2026-01-01T00:00:00Z",
+            "sources": [{
+                "path": "../escape.txt",
+                "sha256": digest_bytes(payload),
+                "size": payload.len(),
+            }]
+        });
+        let manifest_bytes = serde_json::to_vec_pretty(&manifest).unwrap();
+        let tar = raw_tar(&[
+            ("../escape.txt", payload),
+            ("manifest.json", &manifest_bytes),
+        ]);
+        let mut enc = GzEncoder::new(Vec::new(), Compression::default());
+        enc.write_all(&tar).unwrap();
+        std::fs::write(&bundle, enc.finish().unwrap()).unwrap();
+
+        let dest = dir.path().join("out");
+        assert!(extract_bundle(&bundle, &dest, true).is_err());
+        assert!(!dir.path().join("escape.txt").exists());
     }
 }
