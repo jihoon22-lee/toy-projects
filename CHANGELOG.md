@@ -116,6 +116,44 @@ incomplete, `trace analyze` fd 누수. Phase 0에서 0이 아닌 값으로
   — 매니페스트는 서명되지 않으며 무결성 확인이다. 무결성 검증 실패는 이제
   findings(exit 1)로 분류 — 검증은 정상 수행됐고 결과가 부정적인 경우다.
 
+### 확장·정리 (Phase 3)
+
+- `lens-mcp`: 응답 크기 제어 — 모든 도구가 `limit`(배열당 기본 200)·
+  `offset`을 받아 잘린 배열 끝에 `{"_truncated": true, "total_before_
+  truncation", "omitted"}` 마커를 붙이고, 직렬화 결과가 64KiB를 넘으면
+  추가 클램프 + `_response_clamped` 표시. `lens_log_filter`는 앞 1000줄
+  제한을 폐기하고 `tail`(끝 N라인 스캔)·`regex`·`include_unknown`·
+  `limit`/`offset` 매치 페이지를 지원. diff 도구 추가: `lens_abi_diff`,
+  `lens_sys_diff`(스냅샷 또는 유닛 디렉터리), `lens_test_diff`(파일/디렉터리),
+  `lens_net_diff`(스냅샷 JSON). `initialize`가 클라이언트의
+  `protocolVersion`을 에코한다. 모든 도구 설명에 상대 경로가 서버 cwd
+  기준임을 명시하고 `lens_build_impact`의 상대 헤더는 컴파일 DB/entry
+  디렉터리 기준으로 해석(CLI와 공유 헬퍼). `lens_doctor`의 존재하지 않는
+  `root_path`/`proc_dir`/`systemd_dir`은 이제 `isError`를 반환한다.
+- `lens tui`: 디렉터리 스캔이 백그라운드 스레드에서 돌고 UI가 즉시
+  뜬다(스피너 표시, 스캔 오류/절단은 제목에 INCOMPLETE로 표시).
+  Enter/Backspace는 스캔된 아레나 트리 안에서 메모리 탐색한다 — 스캔
+  루트 위로 올라가거나 미완료 노드에 들어갈 때만 백그라운드 재스캔.
+  `--log FILE`로 Logs 탭을 고정할 수 있고 `/` 검색(Enter 적용/Esc 해제),
+  `PgUp/PgDn`, `g/G`, `?` 도움말을 지원한다.
+- systemd: `sys inspect`의 스냅샷 `diagnostics`가 비어 있지 않게 됐다 —
+  `=` 없는 쓰레기 줄(`SYNTAX_GARBAGE_LINE`), 닫히지 않은 섹션 헤더
+  (`SYNTAX_SECTION_HEADER`), 로드된 유닛과 매칭되지 않는 의존 대상
+  (`UNIT_REF_MISSING`; `.device`/`.mount` 등 생성형 유닛과 템플릿 인스턴스
+  참조는 제외)를 파서·로더가 수집하고 CLI가 스냅샷 상위로 집계한다.
+- `lens env`: shadowing 탐지 품질 — 패키지 내부 파일(`pkg/json.py`)은
+  더 이상 stdlib `json` 오탐하지 않는다(프로젝트 루트와 `src/`의 1레벨
+  후보만). 패키지 디렉터리(`logging/__init__.py`)도 탐지하고, stdlib
+  목록을 3.11 `sys.stdlib_module_names` 수준으로 확장(`secrets`, `test`
+  등). 설치 패키지 매칭은 dist 이름이 아니라 `top_level.txt`/`RECORD`의
+  모듈명 기준(`PyYAML`→`yaml`, `typing-extensions`→`typing_extensions`).
+- 메시지·도움말: 모든 위치 인자와 플래그에 설명을 채웠다(빈 `<PATH>`
+  칸 제거). 사용 오류(인자 누락, 잘못된 플래그 값, `--force` 누락 등)는
+  더 이상 "Corrupt or invalid input format:" 접두사가 붙지 않고
+  `LensError::Usage`로 메시지만 출력. 파일 JSON 파싱 오류는 파일 경로를
+  포함한다. GUIDE의 결정성 주장을 타임스탬프(`bundle` `created_at`) 예외와
+  함께 명시했다.
+
 ## 0.4.3
 
 무결성·정확성 대수정 릴리스. 상세 내역은 아래 섹션 참고.

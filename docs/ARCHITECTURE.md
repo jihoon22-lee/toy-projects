@@ -173,8 +173,9 @@ lens-mcp ──┴─────────────┤
 
 - **`SafeInput`**: open 후 `fstat`으로 타깃 메타데이터 재검증(TOCTOU).
   심볼링크 경로는 링크가 아닌 타깃과 비교.
-- **리소스 상한**: 번들 항목/바이트, DWARF 타입 10k, MCP 로그 스캔 1000줄,
-  빌드 스캔 파일 수 — 전부 상한 도달을 출력에 표시.
+- **리소스 상한**: 번들 항목/바이트, DWARF 타입 10k, MCP 응답 64KiB +
+  배열 `limit`(기본 200)·`offset` 페이지네이션(`_truncated` 마커),
+  MCP 로그 `tail` 윈도우, 빌드 스캔 파일 수 — 전부 상한 도달을 출력에 표시.
 - **에러 분류**: `LensError::{Io{path,source}, LimitExceeded, InvalidInput,
   InputChanged, Json, Unsupported}` — 경로와 원인을 유지한 채 전파.
 - **입력 위생**: 아카이브 엔트리 이름, trash 파일명, include 경로는 전부

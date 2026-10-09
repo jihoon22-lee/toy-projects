@@ -263,18 +263,23 @@ WARN이 아니라 PASS + "sudo로 재실행" 권고로 보고한다.
 ## TUI 대시보드
 
 ```bash
-lens tui [path]
+lens tui [path] [--log FILE]
 ```
 
-4개 탭(Storage/Services/Logs/Network) 모두 실데이터. 단축키:
-`Tab`/`1-4` 탭 전환, `j/k` 이동, `Enter` 디렉터리 진입,
-`Backspace`/`h` 상위, `r` 리로드, `q`/`Esc` 종료.
+4개 탭(Storage/Services/Logs/Network) 모두 실데이터. 디렉터리 스캔은
+백그라운드 스레드에서 돌고 UI는 즉시 뜬다 — 스캔 중에는 스피너가 표시된다.
+한 번 스캔한 트리 안에서는 Enter/Backspace가 메모리 탐색만 한다(재스캔 없음).
+`--log FILE`로 Logs 탭의 로그를 지정할 수 있다. 단축키:
+`Tab`/`1-4` 탭 전환, `j/k` 이동, `PgUp/PgDn` 페이지, `g/G` 처음/끝,
+`Enter` 디렉터리 진입, `Backspace`/`h` 상위, `/` 로그 검색,
+`?` 도움말, `r` 리로드, `q`/`Esc` 종료.
 
 ## MCP 서버 (`lens-mcp`)
 
 AI 어시스턴트 연동용 stdio JSON-RPC 서버. 도구: `lens_disk_scan`,
-`lens_disk_duplicates`, `lens_abi_inspect`, `lens_log_filter`,
-`lens_trace_analyze`, `lens_sys_cycles`, `lens_build_impact`,
+`lens_disk_duplicates`, `lens_abi_inspect`, `lens_abi_diff`,
+`lens_log_filter`, `lens_trace_analyze`, `lens_sys_cycles`,
+`lens_sys_diff`, `lens_test_diff`, `lens_net_diff`, `lens_build_impact`,
 `lens_env_check`, `lens_net_inspect`, `lens_bundle_verify`, `lens_doctor`.
 
 ```bash
@@ -282,11 +287,23 @@ cargo build --release -p lens-mcp
 # Claude Desktop 등에서 command로 target/release/lens-mcp 등록
 ```
 
-`lens_log_filter`는 최대 1000라인만 스캔하며 응답에 `truncated`로 명시됩니다.
+- 모든 도구의 상대 경로는 lens-mcp 프로세스의 cwd 기준으로 해석된다
+  (`lens_build_impact`의 `header`는 컴파일 DB 디렉터리/entry `directory` 기준).
+- 응답 크기 제어: 모든 도구가 `limit`(배열당 최대, 기본 200)·`offset`을 받고,
+  잘린 배열 끝에 `{"_truncated": true, "total_before_truncation", "omitted"}`
+  마커가 붙는다. 64KiB를 넘는 응답은 추가로 클램프되어
+  `_response_clamped: true`가 표시된다.
+- `lens_log_filter`는 `tail`로 파일 끝 N라인만 스캔할 수 있다(최근 라인 조사).
+  `limit`/`offset`으로 매치를 페이징하며 `truncated`로 표시된다.
+- 도구 실패는 `result.isError=true` + 텍스트로 반환된다(잘못된 경로 포함).
+- `initialize`는 클라이언트 요청 `protocolVersion`을 그대로 에코한다.
 
 ## 출력 계약 (공통)
 
-- **결정적**: 같은 입력 → 같은 바이트 출력(BTreeMap 기반 정렬 직렬화).
+- **결정적**: 같은 입력 파일/시스템 상태 → 같은 바이트 출력(BTreeMap
+  기반 정렬 직렬화). 단, 스냅샷성 타임스탬프는 예외 — `bundle create`의
+  매니페스트 `created_at`은 생성 시각을 기록하므로 번들 바이트는 실행마다
+  다릅니다. 내용(아티팩트·해시)은 동일합니다.
 - **Fail-closed**: 수집 실패는 조용히 삼키지 않고 `complete=false`,
   `errors`, `diagnostics`, `scan_truncated` 등의 필드로 표면화.
 - **스키마 버전**: 모든 스냅샷/리포트에 `schema` 문자열 필드.

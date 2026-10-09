@@ -151,27 +151,37 @@ let snap = SnapshotV2::from_tree(&res.tree, res.root_id, res.complete, res.trunc
 
 ## lens-tui — 터미널 대시보드
 
-- 4개 탭 실데이터: Storage(아레나 스캔), Services(`load_units` 결과),
-  Logs(`LogIndexer`로 시스템 로그 tail + 레벨 컬러), Network(리스너 목록).
-- `lens_tui::run(path)`가 렌더 루프를 소유해 `lens-tui` 바이너리와
+- 4개 탭 실데이터: Storage(아레나 스캔), Services(merged `load_units_merged`
+  결과), Logs(`LogIndexer`로 로그 tail + 레벨 컬러, `--log` 지정 가능),
+  Network(리스너 목록).
+- 디렉터리 스캔은 백그라운드 스레드(`mpsc`)에서 돌고 스피너로 표시된다.
+  Enter/Backspace는 스캔된 아레나 트리 안에서 메모리 탐색한다(재스캔 없음).
+- `lens_tui::run(path, log)`가 렌더 루프를 소유해 `lens-tui` 바이너리와
   `lens tui`가 공유한다.
 
 ## lens-mcp — MCP 서버
 
-- JSON-RPC 2.0 over stdio로 진단 툴을 노출:
+- JSON-RPC 2.0 over stdio로 진단 툴을 노출. `initialize`는 요청된
+  `protocolVersion`을 에코하고, 도구 실패는 `result.isError`로 반환한다.
+- 모든 도구에 `limit`/`offset` 페이지네이션(배열 끝 `_truncated` 마커,
+  응답 상한 64KiB). 상대 경로는 서버 cwd 기준.
+- `lens_log_filter`는 `tail`(끝 N라인), `regex`, `min_level`,
+  `include_unknown`, `limit`/`offset`을 지원한다.
 
 | 툴 | 용도 |
 |---|---|
 | `lens_disk_scan`, `lens_disk_duplicates` | 스토리지 분석/중복 탐지 |
-| `lens_abi_inspect` | ELF/심볼/버전/DWARF 검사 |
-| `lens_log_filter` | 로그 필터 |
+| `lens_abi_inspect`, `lens_abi_diff` | ELF/심볼/버전/DWARF 검사·비교 |
+| `lens_log_filter` | 로그 필터(tail/regex/페이지) |
 | `lens_trace_analyze` | strace 분석 |
-| `lens_sys_cycles` | systemd 사이클 |
+| `lens_sys_cycles`, `lens_sys_diff` | systemd 사이클/스냅샷 비교 |
+| `lens_test_diff` | JUnit 회귀 diff |
+| `lens_net_diff` | 네트워크 스냅샷 diff |
 | `lens_build_impact` | 헤더 영향도 |
 | `lens_env_check` | venv 의존성 검사 |
 | `lens_net_inspect` | 소켓/리스너 검사 |
 | `lens_bundle_verify` | 번들 무결성 검증 |
-| `lens_doctor` | 종합 진단 |
+| `lens_doctor` | 종합 진단(잘못된 경로 → isError) |
 
 ```json
 { "mcpServers": { "lens": { "command": "/path/to/lens-mcp" } } }
