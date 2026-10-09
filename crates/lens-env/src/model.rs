@@ -14,6 +14,12 @@ pub struct PyPackage {
     pub requires_dist: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dist_info: Option<String>,
+    /// Importable top-level module names declared by the distribution
+    /// (`top_level.txt`, else derived from `RECORD`). Distribution names
+    /// differ from module names (`PyYAML` → `yaml`), so shadowing checks
+    /// compare against these rather than the normalized dist name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub top_level_modules: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]

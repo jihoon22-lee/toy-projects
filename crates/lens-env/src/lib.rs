@@ -53,6 +53,7 @@ Requires-Dist: certifi>=2017.4.17
                 summary: None,
                 requires_dist: vec![],
                 dist_info: None,
+                top_level_modules: vec![],
             },
         );
 
@@ -65,6 +66,64 @@ Requires-Dist: certifi>=2017.4.17
         assert!(issues[0].shadows.contains("standard library"));
         assert_eq!(issues[1].module_name, "requests");
         assert!(issues[1].shadows.contains("Installed third-party"));
+    }
+
+    #[test]
+    fn test_shadowing_nested_module_not_flagged() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+        // `pkg/json.py` imports as `pkg.json` — it does not shadow stdlib
+        // `json`. Only depth-1 names shadow top-level imports.
+        fs::create_dir_all(root.join("pkg")).unwrap();
+        fs::write(root.join("pkg/__init__.py"), "").unwrap();
+        fs::write(root.join("pkg/json.py"), "x = 1\n").unwrap();
+
+        let issues = detect_shadowing(root, &std::collections::BTreeMap::new());
+        assert!(issues.is_empty(), "unexpected: {issues:?}");
+    }
+
+    #[test]
+    fn test_shadowing_package_dir_and_wider_stdlib() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+        // A package directory shadows the stdlib module of the same name.
+        fs::create_dir_all(root.join("logging")).unwrap();
+        fs::write(root.join("logging/__init__.py"), "x = 1\n").unwrap();
+        // `secrets` was missing from the old 58-entry list.
+        fs::write(root.join("secrets.py"), "x = 1\n").unwrap();
+        // src/ layout is scanned too.
+        fs::create_dir_all(root.join("src/email")).unwrap();
+        fs::write(root.join("src/email/__init__.py"), "x = 1\n").unwrap();
+
+        let issues = detect_shadowing(root, &std::collections::BTreeMap::new());
+        let names: Vec<&str> = issues.iter().map(|i| i.module_name.as_str()).collect();
+        assert_eq!(names, vec!["email", "logging", "secrets"]);
+    }
+
+    #[test]
+    fn test_shadowing_uses_top_level_modules() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+        // Dist `PyYAML` provides module `yaml` — a local `yaml.py`
+        // shadows it even though the names differ.
+        fs::write(root.join("yaml.py"), "x = 1\n").unwrap();
+
+        let mut installed = std::collections::BTreeMap::new();
+        installed.insert(
+            "pyyaml".to_string(),
+            PyPackage {
+                name: "PyYAML".to_string(),
+                version: "6.0".to_string(),
+                summary: None,
+                requires_dist: vec![],
+                dist_info: Some("PyYAML-6.0.dist-info".to_string()),
+                top_level_modules: vec!["yaml".to_string()],
+            },
+        );
+        let issues = detect_shadowing(root, &installed);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].module_name, "yaml");
+        assert!(issues[0].shadows.contains("PyYAML"));
     }
 
     #[test]
@@ -87,6 +146,7 @@ Requires-Dist: certifi>=2017.4.17
                 summary: None,
                 requires_dist: vec![],
                 dist_info: None,
+                top_level_modules: vec![],
             },
         );
 
@@ -108,6 +168,7 @@ Requires-Dist: certifi>=2017.4.17
                 summary: None,
                 requires_dist: vec![],
                 dist_info: None,
+                top_level_modules: vec![],
             },
         );
         v2.packages.insert(
@@ -118,6 +179,7 @@ Requires-Dist: certifi>=2017.4.17
                 summary: None,
                 requires_dist: vec![],
                 dist_info: None,
+                top_level_modules: vec![],
             },
         );
 

@@ -55,5 +55,6 @@ pub fn parse_metadata(content: &str, dist_info_dir: Option<&str>) -> Option<PyPa
         summary,
         requires_dist,
         dist_info: dist_info_dir.map(String::from),
+        top_level_modules: Vec::new(),
     })
 }

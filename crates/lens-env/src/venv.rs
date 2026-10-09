@@ -158,7 +158,9 @@ fn scan_site_packages(site_packages: &Path, packages: &mut BTreeMap<String, PyPa
                         let meta_path = path.join("METADATA");
                         if meta_path.exists() {
                             if let Ok(content) = fs::read_to_string(&meta_path) {
-                                if let Some(pkg) = parse_metadata(&content, Some(dir_name)) {
+                                if let Some(mut pkg) = parse_metadata(&content, Some(dir_name)) {
+                                    pkg.top_level_modules =
+                                        read_top_level_modules(&path, &pkg.name);
                                     let norm = normalize_package_name(&pkg.name);
                                     packages.insert(norm, pkg);
                                 }
@@ -169,6 +171,52 @@ fn scan_site_packages(site_packages: &Path, packages: &mut BTreeMap<String, PyPa
             }
         }
     }
+}
+
+/// Importable top-level module names for a distribution. `top_level.txt`
+/// is authoritative when present; otherwise the top-level path components
+/// in `RECORD` identify installed modules/packages. Falls back to the
+/// normalized dist name with separators mapped to `_` (e.g.
+/// `typing-extensions` → `typing_extensions`), which is how pip maps the
+/// common cases.
+fn read_top_level_modules(dist_info: &Path, dist_name: &str) -> Vec<String> {
+    if let Ok(content) = fs::read_to_string(dist_info.join("top_level.txt")) {
+        let mut mods: Vec<String> = content
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(String::from)
+            .collect();
+        if !mods.is_empty() {
+            mods.sort();
+            mods.dedup();
+            return mods;
+        }
+    }
+    if let Ok(content) = fs::read_to_string(dist_info.join("RECORD")) {
+        let mut mods = std::collections::BTreeSet::new();
+        for line in content.lines() {
+            let path_field = line.split(',').next().unwrap_or("");
+            let top = match path_field.split('/').next() {
+                Some(t) if !t.is_empty() && !t.starts_with('.') => t,
+                _ => continue,
+            };
+            if top.ends_with(".dist-info") || top.ends_with(".data") {
+                continue;
+            }
+            if let Some(stem) = top.strip_suffix(".py") {
+                if stem != "__init__" {
+                    mods.insert(stem.to_string());
+                }
+            } else if !top.contains('.') {
+                mods.insert(top.to_string());
+            }
+        }
+        if !mods.is_empty() {
+            return mods.into_iter().collect();
+        }
+    }
+    vec![dist_name.replace('-', "_").to_lowercase()]
 }
 
 #[cfg(test)]
