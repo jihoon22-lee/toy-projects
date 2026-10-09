@@ -1858,8 +1858,8 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                 outcome = Outcome::Findings;
             }
         }
-        Commands::Tui { path } => {
-            lens_tui::run(&path).map_err(|e| lens_core::LensError::Io {
+        Commands::Tui { path, log } => {
+            lens_tui::run(&path, log.as_deref()).map_err(|e| lens_core::LensError::Io {
                 path: path.clone(),
                 source: e,
             })?;

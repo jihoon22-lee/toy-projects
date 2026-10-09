@@ -102,6 +102,9 @@ pub enum Commands {
         /// Initial path to inspect
         #[arg(default_value = ".")]
         path: PathBuf,
+        /// Log file to show in the Logs tab instead of auto-detection
+        #[arg(long)]
+        log: Option<PathBuf>,
     },
     /// Generate shell auto-completion script
     Completion {

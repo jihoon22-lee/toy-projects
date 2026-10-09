@@ -18,8 +18,9 @@ use std::time::Duration;
 use crate::app::{TuiApp, TuiTab};
 
 /// Enter the alternate-screen TUI at `initial_path` and run until quit.
-pub fn run(initial_path: &Path) -> io::Result<()> {
-    let mut app = TuiApp::new(initial_path);
+/// `log` pins the Logs tab to a specific file instead of auto-detection.
+pub fn run(initial_path: &Path, log: Option<&Path>) -> io::Result<()> {
+    let mut app = TuiApp::new(initial_path, log.map(Path::to_path_buf));
 
     // Restore the terminal before the default panic report runs so a panic
     // does not leave the tty in raw mode on the alternate screen.
@@ -50,6 +51,12 @@ fn run_app<B: ratatui::backend::Backend>(
     app: &mut TuiApp,
 ) -> io::Result<()> {
     loop {
+        // Pick up a finished background scan and advance the spinner.
+        app.poll_scan();
+        if app.scanning {
+            app.spinner_frame = app.spinner_frame.wrapping_add(1);
+        }
+
         terminal.draw(|f| {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
@@ -90,6 +97,7 @@ fn run_app<B: ratatui::backend::Backend>(
                         .direction(Direction::Horizontal)
                         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
                         .split(chunks[1]);
+                    app.page_size = body_chunks[0].height.saturating_sub(2) as usize;
 
                     let list_items: Vec<ListItem> = app
                         .items
@@ -114,10 +122,21 @@ fn run_app<B: ratatui::backend::Backend>(
                         })
                         .collect();
 
+                    let dir_title = if app.scanning {
+                        format!(" Directory: {:?} {} scanning… ", app.current_path, app.spinner())
+                    } else if app.scan_incomplete {
+                        format!(
+                            " Directory: {:?} (INCOMPLETE — {} error(s)) ",
+                            app.current_path,
+                            app.scan_errors.len()
+                        )
+                    } else {
+                        format!(" Directory: {:?} (j/k) ", app.current_path)
+                    };
                     let list = List::new(list_items).block(
                         Block::default()
                             .borders(Borders::ALL)
-                            .title(format!(" Directory: {:?} (j/k) ", app.current_path)),
+                            .title(dir_title),
                     );
                     f.render_widget(list, body_chunks[0]);
 
@@ -190,6 +209,7 @@ fn run_app<B: ratatui::backend::Backend>(
                         .direction(Direction::Horizontal)
                         .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
                         .split(chunks[1]);
+                    app.page_size = body_chunks[0].height.saturating_sub(2) as usize;
 
                     let listening = app.net_report.as_ref().map(|r| &r.listening);
                     let list_items: Vec<ListItem> = listening
@@ -272,6 +292,7 @@ fn run_app<B: ratatui::backend::Backend>(
                         .direction(Direction::Horizontal)
                         .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
                         .split(chunks[1]);
+                    app.page_size = body_chunks[0].height.saturating_sub(2) as usize;
 
                     let list_items: Vec<ListItem> = app
                         .sys_units
@@ -341,17 +362,25 @@ fn run_app<B: ratatui::backend::Backend>(
                     f.render_widget(detail, body_chunks[1]);
                 }
                 TuiTab::Logs => {
-                    let title = app
-                        .log_path
-                        .as_ref()
-                        .map(|p| format!(" {} (tail) ", p.display()))
-                        .unwrap_or_else(|| " Logs (no log file found) ".to_string());
+                    let visible = app.visible_log_indices();
+                    let title = match (&app.log_path, &app.log_search) {
+                        (Some(p), Some(q)) => format!(
+                            " {} (tail) — /{} [{} lines] ",
+                            p.display(),
+                            q,
+                            visible.len()
+                        ),
+                        (Some(p), None) => format!(" {} (tail) ", p.display()),
+                        _ => " Logs (no log file found) ".to_string(),
+                    };
                     let height = chunks[1].height.saturating_sub(2) as usize;
-                    let end = app.log_scroll.min(app.log_lines.len());
+                    app.page_size = height;
+                    let end = app.log_scroll.min(visible.len());
                     let start = end.saturating_sub(height);
-                    let items: Vec<ListItem> = app.log_lines[start..end]
+                    let items: Vec<ListItem> = visible[start..end]
                         .iter()
-                        .map(|l| {
+                        .map(|&i| {
+                            let l = &app.log_lines[i];
                             let lvl = lens_log::detect_level(l);
                             let color = match lvl {
                                 lens_log::LogLevel::Error | lens_log::LogLevel::Fatal => {
@@ -372,27 +401,89 @@ fn run_app<B: ratatui::backend::Backend>(
                 }
             }
 
-            // Footer
-            let footer = Paragraph::new(format!(
-                " {} | Hotkeys: [Tab/1-4] Views  [q] Quit  [j/k] Navigate  [Enter] Open  [Backspace/h] Parent  [r] Reload",
-                app.status_message
-            ))
-            .style(Style::default().fg(Color::DarkGray))
-            .block(Block::default().borders(Borders::ALL));
+            if app.show_help {
+                let help = Paragraph::new(vec![
+                    Line::from("Keys:"),
+                    Line::from("  Tab / 1-4   switch views"),
+                    Line::from("  j / k       move selection (wraps)"),
+                    Line::from("  PgUp/PgDn   page up/down"),
+                    Line::from("  g / G       first / last"),
+                    Line::from("  Enter / l   open directory"),
+                    Line::from("  Backspace/h parent directory"),
+                    Line::from("  /           search log lines (Enter applies, Esc clears)"),
+                    Line::from("  r           rescan current directory"),
+                    Line::from("  ?           toggle this help"),
+                    Line::from("  q / Esc     quit"),
+                ])
+                .block(Block::default().borders(Borders::ALL).title(" Help "));
+                f.render_widget(help, chunks[1]);
+            }
+
+            // Footer — doubles as the `/` search prompt on the Logs tab.
+            let footer_text = if app.search_active {
+                format!(" /{}", app.search_buf)
+            } else {
+                format!(
+                    " {} | Hotkeys: [Tab/1-4] Views  [q] Quit  [j/k] Navigate  [PgUp/PgDn/g/G] Page  [Enter] Open  [Backspace/h] Parent  [/] Search  [?] Help  [r] Reload",
+                    app.status_message
+                )
+            };
+            let footer = Paragraph::new(footer_text)
+                .style(Style::default().fg(Color::DarkGray))
+                .block(Block::default().borders(Borders::ALL));
             f.render_widget(footer, chunks[2]);
         })?;
 
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
+                // `/` search mode captures keystrokes until Enter or Esc.
+                if app.search_active {
+                    match key.code {
+                        KeyCode::Enter => {
+                            app.log_search = Some(app.search_buf.clone());
+                            app.search_active = false;
+                            app.log_scroll = usize::MAX;
+                        }
+                        KeyCode::Esc => {
+                            app.search_active = false;
+                            app.search_buf.clear();
+                            app.log_search = None;
+                        }
+                        KeyCode::Backspace => {
+                            app.search_buf.pop();
+                        }
+                        KeyCode::Char(c) => app.search_buf.push(c),
+                        _ => {}
+                    }
+                    continue;
+                }
                 match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                    KeyCode::Char('q') => return Ok(()),
+                    KeyCode::Esc => {
+                        if app.show_help {
+                            app.show_help = false;
+                        } else {
+                            return Ok(());
+                        }
+                    }
                     KeyCode::Tab => app.next_tab(),
+                    KeyCode::Char('?') => app.show_help = !app.show_help,
                     KeyCode::Char('1') => app.set_tab(TuiTab::Storage),
                     KeyCode::Char('2') => app.set_tab(TuiTab::Services),
                     KeyCode::Char('3') => app.set_tab(TuiTab::Logs),
                     KeyCode::Char('4') => app.set_tab(TuiTab::Network),
                     KeyCode::Char('j') | KeyCode::Down => app.next(),
                     KeyCode::Char('k') | KeyCode::Up => app.previous(),
+                    KeyCode::PageDown => app.page_down(),
+                    KeyCode::PageUp => app.page_up(),
+                    KeyCode::Char('g') | KeyCode::Home => app.jump_first(),
+                    KeyCode::Char('G') | KeyCode::End => app.jump_last(),
+                    KeyCode::Char('/') => {
+                        if app.active_tab == TuiTab::Logs {
+                            app.search_active = true;
+                            app.search_buf.clear();
+                        }
+                    }
                     KeyCode::Enter | KeyCode::Char('l') => app.enter(),
                     KeyCode::Backspace | KeyCode::Char('h') => app.parent(),
                     KeyCode::Char('r') => {
