@@ -6,7 +6,7 @@ pub mod parser;
 
 pub use dag::{CyclePath, OrderingConstraint, OrderingGraph};
 pub use diff::diff_systemd;
-pub use loader::{load_unit, load_units};
+pub use loader::{load_unit, load_units, load_units_merged, SYSTEMD_SEARCH_DIRS};
 pub use model::*;
 pub use parser::{apply_drop_in, expand_specifiers, is_template_name, parse_unit_content};
 

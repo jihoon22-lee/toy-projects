@@ -125,17 +125,15 @@ impl TuiApp {
         }
     }
 
-    /// Load systemd units (with drop-ins) for the Services tab.
+    /// Load systemd units (with drop-ins) for the Services tab. Uses the
+    /// full systemd search path so vendor units under /usr/lib and runtime
+    /// units under /run are visible, not just /etc.
     pub fn reload_services(&mut self) {
-        let base = Path::new("/etc/systemd/system");
-        match lens_sys::load_units(base) {
-            Ok(units) => {
-                self.sys_units = units.into_values().collect();
-            }
-            Err(_) => {
-                self.sys_units = Vec::new();
-            }
-        }
+        let dirs: Vec<PathBuf> = lens_sys::SYSTEMD_SEARCH_DIRS
+            .iter()
+            .map(PathBuf::from)
+            .collect();
+        self.sys_units = lens_sys::load_units_merged(&dirs).into_values().collect();
         if self.sys_selected >= self.sys_units.len() {
             self.sys_selected = 0;
         }

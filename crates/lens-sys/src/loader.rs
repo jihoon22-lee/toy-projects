@@ -236,6 +236,232 @@ fn drop_in_dirs(unit_path: &Path, unit_name: &str) -> Vec<PathBuf> {
     dirs
 }
 
+/// systemd's unit search path in *decreasing* precedence order (later
+/// entries are shadowed by earlier ones). `/lib/systemd/system` is the
+/// historic location of what is now `/usr/lib/systemd/system` on merged-usr
+/// systems; listing both keeps non-merged layouts working.
+pub const SYSTEMD_SEARCH_DIRS: [&str; 4] = [
+    "/etc/systemd/system",
+    "/run/systemd/system",
+    "/usr/lib/systemd/system",
+    "/lib/systemd/system",
+];
+
+/// A unit file (or `.d` drop-in directory member) found in a search dir.
+fn unit_name_of(path: &Path) -> Option<String> {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .filter(|n| UNIT_SUFFIXES.iter().any(|s| n.ends_with(s)))
+        .map(|n| n.to_string())
+}
+
+/// Load all drop-in `*.conf` for `unit_name` from `dir` (template level
+/// first, instance level last), returning them sorted by filename.
+fn drop_in_confs(dir: &Path, unit_name: &str) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let unit_path = dir.join(unit_name);
+    for drop_dir in drop_in_dirs(&unit_path, unit_name) {
+        if !drop_dir.is_dir() {
+            continue;
+        }
+        let mut confs: Vec<PathBuf> = match std::fs::read_dir(&drop_dir) {
+            Ok(rd) => rd
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().map(|x| x == "conf").unwrap_or(false))
+                .collect(),
+            Err(_) => Vec::new(),
+        };
+        confs.sort();
+        out.extend(confs);
+    }
+    out
+}
+
+/// Merge-load units across systemd's search dirs (highest precedence first
+/// in `dirs`). The unit *file* comes from the highest-precedence dir that
+/// provides it; a mask (`/dev/null` symlink) or alias there shadows lower
+/// dirs entirely. Drop-ins from **all** dirs still apply — lowest
+/// precedence first so `/etc` drop-ins win over vendor defaults.
+pub fn load_units_merged(dirs: &[impl AsRef<Path>]) -> BTreeMap<String, SystemdUnit> {
+    let mut units = BTreeMap::new();
+
+    // Collect candidate names per dir in precedence order.
+    let dir_names: Vec<std::collections::BTreeSet<String>> = dirs
+        .iter()
+        .map(|d| {
+            std::fs::read_dir(d.as_ref())
+                .map(|rd| {
+                    rd.flatten()
+                        .filter(|e| {
+                            e.file_type()
+                                .map(|t| t.is_file() || t.is_symlink() || t.is_dir())
+                                .unwrap_or(false)
+                        })
+                        .filter_map(|e| {
+                            let n = e.file_name().to_string_lossy().into_owned();
+                            // `<name>.d` dirs contribute the base unit name.
+                            n.strip_suffix(".d")
+                                .filter(|b| UNIT_SUFFIXES.iter().any(|s| b.ends_with(s)))
+                                .map(|b| b.to_string())
+                                .or_else(|| unit_name_of(&e.path()))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+        .collect();
+
+    let mut all_names = std::collections::BTreeSet::new();
+    for set in &dir_names {
+        all_names.extend(set.iter().cloned());
+    }
+
+    for name in all_names {
+        // Highest-precedence dir that actually provides the unit file.
+        let primary = dirs.iter().enumerate().find(|(i, d)| {
+            dir_names[*i].contains(&name) && {
+                let p = d.as_ref().join(&name);
+                p.is_file() || p.is_symlink()
+            }
+        });
+        let Some((_, primary_dir)) = primary else {
+            // Only drop-ins exist — systemd synthesizes a stub unit.
+            let mut unit = SystemdUnit {
+                name: name.clone(),
+                ..Default::default()
+            };
+            unit.diagnostics.push(Diagnostic {
+                code: "UNIT_STUB".to_string(),
+                severity: "info".to_string(),
+                message: "unit defined only via drop-in overrides".to_string(),
+                path: None,
+                line: None,
+            });
+            apply_merged_drop_ins(&mut unit, dirs, &name);
+            units.insert(name, unit);
+            continue;
+        };
+        let p = primary_dir.as_ref().join(&name);
+
+        // Masked / alias / broken symlinks are handled at the winning dir —
+        // a mask in /etc shadows the vendor unit entirely.
+        if p.is_symlink() {
+            match std::fs::canonicalize(&p) {
+                Ok(target) if target == Path::new("/dev/null") => {
+                    let mut unit = SystemdUnit {
+                        name: name.clone(),
+                        path: Some(p.to_string_lossy().into_owned()),
+                        masked: true,
+                        ..Default::default()
+                    };
+                    unit.diagnostics.push(Diagnostic {
+                        code: "UNIT_MASKED".to_string(),
+                        severity: "info".to_string(),
+                        message: "unit is masked (symlink to /dev/null)".to_string(),
+                        path: Some(p.to_string_lossy().into_owned()),
+                        line: None,
+                    });
+                    units.insert(name, unit);
+                    continue;
+                }
+                Ok(target) => {
+                    let target_name = target
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("")
+                        .to_string();
+                    if !target_name.is_empty() && target_name != name {
+                        let mut unit = SystemdUnit {
+                            name: name.clone(),
+                            path: Some(p.to_string_lossy().into_owned()),
+                            alias_of: Some(target_name.clone()),
+                            ..Default::default()
+                        };
+                        unit.diagnostics.push(Diagnostic {
+                            code: "UNIT_ALIAS".to_string(),
+                            severity: "info".to_string(),
+                            message: format!("alias for {}", target_name),
+                            path: Some(p.to_string_lossy().into_owned()),
+                            line: None,
+                        });
+                        units.insert(name, unit);
+                        continue;
+                    }
+                }
+                Err(e) => {
+                    let mut unit = SystemdUnit {
+                        name: name.clone(),
+                        path: Some(p.to_string_lossy().into_owned()),
+                        ..Default::default()
+                    };
+                    unit.diagnostics.push(Diagnostic {
+                        code: "UNIT_UNREADABLE".to_string(),
+                        severity: "error".to_string(),
+                        message: format!("broken symlink: {}", e),
+                        path: Some(p.to_string_lossy().into_owned()),
+                        line: None,
+                    });
+                    units.insert(name, unit);
+                    continue;
+                }
+            }
+        }
+
+        let mut unit = match std::fs::read_to_string(&p) {
+            Ok(content) => parse_unit_content(&content, &name, Some(&p.to_string_lossy())),
+            Err(e) => {
+                let mut unit = SystemdUnit {
+                    name: name.clone(),
+                    path: Some(p.to_string_lossy().into_owned()),
+                    ..Default::default()
+                };
+                unit.diagnostics.push(Diagnostic {
+                    code: "UNIT_UNREADABLE".to_string(),
+                    severity: "error".to_string(),
+                    message: format!("{}", e),
+                    path: Some(p.to_string_lossy().into_owned()),
+                    line: None,
+                });
+                unit
+            }
+        };
+        apply_merged_drop_ins(&mut unit, dirs, &name);
+        units.insert(name, unit);
+    }
+
+    // Fold alias names onto their canonical units.
+    let alias_pairs: Vec<(String, String)> = units
+        .iter()
+        .filter_map(|(n, u)| u.alias_of.as_ref().map(|t| (n.clone(), t.clone())))
+        .collect();
+    for (alias_name, target_name) in alias_pairs {
+        if let Some(target) = units.get_mut(&target_name) {
+            target.aliases.push(alias_name);
+        }
+    }
+    units
+}
+
+/// Apply drop-ins from every search dir, lowest precedence dir first so
+/// the highest-precedence dir's conf wins per key.
+fn apply_merged_drop_ins(unit: &mut SystemdUnit, dirs: &[impl AsRef<Path>], unit_name: &str) {
+    for dir in dirs.iter().rev() {
+        for conf in drop_in_confs(dir.as_ref(), unit_name) {
+            match std::fs::read_to_string(&conf) {
+                Ok(c) => apply_drop_in(unit, &c, &conf.to_string_lossy()),
+                Err(e) => unit.diagnostics.push(Diagnostic {
+                    code: "DROPIN_UNREADABLE".to_string(),
+                    severity: "warning".to_string(),
+                    message: format!("cannot read {}: {}", conf.display(), e),
+                    path: Some(conf.to_string_lossy().into_owned()),
+                    line: None,
+                }),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,5 +529,83 @@ mod tests {
     fn test_load_units_rejects_missing_path() {
         let missing = std::path::Path::new("/nonexistent-lens-sys-dir-xyz");
         assert!(load_units(missing).is_err());
+    }
+
+    #[test]
+    fn test_load_units_merged_precedence_and_cross_dir_dropins() {
+        let root = std::env::temp_dir().join(format!("lenssys-merged-{}", std::process::id()));
+        let etc = root.join("etc/systemd/system");
+        let lib = root.join("usr/lib/systemd/system");
+        std::fs::create_dir_all(&etc).unwrap();
+        std::fs::create_dir_all(&lib).unwrap();
+
+        // Vendor unit + vendor drop-in; /etc overrides the unit file and
+        // adds a second drop-in.
+        std::fs::write(
+            lib.join("svc.service"),
+            "[Service]\nExecStart=/bin/vendor\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(lib.join("svc.service.d")).unwrap();
+        std::fs::write(
+            lib.join("svc.service.d/50-vendor.conf"),
+            "[Service]\nEnvironment=V=vendor\n",
+        )
+        .unwrap();
+        std::fs::write(etc.join("svc.service"), "[Service]\nExecStart=/bin/local\n").unwrap();
+        std::fs::create_dir_all(etc.join("svc.service.d")).unwrap();
+        std::fs::write(
+            etc.join("svc.service.d/90-local.conf"),
+            "[Service]\nEnvironment=E=local\n",
+        )
+        .unwrap();
+        // Masked in /etc shadows the vendor unit completely.
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("/dev/null", etc.join("masked.service")).unwrap();
+        std::fs::write(lib.join("masked.service"), "[Service]\nExecStart=/bin/m\n").unwrap();
+        // Vendor-only unit still loads.
+        std::fs::write(
+            lib.join("vendor-only.service"),
+            "[Service]\nExecStart=/bin/v\n",
+        )
+        .unwrap();
+
+        let dirs: Vec<std::path::PathBuf> = vec![etc.clone(), lib.clone()];
+        let units = load_units_merged(&dirs);
+
+        // /etc unit file wins; drop-ins from both dirs merged.
+        let svc = &units["svc.service"];
+        assert_eq!(svc.exec_start.as_deref(), Some("/bin/local"));
+        assert_eq!(svc.drop_ins.len(), 2);
+        assert_eq!(
+            svc.sections["Service"]["Environment"],
+            vec!["V=vendor".to_string(), "E=local".to_string()]
+        );
+        // /etc mask shadows the vendor file.
+        assert!(units["masked.service"].masked);
+        // Vendor-only unit present.
+        assert_eq!(
+            units["vendor-only.service"].exec_start.as_deref(),
+            Some("/bin/v")
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_load_units_merged_dropin_only_stub() {
+        let root = std::env::temp_dir().join(format!("lenssys-stub-{}", std::process::id()));
+        let etc = root.join("etc");
+        std::fs::create_dir_all(etc.join("ghost.service.d")).unwrap();
+        std::fs::write(
+            etc.join("ghost.service.d/10-x.conf"),
+            "[Service]\nEnvironment=X=1\n",
+        )
+        .unwrap();
+        let dirs: Vec<std::path::PathBuf> = vec![etc];
+        let units = load_units_merged(&dirs);
+        let ghost = &units["ghost.service"];
+        assert_eq!(ghost.sections["Service"]["Environment"], vec!["X=1"]);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
