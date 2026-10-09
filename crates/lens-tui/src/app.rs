@@ -70,8 +70,14 @@ pub struct TuiApp {
 
 impl TuiApp {
     pub fn new(initial_path: &Path) -> Self {
+        // Canonicalize so "." becomes a real absolute path — otherwise
+        // parent() yields Some("") and navigating up silently empties the
+        // listing with "Failed to scan \"\"".
+        let start = initial_path
+            .canonicalize()
+            .unwrap_or_else(|_| initial_path.to_path_buf());
         let mut app = Self {
-            current_path: initial_path.to_path_buf(),
+            current_path: start,
             active_tab: TuiTab::Storage,
             items: Vec::new(),
             selected_index: 0,
@@ -327,5 +333,19 @@ mod tests {
         assert_eq!(app.selected_index, 1);
         app.previous();
         assert_eq!(app.selected_index, 0);
+    }
+
+    #[test]
+    fn test_parent_from_relative_start() {
+        // `lens tui` starts at "."; Path::new(".").parent() is Some(""), an
+        // unscannable path. Canonicalization makes Backspace reach the real
+        // parent directory instead.
+        let cwd = std::env::current_dir().unwrap();
+        let mut app = TuiApp::new(Path::new("."));
+        assert_eq!(app.current_path, cwd);
+
+        app.parent();
+        assert_eq!(app.current_path, cwd.parent().unwrap().to_path_buf());
+        assert!(!app.status_message.contains("Failed to scan"));
     }
 }
