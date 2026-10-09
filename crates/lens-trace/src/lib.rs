@@ -41,7 +41,7 @@ mod tests {
 
         assert!(snap.total_calls >= 5);
         assert_eq!(snap.total_errors, 1);
-        assert_eq!(snap.errors.get("ENOENT"), Some(&1));
+        assert_eq!(snap.errors.get("openat:ENOENT"), Some(&1));
         // read should be stitched properly from unfinished and resumed
         assert!(snap.syscalls.contains_key("read"));
     }
@@ -71,7 +71,7 @@ mod tests {
         let diff = diff_snapshots(&snap1, &snap2);
         assert_eq!(diff.call_delta, -1);
         assert_eq!(diff.error_delta, 1);
-        assert_eq!(diff.new_errors, vec!["ENOENT"]);
+        assert_eq!(diff.new_errors, vec!["openat:ENOENT"]);
         assert!(diff.resolved_errors.is_empty());
     }
 }
