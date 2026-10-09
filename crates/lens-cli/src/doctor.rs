@@ -185,11 +185,26 @@ pub fn check_network(proc_path: Option<&Path>) -> Vec<DoctorCheck> {
             name: "Orphan Socket Detection".to_string(),
             status: HealthStatus::Warn,
             message: format!(
-                "Detected {} sockets without associated process PID in /proc",
+                "Detected {} orphaned sockets (no live process holds the inode)",
                 net_report.summary.orphan_sockets
             ),
             recommendation: Some(
                 "Run with elevated permissions or inspect kernel socket tables.".to_string(),
+            ),
+        });
+    } else if net_report.summary.owner_unknown_sockets > 0 {
+        // Permission limits are not orphans — do not warn for sockets we
+        // simply could not inspect.
+        checks.push(DoctorCheck {
+            category: "Network".to_string(),
+            name: "Orphan Socket Detection".to_string(),
+            status: HealthStatus::Pass,
+            message: format!(
+                "All attributable sockets have owners; {} socket(s) could not be inspected (permission denied on /proc/<pid>/fd)",
+                net_report.summary.owner_unknown_sockets
+            ),
+            recommendation: Some(
+                "Re-run with sudo to attribute those sockets.".to_string(),
             ),
         });
     } else {

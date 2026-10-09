@@ -58,7 +58,7 @@ fn stdout_pipe_closed_early_exits_cleanly() {
 #[test]
 fn env_check_rejects_nonexistent_venv() {
     let out = lens(&["env", "check", "/nonexistent-venv-lens-test"]);
-    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(2), "errors must exit 2");
     assert!(
         stderr_of(&out).contains("virtualenv"),
         "{}",
@@ -70,7 +70,7 @@ fn env_check_rejects_nonexistent_venv() {
 fn env_check_rejects_non_venv_dir() {
     let dir = tmp_dir("notvenv");
     let out = lens(&["env", "check", dir.to_str().unwrap()]);
-    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(2), "errors must exit 2");
     assert!(
         stderr_of(&out).contains("virtualenv"),
         "{}",
@@ -81,7 +81,7 @@ fn env_check_rejects_non_venv_dir() {
 #[test]
 fn net_inspect_rejects_nonexistent_proc_dir() {
     let out = lens(&["net", "inspect", "--proc-dir", "/nonexistent-proc"]);
-    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(2), "errors must exit 2");
     assert!(!stderr_of(&out).is_empty());
 }
 
@@ -94,7 +94,7 @@ fn doctor_rejects_nonexistent_override_dirs() {
         "--procfs",
         "/nonexistent-proc",
     ]);
-    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(2), "errors must exit 2");
     assert!(
         stderr_of(&out).contains("does not exist"),
         "{}",
@@ -102,7 +102,7 @@ fn doctor_rejects_nonexistent_override_dirs() {
     );
 
     let out = lens(&["doctor", "--procfs", "/nonexistent-proc"]);
-    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(2), "errors must exit 2");
     assert!(stderr_of(&out).contains("--procfs"), "{}", stderr_of(&out));
 }
 
@@ -110,7 +110,7 @@ fn doctor_rejects_nonexistent_override_dirs() {
 fn test_parse_rejects_non_xml() {
     let file = tmp_file("junit", "report.xml", "not xml\n");
     let out = lens(&["test", "parse", file.to_str().unwrap()]);
-    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(2), "errors must exit 2");
     assert!(stderr_of(&out).contains("JUnit"), "{}", stderr_of(&out));
 }
 
@@ -129,7 +129,7 @@ fn trace_analyze_rejects_non_strace() {
         "the quick brown fox\njumps over the lazy dog\npack my box with five dozen liquor jugs\n",
     );
     let out = lens(&["trace", "analyze", file.to_str().unwrap()]);
-    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(2), "errors must exit 2");
     assert!(stderr_of(&out).contains("strace"), "{}", stderr_of(&out));
 }
 
@@ -168,7 +168,7 @@ fn bundle_create_isolates_source_failures() {
         "--test",
         junit.to_str().unwrap(),
     ]);
-    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(2), "errors must exit 2");
     assert!(stderr_of(&out).contains("--force"), "{}", stderr_of(&out));
 
     // --force allows the overwrite.
@@ -194,17 +194,19 @@ fn disk_scan_reports_incomplete_on_unreadable_dirs() {
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
 
     let out = lens(&["disk", "scan", dir.to_str().unwrap()]);
-    assert!(out.status.success(), "{}", stderr_of(&out));
-
     // When the filesystem honors the permission drop, the scan records an
     // error and the banner must admit the result is incomplete. (Running as
     // root bypasses the chmod — nothing to assert then.)
     if stderr_of(&out).contains("scan warning") {
+        // Incomplete evidence is a finding: exit 1, not 0.
+        assert_eq!(out.status.code(), Some(1));
         assert!(
             stdout_of(&out).contains("INCOMPLETE"),
             "{}",
             stdout_of(&out)
         );
+    } else {
+        assert!(out.status.success(), "{}", stderr_of(&out));
     }
 
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -260,7 +262,8 @@ fn env_check_evaluates_markers_and_extras() {
     );
 
     let out = lens(&["env", "check", venv.to_str().unwrap()]);
-    assert!(out.status.success(), "{}", stderr_of(&out));
+    // Version conflicts are findings -> exit 1.
+    assert_eq!(out.status.code(), Some(1), "{}", stderr_of(&out));
     let stdout = stdout_of(&out);
     assert!(!stdout.contains("missing dependenc"), "{stdout}");
     assert!(stdout.contains("Version conflicts"), "{stdout}");
@@ -273,7 +276,7 @@ fn env_check_evaluates_markers_and_extras() {
         "testing",
         venv.to_str().unwrap(),
     ]);
-    assert!(out.status.success(), "{}", stderr_of(&out));
+    assert_eq!(out.status.code(), Some(1), "{}", stderr_of(&out));
     assert!(stdout_of(&out).contains("pytest"));
 }
 
@@ -367,7 +370,8 @@ fn sys_cycles_report_directive_path_and_origin() {
     .unwrap();
 
     let out = lens(&["sys", "cycles", dir.to_str().unwrap()]);
-    assert!(out.status.success(), "{}", stderr_of(&out));
+    // A detected cycle is a finding -> exit 1.
+    assert_eq!(out.status.code(), Some(1), "{}", stderr_of(&out));
     let stdout = stdout_of(&out);
     // Real directed path annotated with directive(file:line) origin.
     assert!(stdout.contains("--Before(a.service:2)-->"), "{stdout}");
@@ -528,4 +532,346 @@ fn build_inspect_reports_transitive_impact() {
         "{}",
         json["transitive_impact"]
     );
+}
+
+#[test]
+fn test_diff_regression_exits_1_clean_exits_0() {
+    let base = tmp_file(
+        "diff-base",
+        "base.xml",
+        r#"<testsuite tests="1"><testcase name="a" classname="C" time="0"/></testsuite>"#,
+    );
+    let regressed = tmp_file(
+        "diff-cand",
+        "cand.xml",
+        r#"<testsuite tests="1"><testcase name="a" classname="C" time="0"><failure message="boom"/></testcase></testsuite>"#,
+    );
+
+    let out = lens(&[
+        "test",
+        "diff",
+        base.to_str().unwrap(),
+        regressed.to_str().unwrap(),
+    ]);
+    // A regression is a finding -> exit 1 (was 0 before the convention).
+    assert_eq!(out.status.code(), Some(1), "{}", stderr_of(&out));
+
+    let out = lens(&[
+        "test",
+        "diff",
+        base.to_str().unwrap(),
+        base.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr_of(&out));
+}
+
+// --- Phase 2: CLI contracts ---
+
+#[test]
+fn doctor_fail_on_warn_threshold() {
+    // PATH="." triggers a PATH-sanity WARN; with an empty systemd dir and a
+    // minimal fake procfs nothing else fails.
+    let procfs = tmp_dir("procfs");
+    let net = procfs.join("net");
+    std::fs::create_dir_all(&net).unwrap();
+    std::fs::write(
+        net.join("tcp"),
+        "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n",
+    )
+    .unwrap();
+    let sysdir = tmp_dir("sys-empty");
+
+    let run = |extra: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_lens"))
+            .args([
+                "doctor",
+                "--procfs",
+                procfs.to_str().unwrap(),
+                "--systemd-dir",
+                sysdir.to_str().unwrap(),
+            ])
+            .args(extra)
+            .env("PATH", ".")
+            .output()
+            .expect("failed to spawn lens")
+    };
+
+    let out = run(&[]);
+    // WARN present: default --fail-on fail still exits 0.
+    assert_eq!(out.status.code(), Some(0), "{}", stdout_of(&out));
+    assert!(stdout_of(&out).contains("[WARN]"), "{}", stdout_of(&out));
+
+    let out = run(&["--fail-on", "warn"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout_of(&out));
+}
+
+#[test]
+fn doctor_fail_on_fail_with_cycle() {
+    let dir = tmp_dir("sys-cycle-doctor");
+    std::fs::write(
+        dir.join("a.service"),
+        "[Unit]\nBefore=b.service\n[Service]\nExecStart=/bin/a\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("b.service"),
+        "[Unit]\nBefore=a.service\n[Service]\nExecStart=/bin/b\n",
+    )
+    .unwrap();
+    let procfs = tmp_dir("procfs2");
+    let net = procfs.join("net");
+    std::fs::create_dir_all(&net).unwrap();
+    std::fs::write(
+        net.join("tcp"),
+        "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n",
+    )
+    .unwrap();
+    let out = lens(&[
+        "doctor",
+        "--procfs",
+        procfs.to_str().unwrap(),
+        "--systemd-dir",
+        dir.to_str().unwrap(),
+    ]);
+    assert!(stdout_of(&out).contains("[FAIL]"), "{}", stdout_of(&out));
+    assert_eq!(out.status.code(), Some(1));
+}
+
+#[test]
+fn test_parse_format_text_is_summary() {
+    let f = tmp_file("parse-fmt", "r.xml", JUNIT_XML);
+    let out = lens(&["test", "parse", f.to_str().unwrap(), "--format", "text"]);
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    let stdout = stdout_of(&out);
+    assert!(stdout.contains("Test run:"), "{stdout}");
+    assert!(!stdout.trim_start().starts_with('{'), "{stdout}");
+
+    let out = lens(&["test", "parse", f.to_str().unwrap(), "--format", "json"]);
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    let json: serde_json::Value = serde_json::from_str(&stdout_of(&out)).expect("JSON output");
+    assert_eq!(json["schema"], "testlens.run/v1");
+}
+
+#[test]
+fn disk_scan_top_exclude_and_human_units() {
+    let dir = tmp_dir("scan-top");
+    let big = dir.join("big");
+    let small = dir.join("small");
+    let skipme = dir.join("skipme");
+    for d in [&big, &small, &skipme] {
+        std::fs::create_dir(d).unwrap();
+    }
+    std::fs::write(big.join("a.bin"), vec![0u8; 5 * 1024]).unwrap();
+    std::fs::write(small.join("b.txt"), "x").unwrap();
+    std::fs::write(skipme.join("c.bin"), vec![0u8; 9 * 1024]).unwrap();
+
+    let out = lens(&[
+        "disk",
+        "scan",
+        dir.to_str().unwrap(),
+        "--top",
+        "1",
+        "--exclude",
+        "skipme",
+    ]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr_of(&out));
+    let stdout = stdout_of(&out);
+    assert!(stdout.contains("KiB"), "{stdout}");
+    assert!(stdout.contains("Largest top-level entries:"), "{stdout}");
+    let top_section = stdout.split("Largest top-level entries:").nth(1).unwrap();
+    assert!(top_section.contains("big"), "{stdout}");
+    // --top 1 prints exactly one ranked entry.
+    assert_eq!(
+        top_section
+            .lines()
+            .filter(|l| l.starts_with("    "))
+            .count(),
+        1,
+        "{stdout}"
+    );
+    // --exclude drop: skipme's 9 KiB must not be counted.
+    assert!(!stdout.contains("skipme"), "{stdout}");
+
+    // --max-depth 0 truncates at the root: an incomplete scan is a finding.
+    let out = lens(&[
+        "disk",
+        "scan",
+        dir.to_str().unwrap(),
+        "--max-depth",
+        "0",
+        "--json",
+    ]);
+    assert_eq!(out.status.code(), Some(1), "{}", stderr_of(&out));
+    let json: serde_json::Value = serde_json::from_str(&stdout_of(&out)).expect("JSON output");
+    assert_eq!(json["complete"], false, "{json}");
+}
+
+#[test]
+fn disk_duplicates_json_text_and_reclaimable() {
+    let dir = tmp_dir("dups");
+    let blob = vec![7u8; 2048];
+    std::fs::write(dir.join("a.bin"), &blob).unwrap();
+    std::fs::write(dir.join("b.bin"), &blob).unwrap();
+    std::fs::write(dir.join("unique.bin"), b"u").unwrap();
+
+    let out = lens(&[
+        "disk",
+        "duplicates",
+        dir.to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    let json: serde_json::Value = serde_json::from_str(&stdout_of(&out)).expect("JSON output");
+    assert_eq!(json["groups"].as_array().unwrap().len(), 1);
+    assert_eq!(json["total_reclaimable_bytes"], 2048);
+    assert!(json["errors"].is_array());
+
+    let out = lens(&["disk", "duplicates", dir.to_str().unwrap()]);
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    let stdout = stdout_of(&out);
+    assert!(stdout.contains("Total reclaimable"), "{stdout}");
+    assert!(stdout.contains("KiB"), "{stdout}");
+}
+
+#[test]
+fn test_diff_multifile_and_structured_semantics() {
+    let base = tmp_dir("base-run");
+    let cand = tmp_dir("cand-run");
+    std::fs::write(
+        base.join("m1.xml"),
+        r#"<testsuite name="s1" tests="2"><testcase name="keep" classname="C" time="0"/><testcase name="gone" classname="C" time="0"/></testsuite>"#,
+    )
+    .unwrap();
+    std::fs::write(
+        base.join("m2.xml"),
+        r#"<testsuite name="s2" tests="1"><testcase name="sk" classname="C" time="0"><skipped/></testcase></testsuite>"#,
+    )
+    .unwrap();
+    std::fs::write(
+        cand.join("m1.xml"),
+        r#"<testsuite name="s1" tests="1"><testcase name="keep" classname="C" time="0"/></testsuite>"#,
+    )
+    .unwrap();
+    std::fs::write(
+        cand.join("m2.xml"),
+        r#"<testsuite name="s2" tests="2"><testcase name="sk" classname="C" time="0"/><testcase name="brand" classname="C" time="0"><error message="new boom"/></testcase></testsuite>"#,
+    )
+    .unwrap();
+
+    let out = lens(&[
+        "test",
+        "diff",
+        base.to_str().unwrap(),
+        cand.to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
+    let json: serde_json::Value = serde_json::from_str(&stdout_of(&out)).expect("JSON output");
+    assert_eq!(json["schema"], "testlens.diff/v2");
+    // skipped -> passed is a skip change, not a fix.
+    assert_eq!(json["fixes"].as_array().unwrap().len(), 0);
+    assert_eq!(json["skipped_changes"].as_array().unwrap().len(), 1);
+    // Newly added failing test is a new_failure (a finding -> exit 1).
+    assert_eq!(json["new_failures"].as_array().unwrap().len(), 1);
+    assert_eq!(json["new_failures"][0]["message"], "new boom");
+    // Removed case is surfaced.
+    assert_eq!(json["removed_tests"].as_array().unwrap().len(), 1);
+    assert_eq!(json["removed_tests"][0]["id"], "s1::C::gone");
+    assert_eq!(out.status.code(), Some(1), "{}", stderr_of(&out));
+
+    // Glob input works the same way.
+    let glob = format!("{}/*.xml", base.display());
+    let out = lens(&["test", "diff", &glob, &glob]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr_of(&out));
+}
+
+#[cfg(unix)]
+#[test]
+fn net_inspect_distinguishes_owner_unknown_from_orphan() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let procfs = tmp_dir("procfs-net");
+    let net = procfs.join("net");
+    std::fs::create_dir_all(&net).unwrap();
+    // One listening socket owned by our own uid.
+    let uid = unsafe { libc::getuid() };
+    std::fs::write(
+        net.join("tcp"),
+        format!(
+            "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   0: 0100007F:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  {uid}        0 998877 1 0000000000000000 100 0 0 10 0\n"
+        ),
+    )
+    .unwrap();
+    // A process whose fd table cannot be read — its uid is the current
+    // user's (the fake /proc tree is owned by us), matching the socket.
+    let pid_dir = procfs.join("4321");
+    std::fs::create_dir(&pid_dir).unwrap();
+    std::fs::write(pid_dir.join("comm"), "svc").unwrap();
+    let fd_dir = pid_dir.join("fd");
+    std::fs::create_dir(&fd_dir).unwrap();
+    std::fs::set_permissions(&fd_dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    let out = lens(&[
+        "net",
+        "inspect",
+        "--proc-dir",
+        procfs.to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
+    std::fs::set_permissions(&fd_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", stderr_of(&out));
+    let json: serde_json::Value = serde_json::from_str(&stdout_of(&out)).expect("JSON output");
+    if json["summary"]["uninspectable_processes"]
+        .as_u64()
+        .unwrap_or(0)
+        == 0
+    {
+        // Running as root or a filesystem that ignores mode bits — the
+        // fixture cannot simulate EACCES; nothing to assert.
+        return;
+    }
+    assert_eq!(json["summary"]["owner_unknown_sockets"], 1);
+    assert_eq!(json["summary"]["orphan_sockets"], 0);
+    assert_eq!(
+        json["sockets"][0]["owner_state"],
+        serde_json::json!("owner_unknown")
+    );
+}
+
+#[test]
+fn net_inspect_no_unix_and_text_owner_column() {
+    let procfs = tmp_dir("procfs-net2");
+    let net = procfs.join("net");
+    std::fs::create_dir_all(&net).unwrap();
+    std::fs::write(
+        net.join("tcp"),
+        "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   0: 0100007F:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  0        0 998877 1 0000000000000000 100 0 0 10 0\n",
+    )
+    .unwrap();
+    std::fs::write(
+        net.join("unix"),
+        "Num       RefCount Protocol Flags    Type St Inode Path\n0000000000000000: 00000002 00000000 00010000 0001 01 123456 /run/x.sock\n",
+    )
+    .unwrap();
+
+    let out = lens(&[
+        "net",
+        "inspect",
+        "--proc-dir",
+        procfs.to_str().unwrap(),
+        "--format",
+        "json",
+        "--no-unix",
+    ]);
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    let json: serde_json::Value = serde_json::from_str(&stdout_of(&out)).expect("JSON output");
+    assert_eq!(json["sockets"].as_array().unwrap().len(), 1);
+    assert_eq!(json["sockets"][0]["kind"], "tcp");
+
+    // Text mode renders the unowned socket as <orphan>.
+    let out = lens(&["net", "inspect", "--proc-dir", procfs.to_str().unwrap()]);
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    assert!(stdout_of(&out).contains("<orphan>"), "{}", stdout_of(&out));
 }
