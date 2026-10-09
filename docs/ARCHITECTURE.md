@@ -63,12 +63,17 @@ lens-mcp ──┴─────────────┤
   program header(PT_DYNAMIC/PT_INTERP) 수동 파싱으로 폴백. DT_NEEDED/
   RPATH/RUNPATH/SONAME/VERNEED/VERDEF 해석, SHF_ALLOC 필터.
 - `dwarf.rs`: gimli로 `.debug_info` 타입명 추출(상한 10k), 압축 섹션 해제.
-- `diff.rs`: 심볼/버전 요구사항 SetDiff + `Compatibility` 판정.
+- `diff.rs`: 심볼/버전 요구사항 SetDiff + `Compatibility` 판정. 정의된
+  심볼만 제거 검사 대상이며 미정의 import는 `imports` SetDiff로 별도
+  비교(import만의 변경은 compatible), weak 심볼은 `binding="weak"`.
 
 ### lens-log
 - `indexer.rs`: memmap2 라인 인덱스 + memchr 오프셋 계산.
 - `parser.rs`/`filter.rs`: 무할당 `contains_insensitive` 슬라이딩 윈도우,
   `LogLevel::parse`는 `eq_ignore_ascii_case`(할당 없음), 구조화 `fields`.
+  syslog PRI/커널 printk 우선순위 토큰(`<N>`)에서도 레벨 추출. `--min-level`
+  필터는 `Unknown` 레코드를 제외하고 제외 수를 보고(`include_unknown`
+  으로 복원).
 
 ### lens-test
 - `junit.rs`: quick-xml 스트리밍. 선언된 인코딩+엔티티 디코딩,
@@ -79,14 +84,21 @@ lens-mcp ──┴─────────────┤
 - `parser.rs`: tid 프리픽스/타임스탬프 구분(숫자+`:`+`.`만),
   `+++` 종결행 전부 종료 처리, `-y` 주석(`fd</path>`) 제거,
   `BTreeMap<tid, BTreeMap<generation, fdset>>` — fork 시 fd 상속,
-  exit 시 잔여 fd를 `fd_leaks_by_process`로 귀속, tid 재사용은 새 세대.
+  `CLONE_FILES` clone은 fd 테이블 공유(한 스레드의 close가 다른
+  스레드에도 적용), `O_CLOEXEC` fd는 `execve`에서 해제, `close_range`
+  구간 해제 지원. 에러는 `syscall:errno` 키로 집계. exit 시 잔여 fd를
+  `fd_leaks_by_process`로 귀속, tid 재사용은 새 세대.
 
 ### lens-sys
 - `parser.rs`: 할당 순서 보존 파싱 → `Key=` 빈 값 리셋 의미론,
   specifier(`%u`/`%h`/`%i` 등) 확장.
 - `loader.rs`: 파일/디렉터리 로딩, `.d/` drop-in 스캔(템플릿 포함),
-  후순위 override.
-- `graph.rs`: Wants/Requires/Before/After로 DAG, Tarjan SCC.
+  후순위 override. `/dev/null` masked 유닛과 alias는 엣지 대상에서 정리.
+- `dag.rs`: Wants/Requires/Before/After로 유향 그래프 + Tarjan SCC.
+  사이클은 SCC 멤버 정렬이 아니라 실제 방향 경로로 재구성하고 각 엣지의
+  기원(유닛 파일:라인 + 디렉티브)을 함께 보고.
+- `diff.rs`: 유닛의 모든 섹션·키를 비교(`User=` 추가 등 표면화).
+  `sys diff`는 스냅샷 JSON 외에 유닛 디렉터리도 입력으로 받는다.
 
 ### lens-build
 - `compiler.rs`: compile_commands.json 엔트리 파싱. `-I` 계열 순서 보존
@@ -94,7 +106,9 @@ lens-mcp ──┴─────────────┤
   `normalize_path`로 `..`/`./` 정규화.
 - `impact.rs`: 소스의 `#include`를 온디스크 해석(인클루딩 파일 디렉터리 →
   `-I` 순서), 전이 헤더 클로저(`header_to_headers`), 역방향
-  `header_to_units`. `MAX_SCANNED_FILES` 도달 → `scan_truncated`.
+  `header_to_units`. 스냅샷의 `reverse_impact`는 직접 includer만,
+  `transitive_impact`는 헤더 체인 전이 includer까지.
+  `MAX_SCANNED_FILES` 도달 → `scan_truncated`.
 
 ### lens-net
 - `parser.rs`: `/proc/net/{tcp,tcp6,udp,udp6,unix}` — 주소는 호스트 엔디안
@@ -104,8 +118,15 @@ lens-mcp ──┴─────────────┤
 - `diff.rs`: 리스너는 (kind,address,port), established는 5-tuple 매칭.
 
 ### lens-env
-- venv의 `pyvenv.cfg`/`dist-info` 정적 파싱(인터프리터 실행 없음),
-  미충족 의존성 계산, 프로젝트 소스의 모듈 섀도잉 탐지.
+- venv의 `pyvenv.cfg`/`dist-info` 정적 파싱(인터프리터 실행 없음,
+  uv의 `version_info` 키 포함), 미충족 의존성 계산, 프로젝트 소스의
+  모듈 섀도잉 탐지.
+- `markers.rs`: PEP 508 환경 마커 토크나이저/파서/평가자 —
+  `and`/`or`/괄호, `==`/`!=`/`<`/`<=`/`>`/`>=`/`~=`/`in`/`not in`,
+  버전 비교, `python_version`/`sys_platform`/`platform_system`/
+  `os_name`/`extra` 등. 거짓 마커 요구는 스킵, `extra`는 선택된 extra
+  집합에서만 참, 평가 불가는 `unevaluated`로 분리 보고, 범위 불일치는
+  `version_conflicts`.
 
 ## 4. 번들 포맷 (`lens.bundle/v2`)
 

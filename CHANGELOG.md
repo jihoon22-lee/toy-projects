@@ -25,6 +25,32 @@ Lens는 워크스페이스 단일 버전으로 릴리스된다. 태그는 `vX.Y.
   상위 디렉터리 이동이 동작. 패닉 시 터미널(raw mode/alt screen)을 복원하는
   panic hook 추가.
 
+### 정확성 (Phase 1)
+- `lens env check`: PEP 508 환경 마커(`python_version`, `sys_platform`,
+  `extra`, `and`/`or`/괄호, 버전 비교)를 venv의 실제 버전/플랫폼에 대해
+  평가. 거짓 마커 요구는 스킵해 거짓 "missing"을 제거하고, `extra == "x"`
+  는 새 `--extras a,b`로 활성화한 extra에서만 적용. 설치됐지만 범위를
+  벗어난 버전은 `version_conflicts`, 평가 불가 마커는 `unevaluated`로
+  missing과 구분해 보고. uv venv의 `version_info` 키 인식 추가.
+- `lens log filter --min-level`: 레벨을 판별할 수 없는 줄을 제외하고
+  제외 수를 stderr로 보고(`--include-unknown`으로 복원). syslog PRI와
+  커널 printk `<N>` 접두사에서도 레벨 추출.
+- `lens trace analyze`: `CLONE_FILES` 스레드가 fd 테이블을 공유하도록
+  모델링(스레드의 close가 공유 fd를 해제), `O_CLOEXEC` fd를 `execve`에서
+  해제, `close_range` 지원. 에러 집계 키를 `syscall:errno`로 변경.
+- `lens abi`: 동적 심볼을 정의(export)/미정의(import)로 구분 — diff가
+  정의된 심볼만 제거 판정에 쓰고 import는 `imports` SetDiff로 별도
+  비교(import만의 변경은 compatible). weak 심볼은 binding=`weak`로 표기.
+  `abilens.diff/v3` 스키마.
+- `lens sys cycles`: 사이클을 SCC 멤버 정렬이 아닌 실제 방향 경로로
+  보고하고 각 엣지의 기원(유닛 파일:라인, 디렉티브)을 표시. `/dev/null`
+  masked 유닛은 엣지 대상에서 제외하고 alias/템플릿 이름 해석.
+- `lens sys diff`: 유닛의 모든 섹션·키를 비교(`User=` 추가 등). 입력으로
+  스냅샷 JSON 외에 유닛 디렉터리도 허용.
+- `lens build inspect`: `reverse_impact`는 직접 includer만 유지하고,
+  헤더 체인을 거친 간접 includer까지 포함하는 `transitive_impact` 추가
+  (`buildscope.snapshot/v4` 유지, 신규 필드).
+
 ## 0.4.3
 
 무결성·정확성 대수정 릴리스. 상세 내역은 아래 섹션 참고.
