@@ -80,7 +80,12 @@ pub struct PolicyEvaluation {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AbiData {
     pub versions: Vec<VersionRequirement>,
+    /// Defined dynamic symbols — the exported API surface.
     pub symbols: Vec<String>,
+    /// Undefined dynamic symbols — imported dependencies. Diffed as
+    /// dependency information, never as removed exports.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub imports: Vec<String>,
     pub vtables: Vec<String>,
     #[serde(default)]
     pub types: Vec<String>,
@@ -122,7 +127,12 @@ pub struct DiffReport {
     pub right_status: String,
     pub header_changes: Vec<String>,
     pub dependencies: DiffDependencies,
+    /// Defined/exported symbol surface diff.
     pub symbols: SetDiff<String>,
+    /// Imported (undefined) symbol diff — dependency information only;
+    /// it does not affect the compatibility verdict.
+    #[serde(default)]
+    pub imports: SetDiff<String>,
     pub vtables: SetDiff<String>,
     pub abi: SetDiff<String>,
     pub types: SetDiff<String>,

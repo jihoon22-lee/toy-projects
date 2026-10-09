@@ -65,6 +65,39 @@ mod tests {
     }
 
     #[test]
+    fn test_diff_import_only_change_is_compatible() {
+        let fake_elf =
+            b"\x7fELF\x02\x01\x01\0\0\0\0\0\0\0\0\0\x02\0\x3e\0\x01\0\0\0\0\0\0\0\0\0\0\0";
+        let mut a = inspect_elf("app_v1", fake_elf);
+        a.status = InputStatus::Valid;
+        a.abi.symbols = vec!["run".to_string()];
+        a.abi.imports = vec!["malloc".to_string()];
+
+        let mut b = a.clone();
+        b.input = "app_v2".to_string();
+        // The app now imports a different helper — a dependency change,
+        // not a removed export.
+        b.abi.imports = vec!["malloc".to_string(), "pthread_create".to_string()];
+
+        let diff = diff_reports(&a, &b);
+        assert!(diff.changed);
+        assert!(diff.compatible);
+        assert_eq!(diff.compatibility, lens_core::Compatibility::Compatible);
+        assert_eq!(diff.imports.added, vec!["pthread_create"]);
+        assert!(diff.symbols.removed.is_empty());
+    }
+
+    #[test]
+    fn test_diff_invalid_input_is_uncertain() {
+        let report_a = inspect_elf("a.txt", b"not an elf");
+        let mut report_b = inspect_elf("b.bin", b"not an elf either");
+        report_b.status = InputStatus::Valid;
+        let diff = diff_reports(&report_a, &report_b);
+        assert_eq!(diff.compatibility, lens_core::Compatibility::Uncertain);
+        assert!(!diff.compatible);
+    }
+
+    #[test]
     fn test_diff_version_requirements() {
         let fake = b"\x7fELF\x02\x01\x01\0\0\0\0\0\0\0\0\0\x02\0\x3e\0\x01\0\0\0\0\0\0\0\0\0\0\0";
         let mut a = inspect_elf("lib_v1.so", fake);

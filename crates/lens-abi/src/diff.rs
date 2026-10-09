@@ -57,6 +57,7 @@ pub fn diff_reports(left: &ElfReport, right: &ElfReport) -> DiffReport {
     );
 
     let symbols_diff = SetDiff::compute(left.abi.symbols.clone(), right.abi.symbols.clone());
+    let imports_diff = SetDiff::compute(left.abi.imports.clone(), right.abi.imports.clone());
     let vtables_diff = SetDiff::compute(left.abi.vtables.clone(), right.abi.vtables.clone());
     let types_diff = SetDiff::compute(left.abi.types.clone(), right.abi.types.clone());
     // Diff symbol-version requirements (GLIBC_2.x etc.) — a new requirement
@@ -93,6 +94,11 @@ pub fn diff_reports(left: &ElfReport, right: &ElfReport) -> DiffReport {
     let mut breaking_attribute = false;
 
     for r_sym in &right.evidence {
+        // Attribute drift on an imported (undefined) symbol is a
+        // dependency detail, not an export change.
+        if !r_sym.defined {
+            continue;
+        }
         if let Some(l_sym) = left_evidence_map.get(r_sym.identity.as_str()) {
             let mut diffs = Vec::new();
             if l_sym.symbol_type != r_sym.symbol_type {
@@ -124,7 +130,9 @@ pub fn diff_reports(left: &ElfReport, right: &ElfReport) -> DiffReport {
     let mut uncertain = false;
 
     if !both_valid {
-        incompatible = true;
+        // Invalid input is not evidence of incompatibility — it is
+        // missing evidence, so the verdict is uncertain.
+        uncertain = true;
         diagnostics.push("One or both inputs are invalid ELF files".to_string());
     } else {
         if !header_changes.is_empty() {
@@ -151,6 +159,13 @@ pub fn diff_reports(left: &ElfReport, right: &ElfReport) -> DiffReport {
             uncertain = true;
             diagnostics.push("Dynamic loader search paths or dependencies modified".to_string());
         }
+        if imports_diff.has_changed() {
+            diagnostics.push(format!(
+                "Imported symbols changed (+{} -{})",
+                imports_diff.added.len(),
+                imports_diff.removed.len()
+            ));
+        }
         if abi_diff.has_changed() {
             uncertain = true;
             diagnostics.push(format!(
@@ -174,6 +189,7 @@ pub fn diff_reports(left: &ElfReport, right: &ElfReport) -> DiffReport {
         || rpath_diff.has_changed()
         || runpath_diff.has_changed()
         || symbols_diff.has_changed()
+        || imports_diff.has_changed()
         || vtables_diff.has_changed()
         || abi_diff.has_changed()
         || types_diff.has_changed()
@@ -195,6 +211,7 @@ pub fn diff_reports(left: &ElfReport, right: &ElfReport) -> DiffReport {
             runpath: runpath_diff,
         },
         symbols: symbols_diff,
+        imports: imports_diff,
         vtables: vtables_diff,
         abi: abi_diff,
         types: types_diff,

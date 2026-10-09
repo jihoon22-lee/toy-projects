@@ -1,4 +1,4 @@
-use object::{Object, ObjectSection, ObjectSymbol, SymbolKind, SymbolScope};
+use object::{Object, ObjectSection, ObjectSymbol, SymbolKind};
 use std::path::Path;
 
 use crate::dwarf::extract_dwarf_types;
@@ -502,6 +502,7 @@ pub fn inspect_elf<P: AsRef<Path>>(path: P, data: &[u8]) -> ElfReport {
 
     let mut needed = Vec::new();
     let mut symbols = Vec::new();
+    let mut imports = Vec::new();
     let mut vtables = Vec::new();
     let mut evidence = Vec::new();
 
@@ -517,19 +518,21 @@ pub fn inspect_elf<P: AsRef<Path>>(path: P, data: &[u8]) -> ElfReport {
                 continue;
             }
 
-            let is_vtable = name.starts_with("_ZTV");
-            if is_vtable {
+            // Undefined dynamic symbols are imports, not exports —
+            // keep them out of `abi.symbols` so the diff never reports
+            // a changed dependency as a removed export.
+            let defined = !sym.is_undefined();
+            let is_vtable = defined && name.starts_with("_ZTV");
+            if !defined {
+                imports.push(name.to_string());
+            } else if is_vtable {
                 vtables.push(name.to_string());
             } else {
                 symbols.push(name.to_string());
             }
 
-            let binding = match sym.scope() {
-                SymbolScope::Dynamic => "global",
-                SymbolScope::Linkage => "weak",
-                SymbolScope::Compilation => "local",
-                _ => "global",
-            };
+            // SymbolScope::Linkage is not ELF weakness — ask the symbol.
+            let binding = if sym.is_weak() { "weak" } else { "global" };
 
             let symbol_type = match sym.kind() {
                 SymbolKind::Text => "FUNC",
@@ -546,7 +549,7 @@ pub fn inspect_elf<P: AsRef<Path>>(path: P, data: &[u8]) -> ElfReport {
                 visibility: "default".to_string(),
                 symbol_type: symbol_type.to_string(),
                 default_version: name.contains("@@"),
-                defined: !sym.is_undefined(),
+                defined,
                 demangled: demangle_symbol(name),
             });
         }
@@ -572,6 +575,8 @@ pub fn inspect_elf<P: AsRef<Path>>(path: P, data: &[u8]) -> ElfReport {
 
     symbols.sort();
     symbols.dedup();
+    imports.sort();
+    imports.dedup();
     vtables.sort();
     vtables.dedup();
     needed.sort();
@@ -601,6 +606,7 @@ pub fn inspect_elf<P: AsRef<Path>>(path: P, data: &[u8]) -> ElfReport {
         abi: AbiData {
             versions: dyn_info.versions,
             symbols,
+            imports,
             vtables,
             types,
         },
@@ -617,6 +623,61 @@ pub fn inspect_elf<P: AsRef<Path>>(path: P, data: &[u8]) -> ElfReport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use std::process::Command;
+
+    /// Compile a tiny shared object; returns None when no C toolchain
+    /// is available so the test self-skips instead of failing.
+    fn compile_so(code: &str) -> Option<(tempfile::TempDir, std::path::PathBuf)> {
+        let dir = tempfile::tempdir().ok()?;
+        let src = dir.path().join("t.c");
+        let so = dir.path().join("t.so");
+        std::fs::File::create(&src)
+            .ok()?
+            .write_all(code.as_bytes())
+            .ok()?;
+        let status = Command::new("cc")
+            .args(["-shared", "-fPIC", "-o"])
+            .arg(&so)
+            .arg(&src)
+            .status()
+            .ok()?;
+        status.success().then_some((dir, so))
+    }
+
+    #[test]
+    fn test_imports_and_weak_binding() {
+        let Some((_dir, so)) = compile_so(
+            "extern int imported_fn(void);\n\
+             __attribute__((weak)) int weak_fn(void) { return imported_fn(); }\n\
+             int exported_fn(void) { return 42; }\n",
+        ) else {
+            return;
+        };
+        let data = std::fs::read(&so).unwrap();
+        let report = inspect_elf(&so, &data);
+
+        // Undefined (imported) symbols land in abi.imports, never in
+        // the exported surface.
+        assert!(report.abi.imports.contains(&"imported_fn".to_string()));
+        assert!(!report.abi.symbols.contains(&"imported_fn".to_string()));
+        assert!(report.abi.symbols.contains(&"exported_fn".to_string()));
+
+        let weak = report
+            .evidence
+            .iter()
+            .find(|s| s.identity == "weak_fn")
+            .expect("weak_fn in evidence");
+        assert_eq!(weak.binding, "weak");
+        assert!(weak.defined);
+        let imp = report
+            .evidence
+            .iter()
+            .find(|s| s.identity == "imported_fn")
+            .expect("imported_fn in evidence");
+        assert!(!imp.defined);
+        assert_eq!(imp.binding, "global");
+    }
 
     #[test]
     fn test_demangle_symbol() {
