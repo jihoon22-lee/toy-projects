@@ -39,26 +39,47 @@ fn open_log_indexer(path: &Path) -> Result<LogIndexer> {
     LogIndexer::open(path)
 }
 
+/// Flatten per-unit parser/loader diagnostics for the snapshot-level
+/// `diagnostics` array — previously always empty, which hid malformed
+/// unit files and missing dependency references from `sys inspect`.
+fn sys_diagnostics(
+    units: &std::collections::BTreeMap<String, lens_sys::SystemdUnit>,
+) -> Vec<lens_sys::Diagnostic> {
+    units
+        .values()
+        .flat_map(|u| u.diagnostics.iter().cloned())
+        .collect()
+}
+
+/// Parse a JSON file with the path in the error, so a malformed input
+/// reports *which* file failed rather than a bare serde line/column.
+fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
+    let content = fs::read_to_string(path).map_err(|e| lens_core::LensError::Io {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+    serde_json::from_str(&content).map_err(|e| lens_core::LensError::InvalidInput {
+        message: format!("{}: {}", path.display(), e),
+    })
+}
+
 /// `sys diff` accepts either a saved snapshot JSON or a live unit
 /// directory, which is loaded and graphed into an equivalent snapshot.
 fn sys_snapshot_from(path: &Path) -> Result<SystemdSnapshot> {
     if path.is_dir() {
         let units = lens_sys::load_units(path)?;
         let graph = OrderingGraph::build(&units);
+        let diagnostics = sys_diagnostics(&units);
         return Ok(SystemdSnapshot {
             schema: lens_sys::SNAPSHOT_SCHEMA_V1.to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
             semantics: "systemd-255-subset-v1".to_string(),
             units,
             cycles: graph.find_cycles(),
-            diagnostics: vec![],
+            diagnostics,
         });
     }
-    let s = fs::read_to_string(path).map_err(|e| lens_core::LensError::Io {
-        path: path.to_path_buf(),
-        source: e,
-    })?;
-    Ok(serde_json::from_str(&s)?)
+    read_json(path)
 }
 
 /// Load systemd units for `sys` commands: an explicit path goes through
@@ -189,7 +210,7 @@ fn expand_test_inputs(path: &Path) -> Result<Vec<PathBuf>> {
 fn load_test_run(path: &Path, project: &str) -> Result<lens_test::TestRun> {
     let files = expand_test_inputs(path)?;
     if files.is_empty() {
-        return Err(lens_core::LensError::InvalidInput {
+        return Err(lens_core::LensError::Usage {
             message: format!("{:?} matched no JUnit XML files", path),
         });
     }
@@ -406,7 +427,7 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                     }
                     None => {
                         if paths.is_empty() {
-                            return Err(lens_core::LensError::InvalidInput {
+                            return Err(lens_core::LensError::Usage {
                                 message: "no paths given; use `trash list`/`trash restore` \
                                           to manage existing entries"
                                     .to_string(),
@@ -452,7 +473,7 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                             outln!("{}", to_deterministic_pretty(&receipts)?);
                         }
                         if !failures.is_empty() {
-                            return Err(lens_core::LensError::InvalidInput {
+                            return Err(lens_core::LensError::Usage {
                                 message: format!(
                                     "{} of {} path(s) could not be trashed",
                                     failures.len(),
@@ -584,17 +605,16 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                     filter = filter.with_query(&q);
                 }
                 if let Some(re) = regex {
-                    filter =
-                        filter
-                            .with_regex(&re)
-                            .map_err(|e| lens_core::LensError::InvalidInput {
-                                message: format!("invalid --regex {:?}: {}", re, e),
-                            })?;
+                    filter = filter
+                        .with_regex(&re)
+                        .map_err(|e| lens_core::LensError::Usage {
+                            message: format!("invalid --regex {:?}: {}", re, e),
+                        })?;
                 }
                 if let Some(lvl_str) = min_level {
                     let lvl = LogLevel::parse(&lvl_str);
                     if lvl == LogLevel::Unknown && !lvl_str.eq_ignore_ascii_case("unknown") {
-                        return Err(lens_core::LensError::InvalidInput {
+                        return Err(lens_core::LensError::Usage {
                             message: format!(
                                 "invalid --min-level {lvl_str:?}; expected trace|debug|info|warn|error|fatal"
                             ),
@@ -920,6 +940,7 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                 let units = load_sys_units(path.as_deref())?;
                 let graph = OrderingGraph::build(&units);
                 let cycles = graph.find_cycles();
+                let diagnostics = sys_diagnostics(&units);
 
                 let snapshot = SystemdSnapshot {
                     schema: lens_sys::SNAPSHOT_SCHEMA_V1.to_string(),
@@ -927,7 +948,7 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                     semantics: "systemd-255-subset-v1".to_string(),
                     units,
                     cycles,
-                    diagnostics: vec![],
+                    diagnostics,
                 };
                 if wants_json(format, false, true) {
                     outln!("{}", to_deterministic_pretty(&snapshot)?);
@@ -1016,11 +1037,7 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
         },
         Commands::Build { action } => match action {
             BuildCommands::Inspect { file, format } => {
-                let content = fs::read_to_string(&file).map_err(|e| lens_core::LensError::Io {
-                    path: file.clone(),
-                    source: e,
-                })?;
-                let entries: Vec<CompileCommandEntry> = serde_json::from_str(&content)?;
+                let entries: Vec<CompileCommandEntry> = read_json(&file)?;
                 let units: Vec<_> = entries.iter().map(parse_command_entry).collect();
                 // Emit the full buildscope.snapshot/v4 schema, including the
                 // reverse-impact graph resolved from on-disk headers.
@@ -1072,11 +1089,7 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                 header,
                 format,
             } => {
-                let content = fs::read_to_string(&file).map_err(|e| lens_core::LensError::Io {
-                    path: file.clone(),
-                    source: e,
-                })?;
-                let entries: Vec<CompileCommandEntry> = serde_json::from_str(&content)?;
+                let entries: Vec<CompileCommandEntry> = read_json(&file)?;
                 let mut graph = ImpactGraph::new();
                 for entry in &entries {
                     let unit = parse_command_entry(entry);
@@ -1085,11 +1098,6 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                 // Resolve a relative --header against the compile database
                 // directory and each entry's `directory` — not just the
                 // process cwd — so `build impact` works from any cwd.
-                let in_graph = |h: &str| {
-                    graph.header_to_units.contains_key(h)
-                        || graph.header_to_headers.contains_key(h)
-                        || graph.header_to_headers.values().any(|s| s.contains(h))
-                };
                 let db_dir = file
                     .parent()
                     .filter(|p| !p.as_os_str().is_empty())
@@ -1107,41 +1115,14 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                         bases.push(cwd);
                     }
                 }
-                let target = if Path::new(&header).is_absolute() {
-                    lens_build::normalize_path(&header, "/")
-                } else {
-                    bases
-                        .iter()
-                        .map(|b| lens_build::normalize_path(&header, b))
-                        .find(|c| in_graph(c))
-                        .unwrap_or_else(|| lens_build::normalize_path(&header, &db_dir))
-                };
+                let target = lens_build::resolve_header_target(&graph, &header, &bases);
                 let mut report = graph.compute_impact(&target);
 
-                if !in_graph(&report.target_header) {
+                if !graph.header_in_graph(&report.target_header) {
                     // Not in the include graph at all — likely a path-
                     // resolution problem, not "no rebuilds needed". Show
                     // closest basename matches so the user can re-spell it.
-                    let base = Path::new(&header)
-                        .file_name()
-                        .map(|f| f.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| header.clone());
-                    let mut candidates: Vec<String> = graph
-                        .header_to_units
-                        .keys()
-                        .chain(graph.header_to_headers.keys())
-                        .chain(graph.header_to_headers.values().flatten())
-                        .filter(|h| {
-                            Path::new(h.as_str())
-                                .file_name()
-                                .map(|f| f.to_string_lossy() == base)
-                                .unwrap_or(false)
-                        })
-                        .cloned()
-                        .collect();
-                    candidates.sort();
-                    candidates.dedup();
-                    candidates.truncate(5);
+                    let candidates = graph.closest_headers(&header, 5);
                     let mut hint = format!(
                         "header {:?} is not in the include graph (resolved as {})",
                         header, report.target_header
@@ -1188,18 +1169,8 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                 candidate,
                 format,
             } => {
-                let b_str =
-                    fs::read_to_string(&baseline).map_err(|e| lens_core::LensError::Io {
-                        path: baseline.clone(),
-                        source: e,
-                    })?;
-                let c_str =
-                    fs::read_to_string(&candidate).map_err(|e| lens_core::LensError::Io {
-                        path: candidate.clone(),
-                        source: e,
-                    })?;
-                let b_entries: Vec<CompileCommandEntry> = serde_json::from_str(&b_str)?;
-                let c_entries: Vec<CompileCommandEntry> = serde_json::from_str(&c_str)?;
+                let b_entries: Vec<CompileCommandEntry> = read_json(&baseline)?;
+                let c_entries: Vec<CompileCommandEntry> = read_json(&candidate)?;
                 let u1: Vec<_> = b_entries.iter().map(parse_command_entry).collect();
                 let u2: Vec<_> = c_entries.iter().map(parse_command_entry).collect();
                 let diff = diff_compilations(&u1, &u2);
@@ -1314,18 +1285,8 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                 candidate,
                 format,
             } => {
-                let b_str =
-                    fs::read_to_string(&baseline).map_err(|e| lens_core::LensError::Io {
-                        path: baseline.clone(),
-                        source: e,
-                    })?;
-                let c_str =
-                    fs::read_to_string(&candidate).map_err(|e| lens_core::LensError::Io {
-                        path: candidate.clone(),
-                        source: e,
-                    })?;
-                let s1: EnvSnapshot = serde_json::from_str(&b_str)?;
-                let s2: EnvSnapshot = serde_json::from_str(&c_str)?;
+                let s1: EnvSnapshot = read_json(&baseline)?;
+                let s2: EnvSnapshot = read_json(&candidate)?;
                 let diff = diff_environments(&s1.venv, &s2.venv);
                 if wants_json(format, false, true) {
                     outln!("{}", to_deterministic_pretty(&diff)?);
@@ -1365,7 +1326,7 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                     || env.is_some()
                     || net;
                 if !any_source {
-                    return Err(lens_core::LensError::InvalidInput {
+                    return Err(lens_core::LensError::Usage {
                         message: "at least one artifact source is required \
                                   (--disk/--log/--trace/--test/--sys/--env/--net)"
                             .to_string(),
@@ -1379,7 +1340,7 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                     source: e,
                 })? && !force
                 {
-                    return Err(lens_core::LensError::InvalidInput {
+                    return Err(lens_core::LensError::Usage {
                         message: format!(
                             "output bundle {:?} already exists; pass --force to overwrite",
                             output
@@ -1479,24 +1440,24 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                         let units = lens_sys::load_units(s)?;
                         let graph = OrderingGraph::build(&units);
                         let cycles = graph.find_cycles();
+                        let diagnostics = sys_diagnostics(&units);
                         Ok(SystemdSnapshot {
                             schema: lens_sys::SNAPSHOT_SCHEMA_V1.to_string(),
                             version: env!("CARGO_PKG_VERSION").to_string(),
                             semantics: "systemd-255-subset-v1".to_string(),
                             units,
                             cycles,
-                            diagnostics: vec![],
+                            diagnostics,
                         })
                     });
                 }
 
                 if let Some(ref e) = env {
                     collect!("env", "reports/env_snapshot.json", {
-                        let venv = inspect_venv(e, &[]).map_err(|err| {
-                            lens_core::LensError::InvalidInput {
+                        let venv =
+                            inspect_venv(e, &[]).map_err(|err| lens_core::LensError::Usage {
                                 message: format!("venv {}: {}", e.display(), err),
-                            }
-                        })?;
+                            })?;
                         Ok(EnvSnapshot {
                             schema: lens_env::SNAPSHOT_SCHEMA_V1.to_string(),
                             version: env!("CARGO_PKG_VERSION").to_string(),
@@ -1514,7 +1475,7 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                     for d in &diagnostics {
                         eprintln!("  - {}", d);
                     }
-                    return Err(lens_core::LensError::InvalidInput {
+                    return Err(lens_core::LensError::Usage {
                         message: "bundle contains no artifacts".to_string(),
                     });
                 }
@@ -1761,18 +1722,8 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                 candidate,
                 format,
             } => {
-                let base_content =
-                    fs::read_to_string(&baseline).map_err(|e| lens_core::LensError::Io {
-                        path: baseline.clone(),
-                        source: e,
-                    })?;
-                let cand_content =
-                    fs::read_to_string(&candidate).map_err(|e| lens_core::LensError::Io {
-                        path: candidate.clone(),
-                        source: e,
-                    })?;
-                let base_report: NetReport = serde_json::from_str(&base_content)?;
-                let cand_report: NetReport = serde_json::from_str(&cand_content)?;
+                let base_report: NetReport = read_json(&baseline)?;
+                let cand_report: NetReport = read_json(&candidate)?;
                 let diff = diff_net_reports(&base_report, &cand_report);
                 if wants_json(format, false, true) {
                     outln!("{}", to_deterministic_pretty(&diff)?);
@@ -1811,7 +1762,7 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
             ] {
                 if let Some(p) = dir {
                     if !p.exists() {
-                        return Err(lens_core::LensError::InvalidInput {
+                        return Err(lens_core::LensError::Usage {
                             message: format!("{flag} path {:?} does not exist", p),
                         });
                     }

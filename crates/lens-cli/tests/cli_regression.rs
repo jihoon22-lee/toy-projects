@@ -1254,3 +1254,121 @@ fn sys_inspect_without_path_uses_search_dirs() {
         stderr_of(&out)
     );
 }
+
+#[test]
+fn usage_errors_do_not_say_corrupt_input() {
+    // F25: a missing-flag usage error is reported as usage, not
+    // "Corrupt or invalid input format:".
+    let dir = tmp_dir("usage");
+    let out_path = dir.join("empty.lens");
+    let out = lens(&["bundle", "create", out_path.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = stderr_of(&out);
+    assert!(
+        stderr.contains("at least one artifact source"),
+        "{}",
+        stderr
+    );
+    assert!(
+        !stderr.contains("Corrupt or invalid input format"),
+        "{}",
+        stderr
+    );
+}
+
+#[test]
+fn json_parse_error_names_the_file() {
+    // F25: a malformed JSON input reports which file failed to parse.
+    let bad = tmp_file("badjson", "cc.json", "not json {");
+    let out = lens(&["build", "inspect", bad.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = stderr_of(&out);
+    assert!(stderr.contains("cc.json"), "{}", stderr);
+}
+
+#[test]
+fn help_documents_positional_args() {
+    // F25: positional arguments carry descriptions, not bare <PATH>.
+    for args in [
+        vec!["disk", "scan", "--help"],
+        vec!["log", "filter", "--help"],
+        vec!["abi", "inspect", "--help"],
+    ] {
+        let out = lens(&args);
+        assert!(out.status.success());
+        let help = stdout_of(&out);
+        for line in help.lines() {
+            // Any listed positional has a description after it.
+            if line.trim_start().starts_with('<') {
+                assert!(
+                    line.contains('<') && line.matches('<').count() >= 1 && line.len() > 25,
+                    "undocumented arg line: {line}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn sys_inspect_reports_parser_diagnostics() {
+    // F28: garbage lines, unclosed section headers, and references to
+    // missing units surface in snapshot diagnostics.
+    let dir = tmp_dir("sysdiag");
+    std::fs::write(
+        dir.join("bad.service"),
+        "[Unit\nRequires=nope.service\ngarbage line\n[Service]\nExecStart=/bin/x\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("refs.service"),
+        "[Unit]\nRequires=nope.service\n[Service]\nExecStart=/bin/y\n",
+    )
+    .unwrap();
+
+    let out = lens(&["sys", "inspect", dir.to_str().unwrap(), "--format", "json"]);
+    assert_eq!(out.status.code(), Some(0));
+    let v: serde_json::Value = serde_json::from_str(&stdout_of(&out)).expect("snapshot json");
+    let diags = v["diagnostics"].as_array().expect("diagnostics array");
+    let codes: Vec<&str> = diags.iter().filter_map(|d| d["code"].as_str()).collect();
+    assert!(codes.contains(&"SYNTAX_SECTION_HEADER"), "{codes:?}");
+    assert!(codes.contains(&"SYNTAX_GARBAGE_LINE"), "{codes:?}");
+    assert!(codes.contains(&"UNIT_REF_MISSING"), "{codes:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn env_check_flags_top_level_shadowing_only() {
+    // F27: `pkg/json.py` must not flag stdlib `json`; a package dir
+    // `logging/__init__.py` must flag; `secrets.py` is in the stdlib list.
+    let dir = tmp_dir("shadow");
+    let venv = dir.join("venv");
+    std::fs::create_dir_all(venv.join("lib/python3.12/site-packages")).unwrap();
+    std::fs::write(venv.join("pyvenv.cfg"), "version = 3.12.0\n").unwrap();
+    let proj = dir.join("proj");
+    std::fs::create_dir_all(proj.join("pkg")).unwrap();
+    std::fs::write(proj.join("pkg/__init__.py"), "").unwrap();
+    std::fs::write(proj.join("pkg/json.py"), "x=1\n").unwrap();
+    std::fs::create_dir_all(proj.join("logging")).unwrap();
+    std::fs::write(proj.join("logging/__init__.py"), "x=1\n").unwrap();
+    std::fs::write(proj.join("secrets.py"), "x=1\n").unwrap();
+
+    let out = lens(&[
+        "env",
+        "inspect",
+        venv.to_str().unwrap(),
+        "--project",
+        proj.to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr_of(&out));
+    let v: serde_json::Value = serde_json::from_str(&stdout_of(&out)).expect("env snapshot json");
+    let names: Vec<&str> = v["venv"]["shadowing_issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|i| i["module_name"].as_str())
+        .collect();
+    assert_eq!(names, vec!["logging", "secrets"], "{names:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

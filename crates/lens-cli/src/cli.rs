@@ -82,10 +82,13 @@ pub enum Commands {
     },
     /// Unified system health check across storage, network, services, and environment
     Doctor {
+        /// Filesystem root to check (default /)
         #[arg(long)]
         root: Option<PathBuf>,
+        /// procfs mount to read instead of /proc
         #[arg(long)]
         procfs: Option<PathBuf>,
+        /// Unit directory to load instead of the systemd search path
         #[arg(long)]
         systemd_dir: Option<PathBuf>,
         /// Emit the report as JSON (equivalent to --format json)
@@ -108,6 +111,7 @@ pub enum Commands {
     },
     /// Generate shell auto-completion script
     Completion {
+        /// Shell to generate completions for
         #[arg(value_enum)]
         shell: clap_complete::Shell,
     },
@@ -117,6 +121,7 @@ pub enum Commands {
 pub enum DiskCommands {
     /// Scan directory and print space usage summary or snapshot JSON
     Scan {
+        /// Directory to scan
         path: PathBuf,
         /// Emit the snapshot as JSON (equivalent to --format json)
         #[arg(long)]
@@ -142,9 +147,12 @@ pub enum DiskCommands {
     },
     /// Find duplicate files with hard link deduplication
     Duplicates {
+        /// Directory to scan for duplicates
         path: PathBuf,
+        /// Minimum file size in bytes to consider
         #[arg(long, default_value = "1024")]
         min_size: u64,
+        /// Output format; default preserves the current text summary
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
@@ -162,6 +170,7 @@ pub enum DiskCommands {
         /// Report what would be trashed without moving anything
         #[arg(long)]
         dry_run: bool,
+        /// Output format; default is the text report
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
@@ -175,6 +184,7 @@ pub enum TrashCommands {
         /// mount's `.Trash-$uid` after a cross-device fallback)
         #[arg(long)]
         trash_dir: Option<PathBuf>,
+        /// Output format; default is the text listing
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
@@ -192,6 +202,7 @@ pub enum TrashCommands {
 pub enum AbiCommands {
     /// Inspect an ELF binary and output JSON report
     Inspect {
+        /// ELF binary or shared library to inspect
         binary: PathBuf,
         /// Output format; default is the JSON report
         #[arg(long, value_enum)]
@@ -199,8 +210,11 @@ pub enum AbiCommands {
     },
     /// Compare two ELF binaries and report 3-state ABI compatibility
     Diff {
+        /// Older/reference ELF binary
         baseline: PathBuf,
+        /// Newer ELF binary to compare against the baseline
         candidate: PathBuf,
+        /// Output format; default is the JSON diff
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
@@ -211,19 +225,24 @@ pub enum LogCommands {
     /// Inspect log file metrics and line counts.
     /// PATH may be `-` for stdin; `.gz` files are decompressed (bounded).
     Inspect {
+        /// Log file path, `-` for stdin, or a `.gz` file
         path: PathBuf,
+        /// Output format; default is the JSON report
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
     /// Search and filter log lines (memory-mapped, memchr-accelerated).
     /// PATH may be `-` for stdin; `.gz` files are decompressed (bounded).
     Filter {
+        /// Log file path, `-` for stdin, or a `.gz` file
         path: PathBuf,
+        /// Case-sensitive substring to match
         #[arg(long)]
         query: Option<String>,
         /// Regex pattern alternative to --query's substring match
         #[arg(long, conflicts_with = "query")]
         regex: Option<String>,
+        /// Lowest severity to emit: trace|debug|info|warn|error|fatal
         #[arg(long)]
         min_level: Option<String>,
         /// Keep lines whose level could not be determined when --min-level is set
@@ -245,17 +264,23 @@ pub enum LogCommands {
 pub enum TestCommands {
     /// Parse JUnit XML test report(s) — file, directory of *.xml, or glob
     Parse {
+        /// JUnit XML file, directory, or glob pattern
         file: PathBuf,
+        /// Project label recorded in the snapshot
         #[arg(long, default_value = "default")]
         project: String,
+        /// Output format; default is the JSON snapshot
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
     /// Compare two JUnit XML runs (file, directory of *.xml, or glob)
     /// and report structured regressions
     Diff {
+        /// Older/reference JUnit XML file, directory, or glob
         baseline: PathBuf,
+        /// Newer JUnit XML file, directory, or glob
         candidate: PathBuf,
+        /// Output format; default is the JSON diff
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
@@ -265,14 +290,19 @@ pub enum TestCommands {
 pub enum TraceCommands {
     /// Analyze strace output log and output JSON snapshot
     Analyze {
+        /// strace output file to analyze
         trace_file: PathBuf,
+        /// Output format; default is the JSON snapshot
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
     /// Compare two strace log runs and detect latency shifts/new errors
     Diff {
+        /// Older/reference strace output file
         baseline: PathBuf,
+        /// Newer strace output file
         candidate: PathBuf,
+        /// Output format; default is the JSON diff
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
@@ -283,13 +313,16 @@ pub enum SysCommands {
     /// Inspect systemd unit file or unit directory; with no path, merges
     /// the systemd search path (/etc, /run, /usr/lib, /lib)
     Inspect {
+        /// Unit file or directory; omit to merge the systemd search path
         path: Option<PathBuf>,
+        /// Output format; default is the JSON snapshot
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
     /// Detect ordering cycles in systemd units; with no dir, merges the
     /// systemd search path (/etc, /run, /usr/lib, /lib)
     Cycles {
+        /// Unit directory; omit to merge the systemd search path
         dir: Option<PathBuf>,
         /// Output format; default is the text cycle listing
         #[arg(long, value_enum)]
@@ -297,8 +330,11 @@ pub enum SysCommands {
     },
     /// Compare two systemd snapshots
     Diff {
+        /// Older/reference snapshot JSON or unit directory
         baseline: PathBuf,
+        /// Newer snapshot JSON or unit directory
         candidate: PathBuf,
+        /// Output format; default is the JSON diff
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
@@ -308,22 +344,31 @@ pub enum SysCommands {
 pub enum BuildCommands {
     /// Inspect compile_commands.json database
     Inspect {
+        /// Path to compile_commands.json
         file: PathBuf,
+        /// Output format; default is the JSON snapshot
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
     /// Calculate reverse compilation impact for a header
     Impact {
+        /// Path to compile_commands.json
         file: PathBuf,
+        /// Header to analyze; relative paths resolve against the
+        /// compile database and each entry's `directory`
         #[arg(long)]
         header: String,
+        /// Output format; default is the JSON report
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
     /// Diff two compile_commands.json databases
     Diff {
+        /// Older/reference compile_commands.json
         baseline: PathBuf,
+        /// Newer compile_commands.json
         candidate: PathBuf,
+        /// Output format; default is the JSON diff
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
@@ -333,14 +378,18 @@ pub enum BuildCommands {
 pub enum EnvCommands {
     /// Inspect Python virtualenv and optionally check local project shadowing
     Inspect {
+        /// Path to the virtualenv root (contains pyvenv.cfg)
         venv_path: PathBuf,
+        /// Project directory to scan for stdlib/package shadowing
         #[arg(long)]
         project: Option<PathBuf>,
+        /// Output format; default is the JSON snapshot
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
     /// Check for missing dependencies in a virtualenv
     Check {
+        /// Path to the virtualenv root (contains pyvenv.cfg)
         venv_path: PathBuf,
         /// Activate `extra == "name"` dependency markers (comma-separated)
         #[arg(long, value_delimiter = ',')]
@@ -351,8 +400,11 @@ pub enum EnvCommands {
     },
     /// Diff two virtual environment snapshots
     Diff {
+        /// Older/reference env snapshot JSON
         baseline: PathBuf,
+        /// Newer env snapshot JSON
         candidate: PathBuf,
+        /// Output format; default is the JSON diff
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
@@ -362,11 +414,13 @@ pub enum EnvCommands {
 pub enum NetCommands {
     /// Inspect open listening ports, sockets, and associated processes
     Inspect {
+        /// procfs root to read instead of /proc
         #[arg(long)]
         proc_dir: Option<PathBuf>,
         /// Emit the report as JSON (equivalent to --format json)
         #[arg(long)]
         json: bool,
+        /// Output format; default is the JSON report
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
         /// Omit unix-domain sockets from the output
@@ -375,8 +429,11 @@ pub enum NetCommands {
     },
     /// Compare two network snapshot JSON reports
     Diff {
+        /// Older/reference net snapshot JSON
         baseline: PathBuf,
+        /// Newer net snapshot JSON
         candidate: PathBuf,
+        /// Output format; default is the JSON diff
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
@@ -388,16 +445,22 @@ pub enum BundleCommands {
     Create {
         /// Output path for the .lens bundle
         output: PathBuf,
+        /// Directory to scan for a disk snapshot artifact
         #[arg(long)]
         disk: Option<PathBuf>,
+        /// Log file to embed (raw content, tail-bounded)
         #[arg(long)]
         log: Option<PathBuf>,
+        /// strace output file to analyze into the bundle
         #[arg(long)]
         trace: Option<PathBuf>,
+        /// JUnit XML file/directory to parse into the bundle
         #[arg(long)]
         test: Option<PathBuf>,
+        /// Unit directory for a systemd snapshot artifact
         #[arg(long)]
         sys: Option<PathBuf>,
+        /// Virtualenv root for an environment snapshot artifact
         #[arg(long)]
         env: Option<PathBuf>,
         /// Capture a live network socket report from procfs
@@ -411,32 +474,40 @@ pub enum BundleCommands {
     },
     /// Inspect contents and diagnostics of a .lens bundle
     Inspect {
+        /// Path to the .lens bundle
         bundle: PathBuf,
+        /// Output format; default is the text summary
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
     /// Verify bundle contents against its embedded manifest's SHA-256 checksums
     Verify {
+        /// Path to the .lens bundle
         bundle: PathBuf,
+        /// Output format; default is the text summary
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
     /// Print one archive entry's contents (e.g. reports/disk_snapshot.json)
     Show {
+        /// Path to the .lens bundle
         bundle: PathBuf,
         /// Entry name as listed by `bundle inspect`
         entry: String,
+        /// Output format; default is the raw entry bytes
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
     /// Verify, then extract a bundle into a directory (no overwrite without --force)
     Extract {
+        /// Path to the .lens bundle
         bundle: PathBuf,
         /// Destination directory
         dest: PathBuf,
         /// Overwrite existing files
         #[arg(long)]
         force: bool,
+        /// Output format; default is the text summary
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
