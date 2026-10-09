@@ -356,10 +356,11 @@ pub fn dispatch(command: Commands) -> Result<()> {
         },
         Commands::Env { action } => match action {
             EnvCommands::Inspect { venv_path, project } => {
-                let mut venv = inspect_venv(&venv_path).map_err(|e| lens_core::LensError::Io {
-                    path: venv_path.clone(),
-                    source: e,
-                })?;
+                let mut venv =
+                    inspect_venv(&venv_path, &[]).map_err(|e| lens_core::LensError::Io {
+                        path: venv_path.clone(),
+                        source: e,
+                    })?;
                 if let Some(ref proj) = project {
                     venv.shadowing_issues = detect_shadowing(proj, &venv.packages);
                 }
@@ -370,11 +371,12 @@ pub fn dispatch(command: Commands) -> Result<()> {
                 };
                 outln!("{}", to_deterministic_pretty(&snapshot)?);
             }
-            EnvCommands::Check { venv_path } => {
-                let venv = inspect_venv(&venv_path).map_err(|e| lens_core::LensError::Io {
-                    path: venv_path.clone(),
-                    source: e,
-                })?;
+            EnvCommands::Check { venv_path, extras } => {
+                let venv =
+                    inspect_venv(&venv_path, &extras).map_err(|e| lens_core::LensError::Io {
+                        path: venv_path.clone(),
+                        source: e,
+                    })?;
                 if venv.missing_dependencies.is_empty() {
                     outln!("All dependencies satisfied in {:?}.", venv_path);
                 } else {
@@ -383,6 +385,18 @@ pub fn dispatch(command: Commands) -> Result<()> {
                         venv.missing_dependencies.len()
                     );
                     for d in &venv.missing_dependencies {
+                        outln!("  - {}", d);
+                    }
+                }
+                if !venv.version_conflicts.is_empty() {
+                    outln!("Version conflicts:");
+                    for d in &venv.version_conflicts {
+                        outln!("  - {}", d);
+                    }
+                }
+                if !venv.unevaluated_dependencies.is_empty() {
+                    outln!("Unevaluated requirements (uncertain markers):");
+                    for d in &venv.unevaluated_dependencies {
                         outln!("  - {}", d);
                     }
                 }
@@ -533,10 +547,11 @@ pub fn dispatch(command: Commands) -> Result<()> {
 
                 if let Some(ref e) = env {
                     collect!("env", "reports/env_snapshot.json", {
-                        let venv =
-                            inspect_venv(e).map_err(|err| lens_core::LensError::InvalidInput {
+                        let venv = inspect_venv(e, &[]).map_err(|err| {
+                            lens_core::LensError::InvalidInput {
                                 message: format!("venv {}: {}", e.display(), err),
-                            })?;
+                            }
+                        })?;
                         Ok(EnvSnapshot {
                             schema: lens_env::SNAPSHOT_SCHEMA_V1.to_string(),
                             version: env!("CARGO_PKG_VERSION").to_string(),

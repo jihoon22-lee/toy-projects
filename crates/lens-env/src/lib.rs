@@ -1,4 +1,5 @@
 pub mod diff;
+pub mod markers;
 pub mod metadata;
 pub mod model;
 pub mod shadowing;
@@ -74,6 +75,8 @@ Requires-Dist: certifi>=2017.4.17
             home: "/usr/bin".to_string(),
             packages: std::collections::BTreeMap::new(),
             missing_dependencies: vec![],
+            version_conflicts: vec![],
+            unevaluated_dependencies: vec![],
             shadowing_issues: vec![],
         };
         v1.packages.insert(
@@ -93,6 +96,8 @@ Requires-Dist: certifi>=2017.4.17
             home: "/usr/bin".to_string(),
             packages: std::collections::BTreeMap::new(),
             missing_dependencies: vec![],
+            version_conflicts: vec![],
+            unevaluated_dependencies: vec![],
             shadowing_issues: vec![],
         };
         v2.packages.insert(

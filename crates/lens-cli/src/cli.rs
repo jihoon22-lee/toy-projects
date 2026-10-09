@@ -197,7 +197,12 @@ pub enum EnvCommands {
         project: Option<PathBuf>,
     },
     /// Check for missing dependencies in a virtualenv
-    Check { venv_path: PathBuf },
+    Check {
+        venv_path: PathBuf,
+        /// Activate `extra == "name"` dependency markers (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        extras: Vec<String>,
+    },
     /// Diff two virtual environment snapshots
     Diff {
         baseline: PathBuf,

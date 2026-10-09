@@ -168,11 +168,22 @@ pub fn execute_tool(name: &str, args: &Value) -> Result<String, String> {
                 .get("venv_path")
                 .and_then(|v| v.as_str())
                 .ok_or("Missing 'venv_path' argument")?;
-            let venv = inspect_venv(Path::new(path_str)).map_err(|e| e.to_string())?;
+            let extras: Vec<String> = args
+                .get("extras")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let venv = inspect_venv(Path::new(path_str), &extras).map_err(|e| e.to_string())?;
             serde_json::to_string_pretty(&serde_json::json!({
                 "python_version": venv.python_version,
                 "packages_count": venv.packages.len(),
                 "missing_dependencies": venv.missing_dependencies,
+                "version_conflicts": venv.version_conflicts,
+                "unevaluated_dependencies": venv.unevaluated_dependencies,
             }))
             .map_err(|e| e.to_string())
         }

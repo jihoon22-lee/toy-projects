@@ -138,7 +138,8 @@ pub fn list_tools() -> Vec<McpTool> {
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "venv_path": { "type": "string", "description": "Path to Python virtualenv root" }
+                    "venv_path": { "type": "string", "description": "Path to Python virtualenv root" },
+                    "extras": { "type": "array", "items": { "type": "string" }, "description": "Optional extras to activate for `extra == \"name\"` dependency markers" }
                 },
                 "required": ["venv_path"]
             }),
