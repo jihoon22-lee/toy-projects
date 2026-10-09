@@ -875,3 +875,382 @@ fn net_inspect_no_unix_and_text_owner_column() {
     assert!(out.status.success(), "{}", stderr_of(&out));
     assert!(stdout_of(&out).contains("<orphan>"), "{}", stdout_of(&out));
 }
+
+// --- Phase 2b: workflow depth ---
+
+#[test]
+fn log_filter_shows_lossy_utf8_lines() {
+    // F20: a line containing invalid UTF-8 must still be indexed, matched,
+    // and counted — not silently skipped.
+    let dir = tmp_dir("lossy");
+    let log = dir.join("app.log");
+    let mut bytes = b"[INFO] clean start\n".to_vec();
+    bytes.extend_from_slice(b"[ERROR] disk \xff\xfe corrupted\n");
+    bytes.extend_from_slice(b"[INFO] clean end\n");
+    std::fs::write(&log, bytes).unwrap();
+
+    let out = lens(&["log", "filter", log.to_str().unwrap(), "--query", "disk"]);
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    let stdout = stdout_of(&out);
+    assert!(stdout.contains("disk"), "{stdout}");
+    assert!(
+        stderr_of(&out).contains("invalid UTF-8"),
+        "{}",
+        stderr_of(&out)
+    );
+
+    let out = lens(&["log", "filter", log.to_str().unwrap(), "--format", "json"]);
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    let json: serde_json::Value = serde_json::from_str(&stdout_of(&out)).expect("JSON output");
+    assert_eq!(json["lossy_lines"], serde_json::json!(1));
+    assert_eq!(json["total"], serde_json::json!(3));
+}
+
+#[test]
+fn log_filter_reads_gzip_input() {
+    let dir = tmp_dir("gz");
+    let plain = dir.join("app.log");
+    let gz = dir.join("app.log.gz");
+    std::fs::write(&plain, "[INFO] alpha\n[ERROR] beta\n").unwrap();
+    let ok = Command::new("gzip")
+        .arg("-k")
+        .arg(&plain)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !ok {
+        return; // no gzip binary on this host
+    }
+    assert!(gz.exists());
+
+    let out = lens(&["log", "filter", gz.to_str().unwrap(), "--query", "beta"]);
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    assert!(stdout_of(&out).contains("beta"), "{}", stdout_of(&out));
+    assert!(
+        stderr_of(&out).contains("Matched 1 of 2"),
+        "{}",
+        stderr_of(&out)
+    );
+}
+
+#[test]
+fn log_filter_reads_stdin_dash() {
+    use std::io::Write;
+    let mut child = Command::new(env!("CARGO_BIN_EXE_lens"))
+        .args(["log", "filter", "-", "--query", "needle"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn lens");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"hay\na needle here\nmore hay\n")
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    assert!(stdout_of(&out).contains("needle"), "{}", stdout_of(&out));
+    assert!(
+        stderr_of(&out).contains("Matched 1 of 3"),
+        "{}",
+        stderr_of(&out)
+    );
+}
+
+#[test]
+fn log_filter_regex_limit_context_jsonl() {
+    let log = tmp_file(
+        "logflags",
+        "app.log",
+        "start\nnoise 1\nERROR code=42 here\nnoise 2\nnoise 3\nERROR code=99\nnoise 4\n",
+    );
+
+    // --regex matches a pattern; --limit stops early; --context shows
+    // surrounding lines; --format jsonl emits one object per line.
+    let out = lens(&[
+        "log",
+        "filter",
+        log.to_str().unwrap(),
+        "--regex",
+        r"code=\d+",
+        "--limit",
+        "1",
+        "--context",
+        "1",
+        "--format",
+        "jsonl",
+    ]);
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    let stdout = stdout_of(&out);
+    let lines: Vec<serde_json::Value> = stdout
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("jsonl line"))
+        .collect();
+    assert_eq!(lines.len(), 3, "{stdout}"); // before, match, after
+    assert_eq!(lines[0]["context"], true);
+    assert_eq!(lines[1]["context"], false);
+    assert!(lines[1]["text"].as_str().unwrap().contains("code=42"));
+    assert_eq!(lines[2]["context"], true);
+    assert!(stderr_of(&out).contains("--limit"), "{}", stderr_of(&out));
+
+    // Invalid regex is a usage error, not a silent no-op.
+    let out = lens(&[
+        "log",
+        "filter",
+        log.to_str().unwrap(),
+        "--regex",
+        "([unclosed",
+    ]);
+    assert_eq!(out.status.code(), Some(2), "{}", stderr_of(&out));
+}
+
+#[test]
+fn trash_multi_path_dry_run_list_restore() {
+    let dir = tmp_dir("trash");
+    let xdg = tmp_dir("trash-xdg");
+    let a = dir.join("a.txt");
+    let b = dir.join("b.txt");
+    std::fs::write(&a, "aaa").unwrap();
+    std::fs::write(&b, "bbb").unwrap();
+
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_lens"))
+            .args(args)
+            .env("XDG_DATA_HOME", &xdg)
+            .env("HOME", "/nonexistent-home-lens-test")
+            .output()
+            .expect("spawn lens")
+    };
+
+    // --dry-run reports intent without moving anything.
+    let out = run(&["disk", "trash", a.to_str().unwrap(), "--dry-run"]);
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    assert!(
+        stdout_of(&out).contains("would trash"),
+        "{}",
+        stdout_of(&out)
+    );
+    assert!(a.exists(), "dry-run must not move the file");
+
+    // Multiple paths in one invocation.
+    let out = run(&["disk", "trash", a.to_str().unwrap(), b.to_str().unwrap()]);
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    assert!(!a.exists() && !b.exists());
+
+    // trash list shows both entries with original paths.
+    let out = run(&["disk", "trash", "list"]);
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    let stdout = stdout_of(&out);
+    assert!(stdout.contains("a.txt"), "{stdout}");
+    assert!(stdout.contains("b.txt"), "{stdout}");
+
+    // trash restore puts the file back; identity sidecar must verify.
+    let out = run(&["disk", "trash", "restore", "a.txt"]);
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    assert!(a.exists());
+    assert_eq!(std::fs::read_to_string(&a).unwrap(), "aaa");
+
+    // A bogus name is rejected (fail closed).
+    let out = run(&["disk", "trash", "restore", "../escape"]);
+    assert_eq!(out.status.code(), Some(2), "{}", stderr_of(&out));
+}
+
+#[test]
+fn build_impact_resolves_relative_header_and_hints() {
+    // F16: --header relative paths resolve against the compile database
+    // directory (and entry directories), not just the process cwd.
+    let dir = tmp_dir("build-f16");
+    let inc = dir.join("include");
+    let src = dir.join("src");
+    std::fs::create_dir_all(&inc).unwrap();
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(inc.join("common.h"), "#define C 1\n").unwrap();
+    std::fs::write(src.join("a.c"), "#include \"common.h\"\n").unwrap();
+    let cc_db = dir.join("compile_commands.json");
+    std::fs::write(
+        &cc_db,
+        serde_json::to_string(&serde_json::json!([{
+            "directory": dir,
+            "file": src.join("a.c"),
+            "arguments": ["cc", format!("-I{}", inc.display()), "-c", "a.c"],
+        }]))
+        .unwrap(),
+    )
+    .unwrap();
+
+    // Run from an unrelated cwd: --header include/common.h must still hit.
+    let cwd = tmp_dir("build-f16-cwd");
+    let out = Command::new(env!("CARGO_BIN_EXE_lens"))
+        .args([
+            "build",
+            "impact",
+            cc_db.to_str().unwrap(),
+            "--header",
+            "include/common.h",
+        ])
+        .current_dir(&cwd)
+        .output()
+        .expect("spawn lens");
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    let json: serde_json::Value =
+        serde_json::from_str(&stdout_of(&out)).expect("impact JSON (default format)");
+    assert_eq!(json["total_impacted"], serde_json::json!(1));
+
+    // A header absent from the graph prints a warning hint but stays a
+    // clean (findings-free) exit.
+    let out = lens(&[
+        "build",
+        "impact",
+        cc_db.to_str().unwrap(),
+        "--header",
+        "common.h", // basename matches a known header's tail
+    ]);
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    assert!(
+        stderr_of(&out).contains("not in the include graph"),
+        "{}",
+        stderr_of(&out)
+    );
+    // Missing include directives surface as a warning.
+    let out = lens(&[
+        "build",
+        "impact",
+        cc_db.to_str().unwrap(),
+        "--header",
+        "include/common.h",
+        "--format",
+        "json",
+    ]);
+    let json: serde_json::Value = serde_json::from_str(&stdout_of(&out)).expect("impact JSON");
+    assert!(json["unresolved_includes"].is_u64(), "{json}");
+    assert!(json["missing_sources"].is_u64(), "{json}");
+}
+
+#[test]
+fn bundle_log_content_show_and_extract() {
+    // F22: --log embeds raw log content; show reads an entry without tar;
+    // extract verifies first and refuses overwrite without --force.
+    let dir = tmp_dir("bundle-f22");
+    let log = dir.join("incident.log");
+    std::fs::write(&log, "[ERROR] first\n[INFO] second\n").unwrap();
+    let output = dir.join("evidence.lens");
+
+    let out = lens(&[
+        "bundle",
+        "create",
+        output.to_str().unwrap(),
+        "--log",
+        log.to_str().unwrap(),
+    ]);
+    assert!(out.status.success(), "{}", stderr_of(&out));
+
+    let inspect = lens(&["bundle", "inspect", output.to_str().unwrap()]);
+    let stdout = stdout_of(&inspect);
+    assert!(stdout.contains("logs/incident.log"), "{stdout}");
+
+    // bundle show prints raw entry content without external tar.
+    let out = lens(&[
+        "bundle",
+        "show",
+        output.to_str().unwrap(),
+        "logs/incident.log",
+    ]);
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    let stdout = stdout_of(&out);
+    assert!(stdout.contains("[ERROR] first"), "{stdout}");
+
+    // extract verifies, writes files, and refuses overwrite.
+    let dest = dir.join("out");
+    let out = lens(&[
+        "bundle",
+        "extract",
+        output.to_str().unwrap(),
+        dest.to_str().unwrap(),
+    ]);
+    assert!(out.status.success(), "{}", stderr_of(&out));
+    assert!(dest.join("logs/incident.log").exists());
+    assert!(dest.join("manifest.json").exists());
+    assert_eq!(
+        std::fs::read_to_string(dest.join("logs/incident.log")).unwrap(),
+        "[ERROR] first\n[INFO] second\n"
+    );
+
+    let out = lens(&[
+        "bundle",
+        "extract",
+        output.to_str().unwrap(),
+        dest.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(2), "{}", stderr_of(&out));
+    assert!(stderr_of(&out).contains("--force"), "{}", stderr_of(&out));
+
+    let out = lens(&[
+        "bundle",
+        "extract",
+        output.to_str().unwrap(),
+        dest.to_str().unwrap(),
+        "--force",
+    ]);
+    assert!(out.status.success(), "{}", stderr_of(&out));
+
+    // A tampered bundle is an integrity finding (exit 1), not "crypto".
+    // The archive must still decompress cleanly with altered content, so
+    // rebuild it with python3's tarfile (self-skip when python3 is absent).
+    let bad = dir.join("tampered.lens");
+    let script = [
+        "import tarfile, io".to_string(),
+        format!("t = tarfile.open({:?}, 'r:gz')", output.to_str().unwrap()),
+        "members = [(m.name, t.extractfile(m).read()) for m in t.getmembers() if m.isfile()]"
+            .to_string(),
+        "t.close()".to_string(),
+        format!("t = tarfile.open({:?}, 'w:gz')", bad.to_str().unwrap()),
+        "for name, data in members:".to_string(),
+        "    if name == 'logs/incident.log': data = b'forged'".to_string(),
+        "    ti = tarfile.TarInfo(name); ti.size = len(data)".to_string(),
+        "    t.addfile(ti, io.BytesIO(data))".to_string(),
+        "t.close()".to_string(),
+    ]
+    .join("\n");
+    let rebuilt = Command::new("python3")
+        .args(["-c", &script])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if rebuilt {
+        let out = lens(&["bundle", "verify", bad.to_str().unwrap()]);
+        assert_eq!(out.status.code(), Some(1), "{}", stderr_of(&out));
+        assert!(stderr_of(&out).contains("integrity"), "{}", stderr_of(&out));
+        // Extract refuses to unpack an unverifiable bundle.
+        let out = lens(&[
+            "bundle",
+            "extract",
+            bad.to_str().unwrap(),
+            dir.join("out2").to_str().unwrap(),
+        ]);
+        assert_eq!(out.status.code(), Some(2), "{}", stderr_of(&out));
+    }
+}
+
+#[test]
+fn sys_inspect_without_path_uses_search_dirs() {
+    // F21: no explicit path merges the systemd search path. On any host
+    // this must be a clean run or findings — never a usage error.
+    let out = lens(&["sys", "inspect"]);
+    let code = out.status.code().unwrap_or(-1);
+    assert!(
+        code == 0 || code == 1,
+        "expected 0/1, got {}: {}",
+        code,
+        stderr_of(&out)
+    );
+    let out = lens(&["sys", "cycles"]);
+    let code = out.status.code().unwrap_or(-1);
+    assert!(
+        code == 0 || code == 1,
+        "expected 0/1, got {}: {}",
+        code,
+        stderr_of(&out)
+    );
+}

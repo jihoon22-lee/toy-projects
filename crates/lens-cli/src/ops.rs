@@ -4,8 +4,8 @@ use crate::output::outln;
 use lens_abi::{diff_reports, inspect_elf};
 use lens_build::{diff_compilations, parse_command_entry, CompileCommandEntry, ImpactGraph};
 use lens_core::{
-    create_bundle_archive, inspect_bundle, to_deterministic_pretty, verify_bundle_archive,
-    BundleArtifact, Result,
+    create_bundle_archive, extract_bundle, inspect_bundle, read_bundle_entry,
+    to_deterministic_pretty, verify_bundle_archive, BundleArtifact, Result,
 };
 use lens_disk::{DiskScanner, DuplicateFinder, ScanOptions, SnapshotV2, TrashManager};
 use lens_env::{detect_shadowing, diff_environments, inspect_venv, EnvSnapshot};
@@ -21,10 +21,22 @@ use std::path::{Path, PathBuf};
 /// `default_json` marks commands whose historical default is JSON.
 fn wants_json(format: Option<OutputFormat>, json_flag: bool, default_json: bool) -> bool {
     match format {
-        Some(OutputFormat::Json) => true,
+        // `jsonl` is a `log filter`-only mode; other commands fall back to json.
+        Some(OutputFormat::Json) | Some(OutputFormat::Jsonl) => true,
         Some(OutputFormat::Text) => false,
         None => json_flag || default_json,
     }
+}
+
+/// Open a `log` input: `-` reads stdin through a bounded buffer; `.gz`
+/// files decompress through a bounded reader; the rest are memory-mapped.
+fn open_log_indexer(path: &Path) -> Result<LogIndexer> {
+    if path.as_os_str() == "-" {
+        let stdin = std::io::stdin();
+        let lock = stdin.lock();
+        return LogIndexer::from_reader(lock, "-");
+    }
+    LogIndexer::open(path)
 }
 
 /// `sys diff` accepts either a saved snapshot JSON or a live unit
@@ -49,6 +61,24 @@ fn sys_snapshot_from(path: &Path) -> Result<SystemdSnapshot> {
     Ok(serde_json::from_str(&s)?)
 }
 
+/// Load systemd units for `sys` commands: an explicit path goes through
+/// `load_units` (fail closed on missing paths); no path merges the
+/// standard systemd search dirs like doctor/TUI.
+fn load_sys_units(
+    path: Option<&Path>,
+) -> Result<std::collections::BTreeMap<String, lens_sys::SystemdUnit>> {
+    match path {
+        Some(p) => lens_sys::load_units(p),
+        None => {
+            let dirs: Vec<PathBuf> = lens_sys::SYSTEMD_SEARCH_DIRS
+                .iter()
+                .map(PathBuf::from)
+                .collect();
+            Ok(lens_sys::load_units_merged(&dirs))
+        }
+    }
+}
+
 /// Human-readable binary size (KiB/MiB/GiB) for text-mode summaries.
 fn human_bytes(n: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
@@ -63,6 +93,54 @@ fn human_bytes(n: u64) -> String {
     } else {
         format!("{:.1} {}", v, UNITS[i])
     }
+}
+
+/// Cap on raw log bytes embedded in a bundle — keeps `.lens` files useful
+/// as evidence without turning into multi-hundred-MB archives. The *tail*
+/// is kept: incident investigations care about the most recent lines.
+const BUNDLE_LOG_TAIL_BYTES: u64 = 8 * 1024 * 1024;
+
+/// Read up to `cap` bytes of a log for bundling: the whole file when it
+/// fits, otherwise the tail starting on a line boundary. Returns the bytes
+/// and whether they were truncated.
+fn read_log_tail(path: &Path, cap: u64) -> Result<(Vec<u8>, bool)> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path).map_err(|e| lens_core::LensError::Io {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+    let len = file
+        .metadata()
+        .map_err(|e| lens_core::LensError::Io {
+            path: path.to_path_buf(),
+            source: e,
+        })?
+        .len();
+    if len <= cap {
+        let mut buf = Vec::with_capacity(len as usize);
+        file.read_to_end(&mut buf)
+            .map_err(|e| lens_core::LensError::Io {
+                path: path.to_path_buf(),
+                source: e,
+            })?;
+        return Ok((buf, false));
+    }
+    file.seek(SeekFrom::End(-(cap as i64)))
+        .map_err(|e| lens_core::LensError::Io {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
+    let mut buf = Vec::with_capacity(cap as usize);
+    file.read_to_end(&mut buf)
+        .map_err(|e| lens_core::LensError::Io {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
+    // Skip the partial first line so the excerpt starts cleanly.
+    if let Some(nl) = buf.iter().position(|&b| b == b'\n') {
+        buf.drain(..nl + 1);
+    }
+    Ok((buf, true))
 }
 
 /// `test diff`/`test parse` accept a file, a directory (all `*.xml`
@@ -290,12 +368,100 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                     }
                 }
             }
-            DiskCommands::Trash { path } => {
-                let trash = TrashManager::default();
-                let receipt = trash.move_to_trash(&path)?;
-                outln!("Successfully trashed: {:?}", receipt.original_path);
-                outln!("Trash location: {:?}", receipt.trashed_file_path);
-                outln!("Info receipt: {:?}", receipt.info_path);
+            DiskCommands::Trash {
+                action,
+                paths,
+                dry_run,
+                format,
+            } => {
+                let default_trash = TrashManager::default();
+                let trash_of = |dir: &Option<PathBuf>| match dir {
+                    Some(d) => TrashManager::new(d.clone()),
+                    None => TrashManager::default(),
+                };
+                match action {
+                    Some(TrashCommands::List { trash_dir, format }) => {
+                        let trash = trash_of(&trash_dir);
+                        let entries = trash.list()?;
+                        if wants_json(format, false, false) {
+                            outln!("{}", to_deterministic_pretty(&entries)?);
+                        } else if entries.is_empty() {
+                            outln!("Trash is empty.");
+                        } else {
+                            outln!("{} item(s) in {:?}:", entries.len(), trash.files_dir());
+                            for e in &entries {
+                                outln!(
+                                    "  {:<24} {} {}{}",
+                                    e.name,
+                                    e.deletion_date,
+                                    e.original_path.display(),
+                                    if e.present { "" } else { "  (file missing)" }
+                                );
+                            }
+                        }
+                    }
+                    Some(TrashCommands::Restore { name, trash_dir }) => {
+                        let receipt = trash_of(&trash_dir).restore_by_name(&name)?;
+                        outln!("Restored: {:?}", receipt.original_path);
+                    }
+                    None => {
+                        if paths.is_empty() {
+                            return Err(lens_core::LensError::InvalidInput {
+                                message: "no paths given; use `trash list`/`trash restore` \
+                                          to manage existing entries"
+                                    .to_string(),
+                            });
+                        }
+                        let json_mode = wants_json(format, false, false);
+                        let mut failures: Vec<String> = Vec::new();
+                        let mut receipts: Vec<lens_disk::TrashReceipt> = Vec::new();
+                        for path in &paths {
+                            if dry_run {
+                                let msg = if path.symlink_metadata().is_ok() {
+                                    format!(
+                                        "would trash {:?} -> {:?}",
+                                        path,
+                                        default_trash.files_dir()
+                                    )
+                                } else {
+                                    format!("cannot trash {:?}: does not exist", path)
+                                };
+                                outln!("{}", msg);
+                                continue;
+                            }
+                            match default_trash.move_to_trash(path) {
+                                Ok(receipt) => {
+                                    if !json_mode {
+                                        outln!("Successfully trashed: {:?}", receipt.original_path);
+                                        outln!("Trash location: {:?}", receipt.trashed_file_path);
+                                        outln!("Info receipt: {:?}", receipt.info_path);
+                                    }
+                                    receipts.push(receipt);
+                                }
+                                Err(e) => {
+                                    // One bad path must not block the rest —
+                                    // collect the failures and fail at the end.
+                                    failures.push(format!("{:?}: {}", path, e));
+                                    eprintln!("trash error: {:?}: {}", path, e);
+                                }
+                            }
+                        }
+                        if dry_run {
+                            outln!("(dry-run: nothing was moved)");
+                        } else if json_mode {
+                            outln!("{}", to_deterministic_pretty(&receipts)?);
+                        }
+                        if !failures.is_empty() {
+                            return Err(lens_core::LensError::InvalidInput {
+                                message: format!(
+                                    "{} of {} path(s) could not be trashed",
+                                    failures.len(),
+                                    paths.len()
+                                ),
+                            });
+                        }
+                    }
+                }
             }
         },
         Commands::Abi { action } => match action {
@@ -381,31 +547,49 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
         },
         Commands::Log { action } => match action {
             LogCommands::Inspect { path, format } => {
-                let indexer = LogIndexer::open(&path)?;
+                let indexer = open_log_indexer(&path)?;
                 if wants_json(format, false, false) {
                     outln!(
                         "{}",
                         to_deterministic_pretty(&serde_json::json!({
                             "path": path.to_string_lossy(),
                             "total_lines": indexer.len(),
+                            "lossy_lines": indexer.lossy_lines(),
                         }))?
                     );
                 } else {
                     outln!("Log file: {:?}", path);
                     outln!("Total lines indexed: {}", indexer.len());
+                    if indexer.lossy_lines() > 0 {
+                        outln!(
+                            "Lossy lines (invalid UTF-8, shown with U+FFFD): {}",
+                            indexer.lossy_lines()
+                        );
+                    }
                 }
             }
             LogCommands::Filter {
                 path,
                 query,
+                regex,
                 min_level,
                 include_unknown,
+                limit,
+                context,
                 format,
             } => {
-                let indexer = LogIndexer::open(&path)?;
+                let indexer = open_log_indexer(&path)?;
                 let mut filter = LogFilter::new();
                 if let Some(q) = query {
                     filter = filter.with_query(&q);
+                }
+                if let Some(re) = regex {
+                    filter =
+                        filter
+                            .with_regex(&re)
+                            .map_err(|e| lens_core::LensError::InvalidInput {
+                                message: format!("invalid --regex {:?}: {}", re, e),
+                            })?;
                 }
                 if let Some(lvl_str) = min_level {
                     let lvl = LogLevel::parse(&lvl_str);
@@ -420,46 +604,129 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                 }
                 filter = filter.with_include_unknown(include_unknown);
 
+                let jsonl_mode = format == Some(OutputFormat::Jsonl);
                 let json_mode = wants_json(format, false, false);
-                let mut matched = 0;
+                let mut matched = 0usize;
                 let mut excluded_unknown = 0usize;
                 let mut matched_lines: Vec<serde_json::Value> = Vec::new();
+                // Context bookkeeping: `pending_before` holds the last
+                // `context` non-matching lines; `after_left` counts the
+                // trailing context still owed after the latest match.
+                let mut pending_before: std::collections::VecDeque<(usize, String)> =
+                    std::collections::VecDeque::with_capacity(context);
+                let mut after_left = 0usize;
+                let mut last_printed: Option<usize> = None;
+                let mut limited = false;
+
+                let emit = |idx: usize,
+                            text: &str,
+                            is_match: bool,
+                            matched_lines: &mut Vec<serde_json::Value>,
+                            last_printed: &mut Option<usize>,
+                            after_left: &mut usize| {
+                    if *last_printed == Some(idx) {
+                        return;
+                    }
+                    *last_printed = Some(idx);
+                    if jsonl_mode {
+                        // One JSON object per emitted line; match/context
+                        // distinguished by the `context` flag.
+                        outln!(
+                            "{}",
+                            serde_json::json!({
+                                "line": idx + 1,
+                                "context": !is_match,
+                                "text": text,
+                            })
+                        );
+                    } else if json_mode {
+                        matched_lines.push(serde_json::json!({
+                            "line": idx + 1,
+                            "context": !is_match,
+                            "text": text,
+                        }));
+                    } else if is_match {
+                        outln!("[{}] {}", idx + 1, text);
+                    } else {
+                        outln!("[{}]- {}", idx + 1, text);
+                    }
+                    if !is_match {
+                        *after_left = after_left.saturating_sub(1);
+                    }
+                };
+
                 for idx in 0..indexer.len() {
-                    if let Some(line) = indexer.get_line(idx) {
+                    // After --limit, only the owed trailing context is emitted.
+                    if limited && after_left == 0 {
+                        break;
+                    }
+                    // Lossy view: invalid-UTF-8 lines are still matched and
+                    // shown (with U+FFFD) rather than silently skipped.
+                    let line = indexer
+                        .get_line_lossy(idx)
+                        .map(|c| c.into_owned())
+                        .unwrap_or_default();
+                    let is_match = !limited && {
                         if filter.min_level.is_some() {
                             // Level filtering needs the parsed record; it
                             // also lets us count evidence discarded for
                             // having no detectable level.
-                            let record = parse_line(line, idx + 1);
+                            let record = parse_line(&line, idx + 1);
                             if filter.rejected_only_by_unknown_level(&record) {
                                 excluded_unknown += 1;
-                                continue;
-                            }
-                            if filter.matches(&record) {
-                                if json_mode {
-                                    matched_lines.push(serde_json::json!({
-                                        "line": idx + 1,
-                                        "text": line,
-                                    }));
-                                } else {
-                                    outln!("[{}] {}", idx + 1, line);
-                                }
-                                matched += 1;
-                            }
-                        } else if filter.matches_line(line, idx + 1) {
-                            if json_mode {
-                                matched_lines.push(serde_json::json!({
-                                    "line": idx + 1,
-                                    "text": line,
-                                }));
+                                false
                             } else {
-                                outln!("[{}] {}", idx + 1, line);
+                                filter.matches(&record)
                             }
-                            matched += 1;
+                        } else {
+                            filter.matches_line(&line, idx + 1)
+                        }
+                    };
+
+                    if is_match {
+                        // Flush the buffered leading context.
+                        for (cidx, ctext) in pending_before.drain(..) {
+                            emit(
+                                cidx,
+                                &ctext,
+                                false,
+                                &mut matched_lines,
+                                &mut last_printed,
+                                &mut after_left,
+                            );
+                        }
+                        emit(
+                            idx,
+                            &line,
+                            true,
+                            &mut matched_lines,
+                            &mut last_printed,
+                            &mut after_left,
+                        );
+                        matched += 1;
+                        after_left = context;
+                        if let Some(l) = limit {
+                            if matched >= l {
+                                limited = true;
+                            }
+                        }
+                    } else if after_left > 0 {
+                        emit(
+                            idx,
+                            &line,
+                            false,
+                            &mut matched_lines,
+                            &mut last_printed,
+                            &mut after_left,
+                        );
+                    } else if context > 0 {
+                        pending_before.push_back((idx, line));
+                        while pending_before.len() > context {
+                            pending_before.pop_front();
                         }
                     }
                 }
-                if json_mode {
+                if json_mode && !jsonl_mode {
                     outln!(
                         "{}",
                         to_deterministic_pretty(&serde_json::json!({
@@ -467,11 +734,22 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                             "matched": matched,
                             "total": indexer.len(),
                             "excluded_unknown": excluded_unknown,
+                            "lossy_lines": indexer.lossy_lines(),
                             "lines": matched_lines,
                         }))?
                     );
                 }
+                // Diagnostics stay on stderr so json/jsonl stdout stays clean.
                 eprintln!("\nMatched {} of {} line(s).", matched, indexer.len());
+                if limited {
+                    eprintln!("Stopped after {} match(es): --limit reached.", matched);
+                }
+                if indexer.lossy_lines() > 0 {
+                    eprintln!(
+                        "{} line(s) contain invalid UTF-8 (shown lossy as U+FFFD).",
+                        indexer.lossy_lines()
+                    );
+                }
                 if excluded_unknown > 0 {
                     eprintln!(
                         "Excluded {} line(s) whose log level could not be determined (--include-unknown to keep them).",
@@ -639,7 +917,7 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
         },
         Commands::Sys { action } => match action {
             SysCommands::Inspect { path, format } => {
-                let units = lens_sys::load_units(&path)?;
+                let units = load_sys_units(path.as_deref())?;
                 let graph = OrderingGraph::build(&units);
                 let cycles = graph.find_cycles();
 
@@ -665,7 +943,7 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                 }
             }
             SysCommands::Cycles { dir, format } => {
-                let units = lens_sys::load_units(&dir)?;
+                let units = load_sys_units(dir.as_deref())?;
                 let graph = OrderingGraph::build(&units);
                 let cycles = graph.find_cycle_paths();
                 let found = !cycles.is_empty();
@@ -804,13 +1082,79 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                     let unit = parse_command_entry(entry);
                     graph.add_translation_unit(&unit);
                 }
-                // Normalize --header the same way unit paths are normalized so
-                // relative spellings like include/common.h match graph keys.
-                let cwd = std::env::current_dir()
+                // Resolve a relative --header against the compile database
+                // directory and each entry's `directory` — not just the
+                // process cwd — so `build impact` works from any cwd.
+                let in_graph = |h: &str| {
+                    graph.header_to_units.contains_key(h)
+                        || graph.header_to_headers.contains_key(h)
+                        || graph.header_to_headers.values().any(|s| s.contains(h))
+                };
+                let db_dir = file
+                    .parent()
+                    .filter(|p| !p.as_os_str().is_empty())
                     .map(|p| p.to_string_lossy().into_owned())
-                    .unwrap_or_else(|_| "/".to_string());
-                let target = lens_build::normalize_path(&header, &cwd);
-                let report = graph.compute_impact(&target);
+                    .unwrap_or_else(|| ".".to_string());
+                let mut bases: Vec<String> = vec![db_dir.clone()];
+                for e in &entries {
+                    if !e.directory.is_empty() && !bases.contains(&e.directory) {
+                        bases.push(e.directory.clone());
+                    }
+                }
+                if let Ok(cwd) = std::env::current_dir() {
+                    let cwd = cwd.to_string_lossy().into_owned();
+                    if !bases.contains(&cwd) {
+                        bases.push(cwd);
+                    }
+                }
+                let target = if Path::new(&header).is_absolute() {
+                    lens_build::normalize_path(&header, "/")
+                } else {
+                    bases
+                        .iter()
+                        .map(|b| lens_build::normalize_path(&header, b))
+                        .find(|c| in_graph(c))
+                        .unwrap_or_else(|| lens_build::normalize_path(&header, &db_dir))
+                };
+                let mut report = graph.compute_impact(&target);
+
+                if !in_graph(&report.target_header) {
+                    // Not in the include graph at all — likely a path-
+                    // resolution problem, not "no rebuilds needed". Show
+                    // closest basename matches so the user can re-spell it.
+                    let base = Path::new(&header)
+                        .file_name()
+                        .map(|f| f.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| header.clone());
+                    let mut candidates: Vec<String> = graph
+                        .header_to_units
+                        .keys()
+                        .chain(graph.header_to_headers.keys())
+                        .chain(graph.header_to_headers.values().flatten())
+                        .filter(|h| {
+                            Path::new(h.as_str())
+                                .file_name()
+                                .map(|f| f.to_string_lossy() == base)
+                                .unwrap_or(false)
+                        })
+                        .cloned()
+                        .collect();
+                    candidates.sort();
+                    candidates.dedup();
+                    candidates.truncate(5);
+                    let mut hint = format!(
+                        "header {:?} is not in the include graph (resolved as {})",
+                        header, report.target_header
+                    );
+                    if !candidates.is_empty() {
+                        hint.push_str(&format!("; similar: {}", candidates.join(", ")));
+                    }
+                    hint.push_str(&format!(
+                        "; pass an absolute path or one relative to the compile database directory ({})",
+                        db_dir
+                    ));
+                    report.hint = Some(hint);
+                }
                 if wants_json(format, false, true) {
                     outln!("{}", to_deterministic_pretty(&report)?);
                 } else {
@@ -822,6 +1166,21 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                     for u in &report.impacted_units {
                         outln!("  - {}", u);
                     }
+                }
+                // Evidence gaps stay visible on stderr in both modes;
+                // missing/unresolved includes and truncation are warnings,
+                // not findings (system headers often resolve nowhere).
+                if let Some(hint) = &report.hint {
+                    eprintln!("warning: {}", hint);
+                }
+                if report.missing_sources > 0
+                    || report.unresolved_includes > 0
+                    || report.scan_truncated
+                {
+                    eprintln!(
+                        "warning: impact graph incomplete: {} missing source(s), {} unresolved include(s), truncated={}",
+                        report.missing_sources, report.unresolved_includes, report.scan_truncated
+                    );
                 }
             }
             BuildCommands::Diff {
@@ -1063,12 +1422,35 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
 
                 if let Some(ref l) = log {
                     collect!("log", "reports/log_summary.json", {
-                        let indexer = LogIndexer::open(l)?;
+                        let indexer = open_log_indexer(l)?;
                         Ok(serde_json::json!({
                             "path": l.to_string_lossy(),
                             "total_lines": indexer.len(),
+                            "lossy_lines": indexer.lossy_lines(),
                         }))
                     });
+                    // Embed the original log content (tail-bounded) so the
+                    // bundle is evidence, not just a line count.
+                    let log_name = l
+                        .file_name()
+                        .map(|f| f.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "stdin.log".to_string());
+                    let log_name = log_name.replace(['/', '\\'], "_");
+                    match read_log_tail(l, BUNDLE_LOG_TAIL_BYTES) {
+                        Ok((bytes, truncated)) => {
+                            if truncated {
+                                diagnostics.push(format!(
+                                    "log: content truncated to the last {} bytes",
+                                    BUNDLE_LOG_TAIL_BYTES
+                                ));
+                            }
+                            artifacts.push(BundleArtifact {
+                                name: format!("logs/{}", log_name),
+                                data: bytes,
+                            });
+                        }
+                        Err(e) => diagnostics.push(format!("log content: {}", e)),
+                    }
                 }
 
                 if let Some(ref t) = trace {
@@ -1195,12 +1577,12 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                 let report = verify_bundle_archive(&bundle)?;
                 if wants_json(format, false, false) {
                     outln!("{}", to_deterministic_pretty(&report)?);
-                    if report.is_valid {
-                        return Ok(outcome);
+                    if !report.is_valid {
+                        // Integrity check ran and reported a negative
+                        // result — a finding, not a tool error.
+                        outcome = Outcome::Findings;
                     }
-                    return Err(lens_core::LensError::InvalidInput {
-                        message: "Bundle cryptographic verification failed".to_string(),
-                    });
+                    return Ok(outcome);
                 }
                 if report.is_valid {
                     outln!("Bundle verification SUCCESSFUL: {:?}", bundle);
@@ -1213,7 +1595,7 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                         outln!("  Unlisted entry (not in manifest): {}", u);
                     }
                 } else {
-                    eprintln!("Bundle verification FAILED: {:?}", bundle);
+                    eprintln!("Bundle integrity check FAILED: {:?}", bundle);
                     if let Some(err) = report.error {
                         eprintln!("  Error: {}", err);
                     }
@@ -1226,9 +1608,60 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                     for u in &report.unexpected_files {
                         eprintln!("  Unlisted: {}", u);
                     }
-                    return Err(lens_core::LensError::InvalidInput {
-                        message: "Bundle cryptographic verification failed".to_string(),
-                    });
+                    // Negative integrity result: a finding (exit 1), not an
+                    // operational error.
+                    outcome = Outcome::Findings;
+                }
+            }
+            BundleCommands::Show {
+                bundle,
+                entry,
+                format,
+            } => {
+                let bytes = read_bundle_entry(&bundle, &entry)?;
+                if wants_json(format, false, false) {
+                    outln!(
+                        "{}",
+                        to_deterministic_pretty(&serde_json::json!({
+                            "bundle": bundle.to_string_lossy(),
+                            "entry": entry,
+                            "size": bytes.len(),
+                            "content": String::from_utf8_lossy(&bytes),
+                        }))?
+                    );
+                } else {
+                    // Raw entry content — typically already pretty JSON.
+                    outln!("{}", String::from_utf8_lossy(&bytes));
+                }
+            }
+            BundleCommands::Extract {
+                bundle,
+                dest,
+                force,
+                format,
+            } => {
+                let written = extract_bundle(&bundle, &dest, force)?;
+                if wants_json(format, false, false) {
+                    outln!(
+                        "{}",
+                        to_deterministic_pretty(&serde_json::json!({
+                            "bundle": bundle.to_string_lossy(),
+                            "dest": dest.to_string_lossy(),
+                            "extracted": written
+                                .iter()
+                                .map(|p| p.to_string_lossy())
+                                .collect::<Vec<_>>(),
+                        }))?
+                    );
+                } else {
+                    outln!(
+                        "Verified and extracted {} file(s) to {:?}",
+                        written.len(),
+                        dest
+                    );
+                    for w in &written {
+                        outln!("  - {}", w.display());
+                    }
                 }
             }
         },

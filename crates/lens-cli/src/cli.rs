@@ -10,10 +10,13 @@ pub enum FailOn {
 
 /// `--format` output selector, unified across report commands.
 /// Commands keep their historical default when the flag is absent.
+/// `jsonl` is honored by `log filter` (one object per matched line);
+/// elsewhere it falls back to `json`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum OutputFormat {
     Text,
     Json,
+    Jsonl,
 }
 
 #[derive(Parser)]
@@ -142,8 +145,44 @@ pub enum DiskCommands {
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
-    /// Safely move a file to trash following the FreeDesktop Trash spec
-    Trash { path: PathBuf },
+    /// Safely move paths to trash following the FreeDesktop Trash spec;
+    /// `list`/`restore` manage existing entries
+    #[command(
+        args_conflicts_with_subcommands = true,
+        subcommand_precedence_over_arg = true
+    )]
+    Trash {
+        #[command(subcommand)]
+        action: Option<TrashCommands>,
+        /// Paths to move to trash
+        paths: Vec<PathBuf>,
+        /// Report what would be trashed without moving anything
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long, value_enum)]
+        format: Option<OutputFormat>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum TrashCommands {
+    /// List trash entries with their original paths
+    List {
+        /// Trash root to inspect instead of the home trash (e.g. a
+        /// mount's `.Trash-$uid` after a cross-device fallback)
+        #[arg(long)]
+        trash_dir: Option<PathBuf>,
+        #[arg(long, value_enum)]
+        format: Option<OutputFormat>,
+    },
+    /// Restore a trashed entry by its trash name (see `trash list`)
+    Restore {
+        /// Trash-internal name, e.g. `foo.txt` or `foo.txt_1`
+        name: String,
+        /// Trash root containing the entry instead of the home trash
+        #[arg(long)]
+        trash_dir: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -166,22 +205,34 @@ pub enum AbiCommands {
 
 #[derive(Subcommand)]
 pub enum LogCommands {
-    /// Inspect log file metrics and line counts
+    /// Inspect log file metrics and line counts.
+    /// PATH may be `-` for stdin; `.gz` files are decompressed (bounded).
     Inspect {
         path: PathBuf,
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
-    /// Search and filter log lines (memory-mapped, memchr-accelerated)
+    /// Search and filter log lines (memory-mapped, memchr-accelerated).
+    /// PATH may be `-` for stdin; `.gz` files are decompressed (bounded).
     Filter {
         path: PathBuf,
         #[arg(long)]
         query: Option<String>,
+        /// Regex pattern alternative to --query's substring match
+        #[arg(long, conflicts_with = "query")]
+        regex: Option<String>,
         #[arg(long)]
         min_level: Option<String>,
         /// Keep lines whose level could not be determined when --min-level is set
         #[arg(long)]
         include_unknown: bool,
+        /// Stop after N matched lines
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Show N lines of context around each match
+        #[arg(long, default_value_t = 0)]
+        context: usize,
+        /// `jsonl` prints one object per matched line
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
@@ -226,15 +277,17 @@ pub enum TraceCommands {
 
 #[derive(Subcommand)]
 pub enum SysCommands {
-    /// Inspect systemd unit file or unit directory
+    /// Inspect systemd unit file or unit directory; with no path, merges
+    /// the systemd search path (/etc, /run, /usr/lib, /lib)
     Inspect {
-        path: PathBuf,
+        path: Option<PathBuf>,
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
-    /// Detect ordering cycles in a directory of systemd unit files
+    /// Detect ordering cycles in systemd units; with no dir, merges the
+    /// systemd search path (/etc, /run, /usr/lib, /lib)
     Cycles {
-        dir: PathBuf,
+        dir: Option<PathBuf>,
         /// Output format; default is the text cycle listing
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
@@ -362,6 +415,25 @@ pub enum BundleCommands {
     /// Verify bundle contents against its embedded manifest's SHA-256 checksums
     Verify {
         bundle: PathBuf,
+        #[arg(long, value_enum)]
+        format: Option<OutputFormat>,
+    },
+    /// Print one archive entry's contents (e.g. reports/disk_snapshot.json)
+    Show {
+        bundle: PathBuf,
+        /// Entry name as listed by `bundle inspect`
+        entry: String,
+        #[arg(long, value_enum)]
+        format: Option<OutputFormat>,
+    },
+    /// Verify, then extract a bundle into a directory (no overwrite without --force)
+    Extract {
+        bundle: PathBuf,
+        /// Destination directory
+        dest: PathBuf,
+        /// Overwrite existing files
+        #[arg(long)]
+        force: bool,
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
