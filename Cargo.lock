@@ -587,18 +587,14 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
 name = "lens-build"
 version = "0.4.3"
 dependencies = [
- "lens-core",
  "serde",
- "serde_json",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -621,7 +617,6 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
- "thiserror",
 ]
 
 [[package]]
@@ -656,11 +651,8 @@ dependencies = [
 name = "lens-env"
 version = "0.4.3"
 dependencies = [
- "lens-core",
  "serde",
- "serde_json",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -695,7 +687,6 @@ dependencies = [
  "lens-trace",
  "serde",
  "serde_json",
- "thiserror",
 ]
 
 [[package]]
@@ -704,9 +695,7 @@ version = "0.4.3"
 dependencies = [
  "lens-core",
  "serde",
- "serde_json",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -715,9 +704,7 @@ version = "0.4.3"
 dependencies = [
  "lens-core",
  "serde",
- "serde_json",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -727,20 +714,15 @@ dependencies = [
  "lens-core",
  "quick-xml",
  "serde",
- "serde_json",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
 name = "lens-trace"
 version = "0.4.3"
 dependencies = [
- "lens-core",
  "serde",
- "serde_json",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -749,15 +731,12 @@ version = "0.4.3"
 dependencies = [
  "clap",
  "crossterm",
- "lens-core",
  "lens-disk",
  "lens-log",
  "lens-net",
  "lens-sys",
  "ratatui",
- "serde_json",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]

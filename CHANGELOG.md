@@ -195,6 +195,9 @@ incomplete, `trace analyze` fd 누수. Phase 0에서 0이 아닌 값으로
   상한 없는 힙 할당 — 조작된 XML로 OOM/CPU 소진) 수정. JUnit 속성
   디코딩을 `decoded_and_normalized_value(XmlVersion::Implicit1_0)`로
   이전했고 파싱 동작은 동일하다.
+- 미사용 의존성 제거: `serde_json`(lens-test/trace/sys/build/env/net/
+  tui), `thiserror`(lens-cli/abi/mcp/test/trace/sys/build/env/net/tui),
+  `lens-core`(lens-trace/build/env/tui).
 
 ## 0.4.3
 

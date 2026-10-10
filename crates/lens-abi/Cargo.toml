@@ -10,7 +10,6 @@ repository.workspace = true
 lens-core = { path = "../lens-core" }
 serde = { workspace = true }
 serde_json = { workspace = true }
-thiserror = { workspace = true }
 object = { workspace = true }
 gimli = { workspace = true }
 cpp_demangle = { workspace = true }
