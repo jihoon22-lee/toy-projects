@@ -378,7 +378,11 @@ mod tests {
     #[test]
     fn test_udp_bound_socket_counted_as_listening() {
         // A bound UDP socket reports st=07 and a wildcard remote endpoint.
-        let tmp = std::env::temp_dir().join(format!("lensnet-{}", std::process::id()));
+        let tmp = tempfile::Builder::new()
+            .prefix("lensnet-")
+            .tempdir()
+            .unwrap();
+        let tmp = tmp.path();
         let net = tmp.join("net");
         std::fs::create_dir_all(&net).unwrap();
         // net/tcp is mandatory input — provide a header-only table.
@@ -392,11 +396,10 @@ mod tests {
             "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   0: 00000000:0035 00000000:0000 07 00000000:00000000 00:00000000 00000000   101        0 55555 1 0000000000000000 100 0 0 10 0\n",
         )
         .unwrap();
-        let report = inspect_network(Some(&tmp)).unwrap();
+        let report = inspect_network(Some(tmp)).unwrap();
         assert_eq!(report.summary.listening_ports, 1);
         assert_eq!(report.listening.len(), 1);
         assert_eq!(report.listening[0].local_port, 53);
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

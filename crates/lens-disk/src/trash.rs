@@ -523,19 +523,19 @@ impl TrashManager {
 mod tests {
     use super::*;
 
-    fn tmp_trash(tag: &str) -> (PathBuf, TrashManager) {
-        let root =
-            std::env::temp_dir().join(format!("lensdisk-trash-{}-{}", std::process::id(), tag));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).unwrap();
-        let trash_dir = root.join("Trash");
+    fn tmp_trash(tag: &str) -> (tempfile::TempDir, TrashManager) {
+        let root = tempfile::Builder::new()
+            .prefix(&format!("lensdisk-trash-{tag}-"))
+            .tempdir()
+            .unwrap();
+        let trash_dir = root.path().join("Trash");
         (root, TrashManager::new(trash_dir))
     }
 
     #[test]
     fn test_trash_list_and_restore_by_name() {
         let (root, trash) = tmp_trash("roundtrip");
-        let src_dir = root.join("src");
+        let src_dir = root.path().join("src");
         fs::create_dir_all(&src_dir).unwrap();
         let f1 = src_dir.join("one.txt");
         let f2 = src_dir.join("two.txt");
@@ -570,14 +570,12 @@ mod tests {
         assert!(trash.restore_by_name("../escape").is_err());
         assert!(trash.restore_by_name("").is_err());
         assert!(trash.restore_by_name(".hidden").is_err());
-
-        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
     fn test_restore_refuses_tampered_trash_file() {
         let (root, trash) = tmp_trash("tamper");
-        let src = root.join("victim.txt");
+        let src = root.path().join("victim.txt");
         fs::write(&src, "orig").unwrap();
         trash.move_to_trash(&src).unwrap();
 
@@ -586,7 +584,5 @@ mod tests {
         let trashed = trash.files_dir().join("victim.txt");
         fs::write(&trashed, "tampered!").unwrap();
         assert!(trash.restore_by_name("victim.txt").is_err());
-
-        let _ = fs::remove_dir_all(&root);
     }
 }
