@@ -94,7 +94,11 @@ mod tests {
 
     #[test]
     fn test_add_translation_unit_resolves_on_disk_includes() {
-        let root = std::env::temp_dir().join(format!("lensbuild-{}", std::process::id()));
+        let root = tempfile::Builder::new()
+            .prefix("lensbuild-")
+            .tempdir()
+            .unwrap();
+        let root = root.path();
         let inc_dir = root.join("include");
         let src_dir = root.join("src");
         std::fs::create_dir_all(&inc_dir).unwrap();
@@ -134,13 +138,15 @@ mod tests {
         let core_key = src_dir.join("core.cpp").to_string_lossy().into_owned();
         assert!(report.impacted_units.contains(&main_key));
         assert!(report.impacted_units.contains(&core_key));
-
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
     fn test_include_resolution_normalizes_dotdot_and_preserves_order() {
-        let root = std::env::temp_dir().join(format!("lensbuild-dd-{}", std::process::id()));
+        let root = tempfile::Builder::new()
+            .prefix("lensbuild-dd-")
+            .tempdir()
+            .unwrap();
+        let root = root.path();
         // Layout: root/proj/inc/a_shadow.h? no — want ../ include from src/.
         let src = root.join("proj/src");
         let hdr = root.join("proj");
@@ -198,8 +204,6 @@ mod tests {
                 a.to_string_lossy().into_owned()
             ]
         );
-
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -120,11 +120,30 @@ fn tool_result(id: u64, name: &str, args: Value) -> Value {
     responses[0]["result"].clone()
 }
 
-fn tmpdir(tag: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("lensmcp-{}-{}", tag, std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+/// Temp dir that is removed on drop, even when the test fails.
+struct TestDir {
+    _guard: tempfile::TempDir,
+    path: std::path::PathBuf,
+}
+
+impl std::ops::Deref for TestDir {
+    type Target = std::path::PathBuf;
+
+    fn deref(&self) -> &Self::Target {
+        &self.path
+    }
+}
+
+fn tmpdir(tag: &str) -> TestDir {
+    let guard = tempfile::Builder::new()
+        .prefix(&format!("lensmcp-{tag}-"))
+        .tempdir()
+        .unwrap();
+    let path = guard.path().to_path_buf();
+    TestDir {
+        _guard: guard,
+        path,
+    }
 }
 
 #[test]
@@ -164,7 +183,6 @@ fn log_filter_tail_reaches_end_of_file() {
     let v: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(v["matches"].as_array().unwrap().len(), 1, "{text}");
     assert_eq!(v["matches"][0]["line"], 5001);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -190,7 +208,6 @@ fn log_filter_limit_paginates_matches() {
     // offset 5 → first emitted match is the 6th ERROR (line 6).
     assert_eq!(matches[0]["line"], 6);
     assert_eq!(v["truncated"], true);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -247,8 +264,6 @@ fn sys_diff_between_unit_dirs() {
     );
     let v: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(v["modified_units"][0]["unit"], "a.service", "{text}");
-    let _ = std::fs::remove_dir_all(&base);
-    let _ = std::fs::remove_dir_all(&cand);
 }
 
 #[test]
@@ -275,7 +290,6 @@ fn test_diff_reports_regressions() {
     );
     let v: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(v["regressions"].as_array().unwrap().len(), 1, "{text}");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -308,7 +322,6 @@ fn net_diff_between_snapshots() {
     );
     let v: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(v["new_listeners"][0]["local_port"], 443, "{text}");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

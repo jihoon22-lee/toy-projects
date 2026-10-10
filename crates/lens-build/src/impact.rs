@@ -363,12 +363,11 @@ mod tests {
     use super::*;
     use crate::model::ParsedUnit;
 
-    fn tmp_root(tag: &str) -> std::path::PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("lensbuild-impact-{}-{}", std::process::id(), tag));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+    fn tmp_root(tag: &str) -> tempfile::TempDir {
+        tempfile::Builder::new()
+            .prefix(&format!("lensbuild-impact-{tag}-"))
+            .tempdir()
+            .unwrap()
     }
 
     fn unit(file: &Path, dir: &Path, includes: &[&str]) -> ParsedUnit {
@@ -388,6 +387,7 @@ mod tests {
     #[test]
     fn test_missing_sources_and_unresolved_includes_counted() {
         let root = tmp_root("gaps");
+        let root = root.path();
         let inc = root.join("include");
         let src = root.join("src");
         std::fs::create_dir_all(&inc).unwrap();
@@ -401,9 +401,9 @@ mod tests {
 
         let mut graph = ImpactGraph::new();
         // a.c: one resolved + one unresolved include.
-        graph.add_translation_unit(&unit(&src.join("a.c"), &root, &[inc.to_str().unwrap()]));
+        graph.add_translation_unit(&unit(&src.join("a.c"), root, &[inc.to_str().unwrap()]));
         // deleted.c no longer exists on disk -> missing source.
-        graph.add_translation_unit(&unit(&src.join("deleted.c"), &root, &[]));
+        graph.add_translation_unit(&unit(&src.join("deleted.c"), root, &[]));
 
         assert_eq!(graph.missing_sources, 1);
         assert_eq!(graph.unresolved_includes, 1);
@@ -412,13 +412,12 @@ mod tests {
         assert_eq!(report.missing_sources, 1);
         assert_eq!(report.unresolved_includes, 1);
         assert_eq!(report.total_impacted, 1);
-
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
     fn test_include_cache_reuses_parsed_headers() {
         let root = tmp_root("cache");
+        let root = root.path();
         let inc = root.join("inc");
         std::fs::create_dir_all(&inc).unwrap();
         // Shared by both TUs; would be re-read per TU without the cache.
@@ -428,13 +427,12 @@ mod tests {
 
         let mut graph = ImpactGraph::new();
         let incdir = inc.to_str().unwrap();
-        graph.add_translation_unit(&unit(&root.join("a.c"), &root, &[incdir]));
-        graph.add_translation_unit(&unit(&root.join("b.c"), &root, &[incdir]));
+        graph.add_translation_unit(&unit(&root.join("a.c"), root, &[incdir]));
+        graph.add_translation_unit(&unit(&root.join("b.c"), root, &[incdir]));
 
         let header = inc.join("shared.h").to_string_lossy().into_owned();
         assert_eq!(graph.header_to_units[&header].len(), 2);
         // One cache entry per distinct file (a.c, b.c, shared.h).
         assert_eq!(graph.include_cache.len(), 3);
-        let _ = std::fs::remove_dir_all(&root);
     }
 }

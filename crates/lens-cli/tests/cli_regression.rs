@@ -9,17 +9,37 @@ fn lens(args: &[&str]) -> Output {
         .expect("failed to spawn lens")
 }
 
-fn tmp_dir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("lens-cli-test-{}-{}", std::process::id(), tag));
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+/// Temp dir that is removed on drop, even when the test fails.
+struct TestDir {
+    _guard: tempfile::TempDir,
+    path: PathBuf,
 }
 
-fn tmp_file(tag: &str, name: &str, contents: &str) -> PathBuf {
+impl std::ops::Deref for TestDir {
+    type Target = PathBuf;
+
+    fn deref(&self) -> &PathBuf {
+        &self.path
+    }
+}
+
+fn tmp_dir(tag: &str) -> TestDir {
+    let guard = tempfile::Builder::new()
+        .prefix(&format!("lens-cli-test-{tag}-"))
+        .tempdir()
+        .unwrap();
+    let path = guard.path().to_path_buf();
+    TestDir {
+        _guard: guard,
+        path,
+    }
+}
+
+fn tmp_file(tag: &str, name: &str, contents: &str) -> TestDir {
     let dir = tmp_dir(tag);
-    let path = dir.join(name);
+    let path = dir.path.join(name);
     std::fs::write(&path, contents).unwrap();
-    path
+    TestDir { path, ..dir }
 }
 
 fn stderr_of(output: &Output) -> String {
@@ -136,7 +156,8 @@ fn trace_analyze_rejects_non_strace() {
 #[test]
 fn bundle_create_isolates_source_failures() {
     let junit = tmp_file("bundle", "junit.xml", JUNIT_XML);
-    let output = tmp_dir("bundle").join("evidence.lens");
+    let outdir = tmp_dir("bundle-out");
+    let output = outdir.join("evidence.lens");
 
     let out = lens(&[
         "bundle",
@@ -216,7 +237,7 @@ fn disk_scan_reports_incomplete_on_unreadable_dirs() {
 
 /// Build a minimal venv fixture: pyvenv.cfg + one dist-info per
 /// (name, version, requires) tuple.
-fn make_venv(tag: &str, dists: &[(&str, &str, &[&str])]) -> PathBuf {
+fn make_venv(tag: &str, dists: &[(&str, &str, &[&str])]) -> TestDir {
     let dir = tmp_dir(tag);
     std::fs::write(
         dir.join("pyvenv.cfg"),
@@ -507,7 +528,7 @@ fn build_inspect_reports_transitive_impact() {
     std::fs::write(
         &cc_db,
         serde_json::to_string(&serde_json::json!([{
-            "directory": dir,
+            "directory": dir.to_str().unwrap(),
             "file": src.join("a.c"),
             "arguments": ["cc", format!("-I{}", inc.display()), "-c", "a.c"],
         }]))
@@ -1018,7 +1039,7 @@ fn trash_multi_path_dry_run_list_restore() {
     let run = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_lens"))
             .args(args)
-            .env("XDG_DATA_HOME", &xdg)
+            .env("XDG_DATA_HOME", xdg.as_path())
             .env("HOME", "/nonexistent-home-lens-test")
             .output()
             .expect("spawn lens")
@@ -1072,7 +1093,7 @@ fn build_impact_resolves_relative_header_and_hints() {
     std::fs::write(
         &cc_db,
         serde_json::to_string(&serde_json::json!([{
-            "directory": dir,
+            "directory": dir.to_str().unwrap(),
             "file": src.join("a.c"),
             "arguments": ["cc", format!("-I{}", inc.display()), "-c", "a.c"],
         }]))
@@ -1090,7 +1111,7 @@ fn build_impact_resolves_relative_header_and_hints() {
             "--header",
             "include/common.h",
         ])
-        .current_dir(&cwd)
+        .current_dir(cwd.as_path())
         .output()
         .expect("spawn lens");
     assert!(out.status.success(), "{}", stderr_of(&out));
@@ -1333,7 +1354,6 @@ fn sys_inspect_reports_parser_diagnostics() {
     assert!(codes.contains(&"SYNTAX_SECTION_HEADER"), "{codes:?}");
     assert!(codes.contains(&"SYNTAX_GARBAGE_LINE"), "{codes:?}");
     assert!(codes.contains(&"UNIT_REF_MISSING"), "{codes:?}");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -1370,5 +1390,4 @@ fn env_check_flags_top_level_shadowing_only() {
         .filter_map(|i| i["module_name"].as_str())
         .collect();
     assert_eq!(names, vec!["logging", "secrets"], "{names:?}");
-    let _ = std::fs::remove_dir_all(&dir);
 }

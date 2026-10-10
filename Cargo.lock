@@ -617,6 +617,7 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -687,6 +688,7 @@ dependencies = [
  "lens-trace",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

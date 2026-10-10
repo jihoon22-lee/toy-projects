@@ -184,8 +184,11 @@ mod tests {
 
     #[test]
     fn test_gzip_input_decompresses() {
-        let dir = std::env::temp_dir().join(format!("lenslog-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = tempfile::Builder::new()
+            .prefix("lenslog-")
+            .tempdir()
+            .unwrap();
+        let dir = dir.path();
         let gz_path = dir.join("app.log.gz");
         {
             use std::io::Write;
@@ -197,7 +200,6 @@ mod tests {
         let idx = LogIndexer::open(&gz_path).unwrap();
         assert_eq!(idx.len(), 2);
         assert_eq!(idx.get_line(1), Some("[ERROR] b"));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
