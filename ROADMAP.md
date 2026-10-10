@@ -9,7 +9,7 @@ Lens는 단일 Rust 워크스페이스다. `lens-*` 크레이트가 각각 하�
 | lens-core | 공용 오류·file identity·증거 수집·`lens.bundle/v2` 아카이브(생성/검사/검증/show/extract)·결정적 JSON·시간 유틸 | 증거 스키마 버전 협상 |
 | lens-disk | 아레나 트리 스캔, 심볼링크/하드링크 보존, 병렬 stat, 중복 해시, Trash(list/restore/topdir 폴백) | 정확성을 보존하는 증분 재스캔, `trash empty` |
 | lens-abi | ELF 심볼/dynamic 섹션 파싱, 정의·미정의 심볼 분리, 버전 요구사항, `Compatibility` diff | 타입 멤버/레이아웃 비교(현재는 타입명 표면만 추출) |
-| lens-log | mmap 인덱싱, memchr 라인 스캔, 구조화 필드, 레벨/부분문자열/regex 필터, `.gz`·stdin·lossy UTF-8 | 상수 메모리 스트리밍 gz/stdin(현재는 상한 있는 버퍼), 다중 소스 시계 보정 |
+| lens-log | mmap 인덱싱, memchr 라인 스캔, 구조화 필드, 레벨/부분문자열/regex 필터, `.gz`·stdin·lossy UTF-8 | 다중 소스 시계 보정 |
 | lens-test | JUnit XML 파싱(다중 파일·glob 병합), 상태별 집계, 결정적 run id, `testlens.diff/v2` | 추가 runner 형식 |
 | lens-trace | strace 파싱·재개 스티칭, `CLONE_FILES` 공유 fd 테이블, CLOEXEC/`close_range`, fd 누수·I/O 집계, diff | 대규모 스트림 인덱싱, 실 `strace` 캡처 기반 검증(현재는 합성 픽스처) |
 | lens-sys | systemd unit + `.d/` drop-in 병합, `Key=` 리셋, `%u`/`%h` 확장, 검색 경로 병합 로더, 방향 사이클+엣지 기원, 파서/로더 진단 | 지원 systemd 의미론의 단계적 확대, `--enabled-only` 사이클 범위 |

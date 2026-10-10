@@ -63,7 +63,8 @@ let snap = SnapshotV2::from_tree(&res.tree, res.root_id, res.complete, res.trunc
 
 - `LogIndexer`: mmap + `memchr`로 라인 오프셋 테이블 구축. `.gz` 입력은
   상한 있는 해제(512 MiB)로, 스트림(`from_reader`, stdin `-` 경로)은
-  상한 있는 메모리 버퍼로 처리. invalid UTF-8 줄은 인덱싱되고
+  해제된 바이트를 무익명 임시 파일에 스풀 후 mmap해 처리한다 — 해제
+  버퍼가 프로세스 익명 메모리를 차지하지 않는다. invalid UTF-8 줄은 인덱싱되고
   `lossy_lines()`로 집계되며 `get_line_lossy`가 U+FFFD로 노출.
 - `parse_line`: JSONL(`level`/`msg`/`ts` 등, 키 대소문자 무시, 나머지 키는
   `fields`에 보존)과 `LEVEL ...` 휴리스틱. `detect_level`은 레벨만 빠르게 반환.

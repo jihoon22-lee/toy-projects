@@ -104,8 +104,10 @@ lens log filter <path> [--query TEXT | --regex PATTERN] [--min-level LEVEL]
 ```
 
 - mmap 라인 인덱서(memchr 기반)로 GB급 로그를 즉시 열람.
-- `path`로 `-`를 주면 stdin을 읽는다(상한 있는 버퍼링). `.gz` 파일은
-  상한 해제(512 MiB)로 읽는다 — 로테이트된 로그를 바로 조사 가능.
+- `path`로 `-`를 주면 stdin을 읽는다. `.gz` 파일은 해제하며 읽고,
+  두 경우 모두 해제된 바이트를 무익명 임시 파일에 스풀한 뒤 mmap한다
+  (프로세스 힙에 남지 않는다). 해제 상한 512 MiB 초과 시 오류로
+  거부한다 — 로테이트된 로그를 바로 조사 가능.
 - invalid UTF-8 줄은 건너뛰지 않고 U+FFFD로 표시하며, `lossy_lines`
   카운트를 JSON 필드와 stderr로 보고한다.
 - `--min-level`: trace|debug|info|warn|error|fatal (오타 시 즉시 거부).

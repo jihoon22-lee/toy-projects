@@ -21,6 +21,13 @@ Lens는 워크스페이스 단일 버전으로 릴리스된다. 태그는 `vX.Y.
   미판별 줄은 제외+stderr 보고, `--include-unknown`으로 복원.
   MCP `lens_log_filter`에도 `since`/`until`/`year` 인자 추가.
 
+### 개선
+
+- `log filter`/`log inspect`의 `.gz`·stdin(`-`) 입력이 해제된 바이트를
+  전부 프로세스 힙에 올리지 않고 무익명 임시 파일에 스풀 후 mmap한다.
+  512 MiB 해제 상한과 초과 시 오류는 그대로. 큰 `.gz`에서 피크 익명
+  메모리가 크게 줄었다.
+
 ### 수정
 
 - `lens completion`이 닫힌 파이프에서 패닉(종료 101) 대신 0으로 종료.
