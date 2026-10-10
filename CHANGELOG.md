@@ -2,6 +2,16 @@
 
 Lens는 워크스페이스 단일 버전으로 릴리스된다. 태그는 `vX.Y.Z` 형식이다.
 
+## Unreleased
+
+### 인프라
+
+- ratatui 0.30으로 업그레이드해 `paste` 의존성(RUSTSEC-2024-0436,
+  unmaintained)을 제거했다.
+- 수동 `chore(release):` 범프 머지 시 manifest 버전과 태그를 비교해
+  태그가 없으면 Release 워크플로를 자동 호출한다. 이전에는 매번
+  `gh workflow run`이 필요했다.
+
 ## 0.6.0
 
 사용성·안전성 후속 개선 릴리스. 상세 내역은 아래 섹션 참고.
