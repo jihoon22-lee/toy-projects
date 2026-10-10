@@ -35,6 +35,8 @@ Lens는 워크스페이스 단일 버전으로 릴리스된다. 태그는 `vX.Y.
   `<root>/etc/ld.so.preload`를 검사.
 - 테스트가 `/tmp/lens-*` 디렉터리를 남기지 않도록 모든 테스트가
   `tempfile::TempDir` 가드를 사용.
+- TUI Storage·Services·Network 목록이 선택 항목을 따라 스크롤해
+  첫 페이지 밖의 선택(`j/k`, `PgDn`, `g/G`)이 보이지 않던 문제 수정.
 
 ## 0.5.0
 

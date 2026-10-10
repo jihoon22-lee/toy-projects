@@ -8,7 +8,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Gauge, List, ListItem, Paragraph, Tabs},
+    widgets::{Block, Borders, Gauge, List, ListItem, ListState, Paragraph, Tabs},
     Terminal,
 };
 use std::io;
@@ -138,7 +138,11 @@ fn run_app<B: ratatui::backend::Backend>(
                             .borders(Borders::ALL)
                             .title(dir_title),
                     );
-                    f.render_widget(list, body_chunks[0]);
+                    // Stateful render so the viewport follows the
+                    // selection past the first page.
+                    let mut state = ListState::default();
+                    state.select(Some(app.selected_index));
+                    f.render_stateful_widget(list, body_chunks[0], &mut state);
 
                     let right_chunks = Layout::default()
                         .direction(Direction::Vertical)
@@ -247,7 +251,9 @@ fn run_app<B: ratatui::backend::Backend>(
                             .borders(Borders::ALL)
                             .title(" Active Listening Ports & Sockets "),
                     );
-                    f.render_widget(net_list, body_chunks[0]);
+                    let mut state = ListState::default();
+                    state.select(Some(app.net_selected));
+                    f.render_stateful_widget(net_list, body_chunks[0], &mut state);
 
                     let summary_text = if let Some(rep) = &app.net_report {
                         vec![
@@ -323,7 +329,9 @@ fn run_app<B: ratatui::backend::Backend>(
                                 app.sys_units.len()
                             )),
                     );
-                    f.render_widget(list, body_chunks[0]);
+                    let mut state = ListState::default();
+                    state.select(Some(app.sys_selected));
+                    f.render_stateful_widget(list, body_chunks[0], &mut state);
 
                     let detail_text = if let Some(u) = app.sys_units.get(app.sys_selected) {
                         let mut lines = vec![
