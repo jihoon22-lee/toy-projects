@@ -49,7 +49,12 @@ pub struct TraceSnapshot {
     pub total_calls: u64,
     pub total_errors: u64,
     pub syscalls: BTreeMap<String, SyscallStats>,
+    /// Error counts keyed by `syscall:errno` (e.g. `openat:ENOENT`).
     pub errors: BTreeMap<String, u64>,
+    /// Representative arguments for the first occurrence of each
+    /// `syscall:errno` error key.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub error_samples: BTreeMap<String, String>,
     pub processes: BTreeMap<String, ProcessInfo>,
     pub events: Vec<TraceEvent>,
     /// Union of file descriptors left open when each process exited or when

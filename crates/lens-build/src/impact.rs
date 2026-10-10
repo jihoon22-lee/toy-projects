@@ -16,6 +16,15 @@ pub struct ImpactGraph {
     /// True when the on-disk include scan hit MAX_SCANNED_FILES — results
     /// may be incomplete.
     pub scan_truncated: bool,
+    /// Translation units whose source file could not be read (e.g. deleted
+    /// since the compile database was written).
+    pub missing_sources: usize,
+    /// `#include` directives that resolved to no on-disk file (generated
+    /// headers, missing deps).
+    pub unresolved_includes: usize,
+    /// Per-file `#include` extraction cache — headers shared by many TUs
+    /// are read and parsed once.
+    include_cache: std::collections::HashMap<String, Option<Vec<IncludeDirective>>>,
 }
 
 impl ImpactGraph {
@@ -66,7 +75,22 @@ impl ImpactGraph {
                 self.scan_truncated = true;
                 break;
             }
-            let Ok(content) = std::fs::read_to_string(&current) else {
+            // Cache include extraction per file: headers shared by many
+            // translation units are read and parsed once per graph build.
+            let includes = match self.include_cache.get(&current) {
+                Some(cached) => cached.clone(),
+                None => {
+                    let parsed = std::fs::read_to_string(&current)
+                        .ok()
+                        .map(|c| extract_includes(&c));
+                    self.include_cache.insert(current.clone(), parsed.clone());
+                    parsed
+                }
+            };
+            let Some(includes) = includes else {
+                if current == unit.file {
+                    self.missing_sources += 1;
+                }
                 continue;
             };
             scanned += 1;
@@ -74,9 +98,10 @@ impl ImpactGraph {
                 .parent()
                 .map(|p| p.to_path_buf())
                 .unwrap_or_default();
-            for inc in extract_includes(&content) {
+            for inc in &includes {
                 let Some(resolved) = resolve_include(&inc.name, inc.quoted, &anchor, &include_dirs)
                 else {
+                    self.unresolved_includes += 1;
                     continue;
                 };
                 if current == unit.file {
@@ -141,8 +166,61 @@ impl ImpactGraph {
             impacted_units: impacted_vec,
             total_impacted: total,
             scan_truncated: self.scan_truncated,
+            missing_sources: self.missing_sources,
+            unresolved_includes: self.unresolved_includes,
+            hint: None,
         }
     }
+
+    /// True when `h` names a header the graph knows: directly included by
+    /// a translation unit, an includee of another header, or an includer.
+    pub fn header_in_graph(&self, h: &str) -> bool {
+        self.header_to_units.contains_key(h)
+            || self.header_to_headers.contains_key(h)
+            || self.header_to_headers.values().any(|s| s.contains(h))
+    }
+
+    /// Known headers whose basename matches `header`, for "did you mean"
+    /// hints when a requested header is absent from the graph.
+    pub fn closest_headers(&self, header: &str, max: usize) -> Vec<String> {
+        let base = Path::new(header)
+            .file_name()
+            .map(|f| f.to_string_lossy().into_owned())
+            .unwrap_or_else(|| header.to_string());
+        let mut candidates: Vec<String> = self
+            .header_to_units
+            .keys()
+            .chain(self.header_to_headers.keys())
+            .chain(self.header_to_headers.values().flatten())
+            .filter(|h| {
+                Path::new(h.as_str())
+                    .file_name()
+                    .map(|f| f.to_string_lossy() == base)
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect();
+        candidates.sort();
+        candidates.dedup();
+        candidates.truncate(max);
+        candidates
+    }
+}
+
+/// Resolve a possibly-relative header argument against `bases` in order
+/// (compile-database directory, each entry's `directory`, caller's cwd):
+/// the first base whose normalization lands in the graph wins. Absolute
+/// headers normalize directly. When nothing resolves, fall back to the
+/// first base so the report still names a concrete target.
+pub fn resolve_header_target(graph: &ImpactGraph, header: &str, bases: &[String]) -> String {
+    if Path::new(header).is_absolute() {
+        return crate::normalize_path(header, "/");
+    }
+    bases
+        .iter()
+        .map(|b| crate::normalize_path(header, b))
+        .find(|c| graph.header_in_graph(c))
+        .unwrap_or_else(|| crate::normalize_path(header, bases.first().map_or(".", |b| b)))
 }
 
 /// An `#include` directive with its spelling preserved: `quoted` is true for
@@ -278,4 +356,85 @@ fn resolve_include(
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::ParsedUnit;
+
+    fn tmp_root(tag: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("lensbuild-impact-{}-{}", std::process::id(), tag));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn unit(file: &Path, dir: &Path, includes: &[&str]) -> ParsedUnit {
+        ParsedUnit {
+            file: file.to_string_lossy().into_owned(),
+            directory: dir.to_string_lossy().into_owned(),
+            compiler: "cc".to_string(),
+            includes: includes.iter().map(|s| s.to_string()).collect(),
+            defines: vec![],
+            output: None,
+            standard: None,
+            flags: vec![],
+            forced_includes: vec![],
+        }
+    }
+
+    #[test]
+    fn test_missing_sources_and_unresolved_includes_counted() {
+        let root = tmp_root("gaps");
+        let inc = root.join("include");
+        let src = root.join("src");
+        std::fs::create_dir_all(&inc).unwrap();
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(inc.join("ok.h"), "#define OK 1\n").unwrap();
+        std::fs::write(
+            src.join("a.c"),
+            "#include \"ok.h\"\n#include \"generated.h\"\n",
+        )
+        .unwrap();
+
+        let mut graph = ImpactGraph::new();
+        // a.c: one resolved + one unresolved include.
+        graph.add_translation_unit(&unit(&src.join("a.c"), &root, &[inc.to_str().unwrap()]));
+        // deleted.c no longer exists on disk -> missing source.
+        graph.add_translation_unit(&unit(&src.join("deleted.c"), &root, &[]));
+
+        assert_eq!(graph.missing_sources, 1);
+        assert_eq!(graph.unresolved_includes, 1);
+
+        let report = graph.compute_impact(&inc.join("ok.h").to_string_lossy());
+        assert_eq!(report.missing_sources, 1);
+        assert_eq!(report.unresolved_includes, 1);
+        assert_eq!(report.total_impacted, 1);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_include_cache_reuses_parsed_headers() {
+        let root = tmp_root("cache");
+        let inc = root.join("inc");
+        std::fs::create_dir_all(&inc).unwrap();
+        // Shared by both TUs; would be re-read per TU without the cache.
+        std::fs::write(inc.join("shared.h"), "#define S 1\n").unwrap();
+        std::fs::write(root.join("a.c"), "#include \"shared.h\"\n").unwrap();
+        std::fs::write(root.join("b.c"), "#include \"shared.h\"\n").unwrap();
+
+        let mut graph = ImpactGraph::new();
+        let incdir = inc.to_str().unwrap();
+        graph.add_translation_unit(&unit(&root.join("a.c"), &root, &[incdir]));
+        graph.add_translation_unit(&unit(&root.join("b.c"), &root, &[incdir]));
+
+        let header = inc.join("shared.h").to_string_lossy().into_owned();
+        assert_eq!(graph.header_to_units[&header].len(), 2);
+        // One cache entry per distinct file (a.c, b.c, shared.h).
+        assert_eq!(graph.include_cache.len(), 3);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

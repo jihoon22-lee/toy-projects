@@ -1,4 +1,4 @@
-use crate::model::{Diagnostic, SystemdUnit};
+use crate::model::{Diagnostic, OrderingEdge, SystemdUnit};
 use std::collections::BTreeMap;
 
 /// Specifier expansion context for a unit. `%u`/`%h` resolve against the
@@ -71,6 +71,15 @@ fn split_unit_name(unit_name: &str) -> (String, String) {
 
 pub fn expand_specifiers(value: &str, unit_name: &str) -> String {
     expand_with(&SpecContext::minimal(unit_name), value)
+}
+
+/// `foo@.service` — a template unit declares no concrete instance and
+/// must not participate in the ordering graph.
+pub fn is_template_name(name: &str) -> bool {
+    match (name.find('@'), name.rfind('.')) {
+        (Some(at), Some(dot)) => at + 1 == dot,
+        _ => false,
+    }
 }
 
 fn expand_with(ctx: &SpecContext, value: &str) -> String {
@@ -152,8 +161,30 @@ fn unit_entries(content: &str, path: Option<&str>) -> (Vec<UnitEntry>, Vec<Diagn
 
     for (line_num, line) in logical_lines {
         let trimmed = line.trim();
-        if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            current_section = trimmed[1..trimmed.len() - 1].trim().to_string();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') && trimmed.len() >= 2 {
+            let inner = &trimmed[1..trimmed.len() - 1];
+            if inner.trim().is_empty() || inner.contains('[') || inner.contains(']') {
+                diagnostics.push(Diagnostic {
+                    code: "SYNTAX_SECTION_HEADER".to_string(),
+                    severity: "warning".to_string(),
+                    message: format!("Malformed section header '{}'", trimmed),
+                    path: path.map(String::from),
+                    line: Some(line_num),
+                });
+                continue;
+            }
+            current_section = inner.trim().to_string();
+            continue;
+        }
+        if trimmed.starts_with('[') {
+            // e.g. `[Unit` — a section header that was never closed.
+            diagnostics.push(Diagnostic {
+                code: "SYNTAX_SECTION_HEADER".to_string(),
+                severity: "warning".to_string(),
+                message: format!("Unclosed or malformed section header '{}'", trimmed),
+                path: path.map(String::from),
+                line: Some(line_num),
+            });
             continue;
         }
 
@@ -173,6 +204,14 @@ fn unit_entries(content: &str, path: Option<&str>) -> (Vec<UnitEntry>, Vec<Diagn
             }
 
             entries.push((line_num, current_section.clone(), key, raw_val));
+        } else {
+            diagnostics.push(Diagnostic {
+                code: "SYNTAX_GARBAGE_LINE".to_string(),
+                severity: "warning".to_string(),
+                message: format!("Non-assignment line ignored: '{}'", trimmed),
+                path: path.map(String::from),
+                line: Some(line_num),
+            });
         }
     }
 
@@ -274,6 +313,29 @@ pub fn parse_unit_content(content: &str, unit_name: &str, path: Option<&str>) ->
         sections.insert(sec_name, out_map);
     }
 
+    // Keep per-line ordering directives for cycle provenance; `Key=`
+    // resets clear previously accumulated edges of that directive.
+    let mut ordering_edges = Vec::new();
+    for (line, sec, key, raw_val) in &entries {
+        if sec != "Unit" || (key != "After" && key != "Before") {
+            continue;
+        }
+        let value = expand_with(&ctx, raw_val);
+        if value.is_empty() {
+            ordering_edges.retain(|e: &OrderingEdge| e.directive != *key);
+        } else {
+            for target in value.split_whitespace() {
+                ordering_edges.push(OrderingEdge {
+                    directive: key.clone(),
+                    source: unit_name.to_string(),
+                    target: target.to_string(),
+                    path: path.map(String::from),
+                    line: Some(*line),
+                });
+            }
+        }
+    }
+
     let mut unit = SystemdUnit {
         name: unit_name.to_string(),
         path: path.map(String::from),
@@ -284,6 +346,10 @@ pub fn parse_unit_content(content: &str, unit_name: &str, path: Option<&str>) ->
         after: Vec::new(),
         exec_start: None,
         drop_ins: Vec::new(),
+        ordering_edges,
+        masked: false,
+        alias_of: None,
+        aliases: Vec::new(),
         diagnostics,
     };
     refresh_derived(&mut unit);
@@ -302,8 +368,23 @@ pub fn apply_drop_in(base: &mut SystemdUnit, drop_in_content: &str, drop_in_path
     // updates %u/%h expansion for subsequent entries.
     let mut ctx = SpecContext::for_unit(&base.name, &base.sections);
 
-    for (_line, sec, key, raw_val) in entries {
+    for (line, sec, key, raw_val) in entries {
         let value = expand_with(&ctx, &raw_val);
+        if sec == "Unit" && (key == "After" || key == "Before") {
+            if value.is_empty() {
+                base.ordering_edges.retain(|e| e.directive != key);
+            } else {
+                for target in value.split_whitespace() {
+                    base.ordering_edges.push(OrderingEdge {
+                        directive: key.clone(),
+                        source: base.name.clone(),
+                        target: target.to_string(),
+                        path: Some(drop_in_path.to_string()),
+                        line: Some(line),
+                    });
+                }
+            }
+        }
         if sec == "Service" && key == "User" {
             // `User=` (empty) resets to the manager default (root), and any
             // new value updates %u/%h for the remaining entries.

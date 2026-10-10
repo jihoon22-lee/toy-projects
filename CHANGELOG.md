@@ -4,6 +4,40 @@ Lens는 워크스페이스 단일 버전으로 릴리스된다. 태그는 `vX.Y.
 
 ## Unreleased
 
+### Breaking changes
+
+이번 릴리스는 사용자 가시 동작이 여럿 바뀐다. 마이그레이션 노트:
+
+- **종료 코드 규약이 `diff(1)` 관례로 통일됐다.** `0`=clean,
+  `1`=findings 있음, `2`=사용·입력·런타임 오류. 이전에는 잘못된
+  입력이 `0`이나 `1`로 빠지는 경로가 있었으므로, 스크립트에서
+  "0이 아니면 오류"로 해석하던 로직은 findings(exit 1)를 오류와
+  구분하도록 수정해야 한다. 영향받는 명령: `test diff`(회귀/신규
+  실패→1), `abi diff`(incompatible·uncertain→1), `sys cycles`
+  (사이클→1), `env check`(누락/충돌→1), `doctor`(`--fail-on` 기준
+  이상→1), `disk scan`(incomplete→1), `trace analyze`(fd 누수→1),
+  `bundle verify`(무결성 불일치→1).
+- **`testlens.diff` 스키마가 v1→v2로 변경됐다.** `regressions`/
+  `fixes`가 `Vec<String>`에서 `CaseChange{id,before,after,message}`
+  구조로 바뀌고 `new_failures`/`removed_tests`/`skipped_changes`/
+  `diagnostics`가 추가됐다. 소비자는 `schema` 필드를 확인하고 v2
+  파서로 전환해야 한다.
+- **`lens log filter --min-level`이 레벨 불명 줄을 제외한다.**
+  이전에는 Unknown 레벨 줄도 출력됐다. 기존 동작이 필요하면
+  `--include-unknown`을 추가한다.
+- **잘못된 입력이 더 엄격하게 거부된다(exit 2).** venv가 아닌 경로,
+  읽을 수 없는 `--proc-dir`/`--systemd-dir`/`--root`, JUnit 루트가
+  아닌 XML, 대부분 파싱되지 않는 strace 입력, 소스 없는 `bundle
+  create`, `--force` 없는 출력 덮어쓰기가 이전의 조용한 성공/빈
+  결과 대신 오류가 된다.
+- **`lens-mcp` 도구 실패가 `result.isError=true`로 반환된다.**
+  알려진 도구의 실행 실패는 더 이상 JSON-RPC error가 아니다.
+  클라이언트는 `isError`를 검사해야 한다(알 수 없는 도구/메서드는
+  여전히 JSON-RPC error).
+- **`lens disk trash`는 `list`/`restore` 서브커맨드가 경로 인자보다
+  우선한다.** 이름이 `list`/`restore`인 파일은 `./list`처럼 경로
+  접두어를 붙여 trash 한다.
+
 ### 안전성 (Phase 0)
 - stdout 파이프가 닫혀도 패닉하지 않고 exit 0으로 종료
   (`lens net inspect --json | head -1` 등).
@@ -24,6 +58,146 @@ Lens는 워크스페이스 단일 버전으로 릴리스된다. 태그는 `vX.Y.
 - TUI: 시작 경로를 canonicalize하여 `lens tui`(경로 ".")에서 Backspace로
   상위 디렉터리 이동이 동작. 패닉 시 터미널(raw mode/alt screen)을 복원하는
   panic hook 추가.
+
+### 정확성 (Phase 1)
+- `lens env check`: PEP 508 환경 마커(`python_version`, `sys_platform`,
+  `extra`, `and`/`or`/괄호, 버전 비교)를 venv의 실제 버전/플랫폼에 대해
+  평가. 거짓 마커 요구는 스킵해 거짓 "missing"을 제거하고, `extra == "x"`
+  는 새 `--extras a,b`로 활성화한 extra에서만 적용. 설치됐지만 범위를
+  벗어난 버전은 `version_conflicts`, 평가 불가 마커는 `unevaluated`로
+  missing과 구분해 보고. uv venv의 `version_info` 키 인식 추가.
+- `lens log filter --min-level`: 레벨을 판별할 수 없는 줄을 제외하고
+  제외 수를 stderr로 보고(`--include-unknown`으로 복원). syslog PRI와
+  커널 printk `<N>` 접두사에서도 레벨 추출.
+- `lens trace analyze`: `CLONE_FILES` 스레드가 fd 테이블을 공유하도록
+  모델링(스레드의 close가 공유 fd를 해제), `O_CLOEXEC` fd를 `execve`에서
+  해제, `close_range` 지원. 에러 집계 키를 `syscall:errno`로 변경.
+- `lens abi`: 동적 심볼을 정의(export)/미정의(import)로 구분 — diff가
+  정의된 심볼만 제거 판정에 쓰고 import는 `imports` SetDiff로 별도
+  비교(import만의 변경은 compatible). weak 심볼은 binding=`weak`로 표기.
+  `abilens.diff/v3` 스키마.
+- `lens sys cycles`: 사이클을 SCC 멤버 정렬이 아닌 실제 방향 경로로
+  보고하고 각 엣지의 기원(유닛 파일:라인, 디렉티브)을 표시. `/dev/null`
+  masked 유닛은 엣지 대상에서 제외하고 alias/템플릿 이름 해석.
+- `lens sys diff`: 유닛의 모든 섹션·키를 비교(`User=` 추가 등). 입력으로
+  스냅샷 JSON 외에 유닛 디렉터리도 허용.
+- `lens build inspect`: `reverse_impact`는 직접 includer만 유지하고,
+  헤더 체인을 거친 간접 includer까지 포함하는 `transitive_impact` 추가
+  (`buildscope.snapshot/v4` 유지, 신규 필드).
+
+### CLI 계약 (Phase 2)
+
+**Changed (breaking)** — 종료 코드 규약을 `diff(1)` 관례로 통일:
+`0`=clean, `1`=findings 있음, `2`=사용·입력·런타임 오류. 출력 텍스트는
+그대로이고 종료 코드만 바뀐다. findings는 `test diff` 회귀/신규 실패,
+`abi diff` incompatible·uncertain(uncertain은 수동 검토가 필요하므로
+findings로 분류 — 문서 표 참고), `sys cycles` 사이클 발견, `env check`
+누락/충돌 의존성, `doctor`의 `--fail-on` 기준 이상, `disk scan`
+incomplete, `trace analyze` fd 누수. Phase 0에서 0이 아닌 값으로
+통일했던 잘못된 입력 경로는 이제 **2**로 종료한다.
+- `lens doctor --fail-on warn|fail`(기본 `fail`) 추가.
+- `--format text|json`을 전 명령에 통일. `text`는 사람이 읽는 요약
+  모드(예: `abi inspect`는 SONAME/NEEDED/export·import 수), `json`은
+  기존 결정적 스키마. 명령별 기본값은 유지. `net inspect --no-unix` 추가.
+  `disk scan`/`net inspect`/`doctor`의 `--json`은 `--format json`
+  별칭으로 유지.
+- `lens disk scan`: `--max-depth`, `--exclude`(반복), `-x`/
+  `--one-file-system`, `--top N`(기본 10) 노출. 텍스트 크기는
+  KiB/MiB/GiB로 표시.
+- `lens test diff`: 결과를 `testlens.diff/v2`로 구조화 —
+  `regressions`/`fixes`가 `CaseChange{id,before,after,message}` 목록이
+  되고 `new_failures`, `removed_tests`, `skipped_changes`,
+  `diagnostics`(중복 identity) 추가(**스키마 v1→v2**). skipped→passed는
+  fix로 집계하지 않는다. 파일/디렉터리/`*.xml` glob 다중 입력 지원.
+- `lens net inspect`: 소유자 불명 소켓을 `owner_state`로
+  `orphan`과 `owner_unknown`(권한 부족)을 구분하고 summary에
+  `owner_unknown_sockets`/`uninspectable_processes` 추가
+  (`lens.net/v1` additive). doctor는 권한 부족 소켓을 orphan WARN으로
+  세지 않고 "sudo로 재실행" 권고를 단다.
+- `lens disk duplicates`: `--format text|json` 추가. 해시 실패를 조용히
+  버리지 않고 `errors`로 보고, 스캔 경고도 출력, 크기는 사람 친화적
+  단위 + `total_reclaimable_bytes` 요약.
+
+### 워크플로우 (Phase 2b)
+
+- `lens build impact`: 상대 `--header`를 cwd뿐 아니라 compile database
+  디렉터리와 각 엔트리의 `directory` 기준으로 해석 — 프로젝트 하위
+  디렉터리에서도 동작. 그래프에 없는 헤더는 basename 유사 후보와 경로
+  전달 방법을 힌트로 출력(종료 코드는 유지). 리포트에
+  `missing_sources`/`unresolved_includes` 카운트와 스캔 절단 경고를
+  추가하고, 파일별 include 추출 결과를 캐시해 대형 프로젝트의 중복 I/O를
+  제거.
+- `lens disk trash`: 다중 경로 입력과 `--dry-run` 지원.
+  `trash list`/`trash restore <name>` 추가 — `.trashinfo` 메타데이터와
+  파일 옆 identity 사이드카로 복원 시 교체 여부를 검증(fail-closed).
+  EXDEV(다른 파일시스템)는 FreeDesktop `$topdir/.Trash-$uid`(0700)로
+  폴백. `list`/`restore`는 `--trash-dir`로 topdir trash를 지정 가능.
+- `lens log`: invalid UTF-8 줄을 조용히 건너뛰지 않고 U+FFFD로
+  표시하며 `lossy_lines` 카운트를 JSON/stderr로 보고. `.gz` 입력은
+  상한 있는 해제(512 MiB)로 지원하고 `-`는 stdin을 읽는다.
+  `log filter`에 `--regex`, `--limit`, `--context`, `--format jsonl`
+  (매치 줄당 JSON 오브젝트) 추가.
+- `lens sys`/`doctor`/TUI: systemd 유닛 로더를 검색 경로 병합 방식으로
+  공유화 — `/etc`, `/run`, `/usr/lib`, `/lib` 우선순위 병합(/etc가 최상위,
+  drop-in은 전 디렉터리에서 수집해 낮은 우선순위부터 적용). `sys
+  inspect`/`sys cycles`는 경로 인자를 생략하면 시스템 검색 경로를 사용;
+  명시 경로는 여전히 존재하지 않으면 오류.
+- `lens bundle`: `bundle show <bundle> <entry>`와 `bundle extract
+  <bundle> <dest> [--force]` 추가 — 추출 전 무결성 검증, `..`/절대/역슬래시
+  엔트리 이름 거부, `--force` 없이 덮어쓰지 않음. `--log`는 요약 외에
+  원본 로그 내용을 `logs/` 아티팩트로 포함(8 MiB 꼬리 상한). 실패 메시지를
+  "cryptographic verification failed"에서 "integrity check failed"로 정정
+  — 매니페스트는 서명되지 않으며 무결성 확인이다. 무결성 검증 실패는 이제
+  findings(exit 1)로 분류 — 검증은 정상 수행됐고 결과가 부정적인 경우다.
+
+### 확장·정리 (Phase 3)
+
+- `lens-mcp`: 응답 크기 제어 — 모든 도구가 `limit`(배열당 기본 200)·
+  `offset`을 받아 잘린 배열 끝에 `{"_truncated": true, "total_before_
+  truncation", "omitted"}` 마커를 붙이고, 직렬화 결과가 64KiB를 넘으면
+  추가 클램프 + `_response_clamped` 표시. `lens_log_filter`는 앞 1000줄
+  제한을 폐기하고 `tail`(끝 N라인 스캔)·`regex`·`include_unknown`·
+  `limit`/`offset` 매치 페이지를 지원. diff 도구 추가: `lens_abi_diff`,
+  `lens_sys_diff`(스냅샷 또는 유닛 디렉터리), `lens_test_diff`(파일/디렉터리),
+  `lens_net_diff`(스냅샷 JSON). `initialize`가 클라이언트의
+  `protocolVersion`을 에코한다. 모든 도구 설명에 상대 경로가 서버 cwd
+  기준임을 명시하고 `lens_build_impact`의 상대 헤더는 컴파일 DB/entry
+  디렉터리 기준으로 해석(CLI와 공유 헬퍼). `lens_doctor`의 존재하지 않는
+  `root_path`/`proc_dir`/`systemd_dir`은 이제 `isError`를 반환한다.
+- `lens tui`: 디렉터리 스캔이 백그라운드 스레드에서 돌고 UI가 즉시
+  뜬다(스피너 표시, 스캔 오류/절단은 제목에 INCOMPLETE로 표시).
+  Enter/Backspace는 스캔된 아레나 트리 안에서 메모리 탐색한다 — 스캔
+  루트 위로 올라가거나 미완료 노드에 들어갈 때만 백그라운드 재스캔.
+  `--log FILE`로 Logs 탭을 고정할 수 있고 `/` 검색(Enter 적용/Esc 해제),
+  `PgUp/PgDn`, `g/G`, `?` 도움말을 지원한다.
+- systemd: `sys inspect`의 스냅샷 `diagnostics`가 비어 있지 않게 됐다 —
+  `=` 없는 쓰레기 줄(`SYNTAX_GARBAGE_LINE`), 닫히지 않은 섹션 헤더
+  (`SYNTAX_SECTION_HEADER`), 로드된 유닛과 매칭되지 않는 의존 대상
+  (`UNIT_REF_MISSING`; `.device`/`.mount` 등 생성형 유닛과 템플릿 인스턴스
+  참조는 제외)를 파서·로더가 수집하고 CLI가 스냅샷 상위로 집계한다.
+- `lens env`: shadowing 탐지 품질 — 패키지 내부 파일(`pkg/json.py`)은
+  더 이상 stdlib `json` 오탐하지 않는다(프로젝트 루트와 `src/`의 1레벨
+  후보만). 패키지 디렉터리(`logging/__init__.py`)도 탐지하고, stdlib
+  목록을 3.11 `sys.stdlib_module_names` 수준으로 확장(`secrets`, `test`
+  등). 설치 패키지 매칭은 dist 이름이 아니라 `top_level.txt`/`RECORD`의
+  모듈명 기준(`PyYAML`→`yaml`, `typing-extensions`→`typing_extensions`).
+- 메시지·도움말: 모든 위치 인자와 플래그에 설명을 채웠다(빈 `<PATH>`
+  칸 제거). 사용 오류(인자 누락, 잘못된 플래그 값, `--force` 누락 등)는
+  더 이상 "Corrupt or invalid input format:" 접두사가 붙지 않고
+  `LensError::Usage`로 메시지만 출력. 파일 JSON 파싱 오류는 파일 경로를
+  포함한다. GUIDE의 결정성 주장을 타임스탬프(`bundle` `created_at`) 예외와
+  함께 명시했다.
+
+### 의존성·보안
+
+- `quick-xml` 0.37.5 → 0.41.0: RUSTSEC-2026-0194(중복 네임스페이스
+  선언의 비선형 검사)와 RUSTSEC-2026-0195(`NamespaceResolver`의
+  상한 없는 힙 할당 — 조작된 XML로 OOM/CPU 소진) 수정. JUnit 속성
+  디코딩을 `decoded_and_normalized_value(XmlVersion::Implicit1_0)`로
+  이전했고 파싱 동작은 동일하다.
+- 미사용 의존성 제거: `serde_json`(lens-test/trace/sys/build/env/net/
+  tui), `thiserror`(lens-cli/abi/mcp/test/trace/sys/build/env/net/tui),
+  `lens-core`(lens-trace/build/env/tui).
 
 ## 0.4.3
 

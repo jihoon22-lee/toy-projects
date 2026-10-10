@@ -116,6 +116,7 @@ mod tests {
                 rx_queue: 0,
                 process: None,
                 unix_path: None,
+                owner_state: None,
             }],
         };
 
@@ -141,6 +142,7 @@ mod tests {
                 rx_queue: 0,
                 process: None,
                 unix_path: None,
+                owner_state: None,
             }],
         };
 
@@ -166,6 +168,7 @@ mod tests {
             rx_queue: 0,
             process: None,
             unix_path: None,
+            owner_state: None,
         }
     }
 

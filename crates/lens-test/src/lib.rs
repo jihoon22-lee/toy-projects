@@ -5,16 +5,16 @@
 //! Re-architects and replaces legacy `testlens` with:
 //! - **Streaming XML Parser ([`junit::parse_junit_xml`])**: Powered by `quick-xml`, parsing 100k+ test suites in <30ms with <10MB RAM.
 //! - **Regression & Fix Detection ([`diff::diff_test_runs`])**: Direct identity-based test outcome comparison.
-//! - **Schema V1 ([`model::RUN_SCHEMA_V1`], [`model::DIFF_SCHEMA_V1`])**: 100% compliant with existing contracts.
+//! - **Schemas ([`model::RUN_SCHEMA_V1`], [`model::DIFF_SCHEMA_V2`])**: run snapshots stay `testlens.run/v1`; the diff report is `testlens.diff/v2` (structured regressions/new_failures/removed_tests/skipped_changes).
 
 pub mod diff;
 pub mod junit;
 pub mod model;
 
-pub use diff::diff_test_runs;
+pub use diff::{diff_test_runs, merge_test_runs};
 pub use junit::parse_junit_xml;
 pub use model::{
-    TestCase, TestDiff, TestProducer, TestRun, TestStatus, TestSummary, DIFF_SCHEMA_V1,
+    CaseChange, TestCase, TestDiff, TestProducer, TestRun, TestStatus, TestSummary, DIFF_SCHEMA_V2,
     RUN_SCHEMA_V1,
 };
 
@@ -43,10 +43,11 @@ mod tests {
         assert_eq!(run.summary.failed, 1);
         assert_eq!(run.summary.skipped, 1);
 
-        assert_eq!(run.cases[0].identity, "pkg.FooTest::test_foo");
+        assert_eq!(run.cases[0].identity, "unit::pkg.FooTest::test_foo");
+        assert_eq!(run.cases[0].suite, "unit");
         assert_eq!(run.cases[0].status, TestStatus::Passed);
 
-        assert_eq!(run.cases[1].identity, "pkg.BarTest::test_bar");
+        assert_eq!(run.cases[1].identity, "unit::pkg.BarTest::test_bar");
         assert_eq!(run.cases[1].status, TestStatus::Failed);
         assert_eq!(
             run.cases[1].message,
@@ -99,11 +100,67 @@ mod tests {
         let run_b = parse_junit_xml(xml_candidate.as_bytes(), "proj").unwrap();
 
         let diff = diff_test_runs(&run_a, &run_b);
-        assert_eq!(
-            diff.regressions,
-            vec!["REGRESSION: A::t1 failed in candidate"]
-        );
-        assert_eq!(diff.fixes, vec!["FIX: A::t2 recovered in candidate"]);
+        assert_eq!(diff.schema, DIFF_SCHEMA_V2);
+        assert_eq!(diff.regressions.len(), 1);
+        assert_eq!(diff.regressions[0].id, "A::t1");
+        assert_eq!(diff.regressions[0].before, Some(TestStatus::Passed));
+        assert_eq!(diff.regressions[0].after, Some(TestStatus::Failed));
+        assert_eq!(diff.regressions[0].message.as_deref(), Some("broke"));
+        assert_eq!(diff.fixes.len(), 1);
+        assert_eq!(diff.fixes[0].id, "A::t2");
+    }
+
+    #[test]
+    fn test_diff_structured_semantics() {
+        // skipped->passed is a skip change, not a fix; a brand-new failing
+        // case is a new failure; a removed passed test is a removed test.
+        let base = r#"<testsuite name="s" tests="3">
+            <testcase name="sk" classname="C" time="0"><skipped/></testcase>
+            <testcase name="gone" classname="C" time="0"/>
+        </testsuite>"#;
+        let cand = r#"<testsuite name="s" tests="3">
+            <testcase name="sk" classname="C" time="0"/>
+            <testcase name="fresh" classname="C" time="0"><failure message="x"/></testcase>
+        </testsuite>"#;
+        let b = parse_junit_xml(base.as_bytes(), "p").unwrap();
+        let c = parse_junit_xml(cand.as_bytes(), "p").unwrap();
+        let diff = diff_test_runs(&b, &c);
+
+        assert!(diff.fixes.is_empty());
+        assert!(diff.regressions.is_empty());
+        assert_eq!(diff.skipped_changes.len(), 1);
+        assert_eq!(diff.skipped_changes[0].id, "s::C::sk");
+        assert_eq!(diff.new_failures.len(), 1);
+        assert_eq!(diff.new_failures[0].id, "s::C::fresh");
+        assert_eq!(diff.new_failures[0].message.as_deref(), Some("x"));
+        assert_eq!(diff.removed_tests.len(), 1);
+        assert_eq!(diff.removed_tests[0].id, "s::C::gone");
+        assert_eq!(diff.removed_tests[0].before, Some(TestStatus::Passed));
+    }
+
+    #[test]
+    fn test_diff_duplicate_identity_diagnostic() {
+        let dup = r#"<testsuite tests="2">
+            <testcase name="t" classname="C" time="0"/>
+            <testcase name="t" classname="C" time="0"/>
+        </testsuite>"#;
+        let a = parse_junit_xml(dup.as_bytes(), "p").unwrap();
+        let b = parse_junit_xml(dup.as_bytes(), "p").unwrap();
+        let diff = diff_test_runs(&a, &b);
+        assert!(diff.diagnostics.iter().any(|d| d.contains("duplicate")));
+    }
+
+    #[test]
+    fn test_merge_test_runs() {
+        let x1 = r#"<testsuite name="a" tests="1"><testcase name="t1" classname="M" time="0.1"/></testsuite>"#;
+        let x2 = r#"<testsuite name="b" tests="1"><testcase name="t2" classname="M" time="0.2"><failure/></testcase></testsuite>"#;
+        let r1 = parse_junit_xml(x1.as_bytes(), "p").unwrap();
+        let r2 = parse_junit_xml(x2.as_bytes(), "p").unwrap();
+        let merged = merge_test_runs(vec![r1, r2], "p");
+        assert_eq!(merged.summary.total, 2);
+        assert_eq!(merged.summary.failed, 1);
+        assert!(merged.complete);
+        assert_eq!(merged.cases.len(), 2);
     }
 
     #[test]

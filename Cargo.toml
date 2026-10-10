@@ -32,7 +32,7 @@ memmap2 = "0.9"
 memchr = "2.7"
 rayon = "1.10"
 walkdir = "2.5"
-quick-xml = "0.37"
+quick-xml = "0.41.0"
 clap = { version = "4.5", features = ["derive"] }
 object = { version = "0.36", default-features = false, features = ["read_core", "elf"] }
 gimli = { version = "0.31", features = ["read", "endian-reader"] }

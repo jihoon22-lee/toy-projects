@@ -185,11 +185,26 @@ pub fn check_network(proc_path: Option<&Path>) -> Vec<DoctorCheck> {
             name: "Orphan Socket Detection".to_string(),
             status: HealthStatus::Warn,
             message: format!(
-                "Detected {} sockets without associated process PID in /proc",
+                "Detected {} orphaned sockets (no live process holds the inode)",
                 net_report.summary.orphan_sockets
             ),
             recommendation: Some(
                 "Run with elevated permissions or inspect kernel socket tables.".to_string(),
+            ),
+        });
+    } else if net_report.summary.owner_unknown_sockets > 0 {
+        // Permission limits are not orphans — do not warn for sockets we
+        // simply could not inspect.
+        checks.push(DoctorCheck {
+            category: "Network".to_string(),
+            name: "Orphan Socket Detection".to_string(),
+            status: HealthStatus::Pass,
+            message: format!(
+                "All attributable sockets have owners; {} socket(s) could not be inspected (permission denied on /proc/<pid>/fd)",
+                net_report.summary.owner_unknown_sockets
+            ),
+            recommendation: Some(
+                "Re-run with sudo to attribute those sockets.".to_string(),
             ),
         });
     } else {
@@ -207,18 +222,41 @@ pub fn check_network(proc_path: Option<&Path>) -> Vec<DoctorCheck> {
 
 use lens_sys::OrderingGraph;
 
-/// Load systemd units (with `<unit>.d/*.conf` drop-ins applied) through the
-/// shared loader; unreadable units are preserved as diagnostic stubs so a
-/// doctor run never silently drops them.
+/// Load systemd units with `<unit>.d/*.conf` drop-ins applied. An explicit
+/// `path` loads that file/dir; `None` merges the full systemd search path
+/// (/etc > /run > /usr/lib > /lib). Unreadable units are preserved as
+/// diagnostic stubs so a doctor run never silently drops them.
 pub fn load_systemd_units(
-    path: &Path,
+    path: Option<&Path>,
 ) -> std::collections::BTreeMap<String, lens_sys::SystemdUnit> {
-    lens_sys::load_units(path).unwrap_or_default()
+    match path {
+        Some(p) => lens_sys::load_units(p).unwrap_or_default(),
+        None => {
+            let dirs: Vec<std::path::PathBuf> = lens_sys::SYSTEMD_SEARCH_DIRS
+                .iter()
+                .map(std::path::PathBuf::from)
+                .collect();
+            lens_sys::load_units_merged(&dirs)
+        }
+    }
 }
 
 pub fn check_services(systemd_dir: Option<&Path>) -> DoctorCheck {
-    let base = systemd_dir.unwrap_or_else(|| Path::new("/etc/systemd/system"));
-    if !base.exists() {
+    if let Some(base) = systemd_dir {
+        if !base.exists() {
+            return DoctorCheck {
+                category: "Services".to_string(),
+                name: "Systemd Dependency Cycles".to_string(),
+                status: HealthStatus::Pass,
+                message: "No local systemd unit directory to inspect (non-systemd environment)"
+                    .to_string(),
+                recommendation: None,
+            };
+        }
+    } else if !lens_sys::SYSTEMD_SEARCH_DIRS
+        .iter()
+        .any(|d| Path::new(d).exists())
+    {
         return DoctorCheck {
             category: "Services".to_string(),
             name: "Systemd Dependency Cycles".to_string(),
@@ -229,7 +267,7 @@ pub fn check_services(systemd_dir: Option<&Path>) -> DoctorCheck {
         };
     }
 
-    let units = load_systemd_units(base);
+    let units = load_systemd_units(systemd_dir);
     let graph = OrderingGraph::build(&units);
     let cycles = graph.find_cycles();
 

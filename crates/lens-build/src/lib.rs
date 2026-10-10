@@ -5,7 +5,7 @@ pub mod model;
 
 pub use compiler::{normalize_path, parse_command_entry, split_command_line};
 pub use diff::diff_compilations;
-pub use impact::{extract_includes, ImpactGraph, IncludeDirective};
+pub use impact::{extract_includes, resolve_header_target, ImpactGraph, IncludeDirective};
 pub use model::*;
 
 #[cfg(test)]
@@ -68,6 +68,28 @@ mod tests {
             report_app.impacted_units,
             vec!["/project/src/main.cpp".to_string()]
         );
+    }
+
+    #[test]
+    fn test_direct_vs_transitive_includers() {
+        let mut graph = ImpactGraph::new();
+        // a.c includes mid.h; mid.h includes leaf.h — a.c is only a
+        // transitive includer of leaf.h.
+        graph.add_unit_include("/p/src/a.c", "/p/inc/mid.h");
+        graph.add_header_include("/p/inc/mid.h", "/p/inc/leaf.h");
+
+        // The snapshot's reverse_impact (direct includers) must NOT list
+        // a.c under leaf.h...
+        let direct: Vec<&String> = graph
+            .header_to_units
+            .get("/p/inc/leaf.h")
+            .map(|s| s.iter().collect())
+            .unwrap_or_default();
+        assert!(direct.is_empty());
+
+        // ...while transitive_impact does.
+        let report = graph.compute_impact("/p/inc/leaf.h");
+        assert_eq!(report.impacted_units, vec!["/p/src/a.c".to_string()]);
     }
 
     #[test]

@@ -4,30 +4,288 @@ use crate::output::outln;
 use lens_abi::{diff_reports, inspect_elf};
 use lens_build::{diff_compilations, parse_command_entry, CompileCommandEntry, ImpactGraph};
 use lens_core::{
-    create_bundle_archive, inspect_bundle, to_deterministic_pretty, verify_bundle_archive,
-    BundleArtifact, Result,
+    create_bundle_archive, extract_bundle, inspect_bundle, read_bundle_entry,
+    to_deterministic_pretty, verify_bundle_archive, BundleArtifact, Result,
 };
 use lens_disk::{DiskScanner, DuplicateFinder, ScanOptions, SnapshotV2, TrashManager};
 use lens_env::{detect_shadowing, diff_environments, inspect_venv, EnvSnapshot};
-use lens_log::{LogFilter, LogIndexer, LogLevel};
+use lens_log::{parse_line, LogFilter, LogIndexer, LogLevel};
 use lens_net::{diff_net_reports, inspect_network, NetReport};
 use lens_sys::{diff_systemd, OrderingGraph, SystemdSnapshot};
 use lens_test::{diff_test_runs, parse_junit_xml};
 use lens_trace::{diff_snapshots, TraceAnalyzer};
 use std::fs;
+use std::path::{Path, PathBuf};
 
-pub fn dispatch(command: Commands) -> Result<()> {
+/// Resolve `--format` + legacy `--json` into a boolean.
+/// `default_json` marks commands whose historical default is JSON.
+fn wants_json(format: Option<OutputFormat>, json_flag: bool, default_json: bool) -> bool {
+    match format {
+        // `jsonl` is a `log filter`-only mode; other commands fall back to json.
+        Some(OutputFormat::Json) | Some(OutputFormat::Jsonl) => true,
+        Some(OutputFormat::Text) => false,
+        None => json_flag || default_json,
+    }
+}
+
+/// Open a `log` input: `-` reads stdin through a bounded buffer; `.gz`
+/// files decompress through a bounded reader; the rest are memory-mapped.
+fn open_log_indexer(path: &Path) -> Result<LogIndexer> {
+    if path.as_os_str() == "-" {
+        let stdin = std::io::stdin();
+        let lock = stdin.lock();
+        return LogIndexer::from_reader(lock, "-");
+    }
+    LogIndexer::open(path)
+}
+
+/// Flatten per-unit parser/loader diagnostics for the snapshot-level
+/// `diagnostics` array — previously always empty, which hid malformed
+/// unit files and missing dependency references from `sys inspect`.
+fn sys_diagnostics(
+    units: &std::collections::BTreeMap<String, lens_sys::SystemdUnit>,
+) -> Vec<lens_sys::Diagnostic> {
+    units
+        .values()
+        .flat_map(|u| u.diagnostics.iter().cloned())
+        .collect()
+}
+
+/// Parse a JSON file with the path in the error, so a malformed input
+/// reports *which* file failed rather than a bare serde line/column.
+fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
+    let content = fs::read_to_string(path).map_err(|e| lens_core::LensError::Io {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+    serde_json::from_str(&content).map_err(|e| lens_core::LensError::InvalidInput {
+        message: format!("{}: {}", path.display(), e),
+    })
+}
+
+/// `sys diff` accepts either a saved snapshot JSON or a live unit
+/// directory, which is loaded and graphed into an equivalent snapshot.
+fn sys_snapshot_from(path: &Path) -> Result<SystemdSnapshot> {
+    if path.is_dir() {
+        let units = lens_sys::load_units(path)?;
+        let graph = OrderingGraph::build(&units);
+        let diagnostics = sys_diagnostics(&units);
+        return Ok(SystemdSnapshot {
+            schema: lens_sys::SNAPSHOT_SCHEMA_V1.to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            semantics: "systemd-255-subset-v1".to_string(),
+            units,
+            cycles: graph.find_cycles(),
+            diagnostics,
+        });
+    }
+    read_json(path)
+}
+
+/// Load systemd units for `sys` commands: an explicit path goes through
+/// `load_units` (fail closed on missing paths); no path merges the
+/// standard systemd search dirs like doctor/TUI.
+fn load_sys_units(
+    path: Option<&Path>,
+) -> Result<std::collections::BTreeMap<String, lens_sys::SystemdUnit>> {
+    match path {
+        Some(p) => lens_sys::load_units(p),
+        None => {
+            let dirs: Vec<PathBuf> = lens_sys::SYSTEMD_SEARCH_DIRS
+                .iter()
+                .map(PathBuf::from)
+                .collect();
+            Ok(lens_sys::load_units_merged(&dirs))
+        }
+    }
+}
+
+/// Human-readable binary size (KiB/MiB/GiB) for text-mode summaries.
+fn human_bytes(n: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut v = n as f64;
+    let mut i = 0;
+    while v >= 1024.0 && i < UNITS.len() - 1 {
+        v /= 1024.0;
+        i += 1;
+    }
+    if i == 0 {
+        format!("{} B", n)
+    } else {
+        format!("{:.1} {}", v, UNITS[i])
+    }
+}
+
+/// Cap on raw log bytes embedded in a bundle — keeps `.lens` files useful
+/// as evidence without turning into multi-hundred-MB archives. The *tail*
+/// is kept: incident investigations care about the most recent lines.
+const BUNDLE_LOG_TAIL_BYTES: u64 = 8 * 1024 * 1024;
+
+/// Read up to `cap` bytes of a log for bundling: the whole file when it
+/// fits, otherwise the tail starting on a line boundary. Returns the bytes
+/// and whether they were truncated.
+fn read_log_tail(path: &Path, cap: u64) -> Result<(Vec<u8>, bool)> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path).map_err(|e| lens_core::LensError::Io {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+    let len = file
+        .metadata()
+        .map_err(|e| lens_core::LensError::Io {
+            path: path.to_path_buf(),
+            source: e,
+        })?
+        .len();
+    if len <= cap {
+        let mut buf = Vec::with_capacity(len as usize);
+        file.read_to_end(&mut buf)
+            .map_err(|e| lens_core::LensError::Io {
+                path: path.to_path_buf(),
+                source: e,
+            })?;
+        return Ok((buf, false));
+    }
+    file.seek(SeekFrom::End(-(cap as i64)))
+        .map_err(|e| lens_core::LensError::Io {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
+    let mut buf = Vec::with_capacity(cap as usize);
+    file.read_to_end(&mut buf)
+        .map_err(|e| lens_core::LensError::Io {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
+    // Skip the partial first line so the excerpt starts cleanly.
+    if let Some(nl) = buf.iter().position(|&b| b == b'\n') {
+        buf.drain(..nl + 1);
+    }
+    Ok((buf, true))
+}
+
+/// `test diff`/`test parse` accept a file, a directory (all `*.xml`
+/// inside, sorted), or a `*`/`?` filename glob. CI pipelines commonly
+/// produce one JUnit file per module.
+fn expand_test_inputs(path: &Path) -> Result<Vec<PathBuf>> {
+    if path.is_dir() {
+        let mut files: Vec<PathBuf> = fs::read_dir(path)
+            .map_err(|e| lens_core::LensError::Io {
+                path: path.to_path_buf(),
+                source: e,
+            })?
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "xml"))
+            .collect();
+        files.sort();
+        return Ok(files);
+    }
+    let s = path.to_string_lossy();
+    if s.contains('*') || s.contains('?') {
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        let pat = path.file_name().map(|f| f.to_string_lossy().into_owned());
+        if let Some(pat) = pat {
+            let mut files: Vec<PathBuf> = fs::read_dir(parent)
+                .map_err(|e| lens_core::LensError::Io {
+                    path: parent.to_path_buf(),
+                    source: e,
+                })?
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.file_name()
+                        .map(|f| glob_match(&pat, &f.to_string_lossy()))
+                        .unwrap_or(false)
+                })
+                .collect();
+            files.sort();
+            return Ok(files);
+        }
+    }
+    Ok(vec![path.to_path_buf()])
+}
+
+/// Parse one or more JUnit files into a single merged run.
+fn load_test_run(path: &Path, project: &str) -> Result<lens_test::TestRun> {
+    let files = expand_test_inputs(path)?;
+    if files.is_empty() {
+        return Err(lens_core::LensError::Usage {
+            message: format!("{:?} matched no JUnit XML files", path),
+        });
+    }
+    let mut runs = Vec::new();
+    for f in &files {
+        let bytes = fs::read(f).map_err(|e| lens_core::LensError::Io {
+            path: f.clone(),
+            source: e,
+        })?;
+        runs.push(parse_junit_xml(&bytes, project)?);
+    }
+    Ok(lens_test::merge_test_runs(runs, project))
+}
+
+/// Minimal `*`/`?` filename matcher (no recursion into subdirectories).
+fn glob_match(pattern: &str, name: &str) -> bool {
+    let p: Vec<char> = pattern.chars().collect();
+    let n: Vec<char> = name.chars().collect();
+    let (mut pi, mut ni) = (0usize, 0usize);
+    let (mut star, mut star_next) = (usize::MAX, 0usize);
+    while ni < n.len() {
+        if pi < p.len() && (p[pi] == '?' || p[pi] == n[ni]) {
+            pi += 1;
+            ni += 1;
+        } else if pi < p.len() && p[pi] == '*' {
+            star = pi;
+            star_next = ni;
+            pi += 1;
+        } else if star != usize::MAX {
+            pi = star + 1;
+            star_next += 1;
+            ni = star_next;
+        } else {
+            return false;
+        }
+    }
+    while pi < p.len() && p[pi] == '*' {
+        pi += 1;
+    }
+    pi == p.len()
+}
+
+/// Command result per the exit-code convention: `Clean` exits 0,
+/// `Findings` exits 1, and a returned `Err` exits 2.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outcome {
+    Clean,
+    Findings,
+}
+
+pub fn dispatch(command: Commands) -> Result<Outcome> {
+    let mut outcome = Outcome::Clean;
     match command {
         Commands::Disk { action } => match action {
             DiskCommands::Scan {
                 path,
                 json,
+                format,
                 parallel,
+                max_depth,
+                exclude,
+                one_file_system,
+                top,
             } => {
-                let scanner = DiskScanner::new(ScanOptions {
+                let json = wants_json(format, json, false);
+                let mut scan_opts = ScanOptions {
                     parallel,
+                    one_file_system,
+                    exclude_patterns: exclude,
                     ..Default::default()
-                });
+                };
+                if let Some(d) = max_depth {
+                    scan_opts.max_depth = d;
+                }
+                let scanner = DiskScanner::new(scan_opts);
                 let result = scanner.scan(&path)?;
                 // Scan errors are surfaced even in --json mode so evidence
                 // gaps never go unnoticed.
@@ -58,55 +316,214 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     }
                     outln!("Total entries: {}", result.scanned_entries);
                     outln!(
-                        "Total logical size: {} bytes ({:.2} MB)",
+                        "Total logical size: {} bytes ({})",
                         root_node.size,
-                        root_node.size as f64 / 1_048_576.0
+                        human_bytes(root_node.size)
                     );
                     outln!(
-                        "Total allocated size: {} bytes ({:.2} MB)",
+                        "Total allocated size: {} bytes ({})",
                         root_node.allocated_size,
-                        root_node.allocated_size as f64 / 1_048_576.0
+                        human_bytes(root_node.allocated_size)
                     );
+                    if top > 0 {
+                        let mut ranked: Vec<_> = result
+                            .tree
+                            .children_ids(result.root_id)
+                            .into_iter()
+                            .filter_map(|id| result.tree.get(id))
+                            .collect();
+                        ranked.sort_by(|a, b| b.size.cmp(&a.size).then(a.name.cmp(&b.name)));
+                        if !ranked.is_empty() {
+                            outln!("Largest top-level entries:");
+                            for node in ranked.iter().take(top) {
+                                outln!("    {:>10}  {}", human_bytes(node.size), node.name);
+                            }
+                        }
+                    }
+                }
+                // Exit-code convention: incomplete/truncated evidence is a
+                // finding (exit 1), in both text and JSON modes.
+                if !result.complete || result.truncated {
+                    outcome = Outcome::Findings;
                 }
             }
-            DiskCommands::Duplicates { path, min_size } => {
+            DiskCommands::Duplicates {
+                path,
+                min_size,
+                format,
+            } => {
                 let scanner = DiskScanner::new(ScanOptions::default());
                 let result = scanner.scan(&path)?;
+                // Scan gaps are evidence gaps — surface them even though
+                // the duplicate search itself may still succeed.
+                for e in &result.errors {
+                    eprintln!("scan warning: {e}");
+                }
                 let finder = DuplicateFinder::new(min_size);
-                let groups = finder.find_in_tree(&result.tree, &path)?;
-                outln!("Found {} duplicate group(s):", groups.len());
-                for (i, group) in groups.iter().enumerate() {
-                    outln!("\n[{}] Hash: {}", i + 1, group.sha256);
+                let report = finder.find_in_tree(&result.tree, &path)?;
+                if wants_json(format, false, false) {
+                    outln!("{}", to_deterministic_pretty(&report)?);
+                } else {
+                    for e in &report.errors {
+                        eprintln!("hash warning: {e}");
+                    }
+                    outln!("Found {} duplicate group(s):", report.groups.len());
+                    for (i, group) in report.groups.iter().enumerate() {
+                        outln!("\n[{}] Hash: {}", i + 1, group.sha256);
+                        outln!(
+                            "    File size: {}, Reclaimable: {}",
+                            human_bytes(group.size),
+                            human_bytes(group.reclaimable_bytes)
+                        );
+                        for file in &group.files {
+                            outln!("    - {}", file.display());
+                        }
+                    }
                     outln!(
-                        "    File size: {} bytes, Reclaimable: {} bytes",
-                        group.size,
-                        group.reclaimable_bytes
+                        "Total reclaimable: {} ({} bytes)",
+                        human_bytes(report.total_reclaimable_bytes),
+                        report.total_reclaimable_bytes
                     );
-                    for file in &group.files {
-                        outln!("    - {:?}", file);
+                    if !report.errors.is_empty() {
+                        outln!("Hash errors: {}", report.errors.len());
                     }
                 }
             }
-            DiskCommands::Trash { path } => {
-                let trash = TrashManager::default();
-                let receipt = trash.move_to_trash(&path)?;
-                outln!("Successfully trashed: {:?}", receipt.original_path);
-                outln!("Trash location: {:?}", receipt.trashed_file_path);
-                outln!("Info receipt: {:?}", receipt.info_path);
+            DiskCommands::Trash {
+                action,
+                paths,
+                dry_run,
+                format,
+            } => {
+                let default_trash = TrashManager::default();
+                let trash_of = |dir: &Option<PathBuf>| match dir {
+                    Some(d) => TrashManager::new(d.clone()),
+                    None => TrashManager::default(),
+                };
+                match action {
+                    Some(TrashCommands::List { trash_dir, format }) => {
+                        let trash = trash_of(&trash_dir);
+                        let entries = trash.list()?;
+                        if wants_json(format, false, false) {
+                            outln!("{}", to_deterministic_pretty(&entries)?);
+                        } else if entries.is_empty() {
+                            outln!("Trash is empty.");
+                        } else {
+                            outln!("{} item(s) in {:?}:", entries.len(), trash.files_dir());
+                            for e in &entries {
+                                outln!(
+                                    "  {:<24} {} {}{}",
+                                    e.name,
+                                    e.deletion_date,
+                                    e.original_path.display(),
+                                    if e.present { "" } else { "  (file missing)" }
+                                );
+                            }
+                        }
+                    }
+                    Some(TrashCommands::Restore { name, trash_dir }) => {
+                        let receipt = trash_of(&trash_dir).restore_by_name(&name)?;
+                        outln!("Restored: {:?}", receipt.original_path);
+                    }
+                    None => {
+                        if paths.is_empty() {
+                            return Err(lens_core::LensError::Usage {
+                                message: "no paths given; use `trash list`/`trash restore` \
+                                          to manage existing entries"
+                                    .to_string(),
+                            });
+                        }
+                        let json_mode = wants_json(format, false, false);
+                        let mut failures: Vec<String> = Vec::new();
+                        let mut receipts: Vec<lens_disk::TrashReceipt> = Vec::new();
+                        for path in &paths {
+                            if dry_run {
+                                let msg = if path.symlink_metadata().is_ok() {
+                                    format!(
+                                        "would trash {:?} -> {:?}",
+                                        path,
+                                        default_trash.files_dir()
+                                    )
+                                } else {
+                                    format!("cannot trash {:?}: does not exist", path)
+                                };
+                                outln!("{}", msg);
+                                continue;
+                            }
+                            match default_trash.move_to_trash(path) {
+                                Ok(receipt) => {
+                                    if !json_mode {
+                                        outln!("Successfully trashed: {:?}", receipt.original_path);
+                                        outln!("Trash location: {:?}", receipt.trashed_file_path);
+                                        outln!("Info receipt: {:?}", receipt.info_path);
+                                    }
+                                    receipts.push(receipt);
+                                }
+                                Err(e) => {
+                                    // One bad path must not block the rest —
+                                    // collect the failures and fail at the end.
+                                    failures.push(format!("{:?}: {}", path, e));
+                                    eprintln!("trash error: {:?}: {}", path, e);
+                                }
+                            }
+                        }
+                        if dry_run {
+                            outln!("(dry-run: nothing was moved)");
+                        } else if json_mode {
+                            outln!("{}", to_deterministic_pretty(&receipts)?);
+                        }
+                        if !failures.is_empty() {
+                            return Err(lens_core::LensError::Usage {
+                                message: format!(
+                                    "{} of {} path(s) could not be trashed",
+                                    failures.len(),
+                                    paths.len()
+                                ),
+                            });
+                        }
+                    }
+                }
             }
         },
         Commands::Abi { action } => match action {
-            AbiCommands::Inspect { binary } => {
+            AbiCommands::Inspect { binary, format } => {
                 let bytes = fs::read(&binary).map_err(|e| lens_core::LensError::Io {
                     path: binary.clone(),
                     source: e,
                 })?;
                 let report = inspect_elf(&binary, &bytes);
-                outln!("{}", to_deterministic_pretty(&report)?);
+                if wants_json(format, false, true) {
+                    outln!("{}", to_deterministic_pretty(&report)?);
+                } else {
+                    // Human summary: the JSON report can be thousands of
+                    // lines; text mode is the at-a-glance answer.
+                    let weak = report
+                        .evidence
+                        .iter()
+                        .filter(|s| s.binding == "weak")
+                        .count();
+                    outln!("ABI summary: {}", binary.display());
+                    outln!(
+                        "  SONAME:   {}",
+                        report.dependencies.soname.as_deref().unwrap_or("-")
+                    );
+                    outln!("  NEEDED:   {}", report.dependencies.needed.join(", "));
+                    outln!(
+                        "  Exports:  {} defined ({} weak) | Imports: {}",
+                        report.abi.symbols.len(),
+                        weak,
+                        report.abi.imports.len()
+                    );
+                    outln!("  Version requirements: {}", report.abi.versions.len());
+                    if !report.diagnostics.is_empty() {
+                        outln!("  Diagnostics: {}", report.diagnostics.len());
+                    }
+                }
             }
             AbiCommands::Diff {
                 baseline,
                 candidate,
+                format,
             } => {
                 let bytes_base = fs::read(&baseline).map_err(|e| lens_core::LensError::Io {
                     path: baseline.clone(),
@@ -119,29 +536,85 @@ pub fn dispatch(command: Commands) -> Result<()> {
                 let report_base = inspect_elf(&baseline, &bytes_base);
                 let report_cand = inspect_elf(&candidate, &bytes_cand);
                 let diff = diff_reports(&report_base, &report_cand);
-                outln!("{}", to_deterministic_pretty(&diff)?);
+                if wants_json(format, false, true) {
+                    outln!("{}", to_deterministic_pretty(&diff)?);
+                } else {
+                    outln!(
+                        "ABI diff: {}",
+                        format!("{:?}", diff.compatibility).to_lowercase()
+                    );
+                    outln!(
+                        "  Exports: +{} -{} | Imports: +{} -{} | Deps: +{} -{}",
+                        diff.symbols.added.len(),
+                        diff.symbols.removed.len(),
+                        diff.imports.added.len(),
+                        diff.imports.removed.len(),
+                        diff.dependencies.needed.added.len(),
+                        diff.dependencies.needed.removed.len()
+                    );
+                    for s in diff.symbols.removed.iter().take(10) {
+                        outln!("  - export removed: {}", s);
+                    }
+                    for d in &diff.diagnostics {
+                        outln!("  ! {}", d);
+                    }
+                }
+                // Exit-code convention: incompatible or uncertain ABI
+                // counts as findings (uncertain needs human review).
+                if !diff.compatible {
+                    outcome = Outcome::Findings;
+                }
             }
         },
         Commands::Log { action } => match action {
-            LogCommands::Inspect { path } => {
-                let indexer = LogIndexer::open(&path)?;
-                outln!("Log file: {:?}", path);
-                outln!("Total lines indexed: {}", indexer.len());
+            LogCommands::Inspect { path, format } => {
+                let indexer = open_log_indexer(&path)?;
+                if wants_json(format, false, false) {
+                    outln!(
+                        "{}",
+                        to_deterministic_pretty(&serde_json::json!({
+                            "path": path.to_string_lossy(),
+                            "total_lines": indexer.len(),
+                            "lossy_lines": indexer.lossy_lines(),
+                        }))?
+                    );
+                } else {
+                    outln!("Log file: {:?}", path);
+                    outln!("Total lines indexed: {}", indexer.len());
+                    if indexer.lossy_lines() > 0 {
+                        outln!(
+                            "Lossy lines (invalid UTF-8, shown with U+FFFD): {}",
+                            indexer.lossy_lines()
+                        );
+                    }
+                }
             }
             LogCommands::Filter {
                 path,
                 query,
+                regex,
                 min_level,
+                include_unknown,
+                limit,
+                context,
+                format,
             } => {
-                let indexer = LogIndexer::open(&path)?;
+                let indexer = open_log_indexer(&path)?;
                 let mut filter = LogFilter::new();
                 if let Some(q) = query {
                     filter = filter.with_query(&q);
                 }
+                if let Some(re) = regex {
+                    filter = filter
+                        .with_regex(&re)
+                        .map_err(|e| lens_core::LensError::Usage {
+                            message: format!("invalid --regex {:?}: {}", re, e),
+                        })?;
+                }
                 if let Some(lvl_str) = min_level {
                     let lvl = LogLevel::parse(&lvl_str);
                     if lvl == LogLevel::Unknown && !lvl_str.eq_ignore_ascii_case("unknown") {
-                        return Err(lens_core::LensError::InvalidInput {
+                        return Err(lens_core::LensError::Usage {
                             message: format!(
                                 "invalid --min-level {lvl_str:?}; expected trace|debug|info|warn|error|fatal"
                             ),
@@ -149,48 +622,230 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     }
                     filter = filter.with_min_level(lvl);
                 }
+                filter = filter.with_include_unknown(include_unknown);
 
-                let mut matched = 0;
+                let jsonl_mode = format == Some(OutputFormat::Jsonl);
+                let json_mode = wants_json(format, false, false);
+                let mut matched = 0usize;
+                let mut excluded_unknown = 0usize;
+                let mut matched_lines: Vec<serde_json::Value> = Vec::new();
+                // Context bookkeeping: `pending_before` holds the last
+                // `context` non-matching lines; `after_left` counts the
+                // trailing context still owed after the latest match.
+                let mut pending_before: std::collections::VecDeque<(usize, String)> =
+                    std::collections::VecDeque::with_capacity(context);
+                let mut after_left = 0usize;
+                let mut last_printed: Option<usize> = None;
+                let mut limited = false;
+
+                let emit = |idx: usize,
+                            text: &str,
+                            is_match: bool,
+                            matched_lines: &mut Vec<serde_json::Value>,
+                            last_printed: &mut Option<usize>,
+                            after_left: &mut usize| {
+                    if *last_printed == Some(idx) {
+                        return;
+                    }
+                    *last_printed = Some(idx);
+                    if jsonl_mode {
+                        // One JSON object per emitted line; match/context
+                        // distinguished by the `context` flag.
+                        outln!(
+                            "{}",
+                            serde_json::json!({
+                                "line": idx + 1,
+                                "context": !is_match,
+                                "text": text,
+                            })
+                        );
+                    } else if json_mode {
+                        matched_lines.push(serde_json::json!({
+                            "line": idx + 1,
+                            "context": !is_match,
+                            "text": text,
+                        }));
+                    } else if is_match {
+                        outln!("[{}] {}", idx + 1, text);
+                    } else {
+                        outln!("[{}]- {}", idx + 1, text);
+                    }
+                    if !is_match {
+                        *after_left = after_left.saturating_sub(1);
+                    }
+                };
+
                 for idx in 0..indexer.len() {
-                    if let Some(line) = indexer.get_line(idx) {
-                        if filter.matches_line(line, idx + 1) {
-                            outln!("[{}] {}", idx + 1, line);
-                            matched += 1;
+                    // After --limit, only the owed trailing context is emitted.
+                    if limited && after_left == 0 {
+                        break;
+                    }
+                    // Lossy view: invalid-UTF-8 lines are still matched and
+                    // shown (with U+FFFD) rather than silently skipped.
+                    let line = indexer
+                        .get_line_lossy(idx)
+                        .map(|c| c.into_owned())
+                        .unwrap_or_default();
+                    let is_match = !limited && {
+                        if filter.min_level.is_some() {
+                            // Level filtering needs the parsed record; it
+                            // also lets us count evidence discarded for
+                            // having no detectable level.
+                            let record = parse_line(&line, idx + 1);
+                            if filter.rejected_only_by_unknown_level(&record) {
+                                excluded_unknown += 1;
+                                false
+                            } else {
+                                filter.matches(&record)
+                            }
+                        } else {
+                            filter.matches_line(&line, idx + 1)
+                        }
+                    };
+
+                    if is_match {
+                        // Flush the buffered leading context.
+                        for (cidx, ctext) in pending_before.drain(..) {
+                            emit(
+                                cidx,
+                                &ctext,
+                                false,
+                                &mut matched_lines,
+                                &mut last_printed,
+                                &mut after_left,
+                            );
+                        }
+                        emit(
+                            idx,
+                            &line,
+                            true,
+                            &mut matched_lines,
+                            &mut last_printed,
+                            &mut after_left,
+                        );
+                        matched += 1;
+                        after_left = context;
+                        if let Some(l) = limit {
+                            if matched >= l {
+                                limited = true;
+                            }
+                        }
+                    } else if after_left > 0 {
+                        emit(
+                            idx,
+                            &line,
+                            false,
+                            &mut matched_lines,
+                            &mut last_printed,
+                            &mut after_left,
+                        );
+                    } else if context > 0 {
+                        pending_before.push_back((idx, line));
+                        while pending_before.len() > context {
+                            pending_before.pop_front();
                         }
                     }
                 }
+                if json_mode && !jsonl_mode {
+                    outln!(
+                        "{}",
+                        to_deterministic_pretty(&serde_json::json!({
+                            "path": path.to_string_lossy(),
+                            "matched": matched,
+                            "total": indexer.len(),
+                            "excluded_unknown": excluded_unknown,
+                            "lossy_lines": indexer.lossy_lines(),
+                            "lines": matched_lines,
+                        }))?
+                    );
+                }
+                // Diagnostics stay on stderr so json/jsonl stdout stays clean.
                 eprintln!("\nMatched {} of {} line(s).", matched, indexer.len());
+                if limited {
+                    eprintln!("Stopped after {} match(es): --limit reached.", matched);
+                }
+                if indexer.lossy_lines() > 0 {
+                    eprintln!(
+                        "{} line(s) contain invalid UTF-8 (shown lossy as U+FFFD).",
+                        indexer.lossy_lines()
+                    );
+                }
+                if excluded_unknown > 0 {
+                    eprintln!(
+                        "Excluded {} line(s) whose log level could not be determined (--include-unknown to keep them).",
+                        excluded_unknown
+                    );
+                }
             }
         },
         Commands::Test { action } => match action {
-            TestCommands::Parse { file, project } => {
-                let bytes = fs::read(&file).map_err(|e| lens_core::LensError::Io {
-                    path: file.clone(),
-                    source: e,
-                })?;
-                let run = parse_junit_xml(&bytes, &project)?;
-                outln!("{}", to_deterministic_pretty(&run)?);
+            TestCommands::Parse {
+                file,
+                project,
+                format,
+            } => {
+                let run = load_test_run(&file, &project)?;
+                if wants_json(format, false, true) {
+                    outln!("{}", to_deterministic_pretty(&run)?);
+                } else {
+                    let s = &run.summary;
+                    outln!("Test run: {} (project {})", run.run_id, run.project);
+                    outln!(
+                        "  {} total | {} passed | {} failed | {} errors | {} skipped | {:.2}s",
+                        s.total,
+                        s.passed,
+                        s.failed,
+                        s.errors,
+                        s.skipped,
+                        s.duration_sec
+                    );
+                    if !run.complete {
+                        outln!("  INCOMPLETE: the report was truncated or malformed");
+                    }
+                }
             }
             TestCommands::Diff {
                 baseline,
                 candidate,
+                format,
             } => {
-                let bytes_base = fs::read(&baseline).map_err(|e| lens_core::LensError::Io {
-                    path: baseline.clone(),
-                    source: e,
-                })?;
-                let bytes_cand = fs::read(&candidate).map_err(|e| lens_core::LensError::Io {
-                    path: candidate.clone(),
-                    source: e,
-                })?;
-                let run_base = parse_junit_xml(&bytes_base, "baseline")?;
-                let run_cand = parse_junit_xml(&bytes_cand, "candidate")?;
+                let run_base = load_test_run(&baseline, "baseline")?;
+                let run_cand = load_test_run(&candidate, "candidate")?;
                 let diff = diff_test_runs(&run_base, &run_cand);
-                outln!("{}", to_deterministic_pretty(&diff)?);
+                if wants_json(format, false, true) {
+                    outln!("{}", to_deterministic_pretty(&diff)?);
+                } else {
+                    outln!(
+                        "Test diff: {} regressions, {} fixes, {} new failures, {} removed, {} skip changes",
+                        diff.regressions.len(),
+                        diff.fixes.len(),
+                        diff.new_failures.len(),
+                        diff.removed_tests.len(),
+                        diff.skipped_changes.len()
+                    );
+                    for r in diff.regressions.iter().chain(&diff.new_failures) {
+                        outln!(
+                            "  - {}{}",
+                            r.id,
+                            r.message
+                                .as_deref()
+                                .map(|m| format!(": {}", m))
+                                .unwrap_or_default()
+                        );
+                    }
+                    for d in &diff.diagnostics {
+                        outln!("  ! {}", d);
+                    }
+                }
+                // Exit-code convention: regressions and brand-new failures
+                // are findings.
+                if !diff.regressions.is_empty() || !diff.new_failures.is_empty() {
+                    outcome = Outcome::Findings;
+                }
             }
         },
         Commands::Trace { action } => match action {
-            TraceCommands::Analyze { trace_file } => {
+            TraceCommands::Analyze { trace_file, format } => {
                 let content =
                     fs::read_to_string(&trace_file).map_err(|e| lens_core::LensError::Io {
                         path: trace_file.clone(),
@@ -214,11 +869,35 @@ pub fn dispatch(command: Commands) -> Result<()> {
                         ),
                     });
                 }
-                outln!("{}", to_deterministic_pretty(&snapshot)?);
+                if wants_json(format, false, true) {
+                    outln!("{}", to_deterministic_pretty(&snapshot)?);
+                } else {
+                    outln!("Trace summary: {}", trace_file.display());
+                    outln!(
+                        "  {} events | {} calls | {} errors | {} processes",
+                        snapshot.total_events,
+                        snapshot.total_calls,
+                        snapshot.total_errors,
+                        snapshot.processes.len()
+                    );
+                    let mut top: Vec<_> = snapshot.syscalls.iter().collect();
+                    top.sort_by_key(|e| std::cmp::Reverse(e.1.count));
+                    for (name, st) in top.iter().take(5) {
+                        outln!("    {}: {} calls, {} errors", name, st.count, st.errors);
+                    }
+                    if !snapshot.fd_leaks.is_empty() {
+                        outln!("  fd leaks: {:?}", snapshot.fd_leaks);
+                    }
+                }
+                // Exit-code convention: leaked fds are findings.
+                if !snapshot.fd_leaks.is_empty() {
+                    outcome = Outcome::Findings;
+                }
             }
             TraceCommands::Diff {
                 baseline,
                 candidate,
+                format,
             } => {
                 let c1 = fs::read_to_string(&baseline).map_err(|e| lens_core::LensError::Io {
                     path: baseline.clone(),
@@ -232,14 +911,36 @@ pub fn dispatch(command: Commands) -> Result<()> {
                 let s1 = analyzer.analyze_lines(c1.lines());
                 let s2 = analyzer.analyze_lines(c2.lines());
                 let diff = diff_snapshots(&s1, &s2);
-                outln!("{}", to_deterministic_pretty(&diff)?);
+                if wants_json(format, false, true) {
+                    outln!("{}", to_deterministic_pretty(&diff)?);
+                } else {
+                    outln!(
+                        "Trace diff: calls {:+} ({} -> {}), errors {:+} ({} -> {})",
+                        diff.call_delta,
+                        diff.baseline_calls,
+                        diff.candidate_calls,
+                        diff.error_delta,
+                        diff.baseline_errors,
+                        diff.candidate_errors
+                    );
+                    for e in &diff.new_errors {
+                        outln!("  + new error: {}", e);
+                    }
+                    for e in &diff.resolved_errors {
+                        outln!("  - resolved: {}", e);
+                    }
+                    for s in &diff.significant_latency_shifts {
+                        outln!("  ~ {}", s);
+                    }
+                }
             }
         },
         Commands::Sys { action } => match action {
-            SysCommands::Inspect { path } => {
-                let units = lens_sys::load_units(&path)?;
+            SysCommands::Inspect { path, format } => {
+                let units = load_sys_units(path.as_deref())?;
                 let graph = OrderingGraph::build(&units);
                 let cycles = graph.find_cycles();
+                let diagnostics = sys_diagnostics(&units);
 
                 let snapshot = SystemdSnapshot {
                     schema: lens_sys::SNAPSHOT_SCHEMA_V1.to_string(),
@@ -247,50 +948,96 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     semantics: "systemd-255-subset-v1".to_string(),
                     units,
                     cycles,
-                    diagnostics: vec![],
+                    diagnostics,
                 };
-                outln!("{}", to_deterministic_pretty(&snapshot)?);
+                if wants_json(format, false, true) {
+                    outln!("{}", to_deterministic_pretty(&snapshot)?);
+                } else {
+                    outln!(
+                        "Systemd units: {} | cycles: {}",
+                        snapshot.units.len(),
+                        snapshot.cycles.len()
+                    );
+                    for (name, u) in &snapshot.units {
+                        outln!("  {} {}", name, u.exec_start.as_deref().unwrap_or("-"));
+                    }
+                }
             }
-            SysCommands::Cycles { dir } => {
-                let units = lens_sys::load_units(&dir)?;
+            SysCommands::Cycles { dir, format } => {
+                let units = load_sys_units(dir.as_deref())?;
                 let graph = OrderingGraph::build(&units);
-                let cycles = graph.find_cycles();
-                if cycles.is_empty() {
+                let cycles = graph.find_cycle_paths();
+                let found = !cycles.is_empty();
+                if wants_json(format, false, false) {
+                    outln!("{}", to_deterministic_pretty(&cycles)?);
+                } else if cycles.is_empty() {
                     outln!("No dependency cycles detected among {} units.", units.len());
                 } else {
                     outln!("Detected {} cycle(s):", cycles.len());
                     for (i, c) in cycles.iter().enumerate() {
-                        outln!("  [{}] {}", i + 1, c.join(" -> "));
+                        if c.edges.is_empty() {
+                            outln!("  [{}] {}", i + 1, c.members.join(" -> "));
+                        } else {
+                            // Real directed path: each hop carries the
+                            // directive and file:line that produced it.
+                            let mut line = String::new();
+                            for e in &c.edges {
+                                let origin = match (&e.path, e.line) {
+                                    (Some(p), Some(l)) => format!(
+                                        "{}:{}",
+                                        Path::new(p)
+                                            .file_name()
+                                            .map(|f| f.to_string_lossy().into_owned())
+                                            .unwrap_or_else(|| p.clone()),
+                                        l
+                                    ),
+                                    (Some(p), None) => p.clone(),
+                                    _ => e.declared_by.clone(),
+                                };
+                                line.push_str(&format!(
+                                    "{} --{}({})--> ",
+                                    e.before, e.directive, origin
+                                ));
+                            }
+                            line.push_str(&c.edges.last().unwrap().after);
+                            outln!("  [{}] {}", i + 1, line);
+                        }
                     }
+                }
+                // Exit-code convention: a detected cycle is a finding.
+                if found {
+                    outcome = Outcome::Findings;
                 }
             }
             SysCommands::Diff {
                 baseline,
                 candidate,
+                format,
             } => {
-                let b_str =
-                    fs::read_to_string(&baseline).map_err(|e| lens_core::LensError::Io {
-                        path: baseline.clone(),
-                        source: e,
-                    })?;
-                let c_str =
-                    fs::read_to_string(&candidate).map_err(|e| lens_core::LensError::Io {
-                        path: candidate.clone(),
-                        source: e,
-                    })?;
-                let s1: SystemdSnapshot = serde_json::from_str(&b_str)?;
-                let s2: SystemdSnapshot = serde_json::from_str(&c_str)?;
+                // Inputs may be saved snapshots or live unit directories.
+                let s1 = sys_snapshot_from(&baseline)?;
+                let s2 = sys_snapshot_from(&candidate)?;
                 let diff = diff_systemd(&s1, &s2);
-                outln!("{}", to_deterministic_pretty(&diff)?);
+                if wants_json(format, false, true) {
+                    outln!("{}", to_deterministic_pretty(&diff)?);
+                } else {
+                    outln!(
+                        "Systemd diff: +{} -{} ~{} unit(s), {} new cycle(s), {} resolved",
+                        diff.added_units.len(),
+                        diff.removed_units.len(),
+                        diff.modified_units.len(),
+                        diff.new_cycles.len(),
+                        diff.resolved_cycles.len()
+                    );
+                    for u in &diff.modified_units {
+                        outln!("  ~ {}", u.unit);
+                    }
+                }
             }
         },
         Commands::Build { action } => match action {
-            BuildCommands::Inspect { file } => {
-                let content = fs::read_to_string(&file).map_err(|e| lens_core::LensError::Io {
-                    path: file.clone(),
-                    source: e,
-                })?;
-                let entries: Vec<CompileCommandEntry> = serde_json::from_str(&content)?;
+            BuildCommands::Inspect { file, format } => {
+                let entries: Vec<CompileCommandEntry> = read_json(&file)?;
                 let units: Vec<_> = entries.iter().map(parse_command_entry).collect();
                 // Emit the full buildscope.snapshot/v4 schema, including the
                 // reverse-impact graph resolved from on-disk headers.
@@ -303,63 +1050,156 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     .iter()
                     .map(|(h, us)| (h.clone(), us.iter().cloned().collect()))
                     .collect();
+                // Transitive impact for every known header: keys of both
+                // maps plus headers reached only through other headers.
+                let all_headers: std::collections::BTreeSet<String> = graph
+                    .header_to_units
+                    .keys()
+                    .chain(graph.header_to_headers.keys())
+                    .cloned()
+                    .chain(graph.header_to_headers.values().flatten().cloned())
+                    .collect();
+                let transitive_impact = all_headers
+                    .iter()
+                    .map(|h| (h.clone(), graph.compute_impact(h).impacted_units))
+                    .collect();
                 let snapshot = lens_build::BuildSnapshot {
                     schema: lens_build::SNAPSHOT_SCHEMA_V4.to_string(),
                     version: env!("CARGO_PKG_VERSION").to_string(),
                     total_units: units.len(),
                     units,
                     reverse_impact,
+                    transitive_impact,
                 };
-                outln!("{}", to_deterministic_pretty(&snapshot)?);
+                if wants_json(format, false, true) {
+                    outln!("{}", to_deterministic_pretty(&snapshot)?);
+                } else {
+                    outln!(
+                        "Build database: {} translation units, {} headers tracked",
+                        snapshot.total_units,
+                        snapshot.reverse_impact.len()
+                    );
+                    for u in &snapshot.units {
+                        outln!("  {} [{}]", u.file, u.compiler);
+                    }
+                }
             }
-            BuildCommands::Impact { file, header } => {
-                let content = fs::read_to_string(&file).map_err(|e| lens_core::LensError::Io {
-                    path: file.clone(),
-                    source: e,
-                })?;
-                let entries: Vec<CompileCommandEntry> = serde_json::from_str(&content)?;
+            BuildCommands::Impact {
+                file,
+                header,
+                format,
+            } => {
+                let entries: Vec<CompileCommandEntry> = read_json(&file)?;
                 let mut graph = ImpactGraph::new();
                 for entry in &entries {
                     let unit = parse_command_entry(entry);
                     graph.add_translation_unit(&unit);
                 }
-                // Normalize --header the same way unit paths are normalized so
-                // relative spellings like include/common.h match graph keys.
-                let cwd = std::env::current_dir()
+                // Resolve a relative --header against the compile database
+                // directory and each entry's `directory` — not just the
+                // process cwd — so `build impact` works from any cwd.
+                let db_dir = file
+                    .parent()
+                    .filter(|p| !p.as_os_str().is_empty())
                     .map(|p| p.to_string_lossy().into_owned())
-                    .unwrap_or_else(|_| "/".to_string());
-                let target = lens_build::normalize_path(&header, &cwd);
-                let report = graph.compute_impact(&target);
-                outln!("{}", to_deterministic_pretty(&report)?);
+                    .unwrap_or_else(|| ".".to_string());
+                let mut bases: Vec<String> = vec![db_dir.clone()];
+                for e in &entries {
+                    if !e.directory.is_empty() && !bases.contains(&e.directory) {
+                        bases.push(e.directory.clone());
+                    }
+                }
+                if let Ok(cwd) = std::env::current_dir() {
+                    let cwd = cwd.to_string_lossy().into_owned();
+                    if !bases.contains(&cwd) {
+                        bases.push(cwd);
+                    }
+                }
+                let target = lens_build::resolve_header_target(&graph, &header, &bases);
+                let mut report = graph.compute_impact(&target);
+
+                if !graph.header_in_graph(&report.target_header) {
+                    // Not in the include graph at all — likely a path-
+                    // resolution problem, not "no rebuilds needed". Show
+                    // closest basename matches so the user can re-spell it.
+                    let candidates = graph.closest_headers(&header, 5);
+                    let mut hint = format!(
+                        "header {:?} is not in the include graph (resolved as {})",
+                        header, report.target_header
+                    );
+                    if !candidates.is_empty() {
+                        hint.push_str(&format!("; similar: {}", candidates.join(", ")));
+                    }
+                    hint.push_str(&format!(
+                        "; pass an absolute path or one relative to the compile database directory ({})",
+                        db_dir
+                    ));
+                    report.hint = Some(hint);
+                }
+                if wants_json(format, false, true) {
+                    outln!("{}", to_deterministic_pretty(&report)?);
+                } else {
+                    outln!(
+                        "Impact of {}: {} translation unit(s) need rebuild",
+                        report.target_header,
+                        report.total_impacted
+                    );
+                    for u in &report.impacted_units {
+                        outln!("  - {}", u);
+                    }
+                }
+                // Evidence gaps stay visible on stderr in both modes;
+                // missing/unresolved includes and truncation are warnings,
+                // not findings (system headers often resolve nowhere).
+                if let Some(hint) = &report.hint {
+                    eprintln!("warning: {}", hint);
+                }
+                if report.missing_sources > 0
+                    || report.unresolved_includes > 0
+                    || report.scan_truncated
+                {
+                    eprintln!(
+                        "warning: impact graph incomplete: {} missing source(s), {} unresolved include(s), truncated={}",
+                        report.missing_sources, report.unresolved_includes, report.scan_truncated
+                    );
+                }
             }
             BuildCommands::Diff {
                 baseline,
                 candidate,
+                format,
             } => {
-                let b_str =
-                    fs::read_to_string(&baseline).map_err(|e| lens_core::LensError::Io {
-                        path: baseline.clone(),
-                        source: e,
-                    })?;
-                let c_str =
-                    fs::read_to_string(&candidate).map_err(|e| lens_core::LensError::Io {
-                        path: candidate.clone(),
-                        source: e,
-                    })?;
-                let b_entries: Vec<CompileCommandEntry> = serde_json::from_str(&b_str)?;
-                let c_entries: Vec<CompileCommandEntry> = serde_json::from_str(&c_str)?;
+                let b_entries: Vec<CompileCommandEntry> = read_json(&baseline)?;
+                let c_entries: Vec<CompileCommandEntry> = read_json(&candidate)?;
                 let u1: Vec<_> = b_entries.iter().map(parse_command_entry).collect();
                 let u2: Vec<_> = c_entries.iter().map(parse_command_entry).collect();
                 let diff = diff_compilations(&u1, &u2);
-                outln!("{}", to_deterministic_pretty(&diff)?);
+                if wants_json(format, false, true) {
+                    outln!("{}", to_deterministic_pretty(&diff)?);
+                } else {
+                    outln!(
+                        "Build diff: +{} -{} ~{} unit(s)",
+                        diff.added_units.len(),
+                        diff.removed_units.len(),
+                        diff.modified_units.len()
+                    );
+                    for u in &diff.modified_units {
+                        outln!("  ~ {}", u.file);
+                    }
+                }
             }
         },
         Commands::Env { action } => match action {
-            EnvCommands::Inspect { venv_path, project } => {
-                let mut venv = inspect_venv(&venv_path).map_err(|e| lens_core::LensError::Io {
-                    path: venv_path.clone(),
-                    source: e,
-                })?;
+            EnvCommands::Inspect {
+                venv_path,
+                project,
+                format,
+            } => {
+                let mut venv =
+                    inspect_venv(&venv_path, &[]).map_err(|e| lens_core::LensError::Io {
+                        path: venv_path.clone(),
+                        source: e,
+                    })?;
                 if let Some(ref proj) = project {
                     venv.shadowing_issues = detect_shadowing(proj, &venv.packages);
                 }
@@ -368,43 +1208,99 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     version: env!("CARGO_PKG_VERSION").to_string(),
                     venv,
                 };
-                outln!("{}", to_deterministic_pretty(&snapshot)?);
-            }
-            EnvCommands::Check { venv_path } => {
-                let venv = inspect_venv(&venv_path).map_err(|e| lens_core::LensError::Io {
-                    path: venv_path.clone(),
-                    source: e,
-                })?;
-                if venv.missing_dependencies.is_empty() {
-                    outln!("All dependencies satisfied in {:?}.", venv_path);
+                if wants_json(format, false, true) {
+                    outln!("{}", to_deterministic_pretty(&snapshot)?);
                 } else {
+                    let v = &snapshot.venv;
+                    outln!("Virtualenv: {}", venv_path.display());
                     outln!(
-                        "Found {} missing dependenc(ies):",
-                        venv.missing_dependencies.len()
+                        "  Python: {} | packages: {}",
+                        if v.python_version.is_empty() {
+                            "?"
+                        } else {
+                            v.python_version.as_str()
+                        },
+                        v.packages.len()
                     );
-                    for d in &venv.missing_dependencies {
-                        outln!("  - {}", d);
+                    outln!("  Missing deps: {}", v.missing_dependencies.len());
+                    if !v.shadowing_issues.is_empty() {
+                        outln!("  Shadowing issues: {}", v.shadowing_issues.len());
                     }
+                }
+            }
+            EnvCommands::Check {
+                venv_path,
+                extras,
+                format,
+            } => {
+                let venv =
+                    inspect_venv(&venv_path, &extras).map_err(|e| lens_core::LensError::Io {
+                        path: venv_path.clone(),
+                        source: e,
+                    })?;
+                if wants_json(format, false, false) {
+                    outln!(
+                        "{}",
+                        to_deterministic_pretty(&serde_json::json!({
+                            "venv": venv_path.to_string_lossy(),
+                            "missing_dependencies": venv.missing_dependencies,
+                            "version_conflicts": venv.version_conflicts,
+                            "unevaluated_dependencies": venv.unevaluated_dependencies,
+                        }))?
+                    );
+                } else {
+                    if venv.missing_dependencies.is_empty() {
+                        outln!("All dependencies satisfied in {:?}.", venv_path);
+                    } else {
+                        outln!(
+                            "Found {} missing dependenc(ies):",
+                            venv.missing_dependencies.len()
+                        );
+                        for d in &venv.missing_dependencies {
+                            outln!("  - {}", d);
+                        }
+                    }
+                    if !venv.version_conflicts.is_empty() {
+                        outln!("Version conflicts:");
+                        for d in &venv.version_conflicts {
+                            outln!("  - {}", d);
+                        }
+                    }
+                    if !venv.unevaluated_dependencies.is_empty() {
+                        outln!("Unevaluated requirements (uncertain markers):");
+                        for d in &venv.unevaluated_dependencies {
+                            outln!("  - {}", d);
+                        }
+                    }
+                }
+                // Exit-code convention: missing or version-conflicting
+                // dependencies are findings. Unevaluated markers alone are
+                // informational and keep exit 0.
+                if !venv.missing_dependencies.is_empty() || !venv.version_conflicts.is_empty() {
+                    outcome = Outcome::Findings;
                 }
             }
             EnvCommands::Diff {
                 baseline,
                 candidate,
+                format,
             } => {
-                let b_str =
-                    fs::read_to_string(&baseline).map_err(|e| lens_core::LensError::Io {
-                        path: baseline.clone(),
-                        source: e,
-                    })?;
-                let c_str =
-                    fs::read_to_string(&candidate).map_err(|e| lens_core::LensError::Io {
-                        path: candidate.clone(),
-                        source: e,
-                    })?;
-                let s1: EnvSnapshot = serde_json::from_str(&b_str)?;
-                let s2: EnvSnapshot = serde_json::from_str(&c_str)?;
+                let s1: EnvSnapshot = read_json(&baseline)?;
+                let s2: EnvSnapshot = read_json(&candidate)?;
                 let diff = diff_environments(&s1.venv, &s2.venv);
-                outln!("{}", to_deterministic_pretty(&diff)?);
+                if wants_json(format, false, true) {
+                    outln!("{}", to_deterministic_pretty(&diff)?);
+                } else {
+                    outln!(
+                        "Environment diff: +{} -{} ~{} package(s)",
+                        diff.added_packages.len(),
+                        diff.removed_packages.len(),
+                        diff.version_changes.len()
+                    );
+                    for p in &diff.version_changes {
+                        outln!("  ~ {}: {} -> {}", p.package, p.old_version, p.new_version);
+                    }
+                }
             }
         },
         Commands::Bundle { action } => match action {
@@ -418,6 +1314,7 @@ pub fn dispatch(command: Commands) -> Result<()> {
                 env,
                 net,
                 force,
+                format,
             } => {
                 // A bundle with zero artifact sources would produce an
                 // empty manifest that still verifies OK — refuse to create it.
@@ -429,7 +1326,7 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     || env.is_some()
                     || net;
                 if !any_source {
-                    return Err(lens_core::LensError::InvalidInput {
+                    return Err(lens_core::LensError::Usage {
                         message: "at least one artifact source is required \
                                   (--disk/--log/--trace/--test/--sys/--env/--net)"
                             .to_string(),
@@ -443,7 +1340,7 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     source: e,
                 })? && !force
                 {
-                    return Err(lens_core::LensError::InvalidInput {
+                    return Err(lens_core::LensError::Usage {
                         message: format!(
                             "output bundle {:?} already exists; pass --force to overwrite",
                             output
@@ -486,12 +1383,35 @@ pub fn dispatch(command: Commands) -> Result<()> {
 
                 if let Some(ref l) = log {
                     collect!("log", "reports/log_summary.json", {
-                        let indexer = LogIndexer::open(l)?;
+                        let indexer = open_log_indexer(l)?;
                         Ok(serde_json::json!({
                             "path": l.to_string_lossy(),
                             "total_lines": indexer.len(),
+                            "lossy_lines": indexer.lossy_lines(),
                         }))
                     });
+                    // Embed the original log content (tail-bounded) so the
+                    // bundle is evidence, not just a line count.
+                    let log_name = l
+                        .file_name()
+                        .map(|f| f.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "stdin.log".to_string());
+                    let log_name = log_name.replace(['/', '\\'], "_");
+                    match read_log_tail(l, BUNDLE_LOG_TAIL_BYTES) {
+                        Ok((bytes, truncated)) => {
+                            if truncated {
+                                diagnostics.push(format!(
+                                    "log: content truncated to the last {} bytes",
+                                    BUNDLE_LOG_TAIL_BYTES
+                                ));
+                            }
+                            artifacts.push(BundleArtifact {
+                                name: format!("logs/{}", log_name),
+                                data: bytes,
+                            });
+                        }
+                        Err(e) => diagnostics.push(format!("log content: {}", e)),
+                    }
                 }
 
                 if let Some(ref t) = trace {
@@ -520,13 +1440,14 @@ pub fn dispatch(command: Commands) -> Result<()> {
                         let units = lens_sys::load_units(s)?;
                         let graph = OrderingGraph::build(&units);
                         let cycles = graph.find_cycles();
+                        let diagnostics = sys_diagnostics(&units);
                         Ok(SystemdSnapshot {
                             schema: lens_sys::SNAPSHOT_SCHEMA_V1.to_string(),
                             version: env!("CARGO_PKG_VERSION").to_string(),
                             semantics: "systemd-255-subset-v1".to_string(),
                             units,
                             cycles,
-                            diagnostics: vec![],
+                            diagnostics,
                         })
                     });
                 }
@@ -534,7 +1455,7 @@ pub fn dispatch(command: Commands) -> Result<()> {
                 if let Some(ref e) = env {
                     collect!("env", "reports/env_snapshot.json", {
                         let venv =
-                            inspect_venv(e).map_err(|err| lens_core::LensError::InvalidInput {
+                            inspect_venv(e, &[]).map_err(|err| lens_core::LensError::Usage {
                                 message: format!("venv {}: {}", e.display(), err),
                             })?;
                         Ok(EnvSnapshot {
@@ -554,7 +1475,7 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     for d in &diagnostics {
                         eprintln!("  - {}", d);
                     }
-                    return Err(lens_core::LensError::InvalidInput {
+                    return Err(lens_core::LensError::Usage {
                         message: "bundle contains no artifacts".to_string(),
                     });
                 }
@@ -566,20 +1487,28 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     diagnostics.clone(),
                 )?;
 
-                outln!(
-                    "Successfully created forensic flight recorder bundle: {:?}",
-                    output
-                );
-                outln!("  Artifacts embedded: {}", manifest.sources.len());
-                if !diagnostics.is_empty() {
-                    outln!("  Collection warnings recorded in manifest:");
-                    for d in &diagnostics {
-                        outln!("    - {}", d);
+                if wants_json(format, false, false) {
+                    outln!("{}", to_deterministic_pretty(&manifest)?);
+                } else {
+                    outln!(
+                        "Successfully created forensic flight recorder bundle: {:?}",
+                        output
+                    );
+                    outln!("  Artifacts embedded: {}", manifest.sources.len());
+                    if !diagnostics.is_empty() {
+                        outln!("  Collection warnings recorded in manifest:");
+                        for d in &diagnostics {
+                            outln!("    - {}", d);
+                        }
                     }
                 }
             }
-            BundleCommands::Inspect { bundle } => {
+            BundleCommands::Inspect { bundle, format } => {
                 let report = inspect_bundle(&bundle)?;
+                if wants_json(format, false, false) {
+                    outln!("{}", to_deterministic_pretty(&report)?);
+                    return Ok(outcome);
+                }
                 outln!("=== Lens Forensic Flight Recorder Bundle ===");
                 outln!("Entries: {}", report.entries.len());
                 match &report.manifest {
@@ -605,8 +1534,17 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     outln!("  - {} ({} bytes)", e.name, e.size);
                 }
             }
-            BundleCommands::Verify { bundle } => {
+            BundleCommands::Verify { bundle, format } => {
                 let report = verify_bundle_archive(&bundle)?;
+                if wants_json(format, false, false) {
+                    outln!("{}", to_deterministic_pretty(&report)?);
+                    if !report.is_valid {
+                        // Integrity check ran and reported a negative
+                        // result — a finding, not a tool error.
+                        outcome = Outcome::Findings;
+                    }
+                    return Ok(outcome);
+                }
                 if report.is_valid {
                     outln!("Bundle verification SUCCESSFUL: {:?}", bundle);
                     outln!("  Total manifest files:    {}", report.total_files);
@@ -618,7 +1556,7 @@ pub fn dispatch(command: Commands) -> Result<()> {
                         outln!("  Unlisted entry (not in manifest): {}", u);
                     }
                 } else {
-                    eprintln!("Bundle verification FAILED: {:?}", bundle);
+                    eprintln!("Bundle integrity check FAILED: {:?}", bundle);
                     if let Some(err) = report.error {
                         eprintln!("  Error: {}", err);
                     }
@@ -631,16 +1569,80 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     for u in &report.unexpected_files {
                         eprintln!("  Unlisted: {}", u);
                     }
-                    return Err(lens_core::LensError::InvalidInput {
-                        message: "Bundle cryptographic verification failed".to_string(),
-                    });
+                    // Negative integrity result: a finding (exit 1), not an
+                    // operational error.
+                    outcome = Outcome::Findings;
+                }
+            }
+            BundleCommands::Show {
+                bundle,
+                entry,
+                format,
+            } => {
+                let bytes = read_bundle_entry(&bundle, &entry)?;
+                if wants_json(format, false, false) {
+                    outln!(
+                        "{}",
+                        to_deterministic_pretty(&serde_json::json!({
+                            "bundle": bundle.to_string_lossy(),
+                            "entry": entry,
+                            "size": bytes.len(),
+                            "content": String::from_utf8_lossy(&bytes),
+                        }))?
+                    );
+                } else {
+                    // Raw entry content — typically already pretty JSON.
+                    outln!("{}", String::from_utf8_lossy(&bytes));
+                }
+            }
+            BundleCommands::Extract {
+                bundle,
+                dest,
+                force,
+                format,
+            } => {
+                let written = extract_bundle(&bundle, &dest, force)?;
+                if wants_json(format, false, false) {
+                    outln!(
+                        "{}",
+                        to_deterministic_pretty(&serde_json::json!({
+                            "bundle": bundle.to_string_lossy(),
+                            "dest": dest.to_string_lossy(),
+                            "extracted": written
+                                .iter()
+                                .map(|p| p.to_string_lossy())
+                                .collect::<Vec<_>>(),
+                        }))?
+                    );
+                } else {
+                    outln!(
+                        "Verified and extracted {} file(s) to {:?}",
+                        written.len(),
+                        dest
+                    );
+                    for w in &written {
+                        outln!("  - {}", w.display());
+                    }
                 }
             }
         },
         Commands::Net { action } => match action {
-            NetCommands::Inspect { proc_dir, json } => {
-                let report = inspect_network(proc_dir.as_deref())?;
-                if json {
+            NetCommands::Inspect {
+                proc_dir,
+                json,
+                format,
+                no_unix,
+            } => {
+                let mut report = inspect_network(proc_dir.as_deref())?;
+                if no_unix {
+                    report.sockets.retain(|s| {
+                        !matches!(
+                            s.kind,
+                            lens_net::SocketKind::UnixStream | lens_net::SocketKind::UnixDgram
+                        )
+                    });
+                }
+                if wants_json(format, json, false) {
                     outln!("{}", to_deterministic_pretty(&report)?);
                 } else {
                     outln!("Network & Socket Inspection Summary:");
@@ -662,15 +1664,26 @@ pub fn dispatch(command: Commands) -> Result<()> {
                         report.summary.orphan_sockets
                     );
                     outln!(
+                        "  Owner-Unknown Sockets:  {}",
+                        report.summary.owner_unknown_sockets
+                    );
+                    if report.summary.uninspectable_processes > 0 {
+                        outln!(
+                            "  Uninspectable Procs:    {} (re-run with sudo to attribute)",
+                            report.summary.uninspectable_processes
+                        );
+                    }
+                    outln!(
                         "  UNIX Domain Sockets:    {}",
                         report.summary.unix_domain_sockets
                     );
                     outln!("\nActive Listening Ports:");
                     outln!(
-                        "{:<8} {:<24} {:<10} {:<8} {:<16}",
+                        "{:<8} {:<24} {:<10} {:<8} {:<8} {:<16}",
                         "PROTO",
                         "LOCAL ADDRESS",
                         "INODE",
+                        "UID",
                         "PID",
                         "PROCESS"
                     );
@@ -679,7 +1692,13 @@ pub fn dispatch(command: Commands) -> Result<()> {
                             .process
                             .as_ref()
                             .map(|p| p.name.as_str())
-                            .unwrap_or("<orphan>");
+                            .map(str::to_string)
+                            .unwrap_or_else(|| match l.owner_state {
+                                Some(lens_net::OwnerState::OwnerUnknown) => {
+                                    "<owner unknown>".to_string()
+                                }
+                                _ => "<orphan>".to_string(),
+                            });
                         let pid_str = l
                             .process
                             .as_ref()
@@ -687,10 +1706,11 @@ pub fn dispatch(command: Commands) -> Result<()> {
                             .unwrap_or_else(|| "-".to_string());
                         let addr = format!("{}:{}", l.local_address, l.local_port);
                         outln!(
-                            "{:<8} {:<24} {:<10} {:<8} {}",
+                            "{:<8} {:<24} {:<10} {:<8} {:<8} {}",
                             format!("{:?}", l.kind),
                             addr,
                             l.inode,
+                            l.uid,
                             pid_str,
                             proc_str
                         );
@@ -700,21 +1720,29 @@ pub fn dispatch(command: Commands) -> Result<()> {
             NetCommands::Diff {
                 baseline,
                 candidate,
+                format,
             } => {
-                let base_content =
-                    fs::read_to_string(&baseline).map_err(|e| lens_core::LensError::Io {
-                        path: baseline.clone(),
-                        source: e,
-                    })?;
-                let cand_content =
-                    fs::read_to_string(&candidate).map_err(|e| lens_core::LensError::Io {
-                        path: candidate.clone(),
-                        source: e,
-                    })?;
-                let base_report: NetReport = serde_json::from_str(&base_content)?;
-                let cand_report: NetReport = serde_json::from_str(&cand_content)?;
+                let base_report: NetReport = read_json(&baseline)?;
+                let cand_report: NetReport = read_json(&candidate)?;
                 let diff = diff_net_reports(&base_report, &cand_report);
-                outln!("{}", to_deterministic_pretty(&diff)?);
+                if wants_json(format, false, true) {
+                    outln!("{}", to_deterministic_pretty(&diff)?);
+                } else {
+                    outln!(
+                        "Network diff: +{} -{} listener(s), +{} -{} connection(s), TIME_WAIT {:+}",
+                        diff.new_listeners.len(),
+                        diff.closed_listeners.len(),
+                        diff.new_connections.len(),
+                        diff.closed_connections.len(),
+                        diff.time_wait_delta
+                    );
+                    for l in &diff.new_listeners {
+                        outln!("  + {}:{}", l.local_address, l.local_port);
+                    }
+                    for l in &diff.closed_listeners {
+                        outln!("  - {}:{}", l.local_address, l.local_port);
+                    }
+                }
             }
         },
         Commands::Doctor {
@@ -722,6 +1750,8 @@ pub fn dispatch(command: Commands) -> Result<()> {
             procfs,
             systemd_dir,
             json,
+            format,
+            fail_on,
         } => {
             // An explicitly passed path that does not exist is a usage
             // error, not a healthy-looking "non-systemd environment" report.
@@ -732,7 +1762,7 @@ pub fn dispatch(command: Commands) -> Result<()> {
             ] {
                 if let Some(p) = dir {
                     if !p.exists() {
-                        return Err(lens_core::LensError::InvalidInput {
+                        return Err(lens_core::LensError::Usage {
                             message: format!("{flag} path {:?} does not exist", p),
                         });
                     }
@@ -740,7 +1770,7 @@ pub fn dispatch(command: Commands) -> Result<()> {
             }
             let report =
                 doctor::run_doctor(root.as_deref(), procfs.as_deref(), systemd_dir.as_deref());
-            if json {
+            if wants_json(format, json, false) {
                 outln!("{}", to_deterministic_pretty(&report)?);
             } else {
                 outln!("=== Lens System Doctor Diagnosis ===");
@@ -771,9 +1801,16 @@ pub fn dispatch(command: Commands) -> Result<()> {
                     }
                 }
             }
+            // Exit-code convention: findings exit 1. --fail-on picks the
+            // severity threshold that counts as a finding.
+            if report.summary.failures > 0
+                || (fail_on == crate::cli::FailOn::Warn && report.summary.warnings > 0)
+            {
+                outcome = Outcome::Findings;
+            }
         }
-        Commands::Tui { path } => {
-            lens_tui::run(&path).map_err(|e| lens_core::LensError::Io {
+        Commands::Tui { path, log } => {
+            lens_tui::run(&path, log.as_deref()).map_err(|e| lens_core::LensError::Io {
                 path: path.clone(),
                 source: e,
             })?;
@@ -785,5 +1822,5 @@ pub fn dispatch(command: Commands) -> Result<()> {
         }
     }
 
-    Ok(())
+    Ok(outcome)
 }

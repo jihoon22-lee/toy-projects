@@ -48,6 +48,17 @@ impl TcpState {
     }
 }
 
+/// Why a socket could not be correlated to a process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OwnerState {
+    /// Genuinely orphaned: no live process holds the inode.
+    Orphan,
+    /// The owner could not be inspected — `/proc/<pid>/fd` was unreadable
+    /// (typically another user's process without elevated permissions).
+    OwnerUnknown,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SocketProcess {
     pub pid: u32,
@@ -69,6 +80,10 @@ pub struct SocketEntry {
     pub tx_queue: u64,
     pub rx_queue: u64,
     pub process: Option<SocketProcess>,
+    /// Set only when `process` is `None`: distinguishes a true orphan from
+    /// an owner we lacked permission to inspect.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_state: Option<OwnerState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unix_path: Option<String>,
 }
@@ -80,6 +95,13 @@ pub struct NetSummary {
     pub established_connections: usize,
     pub time_wait_sockets: usize,
     pub orphan_sockets: usize,
+    /// Sockets whose owning process could not be inspected (permission
+    /// denied on `/proc/<pid>/fd`). Distinct from true orphans.
+    #[serde(default)]
+    pub owner_unknown_sockets: usize,
+    /// Processes whose fd table could not be read at all.
+    #[serde(default)]
+    pub uninspectable_processes: usize,
     pub unix_domain_sockets: usize,
 }
 

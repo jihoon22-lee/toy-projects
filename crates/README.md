@@ -21,7 +21,7 @@ Lens는 단일 Rust 워크스페이스다. 각 `lens-*` 크레이트가 하나�
 | `evidence` | `Evidence`, `Source`, 상한 있는 `BoundedCollector` |
 | `json` | 결정론적 JSON 직렬화(키 정렬) |
 | `time` | UTC/로컬 ISO-8601 타임스탬프 유틸 |
-| `bundle` | `lens.bundle/v2` — tar.gz + `manifest.json`(SHA-256, 크기·항목 상한) 생성/검사/검증 |
+| `bundle` | `lens.bundle/v2` — tar.gz + `manifest.json`(SHA-256, 크기·항목 상한) 생성/검사/검증, `read_bundle_entry`(단일 엔트리 추출), `extract_bundle`(검증 우선 + 이름 검증 + `--force` 없이 덮어쓰기 거부) |
 
 ## lens-disk — 파일시스템 분석
 
@@ -32,13 +32,19 @@ Lens는 단일 Rust 워크스페이스다. 각 `lens-*` 크레이트가 하나�
   실제 rayon 병렬 stat을 수행.
 - `DuplicateFinder`: 크기→inode 묶음→4KB 부분 해시→전체 SHA-256 순으로 필터.
   같은 inode의 하드링크는 회수 가능 용량에서 중복 계산하지 않는다.
+  `find_in_tree`는 `DuplicateReport`(groups + 해시 실패 `errors` +
+  `total_reclaimable_bytes`)를 반환한다.
 - `TrashManager`: FreeDesktop Trash v1.0 (`files/` + `.trashinfo` 영수증).
+  `list()`/`restore_by_name()`은 `.trashinfo` + `.lens.json` identity
+  사이드카로 trashed 파일의 교체 여부를 검증(fail-closed: 대상 점유·
+  identity 불일치·안전하지 않은 이름/경로는 거부). EXDEV 시
+  `$topdir/.Trash-$uid`(0700)로 폴백.
 - 스키마: `diskmap.snapshot/v2`, `SnapshotDiff`.
 
 ```rust
 use lens_disk::{DiskScanner, ScanOptions, DuplicateFinder, SnapshotV2};
 let res = DiskScanner::new(ScanOptions::default()).scan("/path")?;
-let groups = DuplicateFinder::new(1<<20).find_in_tree(&res.tree, "/path".as_ref())?;
+let report = DuplicateFinder::new(1<<20).find_in_tree(&res.tree, "/path".as_ref())?;
 let snap = SnapshotV2::from_tree(&res.tree, res.root_id, res.complete, res.truncated);
 ```
 
@@ -55,10 +61,14 @@ let snap = SnapshotV2::from_tree(&res.tree, res.root_id, res.complete, res.trunc
 
 ## lens-log — 로그 분석
 
-- `LogIndexer`: mmap + `memchr`로 라인 오프셋 테이블 구축.
+- `LogIndexer`: mmap + `memchr`로 라인 오프셋 테이블 구축. `.gz` 입력은
+  상한 있는 해제(512 MiB)로, 스트림(`from_reader`, stdin `-` 경로)은
+  상한 있는 메모리 버퍼로 처리. invalid UTF-8 줄은 인덱싱되고
+  `lossy_lines()`로 집계되며 `get_line_lossy`가 U+FFFD로 노출.
 - `parse_line`: JSONL(`level`/`msg`/`ts` 등, 키 대소문자 무시, 나머지 키는
   `fields`에 보존)과 `LEVEL ...` 휴리스틱. `detect_level`은 레벨만 빠르게 반환.
-- `LogFilter`: min_level/query/source. `matches_line`은 no-op 필터와
+- `LogFilter`: min_level/query(대소문자 무시 substring)/`--regex`
+  (regex::Regex)/source. `matches_line`은 no-op 필터와
   substring-only 거절을 파싱 없이 단락.
 - 스키마: `loglens.session/v2`.
 
@@ -67,23 +77,41 @@ let snap = SnapshotV2::from_tree(&res.tree, res.root_id, res.complete, res.trunc
 - `quick-xml` 스트리밍 파서: 속성 엔티티 디코딩, testcase 상태
   (failure/error/skipped) 메타데이터, `<system-out>`/`<system-err>`와
   `<properties>` 수집, 열린 태그 잔존 시 `complete=false`(잘린 XML 감지).
+- 케이스 신원은 `suite::classname::name` — 같은 이름의 케이스가 다른
+  suite에서 충돌하지 않는다. 중복 identity는 덮어쓰지 않고 diff의
+  `diagnostics`로 보고.
+- `diff_test_runs`는 구조화된 `CaseChange` 목록(`regressions`,
+  `fixes`, `new_failures`, `removed_tests`, `skipped_changes`)을 반환.
+  skipped→passed는 fix가 아니다. `merge_test_runs`는 모듈별 JUnit
+  파일들을 하나의 run으로 병합.
 - run id는 입력 해시 기반 결정적 생성.
-- 스키마: `testlens.run/v1`, `testlens.diff/v1`.
+- 스키마: `testlens.run/v1`, `testlens.diff/v2`(v2에서 regressions 등이
+  문자열에서 `CaseChange` 구조로 변경).
 
 ## lens-trace — strace 분석
 
-- strace 라인 파싱, `unfinished`/`resumed` 스티칭, 지연 시간 집계, errno 분포.
-- fd 추적은 tid별 테이블: open/openat/socket/accept/dup/pipe2([3,4]) 등
-  생성 시스템콜과 `+++ exited`에서 잔여 fd를 `fd_leaks_by_process`에 귀속.
+- strace 라인 파싱, `unfinished`/`resumed` 스티칭, 지연 시간 집계.
+  에러는 `syscall:errno` 키로 집계.
+- fd 추적은 tid별 테이블이되 `CLONE_FILES` clone은 fd 테이블을 공유하고,
+  `O_CLOEXEC` fd는 `execve`에서 해제되며 `close_range`도 처리한다.
+  open/openat/socket/accept/dup/pipe2([3,4]) 등 생성 시스템콜과
+  `+++ exited`에서 잔여 fd를 `fd_leaks_by_process`에 귀속.
 - 스키마: `tracelens.snapshot/v1`, `tracelens.diff/v1`.
 
 ## lens-sys — systemd 정적 분석
 
 - `load_units`(공용 로더): 단일 파일 또는 디렉터리의 unit을 로드하고
   `<unit>.d/*.conf`를 이름순으로 병합. 읽기 실패는 진단 스텁으로 보존.
+- `load_units_merged(dirs)` + `SYSTEMD_SEARCH_DIRS`: `/etc` → `/run` →
+  `/usr/lib` → `/lib` 우선순위 병합 — 상위 디렉터리의 유닛(또는 mask/
+  alias)이 하위를 가리고, drop-in은 모든 디렉터리에서 수집해 낮은
+  우선순위부터 적용. doctor/TUI/`sys` 기본 경로가 이 로더를 공유한다.
 - 파서는 할당 순서를 유지해 `ExecStart=` 등 빈 할당 리셋 의미론을 지원하고
   `%u`/`%h` 등 specifier를 `User=` 기준으로 확장.
-- `OrderingGraph`: Before/After DAG + Tarjan SCC 사이클 탐지.
+- `OrderingGraph`: Before/After DAG + Tarjan SCC 사이클 탐지 — 사이클은
+  실제 방향 경로 + 엣지 기원(파일:라인, 디렉티브)으로 보고.
+- 파서/로더는 `SYNTAX_GARBAGE_LINE`, `SYNTAX_SECTION_HEADER`,
+  `UNIT_REF_MISSING` 진단을 유닛에 붙이고 스냅샷 `diagnostics`에 집계된다.
 - 스키마: `servicelens.snapshot/v1`, `servicelens.diff/v1`.
 - 지원 범위는 `systemd-255-subset-v1`로 명시 — 전체 systemd 의미론의 부분 집합.
 
@@ -93,7 +121,10 @@ let snap = SnapshotV2::from_tree(&res.tree, res.root_id, res.complete, res.trunc
   `-include`(강제 포함) 추출, 경로 정규화(`normalize_path`).
 - `ImpactGraph::add_translation_unit`: 소스 파일의 `#include`를 디스크에서
   해석(`"…"`은 포함 파일 기준 우선, `<…>`은 검색 경로만)하고 헤더 간
-  전이 클로저를 구축. `compute_impact`는 역방향 BFS로 영향받는 TU를 반환.
+  전이 클로저를 구축. include 추출은 파일별 캐시로 중복 I/O를 피하고,
+  읽기 실패 소스와 미해결 include는 `missing_sources`/
+  `unresolved_includes`로 집계된다. `compute_impact`는 역방향 BFS로
+  영향받는 TU를 반환(`ImpactReport`는 `scan_truncated`/`hint` 포함).
 - 스키마: `buildscope.snapshot/v4`, `buildscope.diff/v1`, `buildscope.impact/v1`.
 
 ## lens-env — Python 환경 감사
@@ -101,6 +132,13 @@ let snap = SnapshotV2::from_tree(&res.tree, res.root_id, res.complete, res.trunc
 - 인터프리터를 실행하지 않는 정적 분석: `pyvenv.cfg`, `*.dist-info/METADATA`
   (PEP 376/503), `Requires-Dist` 검증, 프로젝트 소스의 stdlib/서드파티
   모듈 섀도잉 탐지.
+- `markers.rs`: PEP 508 환경 마커 평가(`python_version`, `sys_platform`,
+  `extra` 등, `and`/`or`/괄호, 버전 비교). 거짓 마커 요구는 스킵,
+  `extra`는 `--extras`로 활성화한 것만 적용, 범위 불일치는
+  `version_conflicts`, 평가 불가는 `unevaluated`.
+- 섀도잉은 프로젝트 루트/`src/` 1레벨의 `.py`와 `__init__.py` 패키지
+  디렉터리만 후보로 하고, 설치 패키지는 `top_level.txt`/`RECORD`의
+  모듈명으로 비교한다(dist 이름이 아니라 import 이름 기준).
 - 스키마: `envlens.snapshot/v1`, `envlens.diff/v1`.
 
 ## lens-net — 소켓 포렌식
@@ -111,39 +149,53 @@ let snap = SnapshotV2::from_tree(&res.tree, res.root_id, res.complete, res.trunc
   리스너로 집계.
 - diff는 리스너를 (kind, 주소, 포트)로, 연결을 5-tuple로 매칭(inode는
   스냅샷 간 불안정). `127.0.0.1→0.0.0.0` 확장을 감지.
-- 스키마: `lens.net/v1`.
+- 소유자 불명 소켓은 `owner_state`로 `orphan`(실제 미보유)과
+  `owner_unknown`(`/proc/<pid>/fd` EACCES)을 구분하고, summary에
+  `uninspectable_processes`를 기록.
+- 스키마: `lens.net/v1`(additive 필드만 추가).
 
 ## lens-cli — `lens` 통합 CLI
 
 - `src/cli.rs`: clap 커맨드 트리. `src/ops.rs`: 전 서브커맨드 디스패치
   (라이브러리로 공개 — lens-mcp가 재사용). `main.rs`는 얇은 래퍼.
-- `doctor`: 스토리지/네트워크/서비스/환경 종합 헬스체크(`--json` 지원).
-- `bundle create/inspect/verify`: `lens.bundle/v2` 아카이브.
+- `doctor`: 스토리지/네트워크/서비스/환경 종합 헬스체크(`--json`,
+  `--fail-on` 지원).
+- `bundle create/inspect/verify/show/extract`: `lens.bundle/v2` 아카이브.
 - `tui`: `lens_tui::run`으로 진입. `completion`: 셸 자동완성 생성.
 
 ## lens-tui — 터미널 대시보드
 
-- 4개 탭 실데이터: Storage(아레나 스캔), Services(`load_units` 결과),
-  Logs(`LogIndexer`로 시스템 로그 tail + 레벨 컬러), Network(리스너 목록).
-- `lens_tui::run(path)`가 렌더 루프를 소유해 `lens-tui` 바이너리와
+- 4개 탭 실데이터: Storage(아레나 스캔), Services(merged `load_units_merged`
+  결과), Logs(`LogIndexer`로 로그 tail + 레벨 컬러, `--log` 지정 가능),
+  Network(리스너 목록).
+- 디렉터리 스캔은 백그라운드 스레드(`mpsc`)에서 돌고 스피너로 표시된다.
+  Enter/Backspace는 스캔된 아레나 트리 안에서 메모리 탐색한다(재스캔 없음).
+- `lens_tui::run(path, log)`가 렌더 루프를 소유해 `lens-tui` 바이너리와
   `lens tui`가 공유한다.
 
 ## lens-mcp — MCP 서버
 
-- JSON-RPC 2.0 over stdio로 진단 툴을 노출:
+- JSON-RPC 2.0 over stdio로 진단 툴을 노출. `initialize`는 요청된
+  `protocolVersion`을 에코하고, 도구 실패는 `result.isError`로 반환한다.
+- 모든 도구에 `limit`/`offset` 페이지네이션(배열 끝 `_truncated` 마커,
+  응답 상한 64KiB). 상대 경로는 서버 cwd 기준.
+- `lens_log_filter`는 `tail`(끝 N라인), `regex`, `min_level`,
+  `include_unknown`, `limit`/`offset`을 지원한다.
 
 | 툴 | 용도 |
 |---|---|
 | `lens_disk_scan`, `lens_disk_duplicates` | 스토리지 분석/중복 탐지 |
-| `lens_abi_inspect` | ELF/심볼/버전/DWARF 검사 |
-| `lens_log_filter` | 로그 필터 |
+| `lens_abi_inspect`, `lens_abi_diff` | ELF/심볼/버전/DWARF 검사·비교 |
+| `lens_log_filter` | 로그 필터(tail/regex/페이지) |
 | `lens_trace_analyze` | strace 분석 |
-| `lens_sys_cycles` | systemd 사이클 |
+| `lens_sys_cycles`, `lens_sys_diff` | systemd 사이클/스냅샷 비교 |
+| `lens_test_diff` | JUnit 회귀 diff |
+| `lens_net_diff` | 네트워크 스냅샷 diff |
 | `lens_build_impact` | 헤더 영향도 |
 | `lens_env_check` | venv 의존성 검사 |
 | `lens_net_inspect` | 소켓/리스너 검사 |
 | `lens_bundle_verify` | 번들 무결성 검증 |
-| `lens_doctor` | 종합 진단 |
+| `lens_doctor` | 종합 진단(잘못된 경로 → isError) |
 
 ```json
 { "mcpServers": { "lens": { "command": "/path/to/lens-mcp" } } }

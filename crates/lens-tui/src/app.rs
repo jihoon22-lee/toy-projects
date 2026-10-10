@@ -1,8 +1,9 @@
-use lens_disk::{DiskScanner, ScanOptions, ScanResult};
+use lens_disk::{ArenaTree, DiskScanner, NodeId, ScanOptions, ScanResult};
 use lens_log::LogIndexer;
 use lens_net::{inspect_network, NetReport};
 use lens_sys::SystemdUnit;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TuiTab {
@@ -49,10 +50,28 @@ pub struct TuiItem {
     pub size: u64,
     pub allocated_size: u64,
     pub children_count: usize,
+    /// Arena node this row came from — enables in-memory navigation
+    /// without rescanning the directory.
+    pub node_id: Option<NodeId>,
 }
+
+/// Result of a background directory scan.
+type ScanOutcome = (PathBuf, Result<ScanResult, String>);
+
+const SPINNER: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
 pub struct TuiApp {
     pub current_path: PathBuf,
+    /// Root of the currently held arena tree.
+    pub scan_root: PathBuf,
+    tree: Option<ArenaTree>,
+    /// Node ids from the tree root down to `current_path`'s node.
+    nav_stack: Vec<NodeId>,
+    scan_rx: Option<Receiver<ScanOutcome>>,
+    pub scanning: bool,
+    pub spinner_frame: usize,
+    pub scan_errors: Vec<String>,
+    pub scan_incomplete: bool,
     pub active_tab: TuiTab,
     pub items: Vec<TuiItem>,
     pub selected_index: usize,
@@ -62,14 +81,29 @@ pub struct TuiApp {
     pub sys_units: Vec<SystemdUnit>,
     pub sys_selected: usize,
     pub log_path: Option<PathBuf>,
+    /// Explicit `--log` argument — beats the auto-detected candidates.
+    log_override: Option<PathBuf>,
     pub log_lines: Vec<String>,
     pub log_scroll: usize,
+    /// `/` search over the Logs tab; `None` shows all loaded lines.
+    pub log_search: Option<String>,
+    /// True while the `/` prompt is capturing input.
+    pub search_active: bool,
+    pub search_buf: String,
+    pub show_help: bool,
+    /// Content height of the active list — updated every draw so
+    /// PgUp/PgDn move by a page.
+    pub page_size: usize,
     pub status_message: String,
     pub should_quit: bool,
 }
 
 impl TuiApp {
-    pub fn new(initial_path: &Path) -> Self {
+    /// Start the app at `initial_path` with an explicit log file for the
+    /// Logs tab (`None` auto-detects a system log). The directory scan
+    /// runs on a background thread — the UI is interactive immediately
+    /// and shows a spinner while `scanning` is true.
+    pub fn new(initial_path: &Path, log: Option<PathBuf>) -> Self {
         // Canonicalize so "." becomes a real absolute path — otherwise
         // parent() yields Some("") and navigating up silently empties the
         // listing with "Failed to scan \"\"".
@@ -77,7 +111,15 @@ impl TuiApp {
             .canonicalize()
             .unwrap_or_else(|_| initial_path.to_path_buf());
         let mut app = Self {
-            current_path: start,
+            current_path: start.clone(),
+            scan_root: start.clone(),
+            tree: None,
+            nav_stack: Vec::new(),
+            scan_rx: None,
+            scanning: false,
+            spinner_frame: 0,
+            scan_errors: Vec::new(),
+            scan_incomplete: false,
             active_tab: TuiTab::Storage,
             items: Vec::new(),
             selected_index: 0,
@@ -87,17 +129,127 @@ impl TuiApp {
             sys_units: Vec::new(),
             sys_selected: 0,
             log_path: None,
+            log_override: log,
             log_lines: Vec::new(),
             log_scroll: 0,
-            status_message: "Ready. [Tab/1-4] Switch tabs  [j/k] Navigate  [Enter] Open  [q] Quit"
-                .to_string(),
+            log_search: None,
+            search_active: false,
+            search_buf: String::new(),
+            show_help: false,
+            page_size: 10,
+            status_message:
+                "Ready. [Tab/1-4] Switch tabs  [j/k] Navigate  [Enter] Open  [?] Help  [q] Quit"
+                    .to_string(),
             should_quit: false,
         };
-        app.reload();
+        app.request_scan(start);
         app.reload_network();
         app.reload_services();
         app.reload_logs();
         app
+    }
+
+    /// Kick off a background scan of `path`. The result is picked up by
+    /// `poll_scan` on the next frame; until then the previous listing
+    /// stays visible with a scanning indicator.
+    pub fn request_scan(&mut self, path: PathBuf) {
+        if self.scanning {
+            // A scan is already in flight; queueing another would make
+            // adoption order ambiguous.
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        let target = path.clone();
+        std::thread::spawn(move || {
+            let res = DiskScanner::new(ScanOptions::default())
+                .scan(&target)
+                .map_err(|e| e.to_string());
+            let _ = tx.send((target, res));
+        });
+        self.scan_rx = Some(rx);
+        self.scanning = true;
+        self.spinner_frame = 0;
+        self.status_message = format!("Scanning {} …", path.display());
+    }
+
+    /// Drain a finished background scan and adopt its tree. Called once
+    /// per event-loop iteration.
+    pub fn poll_scan(&mut self) {
+        let rx = match self.scan_rx.as_ref() {
+            Some(rx) => rx,
+            None => return,
+        };
+        match rx.try_recv() {
+            Ok((path, Ok(res))) => self.adopt_scan(path, res),
+            Ok((path, Err(e))) => {
+                self.scanning = false;
+                self.scan_rx = None;
+                self.items.clear();
+                self.total_size = 0;
+                self.selected_index = 0;
+                self.scan_errors = vec![e.clone()];
+                self.scan_incomplete = true;
+                self.status_message = format!("Failed to scan {:?}: {}", path, e);
+            }
+            Err(mpsc::TryRecvError::Empty) => {}
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.scanning = false;
+                self.scan_rx = None;
+            }
+        }
+    }
+
+    /// Block until the in-flight scan finishes (tests and synchronous
+    /// callers); no-op when nothing is scanning.
+    pub fn wait_scan(&mut self) {
+        if let Some(rx) = self.scan_rx.take() {
+            if let Ok((path, res)) = rx.recv() {
+                match res {
+                    Ok(res) => self.adopt_scan(path, res),
+                    Err(e) => {
+                        self.scanning = false;
+                        self.scan_errors = vec![e.clone()];
+                        self.scan_incomplete = true;
+                        self.status_message = format!("Failed to scan {:?}: {}", path, e);
+                    }
+                }
+            } else {
+                self.scanning = false;
+            }
+        }
+    }
+
+    fn adopt_scan(&mut self, path: PathBuf, res: ScanResult) {
+        self.scanning = false;
+        self.scan_rx = None;
+        self.scan_root = path;
+        self.current_path = self.scan_root.clone();
+        self.total_size = if res.tree.nodes.is_empty() {
+            0
+        } else {
+            res.tree.nodes[res.root_id as usize].size
+        };
+        self.scan_errors = res.errors.clone();
+        self.scan_incomplete = !res.complete || res.truncated || !res.errors.is_empty();
+        self.nav_stack = vec![res.root_id];
+        self.tree = Some(res.tree);
+        self.selected_index = 0;
+        self.populate_items();
+        self.status_message = if self.scan_incomplete {
+            format!(
+                "Scan INCOMPLETE: {} error(s){}",
+                self.scan_errors.len(),
+                if res.truncated { ", truncated" } else { "" }
+            )
+        } else {
+            format!("Scanned {} entries", res.scanned_entries)
+        };
+    }
+
+    /// Spinner glyph for the current frame — the caller bumps
+    /// `spinner_frame` each draw while `scanning`.
+    pub fn spinner(&self) -> char {
+        SPINNER[self.spinner_frame % SPINNER.len()]
     }
 
     pub fn next_tab(&mut self) {
@@ -125,43 +277,44 @@ impl TuiApp {
         }
     }
 
-    /// Load systemd units (with drop-ins) for the Services tab.
+    /// Load systemd units (with drop-ins) for the Services tab. Uses the
+    /// full systemd search path so vendor units under /usr/lib and runtime
+    /// units under /run are visible, not just /etc.
     pub fn reload_services(&mut self) {
-        let base = Path::new("/etc/systemd/system");
-        match lens_sys::load_units(base) {
-            Ok(units) => {
-                self.sys_units = units.into_values().collect();
-            }
-            Err(_) => {
-                self.sys_units = Vec::new();
-            }
-        }
+        let dirs: Vec<PathBuf> = lens_sys::SYSTEMD_SEARCH_DIRS
+            .iter()
+            .map(PathBuf::from)
+            .collect();
+        self.sys_units = lens_sys::load_units_merged(&dirs).into_values().collect();
         if self.sys_selected >= self.sys_units.len() {
             self.sys_selected = 0;
         }
     }
 
-    /// Tail the first readable system log for the Logs tab.
+    /// Tail the Logs tab source: an explicit `--log` path wins; otherwise
+    /// the first readable system log.
     pub fn reload_logs(&mut self) {
-        let candidates = [
-            "/var/log/syslog",
-            "/var/log/messages",
-            "/var/log/kern.log",
-            "/var/log/daemon.log",
-        ];
-        let path = candidates
-            .iter()
-            .map(Path::new)
-            .find(|p| p.is_file())
-            .map(|p| p.to_path_buf())
-            .or_else(|| {
-                // Fall back to the first *.log file in /var/log.
-                std::fs::read_dir("/var/log").ok().and_then(|rd| {
-                    rd.flatten()
-                        .map(|e| e.path())
-                        .find(|p| p.extension().map(|e| e == "log").unwrap_or(false) && p.is_file())
+        let path = self.log_override.clone().or_else(|| {
+            let candidates = [
+                "/var/log/syslog",
+                "/var/log/messages",
+                "/var/log/kern.log",
+                "/var/log/daemon.log",
+            ];
+            candidates
+                .iter()
+                .map(Path::new)
+                .find(|p| p.is_file())
+                .map(|p| p.to_path_buf())
+                .or_else(|| {
+                    // Fall back to the first *.log file in /var/log.
+                    std::fs::read_dir("/var/log").ok().and_then(|rd| {
+                        rd.flatten().map(|e| e.path()).find(|p| {
+                            p.extension().map(|e| e == "log").unwrap_or(false) && p.is_file()
+                        })
+                    })
                 })
-            });
+        });
 
         let loaded = path.and_then(|p| {
             LogIndexer::open(&p).ok().map(|indexer| {
@@ -184,38 +337,30 @@ impl TuiApp {
                 self.log_lines.clear();
                 self.log_path = None;
                 self.log_scroll = 0;
+                if let Some(p) = &self.log_override {
+                    self.status_message = format!("Cannot read log file {:?}", p);
+                }
             }
         }
     }
 
+    /// Force a fresh background scan of the current directory.
     pub fn reload(&mut self) {
-        let scanner = DiskScanner::new(ScanOptions::default());
-        if let Ok(res) = scanner.scan(&self.current_path) {
-            self.total_size = if res.tree.nodes.is_empty() {
-                0
-            } else {
-                res.tree.nodes[res.root_id as usize].size
-            };
-            self.populate_items(&res);
-        } else {
-            // Do not leave the previous directory's entries visible.
-            self.items.clear();
-            self.total_size = 0;
-            self.selected_index = 0;
-            self.status_message = format!("Failed to scan {:?}", self.current_path);
-        }
+        self.request_scan(self.current_path.clone());
     }
 
-    fn populate_items(&mut self, res: &ScanResult) {
-        self.items.clear();
-        if res.tree.nodes.is_empty() {
-            return;
-        }
+    fn current_node_id(&self) -> Option<NodeId> {
+        self.nav_stack.last().copied()
+    }
 
-        let children = res.tree.children_ids(res.root_id);
-        for child_id in children {
-            let node = &res.tree.nodes[child_id as usize];
-            let sub_children_count = res.tree.children_ids(child_id).len();
+    fn populate_items(&mut self) {
+        self.items.clear();
+        let (Some(tree), Some(current)) = (self.tree.as_ref(), self.current_node_id()) else {
+            return;
+        };
+        for child_id in tree.children_ids(current) {
+            let node = &tree.nodes[child_id as usize];
+            let sub_children_count = tree.children_ids(child_id).len();
             self.items.push(TuiItem {
                 name: node.name.clone(),
                 path: self.current_path.join(&node.name),
@@ -223,6 +368,7 @@ impl TuiApp {
                 size: node.size,
                 allocated_size: node.allocated_size,
                 children_count: sub_children_count,
+                node_id: Some(child_id),
             });
         }
 
@@ -245,7 +391,8 @@ impl TuiApp {
                 }
             }
             TuiTab::Logs => {
-                if self.log_scroll < self.log_lines.len() {
+                let len = self.visible_log_count();
+                if self.log_scroll < len {
                     self.log_scroll += 1;
                 }
             }
@@ -296,21 +443,134 @@ impl TuiApp {
         }
     }
 
-    pub fn enter(&mut self) {
-        if let Some(item) = self.items.get(self.selected_index) {
-            if item.is_dir {
-                self.current_path = item.path.clone();
-                self.selected_index = 0;
-                self.reload();
+    /// Page down on the active tab's selection/scroll position.
+    pub fn page_down(&mut self) {
+        let page = self.page_size.max(1);
+        match self.active_tab {
+            TuiTab::Storage => {
+                if !self.items.is_empty() {
+                    self.selected_index = (self.selected_index + page).min(self.items.len() - 1);
+                }
+            }
+            TuiTab::Services => {
+                if !self.sys_units.is_empty() {
+                    self.sys_selected = (self.sys_selected + page).min(self.sys_units.len() - 1);
+                }
+            }
+            TuiTab::Logs => {
+                self.log_scroll = (self.log_scroll + page).min(self.visible_log_count());
+            }
+            TuiTab::Network => {
+                if let Some(rep) = &self.net_report {
+                    if !rep.listening.is_empty() {
+                        self.net_selected = (self.net_selected + page).min(rep.listening.len() - 1);
+                    }
+                }
             }
         }
     }
 
-    pub fn parent(&mut self) {
-        if let Some(p) = self.current_path.parent() {
-            self.current_path = p.to_path_buf();
+    pub fn page_up(&mut self) {
+        let page = self.page_size.max(1);
+        match self.active_tab {
+            TuiTab::Storage => self.selected_index = self.selected_index.saturating_sub(page),
+            TuiTab::Services => self.sys_selected = self.sys_selected.saturating_sub(page),
+            TuiTab::Logs => self.log_scroll = self.log_scroll.saturating_sub(page),
+            TuiTab::Network => self.net_selected = self.net_selected.saturating_sub(page),
+        }
+    }
+
+    /// `g` — first entry/top.
+    pub fn jump_first(&mut self) {
+        match self.active_tab {
+            TuiTab::Storage => self.selected_index = 0,
+            TuiTab::Services => self.sys_selected = 0,
+            TuiTab::Logs => self.log_scroll = 0,
+            TuiTab::Network => self.net_selected = 0,
+        }
+    }
+
+    /// `G` — last entry/bottom.
+    pub fn jump_last(&mut self) {
+        match self.active_tab {
+            TuiTab::Storage => {
+                if !self.items.is_empty() {
+                    self.selected_index = self.items.len() - 1;
+                }
+            }
+            TuiTab::Services => {
+                if !self.sys_units.is_empty() {
+                    self.sys_selected = self.sys_units.len() - 1;
+                }
+            }
+            TuiTab::Logs => self.log_scroll = self.visible_log_count(),
+            TuiTab::Network => {
+                if let Some(rep) = &self.net_report {
+                    if !rep.listening.is_empty() {
+                        self.net_selected = rep.listening.len() - 1;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Log lines after applying the `/` search filter (indices into
+    /// `log_lines`, preserving line order).
+    pub fn visible_log_indices(&self) -> Vec<usize> {
+        match &self.log_search {
+            Some(q) if !q.is_empty() => (0..self.log_lines.len())
+                .filter(|&i| self.log_lines[i].contains(q.as_str()))
+                .collect(),
+            _ => (0..self.log_lines.len()).collect(),
+        }
+    }
+
+    fn visible_log_count(&self) -> usize {
+        self.visible_log_indices().len()
+    }
+
+    /// Enter the selected directory. Descends inside the already-scanned
+    /// arena tree — no rescan — unless the node was not fully scanned
+    /// (error/truncated), in which case a background scan is requested.
+    pub fn enter(&mut self) {
+        let Some(item) = self.items.get(self.selected_index) else {
+            return;
+        };
+        if !item.is_dir {
+            return;
+        }
+        let target = item.path.clone();
+        let in_tree = match (self.tree.as_ref(), item.node_id) {
+            (Some(tree), Some(id)) => {
+                let node = &tree.nodes[id as usize];
+                node.complete && node.error.is_empty()
+            }
+            _ => false,
+        };
+        if in_tree {
+            let id = item.node_id.unwrap();
+            self.nav_stack.push(id);
+            self.current_path = target;
             self.selected_index = 0;
-            self.reload();
+            self.populate_items();
+        } else {
+            self.request_scan(target);
+        }
+    }
+
+    /// Go to the parent directory. In-memory while inside the scanned
+    /// tree; ascending past the scan root requests a background scan.
+    pub fn parent(&mut self) {
+        if self.nav_stack.len() > 1 {
+            self.nav_stack.pop();
+            if let (Some(tree), Some(id)) = (self.tree.as_ref(), self.current_node_id()) {
+                let node = &tree.nodes[id as usize];
+                self.current_path = self.scan_root.join(&node.rel_path);
+            }
+            self.selected_index = 0;
+            self.populate_items();
+        } else if let Some(p) = self.current_path.parent() {
+            self.request_scan(p.to_path_buf());
         }
     }
 }
@@ -326,7 +586,8 @@ mod tests {
         std::fs::create_dir(dir.path().join("sub")).expect("mkdir");
         std::fs::write(dir.path().join("file.txt"), "hello").expect("write");
 
-        let mut app = TuiApp::new(dir.path());
+        let mut app = TuiApp::new(dir.path(), None);
+        app.wait_scan();
         assert_eq!(app.items.len(), 2);
 
         app.next();
@@ -341,11 +602,74 @@ mod tests {
         // unscannable path. Canonicalization makes Backspace reach the real
         // parent directory instead.
         let cwd = std::env::current_dir().unwrap();
-        let mut app = TuiApp::new(Path::new("."));
+        let mut app = TuiApp::new(Path::new("."), None);
         assert_eq!(app.current_path, cwd);
+        app.wait_scan();
 
+        // Ascending past the scan root requests a background scan of the
+        // parent; adopt it before asserting.
         app.parent();
+        app.wait_scan();
         assert_eq!(app.current_path, cwd.parent().unwrap().to_path_buf());
         assert!(!app.status_message.contains("Failed to scan"));
+    }
+
+    #[test]
+    fn test_in_memory_descend_and_ascend() {
+        let dir = tempdir().expect("tempdir");
+        let sub = dir.path().join("sub");
+        std::fs::create_dir(&sub).expect("mkdir");
+        std::fs::write(sub.join("inner.txt"), "x").expect("write");
+
+        let mut app = TuiApp::new(dir.path(), None);
+        app.wait_scan();
+        assert_eq!(app.items.len(), 1);
+        assert_eq!(app.items[0].name, "sub");
+
+        // Descend without rescanning: nav stack grows, listing comes from
+        // the already-scanned tree.
+        app.enter();
+        assert_eq!(app.current_path, sub);
+        assert_eq!(app.items.len(), 1);
+        assert_eq!(app.items[0].name, "inner.txt");
+        assert!(!app.scanning);
+
+        // Ascend back in memory.
+        app.parent();
+        assert_eq!(app.current_path, dir.path());
+        assert_eq!(app.items.len(), 1);
+        assert!(!app.scanning);
+    }
+
+    #[test]
+    fn test_log_search_filter() {
+        let dir = tempdir().expect("tempdir");
+        let log = dir.path().join("app.log");
+        std::fs::write(&log, "INFO ok\nERROR boom\nINFO fine\n").unwrap();
+
+        let mut app = TuiApp::new(dir.path(), Some(log));
+        app.wait_scan();
+        assert_eq!(app.log_lines.len(), 3);
+
+        app.log_search = Some("ERROR".to_string());
+        let idx = app.visible_log_indices();
+        assert_eq!(idx, vec![1]);
+    }
+
+    #[test]
+    fn test_page_navigation() {
+        let dir = tempdir().expect("tempdir");
+        for i in 0..30 {
+            std::fs::write(dir.path().join(format!("f{:02}.txt", i)), "x").unwrap();
+        }
+        let mut app = TuiApp::new(dir.path(), None);
+        app.wait_scan();
+        app.page_size = 10;
+        app.page_down();
+        assert_eq!(app.selected_index, 10);
+        app.jump_last();
+        assert_eq!(app.selected_index, 29);
+        app.jump_first();
+        assert_eq!(app.selected_index, 0);
     }
 }

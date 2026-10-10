@@ -36,12 +36,18 @@ impl TraceAnalyzer {
 
         let mut syscalls: BTreeMap<String, SyscallStats> = BTreeMap::new();
         let mut errors: BTreeMap<String, u64> = BTreeMap::new();
+        let mut error_samples: BTreeMap<String, String> = BTreeMap::new();
         let mut processes: BTreeMap<String, ProcessInfo> = BTreeMap::new();
         let mut events: Vec<TraceEvent> = Vec::new();
         let mut pending: HashMap<u64, PendingCall> = HashMap::new();
-        // fd tables are per-process: tid -> open fd set. A global set would
-        // let process B's close(3) erase process A's open fd 3.
-        let mut open_fds: BTreeMap<u64, std::collections::BTreeSet<u64>> = BTreeMap::new();
+        // fd tables mirror the kernel's files_struct sharing: threads made
+        // with CLONE_FILES share one table (a thread's close(3) erases it
+        // for every sharer), while fork/clone without CLONE_FILES gives the
+        // child its own copy. Each fd records its close-on-exec flag so a
+        // successful execve can drop O_CLOEXEC fds.
+        let mut fd_tables: Vec<BTreeMap<u64, bool>> = Vec::new();
+        let mut fd_table_users: Vec<u32> = Vec::new();
+        let mut tid_fd_table: HashMap<u64, usize> = HashMap::new();
         let mut leaked_fds: BTreeMap<u64, std::collections::BTreeSet<u64>> = BTreeMap::new();
         let mut io_read_bytes = 0u64;
         let mut io_write_bytes = 0u64;
@@ -71,11 +77,14 @@ impl TraceAnalyzer {
                     })
                     .exited = true;
                 pending.remove(&tid);
-                // Any fd still open at exit is a leak for this process; move
-                // it out of the live table so a recycled tid starts fresh.
-                if let Some(fds) = open_fds.remove(&tid) {
-                    if !fds.is_empty() {
-                        leaked_fds.entry(tid).or_default().extend(fds);
+                // Fds still open when the table's last user exits are
+                // leaks attributed to this process; other CLONE_FILES
+                // sharers keep the table alive.
+                if let Some(tbl) = tid_fd_table.remove(&tid) {
+                    fd_table_users[tbl] -= 1;
+                    if fd_table_users[tbl] == 0 && !fd_tables[tbl].is_empty() {
+                        let keys: Vec<u64> = fd_tables[tbl].keys().copied().collect();
+                        leaked_fds.entry(tid).or_default().extend(keys);
                     }
                 }
                 continue;
@@ -164,7 +173,13 @@ impl TraceAnalyzer {
                 if let Some(ref err) = ev.error {
                     total_errors += 1;
                     stat.errors += 1;
-                    *errors.entry(err.clone()).or_default() += 1;
+                    // Aggregate by syscall:errno — ENOENT from openat and
+                    // ENOENT from statx are different failure modes.
+                    let key = format!("{}:{}", ev.syscall, err);
+                    *errors.entry(key.clone()).or_default() += 1;
+                    error_samples
+                        .entry(key)
+                        .or_insert_with(|| ev.arguments.clone());
                 }
 
                 // FD leak & I/O tracking
@@ -177,7 +192,14 @@ impl TraceAnalyzer {
                         | "timerfd_create" | "inotify_init" | "inotify_init1" | "memfd_create"
                         | "pidfd_open" | "perf_event_open" | "fanotify_init" | "bpf" => {
                             if let Ok(fd) = ev.result.parse::<u64>() {
-                                open_fds.entry(ev.tid).or_default().insert(fd);
+                                let cloexec = ev.arguments.contains("CLOEXEC");
+                                let tbl = table_for(
+                                    &mut tid_fd_table,
+                                    &mut fd_tables,
+                                    &mut fd_table_users,
+                                    ev.tid,
+                                );
+                                fd_tables[tbl].insert(fd, cloexec);
                             }
                         }
                         // pipe/pipe2/socketpair hand back both ends in the
@@ -186,20 +208,41 @@ impl TraceAnalyzer {
                             if let (Ok(0), Some(fds)) =
                                 (ev.result.parse::<u64>(), parse_fd_array(&ev.arguments))
                             {
-                                let table = open_fds.entry(ev.tid).or_default();
+                                let cloexec = ev.arguments.contains("CLOEXEC");
+                                let tbl = table_for(
+                                    &mut tid_fd_table,
+                                    &mut fd_tables,
+                                    &mut fd_table_users,
+                                    ev.tid,
+                                );
                                 for fd in fds {
-                                    table.insert(fd);
+                                    fd_tables[tbl].insert(fd, cloexec);
                                 }
                             }
                         }
-                        // fork/vfork/clone/clone3 return the new tid; the
-                        // child inherits the parent's fd table.
+                        // fork/vfork/clone/clone3 return the new tid. Only
+                        // CLONE_FILES shares the fd table; anything else
+                        // gives the child a private copy.
                         "fork" | "vfork" | "clone" | "clone3" => {
                             if let Ok(child) = ev.result.parse::<u64>() {
                                 if child > 0 {
-                                    let inherited =
-                                        open_fds.get(&ev.tid).cloned().unwrap_or_default();
-                                    open_fds.insert(child, inherited);
+                                    let parent_tbl = table_for(
+                                        &mut tid_fd_table,
+                                        &mut fd_tables,
+                                        &mut fd_table_users,
+                                        ev.tid,
+                                    );
+                                    let shares = matches!(ev.syscall.as_str(), "clone" | "clone3")
+                                        && ev.arguments.contains("CLONE_FILES");
+                                    let child_tbl = if shares {
+                                        fd_table_users[parent_tbl] += 1;
+                                        parent_tbl
+                                    } else {
+                                        fd_tables.push(fd_tables[parent_tbl].clone());
+                                        fd_table_users.push(1);
+                                        fd_tables.len() - 1
+                                    };
+                                    tid_fd_table.insert(child, child_tbl);
                                     processes.entry(child.to_string()).or_insert_with(|| {
                                         ProcessInfo {
                                             tid: child,
@@ -215,9 +258,47 @@ impl TraceAnalyzer {
                         }
                         "close" => {
                             if let Some(fd) = fd_from_arg(&ev.arguments) {
-                                if let Some(table) = open_fds.get_mut(&ev.tid) {
-                                    table.remove(&fd);
+                                if let Some(&tbl) = tid_fd_table.get(&ev.tid) {
+                                    fd_tables[tbl].remove(&fd);
                                 }
+                            }
+                        }
+                        // close_range(first, last[, flags]); `~0U` means "all".
+                        "close_range" => {
+                            if let Some((first, last)) = parse_close_range(&ev.arguments) {
+                                if let Some(&tbl) = tid_fd_table.get(&ev.tid) {
+                                    fd_tables[tbl].retain(|fd, _| *fd < first || *fd > last);
+                                }
+                            }
+                        }
+                        "fcntl" => {
+                            if ev.arguments.contains("F_DUPFD") {
+                                if let Ok(fd) = ev.result.parse::<u64>() {
+                                    let cloexec = ev.arguments.contains("F_DUPFD_CLOEXEC");
+                                    let tbl = table_for(
+                                        &mut tid_fd_table,
+                                        &mut fd_tables,
+                                        &mut fd_table_users,
+                                        ev.tid,
+                                    );
+                                    fd_tables[tbl].insert(fd, cloexec);
+                                }
+                            } else if ev.arguments.contains("F_SETFD") {
+                                // fcntl(fd, F_SETFD, FD_CLOEXEC) toggles
+                                // the close-on-exec flag in place.
+                                if let Some(fd) = fd_from_arg(&ev.arguments) {
+                                    if let Some(&tbl) = tid_fd_table.get(&ev.tid) {
+                                        if let Some(f) = fd_tables[tbl].get_mut(&fd) {
+                                            *f = ev.arguments.contains("FD_CLOEXEC");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // Successful exec drops every close-on-exec fd.
+                        "execve" | "execveat" => {
+                            if let Some(&tbl) = tid_fd_table.get(&ev.tid) {
+                                fd_tables[tbl].retain(|_, cloexec| !*cloexec);
                             }
                         }
                         "read" | "pread" | "pread64" | "recv" | "recvfrom" | "recvmsg" => {
@@ -241,9 +322,12 @@ impl TraceAnalyzer {
         }
 
         // Fds open at end-of-trace are leaks for still-running processes.
-        for (tid, fds) in open_fds {
-            if !fds.is_empty() {
-                leaked_fds.entry(tid).or_default().extend(fds);
+        for (tid, tbl) in tid_fd_table {
+            if !fd_tables[tbl].is_empty() {
+                leaked_fds
+                    .entry(tid)
+                    .or_default()
+                    .extend(fd_tables[tbl].keys().copied());
             }
         }
         let fd_leaks_by_process: BTreeMap<String, Vec<u64>> = leaked_fds
@@ -265,6 +349,7 @@ impl TraceAnalyzer {
             total_errors,
             syscalls,
             errors,
+            error_samples,
             processes,
             events,
             fd_leaks,
@@ -273,6 +358,36 @@ impl TraceAnalyzer {
             io_write_bytes,
         }
     }
+}
+
+/// Return (creating on demand) the fd-table index a tid belongs to.
+fn table_for(
+    tid_fd_table: &mut HashMap<u64, usize>,
+    fd_tables: &mut Vec<BTreeMap<u64, bool>>,
+    fd_table_users: &mut Vec<u32>,
+    tid: u64,
+) -> usize {
+    *tid_fd_table.entry(tid).or_insert_with(|| {
+        fd_tables.push(BTreeMap::new());
+        fd_table_users.push(1);
+        fd_tables.len() - 1
+    })
+}
+
+/// Parse `close_range` arguments: `first, last[, flags]` where `last`
+/// may be `~0U`/`UINT_MAX` for "all higher fds".
+fn parse_close_range(arguments: &str) -> Option<(u64, u64)> {
+    let mut parts = arguments.split(',');
+    let first = parts.next()?.trim().parse::<u64>().ok()?;
+    let last_raw = parts.next()?.trim();
+    let last = match last_raw {
+        "~0U" | "~0" | "UINT_MAX" => u64::from(u32::MAX),
+        _ => last_raw
+            .strip_prefix("0x")
+            .and_then(|h| u64::from_str_radix(h, 16).ok())
+            .or_else(|| last_raw.parse::<u64>().ok())?,
+    };
+    Some((first, last))
 }
 
 /// Parse a leading fd number that may carry a `strace -y` `<...>`
@@ -615,5 +730,93 @@ mod tests {
         assert!(snapshot.processes["7001"].exited);
         // fd 3 leaked by generation 0; generation 1 leaked nothing new.
         assert_eq!(snapshot.fd_leaks_by_process["7001"], vec![3]);
+    }
+
+    #[test]
+    fn test_clone_files_shares_fd_table() {
+        let lines = vec![
+            "100 openat(AT_FDCWD, \"/etc/hosts\", O_RDONLY) = 3",
+            "100 clone(child_stack=0x7f, flags=CLONE_VM|CLONE_FILES|CLONE_THREAD) = 101",
+            // The thread shares the fd table: its close(3) closes it for
+            // the whole thread group — not a per-process fd.
+            "101 close(3) = 0",
+            "101 +++ exited with 0 +++",
+            "100 +++ exited with 0 +++",
+        ];
+        let snapshot = TraceAnalyzer::new().analyze_lines(lines);
+        assert!(snapshot.fd_leaks.is_empty());
+        assert!(snapshot.fd_leaks_by_process.is_empty());
+    }
+
+    #[test]
+    fn test_clone_without_files_copies_fd_table() {
+        let lines = vec![
+            "100 openat(AT_FDCWD, \"/x\", O_RDONLY) = 3",
+            "100 clone(child_stack=0x7f, flags=CLONE_VM|CLONE_THREAD) = 101",
+            "101 close(3) = 0",
+            "101 +++ exited with 0 +++",
+            "100 +++ exited with 0 +++",
+        ];
+        let snapshot = TraceAnalyzer::new().analyze_lines(lines);
+        // Private copy: the child's close leaves the parent's fd 3 open.
+        assert_eq!(snapshot.fd_leaks_by_process["100"], vec![3]);
+        assert!(!snapshot.fd_leaks_by_process.contains_key("101"));
+    }
+
+    #[test]
+    fn test_shared_table_held_by_surviving_thread_is_not_leak() {
+        let lines = vec![
+            "100 openat(AT_FDCWD, \"/x\", O_RDONLY) = 3",
+            "100 clone(child_stack=0x7f, flags=CLONE_VM|CLONE_FILES|CLONE_THREAD) = 101",
+            // Thread exits but fd 3 is still referenced by tid 100's table.
+            "101 +++ exited with 0 +++",
+            "100 +++ exited with 0 +++",
+        ];
+        let snapshot = TraceAnalyzer::new().analyze_lines(lines);
+        // The fd leaked once — under the last sharer to exit.
+        assert_eq!(snapshot.fd_leaks, vec![3]);
+        assert_eq!(snapshot.fd_leaks_by_process["100"], vec![3]);
+        assert!(!snapshot.fd_leaks_by_process.contains_key("101"));
+    }
+
+    #[test]
+    fn test_o_cloexec_fd_closed_by_execve() {
+        let lines = vec![
+            "100 openat(AT_FDCWD, \"/tmp/x\", O_RDONLY|O_CLOEXEC) = 5",
+            "100 openat(AT_FDCWD, \"/tmp/y\", O_RDONLY) = 6",
+            "100 execve(\"/bin/true\", [\"/bin/true\"], 0x55 /* 30 vars */) = 0",
+            "100 +++ exited with 0 +++",
+        ];
+        let snapshot = TraceAnalyzer::new().analyze_lines(lines);
+        // fd 5 was O_CLOEXEC — execve closed it; fd 6 survived exec.
+        assert_eq!(snapshot.fd_leaks_by_process["100"], vec![6]);
+    }
+
+    #[test]
+    fn test_close_range_drops_fd_span() {
+        let lines = vec![
+            "100 openat(AT_FDCWD, \"/a\", O_RDONLY) = 3",
+            "100 openat(AT_FDCWD, \"/b\", O_RDONLY) = 4",
+            "100 openat(AT_FDCWD, \"/c\", O_RDONLY) = 7",
+            "100 close_range(3, 5, 0) = 0",
+            "100 +++ exited with 0 +++",
+        ];
+        let snapshot = TraceAnalyzer::new().analyze_lines(lines);
+        assert_eq!(snapshot.fd_leaks_by_process["100"], vec![7]);
+    }
+
+    #[test]
+    fn test_errors_keyed_by_syscall_errno() {
+        let lines = vec![
+            "100 openat(AT_FDCWD, \"/nope\", O_RDONLY) = -1 ENOENT (No such file or directory)",
+            "100 statx(AT_FDCWD, \"/nope\", 0, 0, NULL) = -1 ENOENT (No such file or directory)",
+            "100 read(3, \"\", 1) = -1 EAGAIN (Resource temporarily unavailable)",
+        ];
+        let snapshot = TraceAnalyzer::new().analyze_lines(lines);
+        assert_eq!(snapshot.errors["openat:ENOENT"], 1);
+        assert_eq!(snapshot.errors["statx:ENOENT"], 1);
+        assert_eq!(snapshot.errors["read:EAGAIN"], 1);
+        assert!(!snapshot.errors.contains_key("ENOENT"));
+        assert!(snapshot.error_samples["openat:ENOENT"].contains("/nope"));
     }
 }

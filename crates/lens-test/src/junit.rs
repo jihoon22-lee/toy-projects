@@ -28,6 +28,8 @@ pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> 
     let mut capture_in_case = false;
     let mut in_testcase = false;
     let mut in_properties = false;
+    // Enclosing <testsuite> names — cases get the innermost one.
+    let mut suite_stack: Vec<String> = Vec::new();
     // Depth of unclosed elements; a truncated document leaves this > 0 at EOF.
     let mut open_depth = 0usize;
     // The first element must be the JUnit root — a document without one is
@@ -37,7 +39,7 @@ pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> 
     // Decode `&quot;`/`&amp;`-style entities: attr.value is the raw bytes.
     let decoder = reader.decoder();
     let decode_attr = |attr: &quick_xml::events::attributes::Attribute| -> String {
-        attr.decode_and_unescape_value(decoder)
+        attr.decoded_and_normalized_value(quick_xml::XmlVersion::Implicit1_0, decoder)
             .map(|c| c.into_owned())
             .unwrap_or_else(|_| String::from_utf8_lossy(&attr.value).into_owned())
     };
@@ -48,6 +50,15 @@ pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> 
                 check_root(e.name().as_ref(), &mut saw_root)?;
                 open_depth += 1;
                 match e.name().as_ref() {
+                    b"testsuite" => {
+                        let mut suite_name = String::new();
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"name" {
+                                suite_name = decode_attr(&attr);
+                            }
+                        }
+                        suite_stack.push(suite_name);
+                    }
                     b"testcase" => {
                         in_testcase = true;
                         current_status = TestStatus::Passed;
@@ -153,11 +164,8 @@ pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> 
                         }
                     }
 
-                    let identity = if classname.is_empty() {
-                        name.clone()
-                    } else {
-                        format!("{}::{}", classname, name)
-                    };
+                    let suite = suite_stack.last().cloned().unwrap_or_default();
+                    let identity = make_identity(&suite, &classname, &name);
 
                     summary.total += 1;
                     summary.passed += 1;
@@ -167,6 +175,7 @@ pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> 
                         identity,
                         name,
                         classname,
+                        suite,
                         status: TestStatus::Passed,
                         duration_sec: time,
                         message: None,
@@ -286,14 +295,14 @@ pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> 
                 if name == b"properties" {
                     in_properties = false;
                 }
+                if name == b"testsuite" {
+                    suite_stack.pop();
+                }
                 if name == b"testcase" && in_testcase {
                     in_testcase = false;
 
-                    let identity = if current_classname.is_empty() {
-                        current_name.clone()
-                    } else {
-                        format!("{}::{}", current_classname, current_name)
-                    };
+                    let suite = suite_stack.last().cloned().unwrap_or_default();
+                    let identity = make_identity(&suite, &current_classname, &current_name);
 
                     summary.total += 1;
                     match current_status {
@@ -308,6 +317,7 @@ pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> 
                         identity,
                         name: current_name.clone(),
                         classname: current_classname.clone(),
+                        suite,
                         status: current_status,
                         duration_sec: current_time,
                         message: current_message.clone(),
@@ -370,6 +380,20 @@ pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> 
             Some(suite_output)
         },
     })
+}
+
+/// Case identity includes the enclosing suite so identically-named cases
+/// in different suites do not collide.
+fn make_identity(suite: &str, classname: &str, name: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    if !suite.is_empty() {
+        parts.push(suite);
+    }
+    if !classname.is_empty() {
+        parts.push(classname);
+    }
+    parts.push(name);
+    parts.join("::")
 }
 
 /// Reject a document whose first element is not a JUnit root.
