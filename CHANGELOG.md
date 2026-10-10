@@ -2,6 +2,29 @@
 
 Lens는 워크스페이스 단일 버전으로 릴리스된다. 태그는 `vX.Y.Z` 형식이다.
 
+## Unreleased
+
+### 안전성 (Phase 0)
+- stdout 파이프가 닫혀도 패닉하지 않고 exit 0으로 종료
+  (`lens net inspect --json | head -1` 등).
+- `lens bundle create`: 소스별 수집 실패를 전체 중단 대신 매니페스트
+  `diagnostics`에 기록하고 번들을 계속 생성한다. 출력 파일이 이미 있으면
+  거부하며 새 `--force` 플래그로만 덮어쓴다.
+- 잘못된 입력이 조용히 성공하던 경로들을 0이 아닌 종료 코드의 명확한 에러로
+  변경: venv가 아닌 경로(`env check`/`env inspect`), 읽을 수 없는 `net/tcp`
+  (`net inspect --proc-dir`), 존재하지 않는 `doctor` `--root`/`--procfs`/
+  `--systemd-dir`, JUnit 루트가 아닌 XML(`test parse`/`test diff`), 대부분
+  파싱되지 않는 `trace analyze` 입력.
+- `lens disk scan` 텍스트 출력: 권한 오류나 절단이 있으면 "Scan completed
+  successfully" 대신 "Scan INCOMPLETE" 배너와 오류 수를 출력.
+- `lens-mcp`: `ping` 메서드 지원. 알려진 도구의 실행 실패는 JSON-RPC error
+  대신 `result.isError: true` + 텍스트 콘텐츠로 반환(MCP 권장 계약). 알 수
+  없는 도구는 `-32602`, 알 수 없는 메서드·JSON 파싱 오류는 기존처럼
+  JSON-RPC error.
+- TUI: 시작 경로를 canonicalize하여 `lens tui`(경로 ".")에서 Backspace로
+  상위 디렉터리 이동이 동작. 패닉 시 터미널(raw mode/alt screen)을 복원하는
+  panic hook 추가.
+
 ## 0.4.3
 
 무결성·정확성 대수정 릴리스. 상세 내역은 아래 섹션 참고.

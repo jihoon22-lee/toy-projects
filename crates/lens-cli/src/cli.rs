@@ -242,6 +242,9 @@ pub enum BundleCommands {
         /// Capture a live network socket report from procfs
         #[arg(long)]
         net: bool,
+        /// Overwrite the output file if it already exists
+        #[arg(long)]
+        force: bool,
     },
     /// Inspect contents and diagnostics of a .lens bundle
     Inspect { bundle: PathBuf },

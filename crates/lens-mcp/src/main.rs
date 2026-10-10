@@ -67,6 +67,13 @@ fn handle_request(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
             error: None,
         }),
         "notifications/initialized" => None,
+        // MCP ping: an empty result keeps the session liveness check cheap.
+        "ping" => Some(JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id: req.id.clone(),
+            result: Some(serde_json::json!({})),
+            error: None,
+        }),
         "tools/list" => {
             let tools = list_tools();
             Some(JsonRpcResponse {
@@ -83,30 +90,50 @@ fn handle_request(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
             let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
             let args = params.get("arguments").unwrap_or(&Value::Null);
 
-            match execute_tool(name, args) {
-                Ok(text) => Some(JsonRpcResponse {
-                    jsonrpc: "2.0".to_string(),
-                    id: req.id.clone(),
-                    result: Some(serde_json::json!({
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": text
-                            }
-                        ]
-                    })),
-                    error: None,
-                }),
-                Err(err) => Some(JsonRpcResponse {
+            // Unknown tool stays a JSON-RPC error; a known tool that fails
+            // reports in-band (`isError: true`) so the model sees the error
+            // text and can retry, per the MCP tools/call contract.
+            if !list_tools().iter().any(|t| t.name == name) {
+                Some(JsonRpcResponse {
                     jsonrpc: "2.0".to_string(),
                     id: req.id.clone(),
                     result: None,
                     error: Some(JsonRpcError {
-                        code: -32000,
-                        message: err,
+                        code: -32602,
+                        message: format!("Unknown tool: {}", name),
                         data: None,
                     }),
-                }),
+                })
+            } else {
+                match execute_tool(name, args) {
+                    Ok(text) => Some(JsonRpcResponse {
+                        jsonrpc: "2.0".to_string(),
+                        id: req.id.clone(),
+                        result: Some(serde_json::json!({
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": text
+                                }
+                            ]
+                        })),
+                        error: None,
+                    }),
+                    Err(err) => Some(JsonRpcResponse {
+                        jsonrpc: "2.0".to_string(),
+                        id: req.id.clone(),
+                        result: Some(serde_json::json!({
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": err
+                                }
+                            ],
+                            "isError": true
+                        })),
+                        error: None,
+                    }),
+                }
             }
         }
         _ => req.id.as_ref().map(|id| JsonRpcResponse {

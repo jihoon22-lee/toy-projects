@@ -30,6 +30,9 @@ pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> 
     let mut in_properties = false;
     // Depth of unclosed elements; a truncated document leaves this > 0 at EOF.
     let mut open_depth = 0usize;
+    // The first element must be the JUnit root — a document without one is
+    // not a test report and must not parse to an empty "complete" run.
+    let mut saw_root = false;
 
     // Decode `&quot;`/`&amp;`-style entities: attr.value is the raw bytes.
     let decoder = reader.decoder();
@@ -42,6 +45,7 @@ pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> 
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref e)) => {
+                check_root(e.name().as_ref(), &mut saw_root)?;
                 open_depth += 1;
                 match e.name().as_ref() {
                     b"testcase" => {
@@ -130,6 +134,7 @@ pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> 
                 }
             }
             Ok(Event::Empty(ref e)) => {
+                check_root(e.name().as_ref(), &mut saw_root)?;
                 if e.name().as_ref() == b"testcase" {
                     let mut name = String::new();
                     let mut classname = String::new();
@@ -314,7 +319,15 @@ pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> 
                     });
                 }
             }
-            Ok(Event::Eof) => break,
+            Ok(Event::Eof) => {
+                if !saw_root {
+                    return Err(LensError::InvalidInput {
+                        message: "not a JUnit XML report: no <testsuites>/<testsuite> root element"
+                            .to_string(),
+                    });
+                }
+                break;
+            }
             Err(e) => {
                 return Err(LensError::InvalidInput {
                     message: format!("XML parsing error: {}", e),
@@ -357,4 +370,21 @@ pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> 
             Some(suite_output)
         },
     })
+}
+
+/// Reject a document whose first element is not a JUnit root.
+fn check_root(name: &[u8], saw_root: &mut bool) -> Result<()> {
+    if *saw_root {
+        return Ok(());
+    }
+    *saw_root = true;
+    if !matches!(name, b"testsuites" | b"testsuite") {
+        return Err(LensError::InvalidInput {
+            message: format!(
+                "not a JUnit XML report: root element is <{}>, expected <testsuites>/<testsuite>",
+                String::from_utf8_lossy(name)
+            ),
+        });
+    }
+    Ok(())
 }
