@@ -545,7 +545,8 @@ mod tests {
 
     #[test]
     fn test_drop_in_reset_and_specifiers() {
-        let dir = std::env::temp_dir().join(format!("lenssys-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
         let drop = dir.join("aa.service.d");
         std::fs::create_dir_all(&drop).unwrap();
         std::fs::write(
@@ -574,12 +575,12 @@ mod tests {
         );
         assert_eq!(unit.drop_ins.len(), 1);
         assert_eq!(unit.wants, vec!["b.service".to_string()]);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn test_template_drop_in_merges_before_instance() {
-        let dir = std::env::temp_dir().join(format!("lenssys-tpl-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
         let tpl = dir.join("foo@.service.d");
         let inst = dir.join("foo@bar.service.d");
         std::fs::create_dir_all(&tpl).unwrap();
@@ -599,7 +600,6 @@ mod tests {
         assert_eq!(unit.sections["Unit"]["Description"].last().unwrap(), "inst");
         // %i expands to the instance name
         assert_eq!(unit.exec_start.as_deref(), Some("/run/bar"));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -610,7 +610,8 @@ mod tests {
 
     #[test]
     fn test_load_units_merged_precedence_and_cross_dir_dropins() {
-        let root = std::env::temp_dir().join(format!("lenssys-merged-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
         let etc = root.join("etc/systemd/system");
         let lib = root.join("usr/lib/systemd/system");
         std::fs::create_dir_all(&etc).unwrap();
@@ -665,13 +666,12 @@ mod tests {
             units["vendor-only.service"].exec_start.as_deref(),
             Some("/bin/v")
         );
-
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
     fn test_load_units_merged_dropin_only_stub() {
-        let root = std::env::temp_dir().join(format!("lenssys-stub-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
         let etc = root.join("etc");
         std::fs::create_dir_all(etc.join("ghost.service.d")).unwrap();
         std::fs::write(
@@ -683,12 +683,12 @@ mod tests {
         let units = load_units_merged(&dirs);
         let ghost = &units["ghost.service"];
         assert_eq!(ghost.sections["Service"]["Environment"], vec!["X=1"]);
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
     fn test_syntax_and_missing_reference_diagnostics() {
-        let dir = std::env::temp_dir().join(format!("lenssys-diag-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("bad.service"),
@@ -713,12 +713,12 @@ mod tests {
         assert!(diags
             .iter()
             .any(|d| d.code == "UNIT_REF_MISSING" && d.message.contains("nope.service")));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn test_missing_reference_resolves_via_template() {
-        let dir = std::env::temp_dir().join(format!("lenssys-tpl-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("getty@.service"),
@@ -736,6 +736,5 @@ mod tests {
             .diagnostics
             .iter()
             .all(|d| d.code != "UNIT_REF_MISSING"));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }
