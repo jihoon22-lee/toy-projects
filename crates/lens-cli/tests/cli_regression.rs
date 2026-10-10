@@ -98,6 +98,59 @@ fn completion_closed_pipe_exits_cleanly() {
 }
 
 #[test]
+fn doctor_root_scopes_preload_check() {
+    // --root must read <root>/etc/ld.so.preload, not the host file.
+    let root = tmp_dir("doctor-root");
+    std::fs::create_dir_all(root.join("etc")).unwrap();
+    std::fs::write(root.join("etc/ld.so.preload"), "/lib/evil.so\n").unwrap();
+
+    let out = lens(&[
+        "doctor",
+        "--root",
+        root.to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
+    let v: serde_json::Value = serde_json::from_str(&stdout_of(&out)).expect("doctor JSON");
+    let preload = v["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "ld.so.preload Verification")
+        .expect("preload check present");
+    assert_eq!(preload["status"], "WARN", "{preload}");
+    assert!(
+        preload["message"]
+            .as_str()
+            .unwrap()
+            .contains("/lib/evil.so"),
+        "{preload}"
+    );
+
+    // A root without the file reports "not present" whatever the host has.
+    let empty = tmp_dir("doctor-empty");
+    let out = lens(&[
+        "doctor",
+        "--root",
+        empty.to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
+    let v: serde_json::Value = serde_json::from_str(&stdout_of(&out)).expect("doctor JSON");
+    let preload = v["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "ld.so.preload Verification")
+        .expect("preload check present");
+    assert_eq!(preload["status"], "PASS", "{preload}");
+    assert!(
+        preload["message"].as_str().unwrap().contains("not present"),
+        "{preload}"
+    );
+}
+
+#[test]
 fn env_check_rejects_nonexistent_venv() {
     let out = lens(&["env", "check", "/nonexistent-venv-lens-test"]);
     assert_eq!(out.status.code(), Some(2), "errors must exit 2");

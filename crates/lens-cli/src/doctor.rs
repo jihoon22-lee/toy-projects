@@ -1,6 +1,6 @@
 use std::env;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -299,19 +299,22 @@ pub fn check_services(systemd_dir: Option<&Path>) -> DoctorCheck {
     }
 }
 
-pub fn check_environment() -> Vec<DoctorCheck> {
+pub fn check_environment(root: Option<&Path>) -> Vec<DoctorCheck> {
     let mut checks = Vec::new();
 
-    let preload = Path::new("/etc/ld.so.preload");
+    let preload = root
+        .map(|r| r.join("etc/ld.so.preload"))
+        .unwrap_or_else(|| PathBuf::from("/etc/ld.so.preload"));
+    let preload_label = preload.display().to_string();
     if preload.exists() {
-        let content = fs::read_to_string(preload).unwrap_or_default();
+        let content = fs::read_to_string(&preload).unwrap_or_default();
         let trimmed = content.trim();
         if !trimmed.is_empty() {
             checks.push(DoctorCheck {
                 category: "Security".to_string(),
                 name: "ld.so.preload Verification".to_string(),
                 status: HealthStatus::Warn,
-                message: format!("/etc/ld.so.preload is present with entries: {}", trimmed),
+                message: format!("{preload_label} is present with entries: {trimmed}"),
                 recommendation: Some(
                     "Verify that preloaded shared libraries are intentional and trusted."
                         .to_string(),
@@ -322,7 +325,7 @@ pub fn check_environment() -> Vec<DoctorCheck> {
                 category: "Security".to_string(),
                 name: "ld.so.preload Verification".to_string(),
                 status: HealthStatus::Pass,
-                message: "/etc/ld.so.preload is empty".to_string(),
+                message: format!("{preload_label} is empty"),
                 recommendation: None,
             });
         }
@@ -331,7 +334,7 @@ pub fn check_environment() -> Vec<DoctorCheck> {
             category: "Security".to_string(),
             name: "ld.so.preload Verification".to_string(),
             status: HealthStatus::Pass,
-            message: "/etc/ld.so.preload not present (clean system default)".to_string(),
+            message: format!("{preload_label} not present (clean system default)"),
             recommendation: None,
         });
     }
@@ -385,7 +388,7 @@ pub fn run_doctor(
     checks.push(check_storage(root.unwrap_or_else(|| Path::new("/"))));
     checks.extend(check_network(procfs));
     checks.push(check_services(sys_dir));
-    checks.extend(check_environment());
+    checks.extend(check_environment(root));
 
     let mut passed = 0;
     let mut warnings = 0;
@@ -435,9 +438,43 @@ mod tests {
 
     #[test]
     fn test_doctor_environment_check() {
-        let checks = check_environment();
+        let checks = check_environment(None);
         assert!(!checks.is_empty());
         assert!(checks.iter().any(|c| c.name.contains("PATH")));
+    }
+
+    #[test]
+    fn test_doctor_environment_reads_preload_under_root() {
+        // --root must scope /etc/ld.so.preload to <root>/etc/ld.so.preload
+        // instead of reading the host file.
+        let root = tempfile::Builder::new()
+            .prefix("lens-doctor-root-")
+            .tempdir()
+            .unwrap();
+        fs::create_dir_all(root.path().join("etc")).unwrap();
+        fs::write(root.path().join("etc/ld.so.preload"), "/lib/evil.so\n").unwrap();
+
+        let checks = check_environment(Some(root.path()));
+        let preload_check = checks
+            .iter()
+            .find(|c| c.name == "ld.so.preload Verification")
+            .unwrap();
+        assert_eq!(preload_check.status, HealthStatus::Warn);
+        assert!(preload_check.message.contains("/lib/evil.so"));
+
+        // A root without the file reports "not present" regardless of the
+        // host's /etc/ld.so.preload state.
+        let empty = tempfile::Builder::new()
+            .prefix("lens-doctor-empty-")
+            .tempdir()
+            .unwrap();
+        let checks = check_environment(Some(empty.path()));
+        let preload_check = checks
+            .iter()
+            .find(|c| c.name == "ld.so.preload Verification")
+            .unwrap();
+        assert_eq!(preload_check.status, HealthStatus::Pass);
+        assert!(preload_check.message.contains("not present"));
     }
 
     #[test]
