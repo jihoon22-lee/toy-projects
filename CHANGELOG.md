@@ -12,6 +12,15 @@ Lens는 워크스페이스 단일 버전으로 릴리스된다. 태그는 `vX.Y.
   출력하지 않는다. 라이브러리와 MCP 도구는 계속 `status: "non-elf"`
   리포트를 반환하므로 프로그래밍 호출자는 영향이 없다.
 
+### 추가
+
+- `lens log filter --since/--until <TS>`: 타임스탬프 창 필터(RFC 3339·
+  `YYYY-MM-DD HH:MM:SS`·`YYYY-MM-DD`, 오프셋 없으면 UTC, 양끝 포함).
+  ISO·syslog 접두사와 JSONL `ts`/`time`/`timestamp`를 인식하고, 연도
+  없는 syslog는 현재 UTC 연도(또는 새 `--year`)를 가정. 타임스탬프
+  미판별 줄은 제외+stderr 보고, `--include-unknown`으로 복원.
+  MCP `lens_log_filter`에도 `since`/`until`/`year` 인자 추가.
+
 ### 수정
 
 - `lens completion`이 닫힌 파이프에서 패닉(종료 101) 대신 0으로 종료.

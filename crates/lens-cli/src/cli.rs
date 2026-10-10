@@ -246,9 +246,22 @@ pub enum LogCommands {
         /// Lowest severity to emit: trace|debug|info|warn|error|fatal
         #[arg(long)]
         min_level: Option<String>,
-        /// Keep lines whose level could not be determined when --min-level is set
+        /// Keep lines whose level could not be determined when --min-level is set,
+        /// or whose timestamp could not be determined when --since/--until is set
         #[arg(long)]
         include_unknown: bool,
+        /// Emit only lines at/after this timestamp (inclusive). Accepts RFC 3339
+        /// (`2026-10-09T12:00:00Z`, with offset), `YYYY-MM-DD HH:MM:SS`, or
+        /// `YYYY-MM-DD`; forms without an offset are read as UTC
+        #[arg(long)]
+        since: Option<String>,
+        /// Emit only lines at/before this timestamp (inclusive); same forms as --since
+        #[arg(long)]
+        until: Option<String>,
+        /// Year assumed for year-less syslog timestamps like `Oct  9 12:00:00`
+        /// (default: current UTC year)
+        #[arg(long)]
+        year: Option<i32>,
         /// Stop after N matched lines
         #[arg(long)]
         limit: Option<usize>,

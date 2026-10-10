@@ -13,6 +13,7 @@ pub mod indexer;
 pub mod parser;
 pub mod record;
 pub mod session;
+pub mod timestamp;
 
 pub use filter::{contains_insensitive, LogFilter};
 pub use indexer::{LineSpan, LogIndexer};

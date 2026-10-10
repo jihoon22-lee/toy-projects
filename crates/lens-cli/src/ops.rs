@@ -611,6 +611,9 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                 regex,
                 min_level,
                 include_unknown,
+                since,
+                until,
+                year,
                 limit,
                 context,
                 format,
@@ -639,11 +642,35 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                     filter = filter.with_min_level(lvl);
                 }
                 filter = filter.with_include_unknown(include_unknown);
+                let parse_ts = |flag: &str, s: &str| -> Result<i64> {
+                    lens_log::timestamp::parse_bound(s).ok_or_else(|| {
+                        lens_core::LensError::Usage {
+                            message: format!(
+                                "invalid {flag} {s:?}; expected RFC 3339 (e.g. 2026-10-09T12:00:00Z), 'YYYY-MM-DD HH:MM:SS' or 'YYYY-MM-DD' (UTC)"
+                            ),
+                        }
+                    })
+                };
+                if let Some(s) = &since {
+                    filter = filter.with_since(Some(parse_ts("--since", s)?));
+                }
+                if let Some(u) = &until {
+                    filter = filter.with_until(Some(parse_ts("--until", u)?));
+                }
+                if let Some(y) = year {
+                    if !(1..=9999).contains(&y) {
+                        return Err(lens_core::LensError::Usage {
+                            message: format!("invalid --year {y}; expected 1..=9999"),
+                        });
+                    }
+                    filter = filter.with_syslog_year(y);
+                }
 
                 let jsonl_mode = format == Some(OutputFormat::Jsonl);
                 let json_mode = wants_json(format, false, false);
                 let mut matched = 0usize;
                 let mut excluded_unknown = 0usize;
+                let mut excluded_unknown_ts = 0usize;
                 let mut matched_lines: Vec<serde_json::Value> = Vec::new();
                 // Context bookkeeping: `pending_before` holds the last
                 // `context` non-matching lines; `after_left` counts the
@@ -703,13 +730,16 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                         .map(|c| c.into_owned())
                         .unwrap_or_default();
                     let is_match = !limited && {
-                        if filter.min_level.is_some() {
-                            // Level filtering needs the parsed record; it
-                            // also lets us count evidence discarded for
-                            // having no detectable level.
+                        if filter.min_level.is_some() || filter.time_filter_active() {
+                            // Level/timestamp filtering needs the parsed
+                            // record; it also lets us count evidence
+                            // discarded as undeterminable.
                             let record = parse_line(&line, idx + 1);
                             if filter.rejected_only_by_unknown_level(&record) {
                                 excluded_unknown += 1;
+                                false
+                            } else if filter.rejected_only_by_unknown_timestamp(&record) {
+                                excluded_unknown_ts += 1;
                                 false
                             } else {
                                 filter.matches(&record)
@@ -770,6 +800,7 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                             "matched": matched,
                             "total": indexer.len(),
                             "excluded_unknown": excluded_unknown,
+                            "excluded_unknown_ts": excluded_unknown_ts,
                             "lossy_lines": indexer.lossy_lines(),
                             "lines": matched_lines,
                         }))?
@@ -790,6 +821,12 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                     eprintln!(
                         "Excluded {} line(s) whose log level could not be determined (--include-unknown to keep them).",
                         excluded_unknown
+                    );
+                }
+                if excluded_unknown_ts > 0 {
+                    eprintln!(
+                        "Excluded {} line(s) whose timestamp could not be determined (--include-unknown to keep them).",
+                        excluded_unknown_ts
                     );
                 }
             }

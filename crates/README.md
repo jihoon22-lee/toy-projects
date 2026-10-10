@@ -68,8 +68,13 @@ let snap = SnapshotV2::from_tree(&res.tree, res.root_id, res.complete, res.trunc
 - `parse_line`: JSONL(`level`/`msg`/`ts` 등, 키 대소문자 무시, 나머지 키는
   `fields`에 보존)과 `LEVEL ...` 휴리스틱. `detect_level`은 레벨만 빠르게 반환.
 - `LogFilter`: min_level/query(대소문자 무시 substring)/`--regex`
-  (regex::Regex)/source. `matches_line`은 no-op 필터와
-  substring-only 거절을 파싱 없이 단락.
+  (regex::Regex)/source/`since_ms`~`until_ms` 타임스탬프 창(양끝 포함,
+  미판별 줄은 `include_unknown`으로 복원). `matches_line`은 no-op
+  필터와 substring-only 거절을 파싱 없이 단락.
+- `timestamp`: `--since/--until` 인자 파서(RFC 3339/오프셋 없는
+  ISO/날짜만 — UTC 해석)와 줄 타임스탬프 추출기(ISO·syslog 접두사,
+  JSONL `ts`/`time`/`timestamp`). 연도 없는 syslog는 `default_syslog_year()`
+  = 현재 UTC 연도, `--year`/`syslog_year`로 재정의.
 - 스키마: `loglens.session/v2`.
 
 ## lens-test — JUnit 파싱

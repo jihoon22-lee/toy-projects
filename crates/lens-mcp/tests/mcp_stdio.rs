@@ -211,6 +211,47 @@ fn log_filter_limit_paginates_matches() {
 }
 
 #[test]
+fn log_filter_since_until_time_window() {
+    let dir = tmpdir("logts");
+    let log = dir.join("t.log");
+    std::fs::write(
+        &log,
+        "2026-10-09T10:00:00Z INFO early\n\
+         2026-10-09T12:00:00Z INFO inside\n\
+         Oct  9 13:00:00 host app: syslog\n\
+         no timestamp INFO\n",
+    )
+    .unwrap();
+
+    let text = tool_call(
+        11,
+        "lens_log_filter",
+        serde_json::json!({
+            "path": log.to_string_lossy(),
+            "since": "2026-10-09T11:00:00Z",
+            "until": "2026-10-09T14:00:00Z",
+            "year": 2026
+        }),
+    );
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let lines: Vec<i64> = v["matches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|m| m["line"].as_i64())
+        .collect();
+    assert_eq!(lines, vec![2, 3], "{text}");
+
+    // Invalid bound → tool error (isError), not a crash.
+    let call = format!(
+        r#"{{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{{"name":"lens_log_filter","arguments":{{"path":{},"since":"bogus"}}}}}}"#,
+        serde_json::to_string(&log.to_string_lossy()).unwrap()
+    );
+    let responses = roundtrip(&[&call]);
+    assert_eq!(responses[0]["result"]["isError"], true);
+}
+
+#[test]
 fn tool_results_paginate_arrays() {
     // lens_doctor's checks array is capped by `limit` and carries a
     // structured truncation marker.

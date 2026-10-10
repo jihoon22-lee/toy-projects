@@ -99,8 +99,8 @@ lens abi diff <baseline> <candidate> [--format text|json]
 ```bash
 lens log inspect <path> [--format text|json]
 lens log filter <path> [--query TEXT | --regex PATTERN] [--min-level LEVEL]
-                [--include-unknown] [--limit N] [--context N]
-                [--format text|json|jsonl]
+                [--include-unknown] [--since TS] [--until TS] [--year Y]
+                [--limit N] [--context N] [--format text|json|jsonl]
 ```
 
 - mmap 라인 인덱서(memchr 기반)로 GB급 로그를 즉시 열람.
@@ -110,6 +110,15 @@ lens log filter <path> [--query TEXT | --regex PATTERN] [--min-level LEVEL]
   카운트를 JSON 필드와 stderr로 보고한다.
 - `--min-level`: trace|debug|info|warn|error|fatal (오타 시 즉시 거부).
   레벨을 판별할 수 없는 줄은 제외되고 stderr에 제외 수를 보고한다.
+  `--include-unknown`으로 복원 가능.
+- `--since TS` / `--until TS`: 타임스탬프 창 필터(양끝 포함). 허용
+  형식은 RFC 3339(`2026-10-09T12:00:00Z`, 오프셋 포함), `YYYY-MM-DD
+  HH:MM:SS`, `YYYY-MM-DD`(오프셋 없는 형식은 UTC 해석). 잘못된 입력은
+  종료 2. 인식하는 줄 타임스탬프는 ISO/RFC3339 접두사, syslog
+  `Oct  9 12:00:00` 접두사, JSONL의 `ts`/`time`/`timestamp` 필드
+  (숫자는 epoch ms, 문자열은 위 형식). 연도 없는 syslog 타임스탬프는
+  현재 UTC 연도를 가정하며 `--year`로 지정 가능. 타임스탬프를 판별할
+  수 없는 줄은 제외되고 stderr에 제외 수를 보고한다 —
   `--include-unknown`으로 복원 가능.
 - `--regex`는 substring `--query` 대신 regex 매칭을 쓴다(둘은
   상호배타). `--limit N`은 매치 N개에서 중단하고, `--context N`은

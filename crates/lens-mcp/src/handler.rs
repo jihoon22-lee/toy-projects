@@ -248,9 +248,33 @@ fn execute_tool_value(name: &str, args: &Value) -> Result<Value, String> {
                         "Invalid 'min_level' {lvl:?}; expected trace|debug|info|warn|error|fatal"
                     ));
                 }
-                filter = filter
-                    .with_min_level(parsed)
-                    .with_include_unknown(include_unknown);
+                filter = filter.with_min_level(parsed);
+            }
+            filter = filter.with_include_unknown(include_unknown);
+            for (key, set) in [
+                (
+                    "since",
+                    LogFilter::with_since as fn(LogFilter, Option<i64>) -> LogFilter,
+                ),
+                (
+                    "until",
+                    LogFilter::with_until as fn(LogFilter, Option<i64>) -> LogFilter,
+                ),
+            ] {
+                if let Some(bound) = arg_opt(args, key) {
+                    let ms = lens_log::timestamp::parse_bound(bound).ok_or_else(|| {
+                        format!(
+                            "Invalid '{key}' {bound:?}; expected RFC 3339 (e.g. 2026-10-09T12:00:00Z), 'YYYY-MM-DD HH:MM:SS' or 'YYYY-MM-DD' (UTC)"
+                        )
+                    })?;
+                    filter = set(filter, Some(ms));
+                }
+            }
+            if let Some(y) = args.get("year").and_then(|v| v.as_i64()) {
+                if !(1..=9999).contains(&y) {
+                    return Err(format!("Invalid 'year' {y}; expected 1..=9999"));
+                }
+                filter = filter.with_syslog_year(y as i32);
             }
 
             // `tail` scans only the last N lines — recent lines are where

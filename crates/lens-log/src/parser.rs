@@ -63,6 +63,16 @@ pub fn parse_line<'a>(raw: &'a str, line_number: usize) -> LogRecordView<'a> {
                 {
                     if let Some(n) = v.as_u64() {
                         timestamp_ms = n;
+                    } else if let Some(n) = v.as_i64() {
+                        timestamp_ms = n.max(0) as u64;
+                    } else if let Some(n) = v.as_f64() {
+                        timestamp_ms = n.max(0.0) as u64;
+                    } else if let Some(s) = v.as_str() {
+                        // ISO/RFC3339 string timestamp, same forms as
+                        // --since/--until accept.
+                        timestamp_ms = crate::timestamp::parse_bound(s)
+                            .and_then(|t| u64::try_from(t).ok())
+                            .unwrap_or(0);
                     }
                 } else {
                     // Preserve unrecognized structured fields instead of
@@ -96,8 +106,15 @@ pub fn parse_line<'a>(raw: &'a str, line_number: usize) -> LogRecordView<'a> {
     // Standard log format heuristic: [LEVEL] or LEVEL
     let detected_level = detect_level(raw);
 
+    // ISO/RFC3339 or syslog (`Oct  9 …`, current UTC year) prefixes
+    // yield a usable timestamp; anything else stays 0 = unknown.
+    let timestamp_ms =
+        crate::timestamp::extract_timestamp_ms(raw, crate::timestamp::default_syslog_year())
+            .and_then(|t| u64::try_from(t).ok())
+            .unwrap_or(0);
+
     LogRecordView {
-        timestamp_ms: 0,
+        timestamp_ms,
         level: detected_level,
         source: Cow::Borrowed(""),
         message: Cow::Borrowed(raw),
