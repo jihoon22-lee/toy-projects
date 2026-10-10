@@ -188,6 +188,14 @@ incomplete, `trace analyze` fd 누수. Phase 0에서 0이 아닌 값으로
   포함한다. GUIDE의 결정성 주장을 타임스탬프(`bundle` `created_at`) 예외와
   함께 명시했다.
 
+### 의존성·보안
+
+- `quick-xml` 0.37.5 → 0.41.0: RUSTSEC-2026-0194(중복 네임스페이스
+  선언의 비선형 검사)와 RUSTSEC-2026-0195(`NamespaceResolver`의
+  상한 없는 힙 할당 — 조작된 XML로 OOM/CPU 소진) 수정. JUnit 속성
+  디코딩을 `decoded_and_normalized_value(XmlVersion::Implicit1_0)`로
+  이전했고 파싱 동작은 동일하다.
+
 ## 0.4.3
 
 무결성·정확성 대수정 릴리스. 상세 내역은 아래 섹션 참고.

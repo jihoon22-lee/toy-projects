@@ -39,7 +39,7 @@ pub fn parse_junit_xml(xml_bytes: &[u8], project_name: &str) -> Result<TestRun> 
     // Decode `&quot;`/`&amp;`-style entities: attr.value is the raw bytes.
     let decoder = reader.decoder();
     let decode_attr = |attr: &quick_xml::events::attributes::Attribute| -> String {
-        attr.decode_and_unescape_value(decoder)
+        attr.decoded_and_normalized_value(quick_xml::XmlVersion::Implicit1_0, decoder)
             .map(|c| c.into_owned())
             .unwrap_or_else(|_| String::from_utf8_lossy(&attr.value).into_owned())
     };
