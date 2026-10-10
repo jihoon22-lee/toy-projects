@@ -155,7 +155,7 @@ lens-mcp ──┴─────────────┤
 {
   "schema": "lens.bundle/v2",
   "tool": "lens",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "created_at": "<RFC3339>",
   "sources": [{"path": "reports/x.json", "size": N, "sha256": "..."}],
   "diagnostics": ["..."]

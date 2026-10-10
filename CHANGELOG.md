@@ -2,7 +2,9 @@
 
 Lens는 워크스페이스 단일 버전으로 릴리스된다. 태그는 `vX.Y.Z` 형식이다.
 
-## Unreleased
+## 0.5.0
+
+CLI/MCP 계약·사용성 대수정 릴리스. 상세 내역은 아래 섹션 참고.
 
 ### Breaking changes
 
