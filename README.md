@@ -75,13 +75,14 @@ cargo build --release -p lens-cli --jobs 2
 2. CI Merge Gate 통과 후 머지 커밋으로 병합한다. Merge Gate는
    `main` 대상 PR에서만 동작하므로 스택드 PR 체인은 머지할 수 없다 —
    통합 브랜치를 `main`으로 머지할 것.
-3. 수동 범프는 release-please가 태그/릴리스를 만들지 않으므로 Release
-   워크플로를 직접 실행한다:
+3. 머지되면 release-please 워크플로가 manifest 버전과 기존 태그를
+   비교해 태그가 없으면 Release 워크플로를 자동으로 호출한다.
+   아티팩트 빌드와 `SHA256SUMS` 검증 후 해당 SHA에 태그를 만들어
+   릴리스를 발행한다. 자동 호출이 실패했거나 건너뛴 경우에는
+   수동으로 실행할 수 있다:
    ```bash
    gh workflow run release.yml -f tag=vX.Y.Z -f sha=<머지 커밋 SHA>
    ```
-   워크플로가 아티팩트를 빌드하고 `SHA256SUMS`를 검증한 뒤 해당 SHA에
-   태그를 만들어 릴리스를 발행한다.
 
 ---
 

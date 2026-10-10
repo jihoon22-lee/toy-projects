@@ -49,7 +49,10 @@ pub fn run(initial_path: &Path, log: Option<&Path>) -> io::Result<()> {
 fn run_app<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     app: &mut TuiApp,
-) -> io::Result<()> {
+) -> io::Result<()>
+where
+    io::Error: From<B::Error>,
+{
     loop {
         // Pick up a finished background scan and advance the spinner.
         app.poll_scan();

@@ -18,9 +18,10 @@ jobs:
       actions: write
     runs-on: ubuntu-latest
     outputs:
-      created: ${{ steps.release.outputs.releases_created }}
-      matrix: ${{ steps.matrix.outputs.matrix }}
+      created: ${{ steps.manual.outputs.created || steps.release.outputs.releases_created }}
+      matrix: ${{ steps.manual.outputs.matrix || steps.matrix.outputs.matrix }}
     steps:
+      - uses: actions/checkout@v4
       - uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4.4.0
         id: release
         with:
@@ -74,6 +75,50 @@ jobs:
               releases.append({'tag': tag, 'sha': sha})
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('matrix=' + json.dumps({'include': releases}) + '\n')
+          PY
+
+      # Manual `chore(release):` bumps (README §릴리스 절차) do not create
+      # release-please outputs. Detect them by comparing the manifest version
+      # against existing tags and emit the same matrix entry, so release.yml
+      # builds and publishes without a separate manual dispatch.
+      - name: Resolve manual release bump
+        id: manual
+        if: steps.release.outputs.releases_created != 'true'
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+          manifest = json.loads(open('.release-please-manifest.json').read())
+          version = manifest.get('.')
+          if not isinstance(version, str) or not re.fullmatch(
+              r'[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?', version):
+              raise SystemExit('manifest has no valid "." version')
+          tag = 'v' + version
+          res = subprocess.run(
+              ['gh', 'api', f'repos/{os.environ["GH_REPO"]}/git/ref/tags/{tag}'],
+              capture_output=True, text=True)
+          if res.returncode == 0:
+              print(f'tag {tag} already exists; nothing to release')
+              sys.exit(0)
+          # A non-404 failure (rate limit, network) must not be treated as
+          # "tag missing" — that would publish a tag pointing at nothing.
+          if '404' not in (res.stderr + res.stdout):
+              sys.stderr.write(res.stderr)
+              raise SystemExit('tag lookup failed (not a 404)')
+          sha = os.environ['GITHUB_SHA']
+          if not re.fullmatch(r'[0-9a-fA-F]{40}', sha):
+              raise SystemExit('missing exact commit SHA')
+          entry = {'include': [{'tag': tag, 'sha': sha}]}
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('matrix=' + json.dumps(entry) + '\n')
+              output.write('created=true\n')
+          print(f'manual release bump detected: {tag} at {sha}')
           PY
 
   # GITHUB_TOKEN-created tag events do not start another workflow. Call the
