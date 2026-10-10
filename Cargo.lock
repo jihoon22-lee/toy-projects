@@ -577,7 +577,7 @@ dependencies = [
 
 [[package]]
 name = "lens-abi"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "cpp_demangle",
  "gimli",
@@ -591,7 +591,7 @@ dependencies = [
 
 [[package]]
 name = "lens-build"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde",
  "tempfile",
@@ -599,7 +599,7 @@ dependencies = [
 
 [[package]]
 name = "lens-cli"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -622,7 +622,7 @@ dependencies = [
 
 [[package]]
 name = "lens-core"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "flate2",
  "jiff",
@@ -637,7 +637,7 @@ dependencies = [
 
 [[package]]
 name = "lens-disk"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "lens-core",
  "libc",
@@ -650,7 +650,7 @@ dependencies = [
 
 [[package]]
 name = "lens-env"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde",
  "tempfile",
@@ -658,7 +658,7 @@ dependencies = [
 
 [[package]]
 name = "lens-log"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "flate2",
  "jiff",
@@ -674,7 +674,7 @@ dependencies = [
 
 [[package]]
 name = "lens-mcp"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "lens-abi",
  "lens-build",
@@ -694,7 +694,7 @@ dependencies = [
 
 [[package]]
 name = "lens-net"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "lens-core",
  "serde",
@@ -703,7 +703,7 @@ dependencies = [
 
 [[package]]
 name = "lens-sys"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "lens-core",
  "serde",
@@ -712,7 +712,7 @@ dependencies = [
 
 [[package]]
 name = "lens-test"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "lens-core",
  "quick-xml",
@@ -722,7 +722,7 @@ dependencies = [
 
 [[package]]
 name = "lens-trace"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde",
  "tempfile",
@@ -730,7 +730,7 @@ dependencies = [
 
 [[package]]
 name = "lens-tui"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "clap",
  "crossterm",
