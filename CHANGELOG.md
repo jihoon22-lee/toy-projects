@@ -4,6 +4,30 @@ Lens는 워크스페이스 단일 버전으로 릴리스된다. 태그는 `vX.Y.
 
 ## Unreleased
 
+### Breaking changes
+
+- `lens abi inspect`/`lens abi diff`의 비ELF 입력이 fail-closed로
+  바뀌었다. 이전에는 `status: "non-elf"` 리포트를 출력하고 종료 0이었고,
+  이제는 `error: <path> is not an ELF file` + 종료 2이며 리포트를
+  출력하지 않는다. 라이브러리와 MCP 도구는 계속 `status: "non-elf"`
+  리포트를 반환하므로 프로그래밍 호출자는 영향이 없다.
+
+### 추가
+
+- `lens log filter --since/--until <TS>`: 타임스탬프 창 필터(RFC 3339·
+  `YYYY-MM-DD HH:MM:SS`·`YYYY-MM-DD`, 오프셋 없으면 UTC, 양끝 포함).
+  ISO·syslog 접두사와 JSONL `ts`/`time`/`timestamp`를 인식하고, 연도
+  없는 syslog는 현재 UTC 연도(또는 새 `--year`)를 가정. 타임스탬프
+  미판별 줄은 제외+stderr 보고, `--include-unknown`으로 복원.
+  MCP `lens_log_filter`에도 `since`/`until`/`year` 인자 추가.
+
+### 개선
+
+- `log filter`/`log inspect`의 `.gz`·stdin(`-`) 입력이 해제된 바이트를
+  전부 프로세스 힙에 올리지 않고 무익명 임시 파일에 스풀 후 mmap한다.
+  512 MiB 해제 상한과 초과 시 오류는 그대로. 큰 `.gz`에서 피크 익명
+  메모리가 크게 줄었다.
+
 ### 수정
 
 - `lens completion`이 닫힌 파이프에서 패닉(종료 101) 대신 0으로 종료.
@@ -11,6 +35,8 @@ Lens는 워크스페이스 단일 버전으로 릴리스된다. 태그는 `vX.Y.
   `<root>/etc/ld.so.preload`를 검사.
 - 테스트가 `/tmp/lens-*` 디렉터리를 남기지 않도록 모든 테스트가
   `tempfile::TempDir` 가드를 사용.
+- TUI Storage·Services·Network 목록이 선택 항목을 따라 스크롤해
+  첫 페이지 밖의 선택(`j/k`, `PgDn`, `g/G`)이 보이지 않던 문제 수정.
 
 ## 0.5.0
 

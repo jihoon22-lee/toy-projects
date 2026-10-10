@@ -14,7 +14,7 @@ thiserror = { workspace = true }
 memmap2 = { workspace = true }
 memchr = { workspace = true }
 flate2 = { workspace = true }
+tempfile = "3.17"
+jiff = { workspace = true }
 regex = { workspace = true }
 
-[dev-dependencies]
-tempfile = "3.17"

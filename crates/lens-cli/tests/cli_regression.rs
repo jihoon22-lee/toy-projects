@@ -151,6 +151,153 @@ fn doctor_root_scopes_preload_check() {
 }
 
 #[test]
+fn abi_non_elf_input_exits_2() {
+    // Non-ELF input fails closed: exit 2, clear stderr, no report.
+    let readme = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("README.md");
+
+    let out = lens(&["abi", "inspect", readme.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(2), "{}", stderr_of(&out));
+    assert!(stderr_of(&out).contains("is not an ELF file"));
+    assert!(!stdout_of(&out).contains("\"status\""));
+
+    // Either side of a diff being non-ELF also errors.
+    let elf = env!("CARGO_BIN_EXE_lens");
+    for args in [
+        ["abi", "diff", readme.to_str().unwrap(), elf],
+        ["abi", "diff", elf, readme.to_str().unwrap()],
+    ] {
+        let out = lens(&args);
+        assert_eq!(out.status.code(), Some(2), "{args:?}: {}", stderr_of(&out));
+        assert!(stderr_of(&out).contains("is not an ELF file"));
+    }
+
+    // A valid ELF still inspects cleanly.
+    let out = lens(&["abi", "inspect", elf]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr_of(&out));
+}
+
+#[test]
+fn log_filter_since_until_window_and_exclusions() {
+    // Mixed sources: ISO prefix, syslog (yearless), JSONL ts, and a
+    // line with no timestamp.
+    let dir = tmp_dir("since");
+    let log = dir.join("app.log");
+    std::fs::write(
+        &log,
+        "2026-10-09T10:00:00Z INFO early\n\
+         2026-10-09T12:00:00Z INFO inside\n\
+         Oct  9 13:00:00 host app: syslog line\n\
+         {\"ts\":1791546720000,\"level\":\"info\",\"msg\":\"jsonl\"}\n\
+         no timestamp at all INFO\n\
+         2026-10-09T16:00:00Z INFO late\n",
+    )
+    .unwrap();
+
+    // 11:00–14:00 UTC window: ISO + syslog(year=2026) + JSONL match;
+    // the timestamp-less line is excluded and reported on stderr.
+    // (ts 1791546720000 = 2026-10-09T12:12:00Z.)
+    let out = lens(&[
+        "log",
+        "filter",
+        log.to_str().unwrap(),
+        "--since",
+        "2026-10-09T11:00:00Z",
+        "--until",
+        "2026-10-09T14:00:00Z",
+        "--year",
+        "2026",
+    ]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr_of(&out));
+    let stdout = stdout_of(&out);
+    assert!(!stdout.contains("early"), "{stdout}");
+    assert!(stdout.contains("inside"), "{stdout}");
+    assert!(stdout.contains("syslog line"), "{stdout}");
+    assert!(stdout.contains("jsonl"), "{stdout}");
+    assert!(!stdout.contains("late"), "{stdout}");
+    assert!(!stdout.contains("no timestamp"), "{stdout}");
+    assert!(
+        stderr_of(&out).contains("timestamp could not be determined"),
+        "{}",
+        stderr_of(&out)
+    );
+
+    // --include-unknown restores the timestamp-less line.
+    let out = lens(&[
+        "log",
+        "filter",
+        log.to_str().unwrap(),
+        "--since",
+        "2026-10-09T11:00:00Z",
+        "--until",
+        "2026-10-09T14:00:00Z",
+        "--year",
+        "2026",
+        "--include-unknown",
+    ]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(stdout_of(&out).contains("no timestamp"));
+
+    // A different --year moves the syslog line out of the window.
+    let out = lens(&[
+        "log",
+        "filter",
+        log.to_str().unwrap(),
+        "--since",
+        "2026-10-09T11:00:00Z",
+        "--until",
+        "2026-10-09T14:00:00Z",
+        "--year",
+        "2020",
+    ]);
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = stdout_of(&out);
+    assert!(stdout.contains("inside"), "{stdout}");
+    assert!(!stdout.contains("syslog line"), "{stdout}");
+
+    // Space-separated form is accepted (UTC, no offset).
+    let out = lens(&[
+        "log",
+        "filter",
+        log.to_str().unwrap(),
+        "--since",
+        "2026-10-09 11:00:00",
+        "--until",
+        "2026-10-09 14:00:00",
+        "--year",
+        "2026",
+    ]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr_of(&out));
+    let stdout = stdout_of(&out);
+    assert!(stdout.contains("inside"), "{stdout}");
+    assert!(stdout.contains("syslog line"), "{stdout}");
+
+    // Date-only --until is midnight UTC → none of the 10:00+ lines.
+    let out = lens(&[
+        "log",
+        "filter",
+        log.to_str().unwrap(),
+        "--until",
+        "2026-10-09",
+        "--year",
+        "2026",
+    ]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(
+        !stdout_of(&out).contains("inside"),
+        "date-only --until is midnight UTC"
+    );
+
+    // Invalid timestamps are usage errors → exit 2.
+    for flag in ["--since", "--until"] {
+        let out = lens(&["log", "filter", log.to_str().unwrap(), flag, "not-a-date"]);
+        assert_eq!(out.status.code(), Some(2), "{flag}: {}", stderr_of(&out));
+        assert!(stderr_of(&out).contains("invalid"), "{}", stderr_of(&out));
+    }
+}
+
+#[test]
 fn env_check_rejects_nonexistent_venv() {
     let out = lens(&["env", "check", "/nonexistent-venv-lens-test"]);
     assert_eq!(out.status.code(), Some(2), "errors must exit 2");

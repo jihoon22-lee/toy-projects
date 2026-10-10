@@ -15,8 +15,9 @@ pub struct LineSpan {
     pub length: usize,
 }
 
-/// The line store backs the indexer: memory-mapped for regular files,
-/// heap-owned for decompressed `.gz` input and piped stdin.
+/// The line store backs the indexer: memory-mapped for regular files
+/// and for `.gz`/stdin input spooled to a temp file; heap-owned only
+/// for small inline buffers (`from_bytes`, empty input).
 enum Backing {
     Mapped(Mmap),
     Owned(Vec<u8>),
@@ -47,19 +48,21 @@ impl LogIndexer {
         if path.extension().map(|e| e == "gz").unwrap_or(false) {
             let safe_input = SafeInput::open(path)?;
             let decoder = flate2::read::GzDecoder::new(safe_input.file);
-            let bytes = read_bounded(decoder, path)?;
-            return Ok(Self::from_bytes(bytes));
+            return Self::from_reader(decoder, &path.to_string_lossy());
         }
         let safe_input = SafeInput::open(path)?;
         let mmap = safe_input.mmap()?;
         Ok(Self::from_backing(Backing::Mapped(mmap)))
     }
 
-    /// Index a stream (e.g. stdin for `-` input) after reading it into
-    /// memory under the same decompression cap as `.gz` files.
+    /// Index a stream (e.g. stdin for `-` input, or a `.gz` decoder):
+    /// the bytes are spooled into an unnamed temp file (deleted on
+    /// drop) under the same decompression cap, then memory-mapped, so
+    /// a multi-hundred-MiB decompressed stream does not live in the
+    /// process heap.
     pub fn from_reader<R: Read>(reader: R, source: &str) -> Result<Self> {
-        let bytes = read_bounded(reader, Path::new(source))?;
-        Ok(Self::from_bytes(bytes))
+        let backing = spool_to_temp_mmap(reader, Path::new(source))?;
+        Ok(Self::from_backing(backing))
     }
 
     /// Index already-materialized bytes.
@@ -144,16 +147,20 @@ impl LogIndexer {
     }
 }
 
-/// Read `reader` fully, failing with `LimitExceeded` once it produces more
-/// than `MAX_UNPACKED_BYTES`.
-fn read_bounded<R: Read>(reader: R, source: &Path) -> Result<Vec<u8>> {
-    let mut out = Vec::new();
-    let mut limited = reader.take(MAX_UNPACKED_BYTES + 1);
-    limited.read_to_end(&mut out).map_err(|e| LensError::Io {
+/// Spool `reader` into an unnamed temp file (unlinked at creation,
+/// deleted on drop) and mmap it. Fails with `LimitExceeded` once the
+/// stream produces more than `MAX_UNPACKED_BYTES`.
+fn spool_to_temp_mmap<R: Read>(reader: R, source: &Path) -> Result<Backing> {
+    let mut tmp = tempfile::tempfile().map_err(|e| LensError::Io {
         path: source.to_path_buf(),
         source: e,
     })?;
-    if out.len() as u64 > MAX_UNPACKED_BYTES {
+    let mut limited = reader.take(MAX_UNPACKED_BYTES + 1);
+    let written = std::io::copy(&mut limited, &mut tmp).map_err(|e| LensError::Io {
+        path: source.to_path_buf(),
+        source: e,
+    })?;
+    if written > MAX_UNPACKED_BYTES {
         return Err(LensError::LimitExceeded {
             message: format!(
                 "{:?} exceeds {} bytes after decompression",
@@ -161,7 +168,22 @@ fn read_bounded<R: Read>(reader: R, source: &Path) -> Result<Vec<u8>> {
             ),
         });
     }
-    Ok(out)
+    if written == 0 {
+        // mmap of a zero-length file fails; an empty log has no lines.
+        return Ok(Backing::Owned(Vec::new()));
+    }
+    // SAFETY: the temp file is a regular file this process just created
+    // and wrote; it is unlinked on creation so nobody else can modify
+    // it under the map.
+    let mmap = unsafe {
+        memmap2::MmapOptions::new()
+            .map(&tmp)
+            .map_err(|e| LensError::Io {
+                path: source.to_path_buf(),
+                source: e,
+            })?
+    };
+    Ok(Backing::Mapped(mmap))
 }
 
 #[cfg(test)]

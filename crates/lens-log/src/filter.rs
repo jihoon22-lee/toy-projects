@@ -20,7 +20,7 @@ pub fn contains_insensitive(haystack: &str, needle_lower: &str) -> bool {
     })
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct LogFilter {
     pub min_level: Option<LogLevel>,
     pub query_lower: Option<String>,
@@ -29,8 +29,29 @@ pub struct LogFilter {
     pub source: Option<String>,
     /// Keep lines whose level could not be determined even when a
     /// `--min-level` threshold is active (off by default: unknown lines
-    /// cannot prove they meet the threshold).
+    /// cannot prove they meet the threshold). Also keeps lines whose
+    /// timestamp could not be determined under `--since`/`--until`.
     pub include_unknown: bool,
+    /// Inclusive epoch-ms bounds for `--since`/`--until`.
+    pub since_ms: Option<i64>,
+    pub until_ms: Option<i64>,
+    /// Year assumed for year-less syslog timestamps (`Oct  9 12:00:00`).
+    pub syslog_year: i32,
+}
+
+impl Default for LogFilter {
+    fn default() -> Self {
+        Self {
+            min_level: None,
+            query_lower: None,
+            query_regex: None,
+            source: None,
+            include_unknown: false,
+            since_ms: None,
+            until_ms: None,
+            syslog_year: crate::timestamp::default_syslog_year(),
+        }
+    }
 }
 
 impl LogFilter {
@@ -69,6 +90,45 @@ impl LogFilter {
         self
     }
 
+    /// Inclusive lower timestamp bound (epoch ms); `None` disables.
+    pub fn with_since(mut self, since_ms: Option<i64>) -> Self {
+        self.since_ms = since_ms;
+        self
+    }
+
+    /// Inclusive upper timestamp bound (epoch ms); `None` disables.
+    pub fn with_until(mut self, until_ms: Option<i64>) -> Self {
+        self.until_ms = until_ms;
+        self
+    }
+
+    pub fn with_syslog_year(mut self, year: i32) -> Self {
+        self.syslog_year = year;
+        self
+    }
+
+    /// True when `--since`/`--until` is active: lines whose timestamp
+    /// cannot be determined are excluded unless `include_unknown`.
+    pub fn time_filter_active(&self) -> bool {
+        self.since_ms.is_some() || self.until_ms.is_some()
+    }
+
+    fn ts_in_bounds(&self, t: i64) -> bool {
+        self.since_ms.is_none_or(|s| t >= s) && self.until_ms.is_none_or(|u| t <= u)
+    }
+
+    /// Timestamp check shared by `matches`/`matches_line`. Returns
+    /// Some(verdict) when the time filter decides, None when inactive.
+    fn time_verdict(&self, raw: &str) -> Option<bool> {
+        if !self.time_filter_active() {
+            return None;
+        }
+        match crate::timestamp::extract_timestamp_ms(raw, self.syslog_year) {
+            Some(t) => Some(self.ts_in_bounds(t)),
+            None => Some(self.include_unknown),
+        }
+    }
+
     /// Match a raw line without constructing a `LogRecordView` when the
     /// configured filters allow it: the substring check alone can reject, and
     /// a no-op filter accepts everything without parsing.
@@ -83,6 +143,11 @@ impl LogFilter {
                 return false;
             }
         }
+        if let Some(verdict) = self.time_verdict(raw) {
+            if !verdict {
+                return false;
+            }
+        }
         if self.min_level.is_none() && self.source.is_none() {
             return true;
         }
@@ -90,6 +155,21 @@ impl LogFilter {
     }
 
     pub fn matches(&self, record: &LogRecordView) -> bool {
+        if !self.min_level_ok(record) {
+            return false;
+        }
+        if let Some(verdict) = self.time_verdict(record.raw) {
+            if !verdict {
+                return false;
+            }
+        }
+
+        self.passes_rest(record)
+    }
+
+    /// The `--min-level` part of the match, factored out so the
+    /// rejected-only-by-unknown-* helpers can check the other filters.
+    fn min_level_ok(&self, record: &LogRecordView) -> bool {
         if let Some(min_lvl) = self.min_level {
             if record.level == LogLevel::Unknown {
                 // An unidentified level cannot prove it meets the
@@ -102,8 +182,7 @@ impl LogFilter {
                 return false;
             }
         }
-
-        self.passes_rest(record)
+        true
     }
 
     /// The record passes the source/query filters but is dropped solely
@@ -113,6 +192,18 @@ impl LogFilter {
         matches!(self.min_level, Some(l) if l != LogLevel::Unknown)
             && !self.include_unknown
             && record.level == LogLevel::Unknown
+            && self.passes_rest(record)
+    }
+
+    /// The record passes level/source/query filters but is dropped
+    /// solely because its timestamp cannot be determined while
+    /// `--since`/`--until` is active. Callers use this to report how
+    /// much evidence was discarded.
+    pub fn rejected_only_by_unknown_timestamp(&self, record: &LogRecordView) -> bool {
+        self.time_filter_active()
+            && !self.include_unknown
+            && crate::timestamp::extract_timestamp_ms(record.raw, self.syslog_year).is_none()
+            && self.min_level_ok(record)
             && self.passes_rest(record)
     }
 

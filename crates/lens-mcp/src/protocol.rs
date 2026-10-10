@@ -124,7 +124,7 @@ pub fn list_tools() -> Vec<McpTool> {
         McpTool {
             name: "lens_log_filter".to_string(),
             description: desc(
-                "Filter high-volume log files by substring query or regex and minimum log level. Use 'tail' to scan the last N lines (recent incident evidence); 'limit'/'offset' page the matched lines.",
+                "Filter high-volume log files by substring query or regex, minimum log level, and time range. Use 'tail' to scan the last N lines (recent incident evidence); 'limit'/'offset' page the matched lines.",
             ),
             input_schema: serde_json::json!({
                 "type": "object",
@@ -133,7 +133,10 @@ pub fn list_tools() -> Vec<McpTool> {
                     "query": { "type": "string", "description": "Case-sensitive substring query" },
                     "regex": { "type": "string", "description": "Regex pattern (alternative to query)" },
                     "min_level": { "type": "string", "description": "Minimum level (trace, debug, info, warn, error, fatal)" },
-                    "include_unknown": { "type": "boolean", "description": "Keep lines whose level could not be determined" },
+                    "include_unknown": { "type": "boolean", "description": "Keep lines whose level or timestamp could not be determined" },
+                    "since": { "type": "string", "description": "Only lines at/after this timestamp (inclusive): RFC 3339 (2026-10-09T12:00:00Z, with offset), 'YYYY-MM-DD HH:MM:SS' or 'YYYY-MM-DD' (UTC)" },
+                    "until": { "type": "string", "description": "Only lines at/before this timestamp (inclusive); same forms as 'since'" },
+                    "year": { "type": "integer", "description": "Year assumed for year-less syslog timestamps like 'Oct  9 12:00:00' (default: current year)" },
                     "tail": { "type": "integer", "description": "Scan only the last N lines of the file" },
                     "limit": { "type": "integer", "description": "Max matched lines to return (default 200)" },
                     "offset": { "type": "integer", "description": "Skip the first N matched lines" }

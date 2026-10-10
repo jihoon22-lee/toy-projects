@@ -23,7 +23,7 @@ source <(lens completion bash)   # zsh, fish도 지원
 |------|------|------|
 | 0 | clean — findings 없음 | 정상 스캔, 회귀 없는 `test diff` |
 | 1 | findings 있음 | `test diff` 회귀/신규 실패, `abi diff` incompatible·uncertain(수동 검토 필요), `sys cycles` 사이클, `env check` 누락/충돌 의존성, `doctor`의 `--fail-on` 기준 이상, `disk scan` incomplete(권한 오류·절단), `trace analyze` fd 누수, `bundle verify` 무결성 불일치 |
-| 2 | 사용·입력·런타임 오류 | 존재하지 않는 경로, 잘못된 플래그 값, 파싱 불가 입력 |
+| 2 | 사용·입력·런타임 오류 | 존재하지 않는 경로, 잘못된 플래그 값, 파싱 불가 입력, `abi inspect`/`abi diff`의 비ELF 입력 |
 
 `doctor`는 `--fail-on warn|fail`(기본 `fail`)로 findings 기준을 조절한다.
 
@@ -86,6 +86,9 @@ lens abi diff <baseline> <candidate> [--format text|json]
 - 동적 심볼 표면(정의/미정의 구분), DT_NEEDED, RPATH/RUNPATH, SONAME,
   인터프리터, 심볼 버전 요구사항(VERNEED/VERDEF), `.debug_info` 타입명 수집.
 - 스트립된 바이너리도 PT_DYNAMIC/PT_INTERP program header 폴백으로 파싱.
+- 비ELF 입력은 CLI에서 fail-closed: `error: <path> is not an ELF file`
+  + 종료 2 (리포트 없음). 라이브러리/MCP는 계속 `status: "non-elf"`
+  리포트를 반환한다.
 - `diff`는 `abilens.diff/v3`: 정의된(exported) 심볼만 제거 판정에 반영,
   미정의 import는 `imports`에 의존성 정보로 별도 집계(import만 바뀌면
   compatible), weak 심볼은 binding=`weak`로 표기. 버전 요구사항 변경,
@@ -96,17 +99,28 @@ lens abi diff <baseline> <candidate> [--format text|json]
 ```bash
 lens log inspect <path> [--format text|json]
 lens log filter <path> [--query TEXT | --regex PATTERN] [--min-level LEVEL]
-                [--include-unknown] [--limit N] [--context N]
-                [--format text|json|jsonl]
+                [--include-unknown] [--since TS] [--until TS] [--year Y]
+                [--limit N] [--context N] [--format text|json|jsonl]
 ```
 
 - mmap 라인 인덱서(memchr 기반)로 GB급 로그를 즉시 열람.
-- `path`로 `-`를 주면 stdin을 읽는다(상한 있는 버퍼링). `.gz` 파일은
-  상한 해제(512 MiB)로 읽는다 — 로테이트된 로그를 바로 조사 가능.
+- `path`로 `-`를 주면 stdin을 읽는다. `.gz` 파일은 해제하며 읽고,
+  두 경우 모두 해제된 바이트를 무익명 임시 파일에 스풀한 뒤 mmap한다
+  (프로세스 힙에 남지 않는다). 해제 상한 512 MiB 초과 시 오류로
+  거부한다 — 로테이트된 로그를 바로 조사 가능.
 - invalid UTF-8 줄은 건너뛰지 않고 U+FFFD로 표시하며, `lossy_lines`
   카운트를 JSON 필드와 stderr로 보고한다.
 - `--min-level`: trace|debug|info|warn|error|fatal (오타 시 즉시 거부).
   레벨을 판별할 수 없는 줄은 제외되고 stderr에 제외 수를 보고한다.
+  `--include-unknown`으로 복원 가능.
+- `--since TS` / `--until TS`: 타임스탬프 창 필터(양끝 포함). 허용
+  형식은 RFC 3339(`2026-10-09T12:00:00Z`, 오프셋 포함), `YYYY-MM-DD
+  HH:MM:SS`, `YYYY-MM-DD`(오프셋 없는 형식은 UTC 해석). 잘못된 입력은
+  종료 2. 인식하는 줄 타임스탬프는 ISO/RFC3339 접두사, syslog
+  `Oct  9 12:00:00` 접두사, JSONL의 `ts`/`time`/`timestamp` 필드
+  (숫자는 epoch ms, 문자열은 위 형식). 연도 없는 syslog 타임스탬프는
+  현재 UTC 연도를 가정하며 `--year`로 지정 가능. 타임스탬프를 판별할
+  수 없는 줄은 제외되고 stderr에 제외 수를 보고한다 —
   `--include-unknown`으로 복원 가능.
 - `--regex`는 substring `--query` 대신 regex 매칭을 쓴다(둘은
   상호배타). `--limit N`은 매치 N개에서 중단하고, `--context N`은
