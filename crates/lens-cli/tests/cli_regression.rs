@@ -76,6 +76,28 @@ fn stdout_pipe_closed_early_exits_cleanly() {
 }
 
 #[test]
+fn completion_closed_pipe_exits_cleanly() {
+    // `lens completion bash | head -1`: the reader closes mid-write.
+    let mut child = Command::new(env!("CARGO_BIN_EXE_lens"))
+        .args(["completion", "bash"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn lens");
+
+    let mut stdout = child.stdout.take().unwrap();
+    let mut buf = [0u8; 256];
+    let _ = stdout.read(&mut buf);
+    drop(stdout);
+
+    let status = child.wait().expect("wait");
+    assert!(
+        status.success(),
+        "lens completion should exit 0 on a closed pipe, got {status:?}"
+    );
+}
+
+#[test]
 fn env_check_rejects_nonexistent_venv() {
     let out = lens(&["env", "check", "/nonexistent-venv-lens-test"]);
     assert_eq!(out.status.code(), Some(2), "errors must exit 2");

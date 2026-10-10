@@ -1818,7 +1818,9 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
         Commands::Completion { shell } => {
             use clap::CommandFactory;
             let mut cmd = Cli::command();
-            clap_complete::generate(shell, &mut cmd, "lens", &mut std::io::stdout());
+            let mut script = Vec::new();
+            clap_complete::generate(shell, &mut cmd, "lens", &mut script);
+            crate::output::bytes(&script);
         }
     }
 
