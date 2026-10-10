@@ -23,7 +23,7 @@ source <(lens completion bash)   # zsh, fish도 지원
 |------|------|------|
 | 0 | clean — findings 없음 | 정상 스캔, 회귀 없는 `test diff` |
 | 1 | findings 있음 | `test diff` 회귀/신규 실패, `abi diff` incompatible·uncertain(수동 검토 필요), `sys cycles` 사이클, `env check` 누락/충돌 의존성, `doctor`의 `--fail-on` 기준 이상, `disk scan` incomplete(권한 오류·절단), `trace analyze` fd 누수, `bundle verify` 무결성 불일치 |
-| 2 | 사용·입력·런타임 오류 | 존재하지 않는 경로, 잘못된 플래그 값, 파싱 불가 입력 |
+| 2 | 사용·입력·런타임 오류 | 존재하지 않는 경로, 잘못된 플래그 값, 파싱 불가 입력, `abi inspect`/`abi diff`의 비ELF 입력 |
 
 `doctor`는 `--fail-on warn|fail`(기본 `fail`)로 findings 기준을 조절한다.
 
@@ -86,6 +86,9 @@ lens abi diff <baseline> <candidate> [--format text|json]
 - 동적 심볼 표면(정의/미정의 구분), DT_NEEDED, RPATH/RUNPATH, SONAME,
   인터프리터, 심볼 버전 요구사항(VERNEED/VERDEF), `.debug_info` 타입명 수집.
 - 스트립된 바이너리도 PT_DYNAMIC/PT_INTERP program header 폴백으로 파싱.
+- 비ELF 입력은 CLI에서 fail-closed: `error: <path> is not an ELF file`
+  + 종료 2 (리포트 없음). 라이브러리/MCP는 계속 `status: "non-elf"`
+  리포트를 반환한다.
 - `diff`는 `abilens.diff/v3`: 정의된(exported) 심볼만 제거 판정에 반영,
   미정의 import는 `imports`에 의존성 정보로 별도 집계(import만 바뀌면
   compatible), weak 심볼은 binding=`weak`로 표기. 버전 요구사항 변경,

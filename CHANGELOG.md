@@ -4,6 +4,14 @@ Lens는 워크스페이스 단일 버전으로 릴리스된다. 태그는 `vX.Y.
 
 ## Unreleased
 
+### Breaking changes
+
+- `lens abi inspect`/`lens abi diff`의 비ELF 입력이 fail-closed로
+  바뀌었다. 이전에는 `status: "non-elf"` 리포트를 출력하고 종료 0이었고,
+  이제는 `error: <path> is not an ELF file` + 종료 2이며 리포트를
+  출력하지 않는다. 라이브러리와 MCP 도구는 계속 `status: "non-elf"`
+  리포트를 반환하므로 프로그래밍 호출자는 영향이 없다.
+
 ### 수정
 
 - `lens completion`이 닫힌 파이프에서 패닉(종료 101) 대신 0으로 종료.

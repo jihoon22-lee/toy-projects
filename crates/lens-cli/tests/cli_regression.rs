@@ -151,6 +151,34 @@ fn doctor_root_scopes_preload_check() {
 }
 
 #[test]
+fn abi_non_elf_input_exits_2() {
+    // Non-ELF input fails closed: exit 2, clear stderr, no report.
+    let readme = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("README.md");
+
+    let out = lens(&["abi", "inspect", readme.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(2), "{}", stderr_of(&out));
+    assert!(stderr_of(&out).contains("is not an ELF file"));
+    assert!(!stdout_of(&out).contains("\"status\""));
+
+    // Either side of a diff being non-ELF also errors.
+    let elf = env!("CARGO_BIN_EXE_lens");
+    for args in [
+        ["abi", "diff", readme.to_str().unwrap(), elf],
+        ["abi", "diff", elf, readme.to_str().unwrap()],
+    ] {
+        let out = lens(&args);
+        assert_eq!(out.status.code(), Some(2), "{args:?}: {}", stderr_of(&out));
+        assert!(stderr_of(&out).contains("is not an ELF file"));
+    }
+
+    // A valid ELF still inspects cleanly.
+    let out = lens(&["abi", "inspect", elf]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr_of(&out));
+}
+
+#[test]
 fn env_check_rejects_nonexistent_venv() {
     let out = lens(&["env", "check", "/nonexistent-venv-lens-test"]);
     assert_eq!(out.status.code(), Some(2), "errors must exit 2");

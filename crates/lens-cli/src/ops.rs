@@ -30,6 +30,19 @@ fn wants_json(format: Option<OutputFormat>, json_flag: bool, default_json: bool)
 
 /// Open a `log` input: `-` reads stdin through a bounded buffer; `.gz`
 /// files decompress through a bounded reader; the rest are memory-mapped.
+/// Non-ELF input is a usage error on the CLI (exit 2): printing a
+/// `status: non-elf` report would look like a successful inspection of
+/// something we never inspected. The library report stays honest for
+/// MCP and other programmatic callers.
+fn reject_non_elf(path: &Path, report: &lens_abi::ElfReport) -> Result<()> {
+    if report.status == lens_abi::InputStatus::NonElf {
+        return Err(lens_core::LensError::Usage {
+            message: format!("{} is not an ELF file", path.display()),
+        });
+    }
+    Ok(())
+}
+
 fn open_log_indexer(path: &Path) -> Result<LogIndexer> {
     if path.as_os_str() == "-" {
         let stdin = std::io::stdin();
@@ -492,6 +505,7 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                     source: e,
                 })?;
                 let report = inspect_elf(&binary, &bytes);
+                reject_non_elf(&binary, &report)?;
                 if wants_json(format, false, true) {
                     outln!("{}", to_deterministic_pretty(&report)?);
                 } else {
@@ -535,6 +549,8 @@ pub fn dispatch(command: Commands) -> Result<Outcome> {
                 })?;
                 let report_base = inspect_elf(&baseline, &bytes_base);
                 let report_cand = inspect_elf(&candidate, &bytes_cand);
+                reject_non_elf(&baseline, &report_base)?;
+                reject_non_elf(&candidate, &report_cand)?;
                 let diff = diff_reports(&report_base, &report_cand);
                 if wants_json(format, false, true) {
                     outln!("{}", to_deterministic_pretty(&diff)?);
