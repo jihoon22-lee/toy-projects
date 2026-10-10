@@ -5,6 +5,44 @@
 
 ---
 
+## Status (2026-10-10, feat/lens-phase3-polish 기준)
+
+5개 누적 PR(#132 Phase 0 → #133 Phase 1 → #134 Phase 2a → #135 Phase 2b
+→ #136 Phase 3)로 전 항목을 처리했다. 각 재현 명령은 이 문서 부록 A대로
+재실행해 확인했다.
+
+| 항목 | 상태 | 비고 |
+|---|---|---|
+| F01–F09 | ✅ #133 | 마커 평가, min-level, fd 공유, ABI defined/import, 사이클 경로, 전체 키 diff, transitive_impact |
+| F02 | ✅ #132 | 표의 모든 재현이 exit 2의 명확한 에러 |
+| F03 | ✅ #132 | 소스별 격리 + `--force` |
+| F10 | ✅ #132 | 출력 계층에서 BrokenPipe → exit 0. 단 `lens completion`(clap_complete 직접 출력)은 잔여 |
+| F11, F13, F14, F15, F17, F19 | ✅ #134 | Outcome 0/1/2, `--format`, 스캔 옵션, 구조화 diff, owner_state |
+| F12 | ✅ #132 | INCOMPLETE 배너 |
+| F16, F18, F20, F21, F22 | ✅ #135 | 헤더 기준 경로, trash list/restore/topdir, gz/stdin/regex/jsonl, 병합 로더, show/extract |
+| F23, F24, F25, F26, F27, F28 | ✅ #132+#136 | Phase 0 선행분 + Phase 3 백그라운드 스캔·검색·`--log`, MCP 크기 제어·tail·diff 툴 |
+| F29 | ✅ #132 | `crates/lens-cli/tests/` + `crates/lens-mcp/tests/` 통합 타깃 |
+| F30 | ✅ 이후 정리 | "minimal RAM" 문구를 "파일 페이지 + 줄당 ~16B 인덱스"로 구체화 |
+
+### 의도적 미구현·잔여 항목 (재검토 대상, ROADMAP에도 기재)
+
+- `log filter --since/--until` 시간 필터 (F20); gz/stdin은 스트리밍이 아닌
+  상한 있는 메모리 버퍼(512 MiB).
+- `--no-timestamps` (F26): 타임스탬프는 `bundle` `created_at`이 유일한
+  예외라 문서 명시로 결론, 플래그는 보류.
+- TUI 전면 워커/취소 리팩터링 (F23): 현재는 스캔 루트를 벗어날 때마다
+  새 백그라운드 스캔이 시작되고 취소 큐는 없다.
+- MCP `resources`/`prompts` (F24 범위 밖), `trash empty` (F18),
+  `--include-events` (F13), `sys cycles --enabled-only` (F07),
+  fd_leaks→open_at_exit 개명·대표 인자 샘플 (F05).
+- `doctor --root`의 ld.so.preload 검사는 여전히 호스트 `/etc`를 읽는다
+  (F21의 첫 번째 하위 항목 — 미해결).
+- `abi inspect`에 비ELF 입력을 주면 `status:"non-elf"` 리포트로 정직하게
+  보고하지만 종료 코드는 0 — 오류 종료로 바꿀지 정책 결정이 필요하다.
+- 합성 픽스처가 아닌 실 `strace` 캡처로 trace 파서를 검증(본 문서 §1 한계).
+
+---
+
 ## 0. 요약
 
 | 구분 | 건수 | 대표 항목 |

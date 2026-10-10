@@ -3,7 +3,7 @@
 //! Ultra high-performance log inspection, memory-mapped line indexing, and investigation session engine.
 //!
 //! Re-architects and replaces legacy `loglens` with:
-//! - **Memory-Mapped Line Indexer ([`indexer::LogIndexer`])**: Zero-copy indexing allowing gigabyte-scale logs to open in milliseconds with minimal RAM.
+//! - **Memory-Mapped Line Indexer ([`indexer::LogIndexer`])**: Zero-copy indexing allowing gigabyte-scale logs to open in milliseconds — memory use is bounded by touched file pages plus ~16 bytes of index per line (bounded buffer for `.gz`/stdin).
 //! - **Zero-Allocation Case-Insensitive Filter ([`filter::contains_insensitive`])**: Eliminates the 1,000,000+ heap allocations found in the C++ filter engine.
 //! - **Structured JSONL & Syslog Parser ([`parser::parse_line`])**: Zero-copy view borrowing directly from memory-mapped slices.
 //! - **Session V2 Schema ([`session::SessionV2`])**: 100% compliant with `loglens.session/v2`.

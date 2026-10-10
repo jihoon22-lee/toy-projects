@@ -33,7 +33,9 @@ source <(lens completion bash)   # zsh, fish도 지원
 요약(색인·집계·top-N)이고, `json`은 기존 결정적 JSON 스키마를 출력한다.
 기본값은 명령별 기존 동작을 유지한다(예: `abi inspect`는 json,
 `disk scan`은 text). `disk scan`/`net inspect`의 기존 `--json` 플래그는
-`--format json`의 별칭으로 유지된다.
+`--format json`의 별칭으로 유지된다. 열거형에는 `jsonl`도 있으나 실제
+줄 단위 출력은 `log filter`만 사용하고, 다른 명령은 `json`과 동일하게
+처리한다.
 
 ## 도메인별 사용법
 
@@ -53,10 +55,11 @@ lens disk trash restore <name> [--trash-dir DIR]
   `diskmap.snapshot/v2` 출력. 심볼링크 루프 감지, 깊이/항목 상한 도달 시
   `complete=false`로 표시되며 per-entry 오류는 stderr로 나옵니다.
 - `--max-depth`/`--exclude`/`--one-file-system`: 스캔 범위 제한
-  (`--exclude`는 반복 지정 가능, 이름 glob 패턴). `-x`는 마운트 경계를
-  넘지 않는다(WSL의 `/mnt/c`, `/proc` 등 제외에 유용).
-- `--top N`(기본 10): 텍스트 출력에 최상위에서 가장 큰 항목 N개를
-  KiB/MiB/GiB 단위로 표시.
+  (`--exclude`는 반복 지정 가능, 이름에 문자열이 **포함**되면 제외 —
+  glob이 아니다). `-x`는 마운트 경계를 넘지 않는다(WSL의 `/mnt/c`,
+  `/proc` 등 제외에 유용).
+- `--top N`(기본 10, 0은 비활성): 텍스트 출력에 최상위에서 가장 큰
+  항목 N개를 KiB/MiB/GiB 단위로 표시.
 - `--parallel`: rayon으로 per-entry stat 병렬화. cold cache의 대형 트리에서
   유효하고, warm cache에서는 이득이 거의 없다.
 - `duplicates`: 부분 해시 → 전체 SHA-256 2단계 판정. 하드링크(inode 공유)는

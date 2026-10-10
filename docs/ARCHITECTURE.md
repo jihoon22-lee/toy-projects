@@ -40,7 +40,7 @@ lens-mcp ──┴─────────────┤
    직렬화. `HashMap` 반복 결과가 출력에 도달하면 안 된다.
 3. **스키마 버전 명시**: 모든 스냅샷/리포트에 `schema` 문자열
    (`lens.bundle/v2`, `diskmap.snapshot/v2`, `abilens.report/v2`,
-   `testlens.run/v1`, `testlens.diff/v2`, `tracelens.snapshot/v1`, `servicelens.snapshot/v1`,
+   `abilens.diff/v3`, `testlens.run/v1`, `testlens.diff/v2`, `tracelens.snapshot/v1`, `servicelens.snapshot/v1`,
    `envlens.snapshot/v1`, `lens.net/v1`, `buildscope.snapshot/v4` 등).
 4. **단일 구현 단일 책임**: 같은 파일 포맷을 파싱하는 코드는 하나
    (예: 번들 create/inspect/verify는 모두 `lens_core::bundle` 한 구현).
@@ -99,14 +99,17 @@ lens-mcp ──┴─────────────┤
 
 ### lens-sys
 - `parser.rs`: 할당 순서 보존 파싱 → `Key=` 빈 값 리셋 의미론,
-  specifier(`%u`/`%h`/`%i` 등) 확장.
+  specifier(`%u`/`%h`/`%i` 등) 확장. `=` 없는 라인(`SYNTAX_GARBAGE_LINE`)과
+  닫히지 않은 `[Section` 헤더(`SYNTAX_SECTION_HEADER`)를 진단으로 수집.
 - `loader.rs`: 파일/디렉터리 로딩, `.d/` drop-in 스캔(템플릿 포함),
   후순위 override. `/dev/null` masked 유닛과 alias는 엣지 대상에서 정리.
   `load_units_merged`는 `SYSTEMD_SEARCH_DIRS`(/etc→/run→/usr/lib→/lib,
   높은 우선순위 순)를 병합 — 상위 디렉터리의 유닛 파일·mask·alias가
   하위를 가리고, drop-in은 모든 디렉터리에서 수집해 낮은 우선순위부터
   적용. drop-in만 존재하는 유닛은 스텁으로 합성. doctor/TUI/`sys`의
-  기본 경로가 이 단일 구현을 공유.
+  기본 경로가 이 단일 구현을 공유. 로드된 유닛·alias·mask·템플릿
+  인스턴스·생성형 suffix에 매칭되지 않는 의존 대상은 `UNIT_REF_MISSING`
+  진단이 되고 CLI가 스냅샷 상위 `diagnostics`로 집계한다.
 - `dag.rs`: Wants/Requires/Before/After로 유향 그래프 + Tarjan SCC.
   사이클은 SCC 멤버 정렬이 아니라 실제 방향 경로로 재구성하고 각 엣지의
   기원(유닛 파일:라인 + 디렉티브)을 함께 보고.
@@ -177,7 +180,9 @@ lens-mcp ──┴─────────────┤
   배열 `limit`(기본 200)·`offset` 페이지네이션(`_truncated` 마커),
   MCP 로그 `tail` 윈도우, 빌드 스캔 파일 수 — 전부 상한 도달을 출력에 표시.
 - **에러 분류**: `LensError::{Io{path,source}, LimitExceeded, InvalidInput,
-  InputChanged, Json, Unsupported}` — 경로와 원인을 유지한 채 전파.
+  InputChanged, Json, Unsupported, Usage}` — 경로와 원인을 유지한 채 전파.
+  `Usage`는 인자/플래그 오류 전용으로 "Corrupt or invalid input format"
+  접두사 없이 메시지를 출력한다.
 - **입력 위생**: 아카이브 엔트리 이름, trash 파일명, include 경로는 전부
   경로 이탈(`..`)/절대경로/널바이트 검증.
 

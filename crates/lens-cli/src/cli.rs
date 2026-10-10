@@ -94,6 +94,7 @@ pub enum Commands {
         /// Emit the report as JSON (equivalent to --format json)
         #[arg(long)]
         json: bool,
+        /// Output format; default is the text report
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
         /// Lowest severity that exits 1: `fail` (default) or `warn`
@@ -227,7 +228,7 @@ pub enum LogCommands {
     Inspect {
         /// Log file path, `-` for stdin, or a `.gz` file
         path: PathBuf,
-        /// Output format; default is the JSON report
+        /// Output format; default is the text summary
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },
@@ -236,7 +237,7 @@ pub enum LogCommands {
     Filter {
         /// Log file path, `-` for stdin, or a `.gz` file
         path: PathBuf,
-        /// Case-sensitive substring to match
+        /// Case-insensitive substring to match
         #[arg(long)]
         query: Option<String>,
         /// Regex pattern alternative to --query's substring match
@@ -420,7 +421,7 @@ pub enum NetCommands {
         /// Emit the report as JSON (equivalent to --format json)
         #[arg(long)]
         json: bool,
-        /// Output format; default is the JSON report
+        /// Output format; default is the text summary
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
         /// Omit unix-domain sockets from the output
@@ -469,6 +470,7 @@ pub enum BundleCommands {
         /// Overwrite the output file if it already exists
         #[arg(long)]
         force: bool,
+        /// Output format; default is the text summary
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
     },

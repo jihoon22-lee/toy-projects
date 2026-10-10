@@ -90,9 +90,12 @@ let snap = SnapshotV2::from_tree(&res.tree, res.root_id, res.complete, res.trunc
 
 ## lens-trace — strace 분석
 
-- strace 라인 파싱, `unfinished`/`resumed` 스티칭, 지연 시간 집계, errno 분포.
-- fd 추적은 tid별 테이블: open/openat/socket/accept/dup/pipe2([3,4]) 등
-  생성 시스템콜과 `+++ exited`에서 잔여 fd를 `fd_leaks_by_process`에 귀속.
+- strace 라인 파싱, `unfinished`/`resumed` 스티칭, 지연 시간 집계.
+  에러는 `syscall:errno` 키로 집계.
+- fd 추적은 tid별 테이블이되 `CLONE_FILES` clone은 fd 테이블을 공유하고,
+  `O_CLOEXEC` fd는 `execve`에서 해제되며 `close_range`도 처리한다.
+  open/openat/socket/accept/dup/pipe2([3,4]) 등 생성 시스템콜과
+  `+++ exited`에서 잔여 fd를 `fd_leaks_by_process`에 귀속.
 - 스키마: `tracelens.snapshot/v1`, `tracelens.diff/v1`.
 
 ## lens-sys — systemd 정적 분석
@@ -105,7 +108,10 @@ let snap = SnapshotV2::from_tree(&res.tree, res.root_id, res.complete, res.trunc
   우선순위부터 적용. doctor/TUI/`sys` 기본 경로가 이 로더를 공유한다.
 - 파서는 할당 순서를 유지해 `ExecStart=` 등 빈 할당 리셋 의미론을 지원하고
   `%u`/`%h` 등 specifier를 `User=` 기준으로 확장.
-- `OrderingGraph`: Before/After DAG + Tarjan SCC 사이클 탐지.
+- `OrderingGraph`: Before/After DAG + Tarjan SCC 사이클 탐지 — 사이클은
+  실제 방향 경로 + 엣지 기원(파일:라인, 디렉티브)으로 보고.
+- 파서/로더는 `SYNTAX_GARBAGE_LINE`, `SYNTAX_SECTION_HEADER`,
+  `UNIT_REF_MISSING` 진단을 유닛에 붙이고 스냅샷 `diagnostics`에 집계된다.
 - 스키마: `servicelens.snapshot/v1`, `servicelens.diff/v1`.
 - 지원 범위는 `systemd-255-subset-v1`로 명시 — 전체 systemd 의미론의 부분 집합.
 
@@ -126,6 +132,13 @@ let snap = SnapshotV2::from_tree(&res.tree, res.root_id, res.complete, res.trunc
 - 인터프리터를 실행하지 않는 정적 분석: `pyvenv.cfg`, `*.dist-info/METADATA`
   (PEP 376/503), `Requires-Dist` 검증, 프로젝트 소스의 stdlib/서드파티
   모듈 섀도잉 탐지.
+- `markers.rs`: PEP 508 환경 마커 평가(`python_version`, `sys_platform`,
+  `extra` 등, `and`/`or`/괄호, 버전 비교). 거짓 마커 요구는 스킵,
+  `extra`는 `--extras`로 활성화한 것만 적용, 범위 불일치는
+  `version_conflicts`, 평가 불가는 `unevaluated`.
+- 섀도잉은 프로젝트 루트/`src/` 1레벨의 `.py`와 `__init__.py` 패키지
+  디렉터리만 후보로 하고, 설치 패키지는 `top_level.txt`/`RECORD`의
+  모듈명으로 비교한다(dist 이름이 아니라 import 이름 기준).
 - 스키마: `envlens.snapshot/v1`, `envlens.diff/v1`.
 
 ## lens-net — 소켓 포렌식
@@ -145,8 +158,9 @@ let snap = SnapshotV2::from_tree(&res.tree, res.root_id, res.complete, res.trunc
 
 - `src/cli.rs`: clap 커맨드 트리. `src/ops.rs`: 전 서브커맨드 디스패치
   (라이브러리로 공개 — lens-mcp가 재사용). `main.rs`는 얇은 래퍼.
-- `doctor`: 스토리지/네트워크/서비스/환경 종합 헬스체크(`--json` 지원).
-- `bundle create/inspect/verify`: `lens.bundle/v2` 아카이브.
+- `doctor`: 스토리지/네트워크/서비스/환경 종합 헬스체크(`--json`,
+  `--fail-on` 지원).
+- `bundle create/inspect/verify/show/extract`: `lens.bundle/v2` 아카이브.
 - `tui`: `lens_tui::run`으로 진입. `completion`: 셸 자동완성 생성.
 
 ## lens-tui — 터미널 대시보드

@@ -4,6 +4,40 @@ Lens는 워크스페이스 단일 버전으로 릴리스된다. 태그는 `vX.Y.
 
 ## Unreleased
 
+### Breaking changes
+
+이번 릴리스는 사용자 가시 동작이 여럿 바뀐다. 마이그레이션 노트:
+
+- **종료 코드 규약이 `diff(1)` 관례로 통일됐다.** `0`=clean,
+  `1`=findings 있음, `2`=사용·입력·런타임 오류. 이전에는 잘못된
+  입력이 `0`이나 `1`로 빠지는 경로가 있었으므로, 스크립트에서
+  "0이 아니면 오류"로 해석하던 로직은 findings(exit 1)를 오류와
+  구분하도록 수정해야 한다. 영향받는 명령: `test diff`(회귀/신규
+  실패→1), `abi diff`(incompatible·uncertain→1), `sys cycles`
+  (사이클→1), `env check`(누락/충돌→1), `doctor`(`--fail-on` 기준
+  이상→1), `disk scan`(incomplete→1), `trace analyze`(fd 누수→1),
+  `bundle verify`(무결성 불일치→1).
+- **`testlens.diff` 스키마가 v1→v2로 변경됐다.** `regressions`/
+  `fixes`가 `Vec<String>`에서 `CaseChange{id,before,after,message}`
+  구조로 바뀌고 `new_failures`/`removed_tests`/`skipped_changes`/
+  `diagnostics`가 추가됐다. 소비자는 `schema` 필드를 확인하고 v2
+  파서로 전환해야 한다.
+- **`lens log filter --min-level`이 레벨 불명 줄을 제외한다.**
+  이전에는 Unknown 레벨 줄도 출력됐다. 기존 동작이 필요하면
+  `--include-unknown`을 추가한다.
+- **잘못된 입력이 더 엄격하게 거부된다(exit 2).** venv가 아닌 경로,
+  읽을 수 없는 `--proc-dir`/`--systemd-dir`/`--root`, JUnit 루트가
+  아닌 XML, 대부분 파싱되지 않는 strace 입력, 소스 없는 `bundle
+  create`, `--force` 없는 출력 덮어쓰기가 이전의 조용한 성공/빈
+  결과 대신 오류가 된다.
+- **`lens-mcp` 도구 실패가 `result.isError=true`로 반환된다.**
+  알려진 도구의 실행 실패는 더 이상 JSON-RPC error가 아니다.
+  클라이언트는 `isError`를 검사해야 한다(알 수 없는 도구/메서드는
+  여전히 JSON-RPC error).
+- **`lens disk trash`는 `list`/`restore` 서브커맨드가 경로 인자보다
+  우선한다.** 이름이 `list`/`restore`인 파일은 `./list`처럼 경로
+  접두어를 붙여 trash 한다.
+
 ### 안전성 (Phase 0)
 - stdout 파이프가 닫혀도 패닉하지 않고 exit 0으로 종료
   (`lens net inspect --json | head -1` 등).
