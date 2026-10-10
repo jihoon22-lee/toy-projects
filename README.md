@@ -62,6 +62,27 @@ cargo build --release -p lens-cli --jobs 2
 # 생성 바이너리: target/release/lens
 ```
 
+### 릴리스 절차
+
+버전 범프는 수동 PR로 진행한다 (release-please가 생성하지 않음).
+
+1. `main`에서 `release/vX.Y.Z` 브랜치를 만들고 `chore(release): vX.Y.Z`
+   커밋 하나로 다음을 수정한다:
+   - `.release-please-manifest.json` — `"."` 버전
+   - `Cargo.toml` — `[workspace.package] version`
+   - `Cargo.lock` — `cargo check`로 재생성 (lens-* 크레이트 버전만 바뀌어야 함)
+   - `CHANGELOG.md` — `## Unreleased` 헤딩을 `## X.Y.Z`로 바꾸고 한 줄 요약 추가
+2. CI Merge Gate 통과 후 머지 커밋으로 병합한다. Merge Gate는
+   `main` 대상 PR에서만 동작하므로 스택드 PR 체인은 머지할 수 없다 —
+   통합 브랜치를 `main`으로 머지할 것.
+3. 수동 범프는 release-please가 태그/릴리스를 만들지 않으므로 Release
+   워크플로를 직접 실행한다:
+   ```bash
+   gh workflow run release.yml -f tag=vX.Y.Z -f sha=<머지 커밋 SHA>
+   ```
+   워크플로가 아티팩트를 빌드하고 `SHA256SUMS`를 검증한 뒤 해당 SHA에
+   태그를 만들어 릴리스를 발행한다.
+
 ---
 
 ## 4. 통합 CLI 사용법 (`lens`)

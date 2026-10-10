@@ -2,6 +2,16 @@
 
 Lens는 워크스페이스 단일 버전으로 릴리스된다. 태그는 `vX.Y.Z` 형식이다.
 
+## Unreleased
+
+### 수정
+
+- `lens completion`이 닫힌 파이프에서 패닉(종료 101) 대신 0으로 종료.
+- `lens doctor --root`가 호스트의 `/etc/ld.so.preload` 대신
+  `<root>/etc/ld.so.preload`를 검사.
+- 테스트가 `/tmp/lens-*` 디렉터리를 남기지 않도록 모든 테스트가
+  `tempfile::TempDir` 가드를 사용.
+
 ## 0.5.0
 
 CLI/MCP 계약·사용성 대수정 릴리스. 상세 내역은 아래 섹션 참고.
